@@ -6,7 +6,9 @@ import { morphDocument, morphNode, morphChildren, pathOf, atPath, wasInserted } 
 import { presenterKey } from './presenter-key.js';
 import { flowFromBundle, applyFlowOverrides } from './bundle-flow.js';
 
-const manifestResponse = await fetch('/manifest.json', { cache: 'no-store' });
+const baseUrl = new URL('.', location.href);
+const local = path => new URL(path.replace(/^\//, ''), baseUrl).href;
+const manifestResponse = await fetch(local('/manifest.json'), { cache: 'no-store' });
 if (!manifestResponse.ok) throw new Error(`manifest.json ${manifestResponse.status}`);
 const manifest = await manifestResponse.json();
 const flow = applyFlowOverrides(flowFromBundle(manifest), manifest.development_overrides);
@@ -20,9 +22,9 @@ const parse = html => (Document.parseHTMLUnsafe ? Document.parseHTMLUnsafe(html)
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\u00a0/g, '&nbsp;');
 const S = flow.states;
 const snapshots = Object.fromEntries(Object.values(S).filter(s => s.snap.startsWith('@scene:')).map(s => [s.snap, s.snapshot]));
-const bundlePath = path => '/bundle/' + path.split('/').map(encodeURIComponent).join('/');
-const snapUrl = id => snapshots[id] ? bundlePath(snapshots[id]) : `/snaps/${id}.html`;
-const snapRelated = (id, suffix) => snapshots[id] ? bundlePath(snapshots[id].replace(/\.html$/i, '') + suffix) : `/snaps/${id}${suffix}`;
+const bundlePath = path => local('/bundle/' + path.split('/').map(encodeURIComponent).join('/'));
+const snapUrl = id => snapshots[id] ? bundlePath(snapshots[id]) : local(`/snaps/${id}.html`);
+const snapRelated = (id, suffix) => snapshots[id] ? bundlePath(snapshots[id].replace(/\.html$/i, '') + suffix) : local(`/snaps/${id}${suffix}`);
 // Replay pace (seconds per prompt): flow.pace, or ?pace= in the URL. Stream timings are written for pace 5.
 const PACE = (q => q > 0 ? q : flow.pace || 5)(+new URLSearchParams(location.search).get('pace'));
 // ?speed=N runs every timer N times faster (answers, hover delays, slides): the checks' virtual clock. The order of
@@ -118,7 +120,7 @@ function post(doc, scroll, before) {
   if (scroll === 'target') for (const el of before) if (el.isConnected && !el.hasAttribute('data-d1-scroll')) { el.scrollTop = 0; el.scrollLeft = 0; }
   for (const c of doc.querySelectorAll('canvas[data-d1-canvas]')) {
     const src = c.getAttribute('data-d1-canvas');
-    if (!src || !src.startsWith('/assets/') || c.__d1drawn === src) continue;
+    if (!src || !/^(?:\/|\.\.\/)assets\//.test(src) || c.__d1drawn === src) continue;
     c.__d1drawn = src;
     const img = new doc.defaultView.Image();
     img.onload = () => { const g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0); };
@@ -283,7 +285,7 @@ function onOut(e, app, doc) {
 // when the pointer leaves. Data: /snaps/hovers-<app>.json (process.mjs).
 const hoverData = {};
 async function loadHovers(app) {
-  if (!hoverData[app.id]) hoverData[app.id] = await getJson(`/snaps/hovers-${app.id}.json`).catch(() => ({ css: {}, defs: [] }));
+  if (!hoverData[app.id]) hoverData[app.id] = await getJson(local(`/snaps/hovers-${app.id}.json`)).catch(() => ({ css: {}, defs: [] }));
 }
 const ekids = el => [...el.children].filter(c => !/^(script|noscript|template|base)$/.test(c.localName));
 const walk = (el, path) => (path || []).reduce((e, i) => e && ekids(e)[i], el);
@@ -1201,8 +1203,8 @@ async function scoped(app, t, ctx) {
 // Streamed frames are <body> only; the final capture's <head> (a superset of the CSS) goes in first.
 async function playStream(app, t, ctx, my) {
   const s = flow.streams[t.stream];
-  const index = await getJson(`/streams/${t.stream}.json`);
-  const data = { frames: await Promise.all(index.frames.map(async f => ({ t: f.t, html: await getText(`/streams/${t.stream}/${f.file}`) }))) };
+  const index = await getJson(local(`/streams/${t.stream}.json`));
+  const data = { frames: await Promise.all(index.frames.map(async f => ({ t: f.t, html: await getText(local(`/streams/${t.stream}/${f.file}`)) }))) };
   const doc = app.iframe.contentDocument;
   if (s.prompt && ctx.typed !== undefined) {
     app.subst = (app.subst || []).filter(([a]) => a !== esc(s.prompt));
@@ -1253,7 +1255,7 @@ function prefetch(app) {
   for (const t of [...transitions(app, 'click'), ...transitions(app, 'enter'), ...transitions(app, 'type'), ...transitions(app, 'hover')]) {
     const ids = t.stream ? [flow.streams[t.stream].to] : t.query ? Object.values(t.query) : t.to ? [t.to] : [];
     for (const id of ids) if (S[id]) getText(snapUrl(S[id].snap)).catch(note);
-    if (t.stream) getJson(`/streams/${t.stream}.json`).then(ix => ix.frames.forEach(f => getText(`/streams/${t.stream}/${f.file}`).catch(note))).catch(note);
+    if (t.stream) getJson(local(`/streams/${t.stream}.json`)).then(ix => ix.frames.forEach(f => getText(local(`/streams/${t.stream}/${f.file}`)).catch(note))).catch(note);
   }
 }
 
@@ -1366,13 +1368,13 @@ const moduleApi = {
   on: (kind, fn) => hooks[kind].push(fn),
   expose: (name, value) => { exposed[name] = value; },
 };
-for (const m of flow.modules || []) { try { (await import(m)).default(moduleApi); } catch (e) { note(e); } }
+for (const m of flow.modules || []) { try { (await import(m.startsWith('/') ? local(m) : m)).default(moduleApi); } catch (e) { note(e); } }
 // Fonts first. Chrome draws a fallback font while a web font is still loading whenever it judges the network slow
 // ("Slow network is detected"; it can on localhost, on a cold start or a second run in the same browser), and a page
 // then lays out, scrolls and swaps in front of her. A font that's already in memory is drawn at once, so every font
 // the replica has is loaded before the first screen (7.5 MB from localhost for Demo 1, a fraction of a second).
 const fontsKept = [];
-try { const list = await (await fetch('/__replica/fonts', { cache: 'no-store' })).json(); await Promise.all(list.map(u => { const f = new FontFace('d1-font', `url("${u}")`, { display: 'block' }); fontsKept.push(f); return f.load().catch(() => {}); })); } catch (e) {}
+try { const list = await (await fetch(local('/__replica/fonts'), { cache: 'no-store' })).json(); await Promise.all(list.map(u => { const f = new FontFace('d1-font', `url("${local(u)}")`, { display: 'block' }); fontsKept.push(f); return f.load().catch(() => {}); })); } catch (e) {}
 document.addEventListener('keydown', e => onKey(e, apps[active], document), true);
 await jump(0);
 
