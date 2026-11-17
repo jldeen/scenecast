@@ -42,6 +42,8 @@ async function runPath(page, flow, opt = {}) {
   const focusField = async m => { if (!(await page.evaluate(m => window.d1.focused(m), m))) await click(m, 40); };
   const selectAll = () => page.keyboard.press('ControlOrMeta+A');
   const keyOf = id => (flow.apps.find(a => a.id === id) || {}).key;
+  const platform = await page.evaluate(() => navigator.userAgentData?.platform || navigator.platform || '');
+  const mod = /^win/i.test(platform) ? 'Control+Alt+' : 'Alt+';
   const check = async name => {
     await idle();
     const n = seen[name] = (seen[name] || 0) + 1;
@@ -52,9 +54,9 @@ async function runPath(page, flow, opt = {}) {
   };
 
   await page.waitForFunction(() => window.d1 && window.d1.state.active);
-  await page.keyboard.press('Alt+Digit0'); await idle(); await park();
+  await page.keyboard.press(mod + 'Digit0'); await idle(); await park();
   for (const s of flow.path || []) {
-    if (s.app) { const k = keyOf(s.app); if (k) await page.keyboard.press('Alt+Key' + k.toUpperCase()); else await page.evaluate(id => window.d1.activate(id), s.app); await sleep(200); }
+    if (s.app) { const k = keyOf(s.app); if (k) await page.keyboard.press(mod + 'Key' + k.toUpperCase()); else await page.evaluate(id => window.d1.activate(id), s.app); await sleep(200); }
     else if (s.type) {
       await focusField(s.type);
       if (await activeText()) { await selectAll(); await page.keyboard.press('Backspace'); await idle(); }
