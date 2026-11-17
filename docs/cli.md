@@ -47,7 +47,8 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 | `scenecast serve [--open] [--pace N] [--release]` | The replica on localhost. `--open`: an app window, Chrome on the Mac and Edge on Windows (`chrome.browser` and `chrome.profile` in `demo.json`). |
 | `scenecast present [--pace N] [--release]` | Serve the replica and open the same app window. The URL is printed if the browser cannot be opened. |
 | `scenecast text "<old>" "<new>"` | A wording or date tweak, live on reload. |
-| `scenecast check [--only a,b] [--skip a,b]` | The whole fidelity checklist (`fidelity` is an alias). Flags every fallback scene first. |
+| `scenecast check [--only a,b] [--skip a,b]` | The whole fidelity checklist. Flags every fallback scene first. |
+| `scenecast fidelity [--rounds 3] [--threshold 0.5] [--no-fix] [--json\|--ndjson]` | The fidelity loop: real vs replica for every captured state, each difference diagnosed and fixed in `flow.fixes.json`, built and checked again (below). |
 | `scenecast quick` | The checks for only what changed. |
 | `scenecast status`, `scenecast save "<msg>"` | Where things stand; secret scan and commit. |
 | `scenecast release [--push]` | Build, manifest, full checklist, secret scan, commit (and push). |
@@ -70,6 +71,43 @@ only rewritten when it changes.
 Rust fingerprints the raw capture tree, built data and Rust processing code by content; changing any of them
 forces capture processing even when file sizes and modification times are unchanged. The cache is kept in
 `.out/build-fingerprint.json`.
+
+## The fidelity loop: `scenecast fidelity`
+
+Compares every captured state of the real product with the replica, the way its real screenshot was taken: each
+state at 100% (the demo's viewport), each zoom capture at its zoom, and each menu or pane the click audit opened
+(right after the click, the pointer on the control). For each: the share of pixels that differ, the regions, a
+side-by-side and a diff picture. Each state's fonts are checked too: every font the real page had loaded must be in
+the replica from the same file (SHA-256), else it's reported as substituted or a different file.
+
+What's over the threshold (0.5% of pixels by default), or has a font that isn't the real file, goes to the fixer.
+Its diagnosers say why, from evidence in the raw captures and the rendered replica, and write a patch for this demo
+in `flow.fixes.json` (never a capture edited by hand, never a product-wide rule). Then the loop builds and compares
+again, up to `--rounds` fix rounds (3). The rule-based diagnoser knows:
+
+| Cause | Found from | Patch |
+|---|---|---|
+| font substituted | a font the real page loaded by script (the FontFace API) has no @font-face rule in any capture | `font`: an @font-face rule for the file the page fetched (matched by its name table) |
+| missing asset | a blank image in a region that differs; its capture answered with an HTML page (a sign-in page) | `asset`: the same resource as captured from another URL of it (a one-time or signed link) |
+| late style | a menu or pane opens unstyled: its classes have no rules (styles that came and went with it) | `clickCss`: the rules from the capture that has them |
+| script-pinned | at another zoom, a fixed box isn't where the real page put it | `pin`: kept over the placeholder that's where the real page put it |
+| script-sized | at another zoom, a size isn't the real page's | `set`: the size as a function of the window, from the two captures |
+| virtualized | at another zoom, a scrolling list ends early: only the rows in view were captured | `rows`: the rows from the capture at that zoom |
+| size | the screenshots aren't the same size | none: record at the demo's viewport |
+
+Anything else is reported as unexplained. The loop never replaces a page with a screenshot: there is no such patch,
+and it fails if the manifest has more fallback scenes at the end than at the start. Remove a patch from
+`flow.fixes.json` to undo it; `flow.overrides.mjs` runs after the fixes, so a hand edit wins.
+
+The diagnosers are pluggable (a model, a team's own rules): see `packages/fixer/index.mjs` for the interface, and
+name modules in `demo.json` as `"fidelity": { "diagnosers": ["my-diagnoser.mjs"] }` or in `SCENECAST_DIAGNOSERS`.
+They run before the rules.
+
+It writes `.out/fidelity/report.html` and `report.json` (what's still different, where and how much, why; the fonts;
+the fixes) and, per round, `.out/fidelity/round-N/` (the comparison, its pictures, the diagnoses). `--no-fix` only
+compares and reports. `--ndjson` prints each event as it comes (what the desktop app shows); `--json` the outcome.
+The exit code is 0 when every state is within the threshold, every font matches and no fallback scene was added.
+From Rust: `scenecast_build::fidelity::run(dir, &FidelityOptions, |progress| …)`.
 
 Environment: `SCENECAST_JS` (the `packages` folder), `SCENECAST_NODE` (the Node binary), and the engine's
 `REPLICA_RAW`, `REPLICA_PORT`, `REPLICA_RX_PORT`, `REPLICA_NO_OPEN=1`, `REPLICA_CHROME_CHANNEL` (`chrome`, or

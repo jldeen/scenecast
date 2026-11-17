@@ -8,10 +8,11 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "test": "node packages/selftest/run.mjs",
-    "test:unit": "node --test packages/player/bundle-flow.test.mjs packages/player/launch.test.mjs packages/player/presenter-key.test.mjs packages/player/serve.test.mjs packages/checks/path.test.mjs packages/kit/compile/flow.test.mjs packages/kit/lib/preflight.test.mjs",
+    "test:unit": "node --test packages/player/bundle-flow.test.mjs packages/player/launch.test.mjs packages/player/presenter-key.test.mjs packages/player/serve.test.mjs packages/checks/path.test.mjs packages/kit/compile/flow.test.mjs packages/kit/lib/preflight.test.mjs packages/fixer/patches.test.mjs",
     "test:browsers": "node packages/selftest/extension-browsers.mjs",
     "test:capture": "node packages/selftest/capture-fixture.mjs",
-    "test:e2e": "node packages/selftest/selftest.mjs"
+    "test:e2e": "node packages/selftest/selftest.mjs",
+    "test:fidelity": "node packages/selftest/fidelity-loop.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.56.0"

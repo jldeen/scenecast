@@ -193,6 +193,10 @@ async (opts) => {
     head += adopted(doc);
     out = '<!DOCTYPE html><html' + attrs(html) + '><head>' + head + '</head>' + ser(doc.body, false) + '</html>';
   }
+  // Font files the page loaded, by any means (a stylesheet's @font-face, or script through the FontFace API, which
+  // leaves no rule in any stylesheet): fetched with the capture, so the fidelity loop can match fonts by file.
+  const fontFiles = opts.body ? [] : [...new Set(performance.getEntriesByType('resource').map(e => e.name).filter(u => /\.(woff2?|ttf|otf)([?#]|$)/i.test(u)))];
+  for (const u of fontFiles) tok(u);
   await blobs();
   const se = doc.scrollingElement || html;
   return {
@@ -209,6 +213,7 @@ async (opts) => {
       nodes,
       colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
       fonts: [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family + ' ' + f.weight + ' ' + f.style),
+      fontFiles,
       at: new Date().toISOString(),
     },
   };

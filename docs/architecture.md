@@ -14,9 +14,11 @@ packages/            npm workspaces: everything that runs in the browser
   recorder           the recorder extension (MV3, Edge and Chrome), capture (DOM, CSSOM, fonts, shadow DOM, iframes),
                      side-state audits, preflight
   player             server, morph engine, streams, presenter keys, focus points, launcher
-  checks             the fidelity checklist
-  editor, fixer      placeholders (later phases)
-  selftest           end-to-end tests against examples/fixture-app
+  checks             the fidelity checklist; real vs replica (real-vs-replica.mjs) and the fidelity report
+  fixer              the fidelity fixer: pluggable diagnosers (rule-based by default) and the per-demo patches
+                     (flow.fixes.json) the flow compiler and build apply
+  editor             placeholder (later phase)
+  selftest           end-to-end tests against examples/fixture-app (and the fidelity loop on its seeded lab app)
 ```
 
 **The split.** Rust owns the bundle format, validation, build orchestration and the CLI; JavaScript owns what
@@ -24,7 +26,8 @@ runs in a browser. The manifest's JSON Schema is generated from the Rust types, 
 `scenecast-build` is a library with structured results (`ProjectCreated`, `SyncReport`, and in `recorder`:
 `PreflightReport` item by item, `RecordStatus`, `RecordSummary` with `RecordTiming`) and line-by-line progress
 (`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
-`build::build` also reports build stages and per-file fingerprint progress. Rust compiles the recorded base flow
+`build::build` also reports build stages and per-file fingerprint progress. `fidelity::run` runs the fidelity loop
+(compare, diagnose and patch, build, again) with `FidelityProgress` events and a typed `FidelityReport`. Rust compiles the recorded base flow
 and rewrites captured pages, stream frames, interaction fragments, assets and CSS, deduplicates and indexes streams, composes captured parts, isolates generated classes and filters non-visual interaction operations, publishes staged outputs by
 content hash, and prunes unreferenced assets. JavaScript still applies flow overrides and focus hooks and orchestrates
 composition and interaction processing; moving that processing to Rust remains unfinished. The resolved raw folder is passed explicitly

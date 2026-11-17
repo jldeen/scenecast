@@ -57,6 +57,9 @@ answer streaming in). Every side path also says how much of its time was fixed w
   `data-sc-closed`) so the replica can reach into them.
 - **Cross-site iframes** in their own process (OOPIFs): attached as their own sessions, captured like any frame.
 - **Cross-origin resources** (stylesheets, fonts, images): fetched by the extension itself, so CORS doesn't stop them.
+- **Every font file the page loaded**, including ones loaded by script through the FontFace API (no @font-face rule
+  in any stylesheet): listed with the capture (`meta.fontFiles`) and fetched, so `scenecast fidelity` can match the
+  replica's fonts to the real files.
 
 ### Speed: waiting for a quiet screen
 
@@ -100,5 +103,8 @@ sent (`scenecast run`); every built-in command and side path works.
   the Playwright agent instead; `--record-only` stops after recording (for timing).
 - `packages/selftest/capture-fixture.mjs`: the capture of a tricky page, including a closed shadow root and a
   cross-site frame.
+- `packages/selftest/fidelity-loop.mjs`: the fixture's lab app (`examples/fixture-app/lab.mjs`, seeded with a
+  script-loaded font, a one-time image link, a menu with adopted styles, a script-pinned composer and a virtualized
+  list without row indexes) recorded, built, and fixed by `scenecast fidelity` to within 0.5% everywhere.
 - `packages/selftest/extension-browsers.mjs`: the extension loaded in branded Chrome and Edge (wherever they're
   installed), connected, capturing a page with its font and a screenshot.

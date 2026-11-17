@@ -72,8 +72,10 @@ enum Command {
     Check(Passthrough),
     /// The checks for only what changed since the last pass.
     Quick(Passthrough),
-    /// Alias for `check`.
-    Fidelity(Passthrough),
+    /// The fidelity loop: every captured state of the real product against the replica (100%, each zoom capture,
+    /// menus and panes, fonts by file), each difference diagnosed and fixed in the demo's flow.fixes.json, built and
+    /// checked again; then .out/fidelity/report.html with what's still different.
+    Fidelity(engine_cmds::FidelityArgs),
     /// Where the project is and what to run next.
     Status(Passthrough),
     /// Secret scan, then commit.
@@ -326,7 +328,8 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Serve(a) => return engine_cmds::handover("serve", &a, true),
         Command::Present(a) => return engine_cmds::present(&a),
         Command::Text(a) => return engine_cmds::handover("text", &a, true),
-        Command::Check(a) | Command::Fidelity(a) => return engine_cmds::check(&a, false),
+        Command::Check(a) => return engine_cmds::check(&a, false),
+        Command::Fidelity(a) => return engine_cmds::fidelity(&a),
         Command::Quick(a) => return engine_cmds::check(&a, true),
         Command::Status(a) => return engine_cmds::handover("status", &a, true),
         Command::Save(a) => return engine_cmds::handover("save", &a, true),

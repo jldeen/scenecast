@@ -17,7 +17,7 @@ const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary;
   preflight [--check] [--json|--ndjson]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release]
   text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
-  check [--runs 2]  fidelity [--skip a,b] [--only a,b]  sheet  hovers  scan [<dir>]
+  check [--runs 2]  checklist [--skip a,b] [--only a,b]  fidelity-compare|fidelity-fix|fidelity-report  sheet  hovers  scan [<dir>]
 
 Every demo command takes --demo <dir>, or runs from inside the demo folder.`
 
@@ -77,7 +77,12 @@ async function main() {
     }
     case 'serve': return node('player/serve.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'check': return node('checks/check.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
-    case 'fidelity': return node('checks/fidelity.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    // The checklist (scenecast check). `fidelity` is its old engine name.
+    case 'checklist': case 'fidelity': return node('checks/fidelity.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    // The fidelity loop's steps (the scenecast binary runs the loop: compare, fix, build, compare again, report).
+    case 'fidelity-compare': return node('checks/real-vs-replica.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'fidelity-fix': return node('fixer/fix.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'fidelity-report': return node('checks/fidelity-report.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'quick': return node('checks/fidelity.mjs', ['--quick', ...(rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest])]);
     case 'text': return (await import('../lib/workflow.mjs')).text(rest);
     case 'status': return (await import('../lib/workflow.mjs')).status(rest);

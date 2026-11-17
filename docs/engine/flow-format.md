@@ -6,6 +6,7 @@ A demo folder holds:
 |---|---|---|
 | `demo.json` | you (from `replica new`) | The demo's settings: apps, viewport, Chrome profile, ports, recorder settings. |
 | `recording.json` | the recorder (`replica build --from-raw`) | What happened when the demo was recorded. Don't edit. |
+| `flow.fixes.json` | `scenecast fidelity` | The fidelity loop's per-demo patches (fonts, assets, click CSS, pin, set, rows), each with its cause and evidence. Applied before the overrides. Remove one to undo it. |
 | `flow.overrides.mjs` | you | Hand edits, applied after the recording. Keep every edit here, with why. |
 | `flow.json` | `replica flow` / `replica build` | What the replica runs. Never edit by hand. |
 | `data/` | `replica build` | `snaps/` (pages), `streams/` (answers' frames), `assets/` (CSS, fonts, images). |
@@ -57,6 +58,8 @@ A demo folder holds:
   `html` runs after the edits on every page (ctx: its snap id), stream frame (`stream:<name>`, `{ partial: true }`)
   and hover and click part (`hover:<app>`, `click:<app>`), `plain` on their plain text. The build fails on anything
   `leftovers` or `unused` reports. `hookFiles` (what it reads) are part of the build key.
+- `fidelity` (optional): `{ diagnosers: ["file.mjs"] }`, the demo's own diagnosers for `scenecast fidelity`, run
+  before the rule-based one (interface in `packages/fixer/index.mjs`).
 - `checks` (optional): `light: "rendered"` judges light mode by the replica's screens only (apps set to Light while
   the OS was dark); `known: ["text a failure starts with", …]` makes those accepted differences warnings.
 

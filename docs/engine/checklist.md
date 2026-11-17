@@ -1,6 +1,9 @@
 # Fidelity checklist
 
-Every replica gets the same checks before it goes on a stage. `replica fidelity` runs the automatic ones (it starts
+The real-vs-replica fidelity loop (find and fix differences, state by state) is `scenecast fidelity` (docs/cli.md);
+run it before the checklist.
+
+Every replica gets the same checks before it goes on a stage. `scenecast check` runs the automatic ones (it starts
 the replica server if it isn't running) and writes `.out/fidelity.md` and `.out/fidelity.json`. Each item passes
 (✅), fails (❌), warns (⚠️, look at it), is skipped (➖, nothing to check) or is for a person (👤).
 `--only id,id` or `--skip id,id` picks items.

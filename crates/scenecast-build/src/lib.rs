@@ -7,11 +7,13 @@
 //! - [`recorder`]: preflight, the recorder extension and the recording, with per-item progress and timing.
 //! - [`sync`]: the bundle manifest (v2) from what the engine built (`flow.json`, `data/`).
 //! - [`build`]: content-hashed build orchestration and scrub reporting with structured progress.
+//! - [`fidelity`]: the fidelity loop: real vs replica, diagnose, patch, build, again; with a residual report.
 
 pub mod build;
 pub mod compose;
 pub mod engine;
 pub mod export;
+pub mod fidelity;
 pub mod fingerprint;
 pub mod flow;
 pub mod interactions;

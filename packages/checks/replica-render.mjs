@@ -1,0 +1,61 @@
+// The replica in headless Chrome, rendered the way a real screenshot was taken: a state at its zoom (a fresh go to it,
+// its app in front, the pointer parked), or a click side state (the control clicked, the pointer left on it). Shared by
+// the real-vs-replica comparison and the fixer (which looks into the same rendering for causes).
+import { chromium } from 'playwright-core';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { bundleFlow } from '../kit/lib/demo.mjs';
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+export async function openReplica(demo, url, kit) {
+  const fileBase = new globalThis.URL(url).protocol === 'file:';
+  const up = async () => { if (fileBase) return true; try { return (await fetch(new globalThis.URL('__replica/status', url))).ok; } catch (e) { return false; } };
+  let server = null;
+  if (!(await up())) {
+    server = spawn(process.execPath, [join(kit, 'player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(url).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+    for (let i = 0; i < 80 && !(await up()); i++) await sleep(100);
+  }
+  const flow = await bundleFlow(url);
+  const VP = demo.cfg.viewport;
+  const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+  const pages = new Map();
+  async function pageAt(z) {
+    if (pages.has(z)) return pages.get(z);
+    const zf = z / 100;
+    const ctx = await browser.newContext({ viewport: { width: Math.round(VP.width / zf), height: Math.round(VP.height / zf) }, deviceScaleFactor: VP.dpr * zf });
+    const page = await ctx.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => window.d1 && window.d1.state.active);
+    pages.set(z, page);
+    return page;
+  }
+  const idle = page => page.evaluate(() => window.d1.idle());
+  // it: { app, state, z, click?: { name, ctl, frame } } → the page, showing it (or { error }).
+  async function show(it) {
+    const page = await pageAt(it.z || 100);
+    const vp = page.viewportSize();
+    await page.mouse.move(vp.width - 1, 2);
+    await page.evaluate(([a, s]) => window.d1.go(a, s), [it.app, it.state]); await idle(page);
+    await page.evaluate(a => window.d1.activate(a), it.app);
+    await page.mouse.move(vp.width - 1, 2); await idle(page); await sleep(120);
+    if (it.click) {
+      const m = { ...it.click.ctl, frame: it.click.frame };
+      await page.evaluate(([m, a]) => window.d1.reveal(m, a), [m, it.app]); await sleep(150);
+      const ctl = await page.evaluate(([m, a]) => window.d1.locate(m, a), [m, it.app]);
+      if (!ctl || !ctl.w) return { error: `the control "${it.click.name}" isn't on ${it.state}` };
+      await page.mouse.move(ctl.x, ctl.y, { steps: 3 }); await sleep(250); await page.mouse.click(ctl.x, ctl.y);
+      await sleep(300); await idle(page);
+    }
+    return { page };
+  }
+  async function close() { await browser.close(); if (server) server.kill(); }
+  return { flow, browser, pageAt, show, close };
+}
+
+// Where an app's document sits on the page (its iframe's offset), so screenshot regions map to its coordinates.
+export const appOffset = (page, app) => page.evaluate(a => {
+  let w = window.d1.doc(a).defaultView, x = 0, y = 0;
+  while (w.frameElement) { const r = w.frameElement.getBoundingClientRect(); x += r.x; y += r.y; w = w.parent; }
+  return { x, y };
+}, app);

@@ -15,6 +15,7 @@ import { compose as composeJs, cssFor as cssForJs, elementEnd, isolateClasses as
 import { loadDemo, arg, KIT_VERSION } from '../kit/lib/demo.mjs';
 import { compileEdits, applyEdits } from '../kit/lib/edits.mjs';
 import { buildInputs, buildKey } from '../kit/lib/buildkey.mjs';
+import { assetSubstitute, fontFaceCss, mergeRows, refResolver } from '../fixer/patches.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
@@ -33,6 +34,16 @@ if (last && last.key === KEY && existsSync(join(DATA, 'snaps')) && !args.include
   process.exit(0);
 }
 const urlIndex = JSON.parse(readFileSync(join(RAW, 'urls.json'), 'utf8'));
+// The fidelity loop's build-time fixes (flow.fixes.json): fonts, assets, rows. See fixer/patches.mjs.
+const FIXES = flow.fixes || [];
+const usableCapture = u => {
+  const e = urlIndex[u]; if (!e || !e.file) return false;
+  const f = join(RAW, 'blobs', e.file); if (!existsSync(f)) return false;
+  return e.file.endsWith('.css') || !/<(!doctype html|html[\s>])/i.test(readFileSync(f).subarray(0, 600).toString('latin1'));
+};
+const resolveRef = refResolver(urlIndex);
+const sub = assetSubstitute(FIXES, usableCapture, resolveRef);
+const subUrls = list => Array.isArray(list) ? list.map(sub) : list;
 rmSync(OUT, { recursive: true, force: true });
 for (const d of ['snaps', 'streams']) mkdirSync(join(OUT, d), { recursive: true });
 mkdirSync(ASSETS, { recursive: true });
@@ -114,6 +125,7 @@ function rewriteCss(text, base, depth = 0) {
     });
 }
 function local(abs, inline) {
+  abs = sub(abs);
   if (process.env.SCENECAST_RUST_ASSETS === '1' && typeof abs === 'string') return rustAsset('local', abs, inline && inline[abs]);
   if (inline && inline[abs]) return fromData(inline[abs]) || emptyAsset();
   const e = urlIndex[abs];
@@ -170,7 +182,7 @@ function rewriteDoc(doc, snapId, docsByKey) {
 // focusgroup (an experimental attribute): Chrome warns whenever a morph changes or removes it.
 const quiet = text => text.replace(/(-webkit-)?appearance:\s*slider-vertical\s*;?/g, '').replace(/\sfocusgroup="[^"]*"/g, '');
 const rewritePart = (html, rec) => process.env.SCENECAST_RUST_ASSETS === '1'
-  ? rustAsset('fragment', JSON.stringify({ html, urls: rec.urls, inline: rec.inline }))
+  ? rustAsset('fragment', JSON.stringify({ html, urls: subUrls(rec.urls), inline: rec.inline }))
   : scrub(quiet(html.replace(/d1res:\/\/(\d+)/g, (m, n) => local(rec.urls[+n], rec.inline))));
 // @font-face sources that never loaded in the real page (404, dead host) are dropped, and a rule left with no
 // source goes too: the browser falls back the same way, without a failed request in the console.
@@ -193,6 +205,17 @@ for (const f of readdirSync(snapsDir)) {
   if (id.startsWith('x-') || (want.size && !want.has(id))) continue;
   if (only.length && !only.includes(id)) continue;
   const s = JSON.parse(readFileSync(join(snapsDir, f), 'utf8'));
+  // rows: a virtualized list's rows from the same screen captured at another size (the fidelity loop's fix).
+  for (const p of FIXES.filter(x => x.kind === 'rows' && x.snap === id)) {
+    const fromFile = join(snapsDir, p.from + '.json');
+    if (!existsSync(fromFile)) { report.fixes = (report.fixes || []).concat(`rows ${id}: no capture ${p.from}`); continue; }
+    const fromMain = JSON.parse(readFileSync(fromFile, 'utf8')).docs.find(d => d.key === 'main');
+    const k = s.docs.findIndex(d => d.key === 'main');
+    const r = fromMain && k >= 0 ? mergeRows(s.docs[k], fromMain, p.marker) : { added: 0 };
+    if (r.added) s.docs[k] = r.doc;
+    report.fixes = (report.fixes || []).concat(`rows ${id}: ${r.added} from ${p.from}`);
+  }
+  for (const d of s.docs) d.urls = subUrls(d.urls);
   const byKey = Object.fromEntries(s.docs.map(d => [d.key, d]));
   for (const d of s.docs) {
     const name = d.key === 'main' ? `${id}.html` : `${id}.${d.key}.html`;
@@ -208,6 +231,7 @@ for (const [name, def] of Object.entries(flow.streams || {})) {
   const dir = join(RAW, 'streams', def.raw || name);
   if (!existsSync(dir)) { console.log(`stream ${name}: no raw frames (${def.raw || name})`); continue; }
   const all = readdirSync(dir).sort().map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')));
+  for (const fr of all) fr.urls = subUrls(fr.urls);
   const [first, last] = def.frames || [0, all.length - 1];
   const frames = all.filter(fr => fr.n >= first && fr.n <= last);
   if (process.env.SCENECAST_RUST_ASSETS === '1') rustAsset('stream-begin', name);
@@ -308,6 +332,21 @@ for (const app of flow.apps) for (const r of ((app.layout || {}).responsive || [
     }
     report.variants = (report.variants || []).concat(`${v}: part ${Math.round(part.length / 1024)}KB`);
   }
+}
+// font: the families the real page loaded by script, from the files it fetched (the fidelity loop's fix), on every
+// screen of the app.
+for (const p of FIXES.filter(x => x.kind === 'font')) {
+  const url = resolveRef(p.src);
+  const src = url && local(url);
+  if (!src || /missing\.woff2/.test(src)) { report.fixes = (report.fixes || []).concat(`font ${p.family}: file not captured`); continue; }
+  const snaps = new Set([...Object.values(flow.states).filter(st => st.app === p.app).map(st => st.snap), ...(flow.zoomRefs || []).filter(z => z.app === p.app).map(z => z.snap)]);
+  let n = 0;
+  for (const snap of snaps) {
+    const f = join(OUT, 'snaps', snap + '.html'); if (!existsSync(f)) continue;
+    const html = readFileSync(f, 'utf8');
+    if (html.includes('</head>')) { writeFileSync(f, html.replace('</head>', `<style data-sc-fix="font">${fontFaceCss(p, src)}</style></head>`)); n++; }
+  }
+  report.fixes = (report.fixes || []).concat(`font ${p.family}: ${n} pages`);
 }
 writeFileSync(join(ASSETS, 'missing.woff2'), Buffer.alloc(0));
 

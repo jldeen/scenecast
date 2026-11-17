@@ -185,7 +185,181 @@ fn print_fallbacks(fallback: &[(String, String)]) {
 pub fn check(args: &Passthrough, quick: bool) -> Result<i32> {
     let dir = project_dir(&args.args)?;
     print_fallbacks(&fallback_scenes(&dir)?);
-    handover(if quick { "quick" } else { "fidelity" }, args, true)
+    handover(if quick { "quick" } else { "checklist" }, args, true)
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct FidelityArgs {
+    /// The project folder (default: the one you're in, or above it).
+    #[arg(long)]
+    pub demo: Option<PathBuf>,
+    /// Fix rounds at most (each: diagnose, patch, build, compare again).
+    #[arg(long, default_value_t = 3)]
+    pub rounds: u32,
+    /// Share of pixels (percent) a state may differ from the real page by.
+    #[arg(long, default_value_t = 0.5)]
+    pub threshold: f64,
+    /// Compare and report only: no diagnosis, no patches.
+    #[arg(long)]
+    pub no_fix: bool,
+    /// The replica's URL (default: the demo's own server, started if it isn't running).
+    #[arg(long)]
+    pub url: Option<String>,
+    /// Print the outcome as JSON at the end (and nothing else).
+    #[arg(long, conflicts_with = "ndjson")]
+    pub json: bool,
+    /// Print each event as one line of JSON as it comes (what the desktop app shows).
+    #[arg(long)]
+    pub ndjson: bool,
+}
+
+/// `scenecast fidelity`: the loop (scenecast_build::fidelity), with its progress printed.
+pub fn fidelity(args: &FidelityArgs) -> Result<i32> {
+    use scenecast_build::fidelity::{FidelityOptions, FidelityProgress, run};
+    let mut given = Vec::new();
+    if let Some(d) = &args.demo {
+        given.extend([OsString::from("--demo"), d.clone().into_os_string()]);
+    }
+    let dir = project_dir(&given)?;
+    let human = !args.json && !args.ndjson;
+    if human {
+        print_fallbacks(&fallback_scenes(&dir)?);
+    }
+    let opts = FidelityOptions {
+        rounds: args.rounds,
+        threshold: args.threshold,
+        fix: !args.no_fix,
+        url: args.url.clone(),
+    };
+    let str_of = |v: &serde_json::Value| {
+        v.as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| v.to_string())
+    };
+    let outcome = run(&dir, &opts, |p| match p {
+        FidelityProgress::Round(n) if args.ndjson => {
+            println!("{}", serde_json::json!({"event": "round", "round": n}))
+        }
+        FidelityProgress::Building(n) if args.ndjson => {
+            println!("{}", serde_json::json!({"event": "building", "round": n}))
+        }
+        FidelityProgress::Event(e) if args.ndjson => {
+            println!("{}", serde_json::to_string(&e).unwrap_or_default())
+        }
+        FidelityProgress::Round(n) if human => println!("round {n}: real vs replica"),
+        FidelityProgress::Building(n) if human => println!("  building round {n}'s fixes"),
+        FidelityProgress::Event(e) if human => {
+            let d = &e.data;
+            match e.event.as_str() {
+                "compared" => println!(
+                    "  {} {:<44} {}{}",
+                    if d["pass"].as_bool() == Some(true) {
+                        "ok  "
+                    } else {
+                        "OVER"
+                    },
+                    str_of(&d["id"]),
+                    if d["pct"].is_null() {
+                        "—".to_owned()
+                    } else {
+                        format!("{}%", d["pct"])
+                    },
+                    d["fonts"]
+                        .as_array()
+                        .filter(|f| !f.is_empty())
+                        .map(|f| format!(
+                            "  fonts: {}",
+                            f.iter().map(str_of).collect::<Vec<_>>().join(", ")
+                        ))
+                        .unwrap_or_default()
+                ),
+                "diagnosed" => println!(
+                    "  {}: {}{}\n      {}",
+                    str_of(&d["finding"]),
+                    str_of(&d["cause"]),
+                    if d["patch"].is_null() {
+                        String::new()
+                    } else {
+                        format!(" → {} ({})", str_of(&d["patch"]), str_of(&d["patchStatus"]))
+                    },
+                    str_of(&d["summary"])
+                ),
+                "fix-done" => println!("  {} fix(es) added to flow.fixes.json", d["added"]),
+                _ => {}
+            }
+        }
+        FidelityProgress::Build(BuildProgress::Engine(Progress::Stderr(line)))
+        | FidelityProgress::Engine(Progress::Stderr(line))
+            if !args.json =>
+        {
+            eprintln!("{line}")
+        }
+        _ => {}
+    })?;
+    let r = &outcome.report;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "pass": outcome.passed(), "stop": outcome.stop, "rounds": outcome.rounds,
+                "fallbackBefore": outcome.fallback_before, "fallbackAfter": outcome.fallback_after,
+                "report": r, "html": outcome.report_html, "json": outcome.report_json,
+            }))?
+        );
+    } else if args.ndjson {
+        println!(
+            "{}",
+            serde_json::json!({"event": "done", "pass": outcome.passed(), "stop": outcome.stop, "html": outcome.report_html})
+        );
+    } else {
+        let within = r.items.iter().filter(|i| i.pass && i.pct.is_some()).count();
+        let compared = r.items.iter().filter(|i| i.pct.is_some()).count();
+        let worst = r
+            .items
+            .iter()
+            .filter_map(|i| i.pct.map(|p| (p, &i.id)))
+            .fold(None, |m: Option<(f64, &String)>, x| {
+                if m.is_none_or(|m| x.0 > m.0) {
+                    Some(x)
+                } else {
+                    m
+                }
+            });
+        println!(
+            "\n{} {within} of {compared} states within {}%{}; fonts {}; {} fix(es) in flow.fixes.json; {}",
+            if outcome.passed() { "PASS" } else { "FAIL" },
+            r.threshold,
+            worst
+                .map(|(p, id)| format!(" (worst {id} {p}%)"))
+                .unwrap_or_default(),
+            if r.fonts
+                .iter()
+                .all(|f| f.status == "match" || f.status == "unverified")
+            {
+                "match"
+            } else {
+                "differ"
+            },
+            r.fixes.len(),
+            match outcome.stop {
+                scenecast_build::fidelity::Stop::Within => "done".to_owned(),
+                scenecast_build::fidelity::Stop::CompareOnly =>
+                    "compared only (--no-fix)".to_owned(),
+                scenecast_build::fidelity::Stop::NothingToPatch =>
+                    "the rest has no patch (see the report)".to_owned(),
+                scenecast_build::fidelity::Stop::RoundLimit =>
+                    format!("stopped at the round limit ({})", args.rounds),
+            }
+        );
+        if outcome.fallback_after > outcome.fallback_before {
+            println!(
+                "FAIL fallback scenes went from {} to {}: the loop never adds one",
+                outcome.fallback_before, outcome.fallback_after
+            );
+        }
+        println!("report: {}", outcome.report_html.display());
+    }
+    Ok(if outcome.passed() { 0 } else { 1 })
 }
 
 /// `scenecast release`: build, manifest, then the engine's full checklist, secret scan and commit (and push).

@@ -413,7 +413,7 @@ export default flow => {
           await browser.close();
         }
         check('static export: three identical cold starts', new Set(hashes).size === 1 && !failures.length, JSON.stringify({ hashes, failures }));
-        const fidelity = await run(['fidelity', '--url', url, '--only', 'two-run,keys,focus,clicks,hovers,drags,zoom'], at);
+        const fidelity = await run(['check', '--url', url, '--only', 'two-run,keys,focus,clicks,hovers,drags,zoom'], at);
         check('static export: interaction and two-run checks', fidelity.code === 0, fidelity.out.slice(-1000));
         const fileUrl = pathToFileURL(join(output, 'index.html')).href, fileHashes = [], fileErrors = [];
         for (let i = 0; i < 3; i++) {
@@ -432,11 +432,11 @@ export default flow => {
         const flowFile = join(DEMO, 'flow.json'), flowAside = join(tmp, 'flow.json.aside');
         renameSync(flowFile, flowAside);
         let offline;
-        try { offline = await run(['fidelity', '--url', fileUrl, '--only', 'two-run,composer,keys,focus,clicks,hovers,drags,zoom'], at); }
+        try { offline = await run(['check', '--url', fileUrl, '--only', 'two-run,composer,keys,focus,clicks,hovers,drags,zoom'], at); }
         finally { renameSync(flowAside, flowFile); }
         check('folder export: offline interaction and two-run checks, from the export\'s bundle alone', offline.code === 0, offline.out.slice(-1000));
         if (process.platform === 'win32' || process.platform === 'darwin') {
-          const edge = await run(['fidelity', '--url', fileUrl, '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
+          const edge = await run(['check', '--url', fileUrl, '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
           const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
           check('folder export: Edge presenter keys and focus',
             edge.code === 0 && ['composer', 'keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-1000));
@@ -465,7 +465,7 @@ export default flow => {
     }
   }
   if (process.platform === 'win32' || process.platform === 'darwin') {
-    const edge = await run(['fidelity', '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
+    const edge = await run(['check', '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
     const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
     check('Edge: presenter keys and focus', edge.code === 0 && ['composer', 'keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-800));
   }
@@ -493,7 +493,7 @@ export default flow => {
     const gi = readFileSync(join(DEMO, '.gitignore'), 'utf8');
     const git = (...a) => spawnSync('git', ['-C', DEMO, ...a], { encoding: 'utf8' });
     git('rm', '--cached', '-q', `data/assets/${img}`); writeFileSync(join(DEMO, '.gitignore'), gi + `data/assets/${img}\n`);
-    r = await run(['fidelity', '--only', 'two-run,cold-start'], at);
+    r = await run(['check', '--only', 'two-run,cold-start'], at);
     const f2 = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8')), c2 = f2.items.find(i => i.id === 'cold-start') || {};
     check('cold start: catches a file that isn\'t in the repository', !!img && c2.status === 'fail' && /clone 1: .*(404|failed|differ)/.test(c2.detail) && (f2.items.find(i => i.id === 'two-run') || {}).status === 'pass', JSON.stringify([img, c2]));
     writeFileSync(join(DEMO, '.gitignore'), gi); git('reset', '-q');

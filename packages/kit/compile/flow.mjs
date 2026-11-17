@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadDemo, KIT_VERSION, FLOW_VERSION } from '../lib/demo.mjs';
+import { applyFixesToFlow, readFixes } from '../../fixer/patches.mjs';
 
 export async function compileFlow(demo, { fromRaw = false } = {}) {
   // A demo without a recording (a flow written by hand) is its own flow.json.
@@ -126,6 +127,8 @@ export async function compileFlow(demo, { fromRaw = false } = {}) {
 
 export async function finishFlow(demo, flow, rec) {
   const cfg = demo.cfg;
+  // The fidelity loop's fixes for this demo (flow.fixes.json, written by scenecast fidelity), before the hand edits.
+  applyFixesToFlow(flow, readFixes(demo.dir));
   // Hand edits last.
   const over = join(demo.dir, 'flow.overrides.mjs');
   if (existsSync(over)) {

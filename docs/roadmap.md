@@ -19,7 +19,12 @@ first-class. Phases:
   server or a plain exported folder; presenter keys per platform (⌥ on the Mac, Ctrl+Alt on Windows, Edge and Chrome
   tested); `scenecast present` opens an app window or prints the URL; an incremental, content-hashed Rust build; the
   secret and PII scrub with `.out/scrub.json`, failing the build on any credential.
-- **Phase 3: fidelity loop and AI fixer.**
+- **Phase 3 (done on the fixture; pilots next): fidelity loop and AI fixer.** `scenecast fidelity` compares every
+  captured state with the replica (100%, each zoom capture, each menu or pane; fonts by file hash), diagnoses each
+  difference with pluggable diagnosers (rule-based by default: script-loaded fonts, assets that came back as HTML
+  pages, late styles, script-pinned and script-sized layout, virtualized lists), writes per-demo patches to
+  `flow.fixes.json`, builds and checks again, and writes a residual report. Never a screenshot in a page's place.
+  The fixture's lab app seeds each problem; the loop finds and fixes all of them on Ubuntu, macOS and Windows.
 - **Phase 4: script to focus points, and the editor.**
 - **Phase 5: ready for anyone**, then a desktop app (Tauri, macOS and Windows) on the same Rust core.
 

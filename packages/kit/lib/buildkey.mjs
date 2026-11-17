@@ -10,7 +10,7 @@ import { KIT } from './demo.mjs';
 import { editSig } from './edits.mjs';
 
 const sha = s => createHash('sha256').update(s).digest('hex').slice(0, 16);
-const CODE = ['recorder/process.mjs', 'recorder/compose.mjs', 'kit/lib/edits.mjs'];
+const CODE = ['recorder/process.mjs', 'recorder/compose.mjs', 'kit/lib/edits.mjs', 'fixer/patches.mjs'];
 let codeHash = null;
 
 // Parts of the flow the build reads, by name (so a change can say which part needs a build).
@@ -23,6 +23,8 @@ export function flowParts(flow) {
     layout: (flow.apps || []).map(a => [a.id, ((a.layout || {}).chips) || null, ((a.layout || {}).responsive) || null]),
     hoverPages: flow.hoverPages || [], clickPages: flow.clickPages || [], chipCards: flow.chipCards || [],
     groups: flow.groups || null, lateItems: flow.lateItems || [],
+    // The fidelity loop's build-time fixes (fonts, assets, rows: flow.fixes.json).
+    fixes: flow.fixes || [],
     // Edits the server can't apply as it serves (a tooltip dropped from a capture).
     buildEdits: (flow.edits || []).filter(e => !(e.remove || e.replace)).map(editSig),
   };
