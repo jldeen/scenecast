@@ -8,6 +8,7 @@
 //! - [`sync`]: the bundle manifest (v2) from what the engine built (`flow.json`, `data/`).
 
 pub mod engine;
+pub mod export;
 pub mod fingerprint;
 pub mod project;
 pub mod recorder;

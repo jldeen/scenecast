@@ -1337,6 +1337,19 @@ fn export_html(bundle: &Path, output: &Path) -> Result<()> {
         );
     }
 
+    if manifest
+        .graph
+        .scenes
+        .iter()
+        .any(|scene| scene.live.is_some())
+    {
+        scenecast_build::export::export_live(bundle, output, &manifest)?;
+        println!(
+            "Exported {} (serve this folder with a static HTTP server)",
+            output.join("index.html").display()
+        );
+        return Ok(());
+    }
     fs::create_dir_all(output)
         .with_context(|| format!("failed to create output directory `{}`", output.display()))?;
     copy_referenced_assets(bundle, output, &manifest)?;

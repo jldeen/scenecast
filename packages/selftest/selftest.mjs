@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
 
@@ -336,6 +338,38 @@ export default flow => {
   check('focus points: each lands on screen with its mark, the same twice; beat keys, ↑/↓, Esc and ⌥0', it('focus').status === 'pass' && /4 points/.test(it('focus').detail), JSON.stringify(it('focus')));
   check('cold start: three fresh clones, each first run identical to the warm runs', it('cold-start').status === 'pass' && /^3 clones/.test(it('cold-start').detail), JSON.stringify(it('cold-start')));
   times.focus = it('focus').secs; times.coldStart = it('cold-start').secs;
+  {
+    const output = join(tmp, 'static-export');
+    const exported = await run(['export-html', DEMO, output], at);
+    check('static export: created', exported.code === 0, exported.out);
+    if (exported.code === 0) {
+      const failures = [];
+      const server = createHttpServer((req, res) => {
+        const path = new URL(req.url, 'http://localhost').pathname;
+        const rel = path.startsWith('/nested/') ? decodeURIComponent(path.slice('/nested/'.length)) || 'index.html' : '';
+        if (!rel || rel.split('/').some(part => part === '..' || part === '.')) { res.writeHead(404); return res.end(); }
+        const file = join(output, rel);
+        if (!existsSync(file) || !statSync(file).isFile()) { failures.push(path); res.writeHead(404); return res.end(); }
+        const type = rel.endsWith('.html') ? 'text/html' : rel.endsWith('.js') ? 'text/javascript' : rel.endsWith('.css') ? 'text/css' : rel.endsWith('.json') ? 'application/json' : 'application/octet-stream';
+        res.writeHead(200, { 'content-type': type }); res.end(readFileSync(file));
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      const url = `http://127.0.0.1:${server.address().port}/nested/`, hashes = [];
+      try {
+        for (let i = 0; i < 3; i++) {
+          const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+          const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+          await page.goto(url); await page.waitForFunction(() => window.d1 && window.d1.state.active);
+          await page.evaluate(() => window.d1.idle());
+          hashes.push(createHash('sha256').update(await page.screenshot()).digest('hex'));
+          await browser.close();
+        }
+        check('static export: three identical cold starts', new Set(hashes).size === 1 && !failures.length, JSON.stringify({ hashes, failures }));
+        const fidelity = await run(['fidelity', '--url', url, '--only', 'two-run,keys,focus,clicks,hovers,drags,zoom'], at);
+        check('static export: interaction and two-run checks', fidelity.code === 0, fidelity.out.slice(-1000));
+      } finally { await new Promise(resolve => server.close(resolve)); }
+    }
+  }
   if (process.platform === 'win32') {
     const edge = await run(['fidelity', '--only', 'keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
     const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
