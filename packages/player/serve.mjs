@@ -41,12 +41,14 @@ const watched = () => {
   return parts.join('|');
 };
 let lastNote = '';
-let checked = 0;
-async function refresh(force) {
+let refreshing = Promise.resolve();
+async function refresh() {
+  const pending = refreshing.then(() => refreshNow());
+  refreshing = pending.catch(() => {});
+  return pending;
+}
+async function refreshNow() {
   if (RELEASE) { if (!live.json) live.json = readFileSync(demo.flowPath, 'utf8'); return; }
-  // Pages ask too (they can come before the flow); a check costs a directory listing, at most every 250 ms.
-  if (!force && Date.now() - checked < 250) return;
-  checked = Date.now();
   const key = watched();
   if (key === live.key) return;
   live.key = key;
@@ -99,7 +101,7 @@ createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' }); return res.end(JSON.stringify(list));
   }
   if (path === '/flow.json' || path === '/__replica/status') {
-    await refresh(true);
+    await refresh();
     if (path === '/__replica/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' }); return res.end(JSON.stringify({ release: RELEASE, error: live.error, needsBuild: live.needsBuild, pendingEdits: live.pending.map(e => e.what), compiledAt: live.at })); }
     if (live.json) { res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' }); return res.end(live.json); }
   }
