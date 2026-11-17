@@ -373,9 +373,9 @@ export default flow => {
     }
   }
   if (process.platform === 'win32') {
-    const edge = await run(['fidelity', '--only', 'keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
+    const edge = await run(['fidelity', '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
     const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
-    check('Windows Edge: presenter keys and focus', edge.code === 0 && ['keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-800));
+    check('Windows Edge: presenter keys and focus', edge.code === 0 && ['composer', 'keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-800));
   }
   // 7 · A tweak: one line, shown on reload with no build; the quick check covers only the screens it touched.
   t1 = Date.now();

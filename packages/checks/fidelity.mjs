@@ -407,6 +407,32 @@ try {
         await page.keyboard.press(MOD + 'Key' + a.key.toUpperCase()); await sleep(150);
         if ((await page.evaluate(() => window.d1.state)).active !== a.id) bad.push(`⌥${a.key} doesn't switch to ${a.id}`);
       }
+      if (flow.apps.length > 1) {
+        const order = flow.apps.map(a => a.id);
+        const before = (await page.evaluate(() => window.d1.state)).active;
+        const index = order.indexOf(before);
+        await page.keyboard.press(MOD + 'ArrowRight'); await sleep(150);
+        if ((await page.evaluate(() => window.d1.state)).active !== order[(index + 1) % order.length]) bad.push('modifier+right did not switch apps');
+        await page.keyboard.press(MOD + 'ArrowLeft'); await sleep(150);
+        if ((await page.evaluate(() => window.d1.state)).active !== before) bad.push('modifier+left did not switch apps');
+        const reset = flow.beats[0], target = order.find(id => id !== reset.active);
+        await page.route('**/manifest.json', async route => {
+          const response = await route.fetch(), bundle = await response.json();
+          const scene = reset.states[reset.active];
+          bundle.playback ||= {}; bundle.playback.scenes ||= {};
+          bundle.playback.scenes[scene] ||= {}; bundle.playback.scenes[scene].options ||= {};
+          bundle.playback.scenes[scene].options.next = { app: target };
+          while (bundle.beats.length < 10) bundle.beats.push(bundle.beats[0]);
+          await route.fulfill({ response, json: bundle });
+        });
+        await page.reload(); await page.waitForFunction(() => window.d1 && window.d1.state.active);
+        await page.keyboard.press(MOD + 'KeyN'); await sleep(150);
+        if ((await page.evaluate(() => window.d1.state)).active !== target) bad.push('modifier+N did not run the next step');
+        for (let i = flow.beats.length; i < 10; i++) {
+          await page.keyboard.press(MOD + 'Digit' + i); await sleep(150); await idle(page);
+          if ((await page.evaluate(() => window.d1.state)).active !== reset.active) bad.push(`modifier+${i} did not reach its beat`);
+        }
+      }
       add('keys', 'Presenter keys (⌥0–9, app keys)', bad.length ? 'fail' : 'pass', bad.length ? bad.join('\n') : `${Math.min(10, flow.beats.length)} beats, ${flow.apps.filter(x => x.key).length} app keys`);
       await page.context().close();
     }
