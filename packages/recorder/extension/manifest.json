@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Scenecast Recorder",
+  "description": "Records a live web demo for scenecast: the real page (DOM, CSS, fonts, frames, shadow DOM) and a screenshot of every state, sent to the scenecast receiver on this machine.",
+  "version": "0.0.0",
+  "minimum_chrome_version": "125",
+  "permissions": ["debugger", "tabs", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Scenecast Recorder", "default_icon": "icon.png" },
+  "icons": { "128": "icon.png" }
+}

@@ -40,9 +40,14 @@ enum Command {
     New(NewArgs),
     /// Alias for `new`.
     Init(NewArgs),
+    /// Is everything ready to record? A fast check per item (receiver, browser and profile, recorder, each app's tab:
+    /// open, light, on its start screen) that fixes only what fails and never relaunches a running browser.
+    Preflight(Passthrough),
     /// Record the demo once in the browser (start [--resume] [--no-auto] | status | stop | side <kind>).
     Record(Passthrough),
-    /// Build the capture agent (agent.js) the recorder runs in the browser.
+    /// Build the recorder extension for Edge and Chrome (load it unpacked once; ~/.scenecast/extension by default).
+    Extension(Passthrough),
+    /// Build the capture agent (agent.js) for a Playwright-driven browser instead of the extension.
     Agent(Passthrough),
     /// The local receiver the capture agent posts captures to (keep it running while recording).
     Receiver(Passthrough),
@@ -306,7 +311,9 @@ fn run(cli: Cli) -> Result<i32> {
         Command::New(args) | Command::Init(args) => {
             return engine_cmds::new_project(args).map(|()| 0);
         }
+        Command::Preflight(a) => return engine_cmds::handover("preflight", &a, true),
         Command::Record(a) => return engine_cmds::handover("record", &a, true),
+        Command::Extension(a) => return engine_cmds::handover("extension", &a, false),
         Command::Agent(a) => return engine_cmds::handover("agent", &a, false),
         Command::Receiver(a) => return engine_cmds::handover("receiver", &a, true),
         Command::Cmd(a) => return engine_cmds::handover("cmd", &a, false),

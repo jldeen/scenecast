@@ -18,6 +18,8 @@ const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
 if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 const keep = process.argv.includes('--keep');
+// The recorder: the extension (MV3, chrome.debugger) by default; --agent for the Playwright-driven agent.
+const MODE = process.argv.includes('--agent') || process.env.SCENECAST_RECORDER === 'agent' ? 'agent' : 'extension';
 const RX_PORT = 47691, REPLICA_PORT = 4699;
 const tmp = mkdtempSync(join(tmpdir(), 'replica-selftest-'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -40,8 +42,46 @@ for (const port of [RX_PORT, REPLICA_PORT, 47801, 47802]) {
   const busy = await new Promise(res => { const s = createServer().once('error', () => res(true)).once('listening', () => s.close(() => res(false))).listen(port, '127.0.0.1'); });
   if (busy) { console.log(`port ${port} is in use: stop whatever is on it and run again`); process.exit(1); }
 }
+// The extension, loaded unpacked into a fresh profile: Playwright's Chromium takes --load-extension; branded Chrome
+// and Edge (which dropped that flag) get it through the DevTools protocol's Extensions.loadUnpacked instead.
+async function launchWithExtension(ext, profile) {
+  const channel = process.env.SCENECAST_EXT_CHANNEL || 'chromium';
+  const args = ['--silent-debugger-extension-api', '--force-device-scale-factor=1', '--window-size=1700,1100', '--screen-info={0,0 2560x1600}', '--disable-features=DisableLoadExtensionCommandLineSwitch'];
+  const branded = channel !== 'chromium';
+  const ctx = await chromium.launchPersistentContext(profile, { channel, headless: true, viewport: null, colorScheme: 'light',
+    args: branded ? [...args, '--enable-unsafe-extension-debugging'] : [...args, `--disable-extensions-except=${ext}`, `--load-extension=${ext}`] });
+  if (branded) {
+    const b = await ctx.browser().newBrowserCDPSession();
+    await b.send('Extensions.loadUnpacked', { path: ext });
+  }
+  let [sw] = ctx.serviceWorkers();
+  if (!sw) sw = await ctx.waitForEvent('serviceworker', { timeout: 30000 });
+  return { ctx, sw };
+}
+// The window sized so the page is exactly w×h (whatever the browser's own bars take).
+async function sizeWindow(page, w, h) {
+  const s = await page.context().newCDPSession(page);
+  const { windowId } = await s.send('Browser.getWindowForTarget');
+  for (let i = 0; i < 4; i++) {
+    const [iw, ih, ow, oh] = await page.evaluate(() => [innerWidth, innerHeight, outerWidth, outerHeight]);
+    if (iw === w && ih === h) break;
+    await s.send('Browser.setWindowBounds', { windowId, bounds: { width: ow + w - iw, height: oh + h - ih } });
+    await sleep(300);
+  }
+  await s.detach();
+}
+// Stops the extension's service worker, as the browser does to an idle one.
+async function stopWorker(ctx, sw) {
+  const b = await ctx.browser().newBrowserCDPSession();
+  const { targetInfos } = await b.send('Target.getTargets');
+  const t = targetInfos.find(x => x.type === 'service_worker' && x.url === sw.url());
+  if (!t) throw new Error('no service worker target');
+  await b.send('Target.closeTarget', { targetId: t.targetId });
+  await b.detach();
+  await sleep(1500);
+}
 const fx = startFixture();
-let browser;
+let browser, ctx;
 try {
   // 1 · A new demo folder from the template, pointed at the fixture.
   let r = await run(['new', 'fixture-demo', '--dir', tmp, '--title', 'Fixture', '--port', String(REPLICA_PORT), '--app', `chat=${fx.chat}`, '--app', `admin=${fx.admin}`]);
@@ -72,22 +112,52 @@ export default flow => {
 };
 `);
 
-  // 2 · The agent, the receiver, and Chrome with the two app tabs (light mode).
-  r = await run(['agent', join(tmp, 'agent')], at);
-  check('agent builds', r.code === 0, r.out);
+  // 2 · The recorder, the receiver, and a browser with the two app tabs (light mode).
+  const cmd = async (...a) => { const x = await run(a, at); try { return json(x.out); } catch (e) { return { raw: x.out }; } };
   bg(['receiver', '--demo', DEMO]);
   await sleep(600);
-  browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
-  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light' });
-  const chat = await ctx.newPage(); await chat.goto(fx.chat);
-  const admin = await ctx.newPage(); await admin.goto(fx.admin);
-  await chat.bringToFront(); await sleep(500);
-  const agent = eval(readFileSync(join(tmp, 'agent', 'agent.js'), 'utf8'));
-  check('agent starts', (await agent(chat)) === 'agent started');
+  let chat, admin, sw = null;
+  if (MODE === 'extension') {
+    // The extension as a presenter has it: loaded unpacked into the browser, talking to the receiver on its own.
+    r = await run(['extension', join(tmp, 'ext')], at);
+    check('extension builds', r.code === 0 && existsSync(join(tmp, 'ext', 'manifest.json')), r.out);
+    ({ ctx, sw } = await launchWithExtension(join(tmp, 'ext'), join(tmp, 'profile')));
+    chat = await ctx.newPage(); await chat.goto(fx.chat);
+    for (const p of ctx.pages()) if (p !== chat) await p.close();
+    await sizeWindow(chat, 1600, 900);
+    await chat.bringToFront(); await sleep(500);
+    let e = {};
+    for (let i = 0; i < 40 && !e.version; i++) { e = await cmd('cmd', 'extension'); if (!e.version) await sleep(500); }
+    check('extension connects to the receiver', !!e.version, JSON.stringify(e));
+    // Preflight: the admin tab is missing, so it opens it (and touches nothing else); then again, all set, fast.
+    let t1 = Date.now();
+    let pf = await cmd('preflight', '--json');
+    times.preflightFix = +((Date.now() - t1) / 1000).toFixed(1);
+    const st = id => ((pf.items || []).find(i => i.id === id) || {}).status;
+    check('preflight: opens the missing tab, leaves the rest', pf.ready && st('app admin') === 'fixed' && st('app chat') === 'ok' && st('browser') === 'ok' && st('receiver') === 'ok', JSON.stringify(pf));
+    admin = ctx.pages().find(p => p.url().startsWith(fx.admin));
+    check('preflight: the admin tab is open', !!admin, ctx.pages().map(p => p.url()).join(' '));
+    await chat.bringToFront(); await sleep(300);
+    t1 = Date.now();
+    pf = await cmd('preflight', '--json');
+    times.preflight = +((Date.now() - t1) / 1000).toFixed(1);
+    check('preflight: all set, nothing done, under a minute', pf.ready && pf.items.every(i => i.status === 'ok') && times.preflight < 60, JSON.stringify(pf));
+    const vp = await chat.evaluate(() => [innerWidth, innerHeight, devicePixelRatio]);
+    check('window is 1600×900 at 1×', vp.join() === '1600,900,1', vp.join());
+  } else {
+    r = await run(['agent', join(tmp, 'agent')], at);
+    check('agent builds', r.code === 0, r.out);
+    browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+    ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light' });
+    chat = await ctx.newPage(); await chat.goto(fx.chat);
+    admin = await ctx.newPage(); await admin.goto(fx.admin);
+    await chat.bringToFront(); await sleep(500);
+    const agent = eval(readFileSync(join(tmp, 'agent', 'agent.js'), 'utf8'));
+    check('agent starts', (await agent(chat)) === 'agent started');
+  }
 
   // 3 · Record: the person runs the demo once. Each new screen's side states (hovers, panes and menus, step groups,
   // "+N", resize handles, zoom, every row of a long list) are captured as it goes: one Chrome pass, nothing after.
-  const cmd = async (...a) => { const x = await run(a, at); try { return json(x.out); } catch (e) { return { raw: x.out }; } };
   const settled = async () => { await sleep(450); for (let i = 0, ok = 0; i < 1200; i++) { const s = await cmd('record', 'status'); if (!s.busy && !(s.typing || []).length) { if (++ok >= 2) return s; } else ok = 0; await sleep(250); } throw new Error('recorder never settled'); };
   const tRec = Date.now();
   let s = await cmd('record', 'start');
@@ -99,12 +169,23 @@ export default flow => {
   await chat.click('[aria-label="Close workspace"]'); await settled();
   await chat.click('[aria-label="Show workspace"]'); await settled();
   await chat.click('[aria-label="Plugins"]'); await settled();
-  // An interruption: the recording stops without being written (as if the agent died). record start --resume picks
-  // it up from the receiver's checkpoint.
-  s = await cmd('cmd', 'recordAbort');
-  check('interrupted', s.aborted === true, JSON.stringify(s));
-  s = await cmd('record', 'start', '--resume');
-  check('resumed from the checkpoint', s.resumed === true && s.states >= 6 && s.steps >= 5 && !(s.notOnTheirScreen || []).length, JSON.stringify(s));
+  if (MODE === 'extension') {
+    // An interruption: the browser stops the extension's service worker mid-recording (MV3 may, any time). The next
+    // tab event starts it again and it resumes from the receiver's checkpoint on its own.
+    await stopWorker(ctx, sw);
+    check('service worker stopped', true);
+    await admin.bringToFront(); await sleep(300);
+    for (let i = 0; i < 120; i++) { s = await cmd('record', 'status'); if (s.recording && s.resumed) break; await sleep(500); }
+    check('resumed from the checkpoint on its own', s.recording === true && s.resumed && s.resumed.states >= 6 && s.resumed.steps >= 5 && !(s.resumed.notOnTheirScreen || []).length, JSON.stringify(s));
+    await settled();
+  } else {
+    // An interruption: the recording stops without being written (as if the agent died). record start --resume
+    // picks it up from the receiver's checkpoint.
+    s = await cmd('cmd', 'recordAbort');
+    check('interrupted', s.aborted === true, JSON.stringify(s));
+    s = await cmd('record', 'start', '--resume');
+    check('resumed from the checkpoint', s.resumed === true && s.states >= 6 && s.steps >= 5 && !(s.notOnTheirScreen || []).length, JSON.stringify(s));
+  }
   // Admin: a search, a row's details, Escape.
   await admin.bringToFront(); await sleep(300);
   await admin.click('[aria-label="Search tools by name"]'); await admin.keyboard.type('alpha', { delay: 30 });
@@ -122,7 +203,7 @@ export default flow => {
   check('record stop', s.states >= 10 && s.streams === 2, JSON.stringify(s).slice(0, 600));
   check('side states captured on the way', (s.autos || []).length >= 8, JSON.stringify(s.autos));
   console.log(`TIME recording, one Chrome pass with every side state: ${times.recording} s (side paths ${s.autoSecs} s)\n  ` + (s.autos || []).join('\n  '));
-  await browser.close(); browser = null;
+  if (MODE === 'extension') { await ctx.close(); ctx = null; } else { await browser.close(); browser = null; }
 
   // 4 · Build: flow.json from the recording, raw captures → data/, secret scan.
   let t1 = Date.now();
@@ -252,6 +333,7 @@ export default flow => {
   check('selftest ran to the end', false, String(e.stack || e));
 } finally {
   if (browser) await browser.close().catch(() => {});
+  if (ctx && MODE === 'extension') await ctx.close().catch(() => {});
   // On Windows the scenecast binary waits on Node rather than becoming it: stop the whole tree.
   for (const p of procs) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' }); else p.kill(); }
   fx.close();

@@ -8,11 +8,16 @@ const post = (path, data) => page0.request.post(RX + path, { data, timeout: 1800
 const get = path => page0.request.get(RX + path, { timeout: 60000 }).then(r => r.json()).catch(e => ({ op: 'idle', error: String(e) }));
 const rlog = msg => post('/log', { msg });
 const SERX = opts => `(${SER})(${JSON.stringify(opts || {})})`;
+// Closed shadow roots are out of the page's own reach; the extension hands them to the serializer (EXPOSE_SHADOW,
+// through the DevTools protocol). Playwright's agent has no way to, so it's a no-op there.
+const exposeShadow = typeof EXPOSE_SHADOW === 'function' ? EXPOSE_SHADOW : async () => 0;
 
+// A tab by its mark (sessionStorage d1tab, set by the mark op) or by part of its URL. In the extension only tabs it
+// already watches are asked for a mark, and a tab is attached before it's handed back.
 async function pageFor(spec) {
-  if (!spec) return page0;
-  for (const p of ctx.pages()) { try { if ((await p.evaluate(() => sessionStorage.getItem('d1tab'))) === spec) return p; } catch (e) {} }
-  for (const p of ctx.pages()) if (p.url().includes(spec)) return p;
+  if (!spec) return (ctx.activePage && await ctx.activePage()) || page0;
+  for (const p of ctx.pages()) { if (p.attached === false) continue; try { if ((await p.evaluate(() => sessionStorage.getItem('d1tab'))) === spec) return p; } catch (e) {} }
+  for (const p of ctx.pages()) if (p.url().includes(spec)) { if (p.attach) await p.attach(); return p; }
   throw new Error('no tab ' + spec);
 }
 function frameFor(p, spec) {
@@ -117,6 +122,7 @@ async function snap(p, id, opts = {}) {
   const t0 = Date.now();
   if (opts.shot !== false) { const b = await p.screenshot({ timeout: 60000 }); await post('/shot', { id, b64: b.toString('base64') }); }
   const keys = await frameKeys(p);
+  await exposeShadow(p).catch(e => rlog(`snap ${id}: closed shadow roots: ${e.message}`));
   const docs = [];
   for (const [f, key] of [[p.mainFrame(), 'main'], ...keys]) {
     try {
@@ -174,7 +180,7 @@ async function stream(p, name, { everyMs = 600, maxS = 900, until = 'quiet', set
 const H = {
   sleep, post, rlog, snap, stream, STREAMS, pageFor, frameFor, SERX, fetchResources,
   async mark(p, kind) { await p.evaluate(k => sessionStorage.setItem('d1tab', k), kind); },
-  async tabs() { const out = []; for (const p of ctx.pages()) { let m = null; try { m = await p.evaluate(() => sessionStorage.getItem('d1tab')); } catch (e) {} out.push({ url: p.url().slice(0, 160), title: (await p.title().catch(() => '')).slice(0, 80), mark: m }); } return out; },
+  async tabs() { const out = []; for (const p of ctx.pages()) { let m = null; try { if (p.attached !== false) m = await p.evaluate(() => sessionStorage.getItem('d1tab')); } catch (e) {} out.push({ url: p.url().slice(0, 160), title: (await p.title().catch(() => '')).slice(0, 80), mark: m }); } return out; },
   // Centre of the smallest visible element whose text matches, in page coordinates (frame offsets included).
   async find(p, { frame, text, sel, exact = true, minX, maxX, nth = 0 } = {}) {
     const f = frameFor(p, frame);

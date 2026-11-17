@@ -361,6 +361,7 @@ async function recResume(c) {
   REC.autoQueue = REC.apps.filter(a => !REC.autoDone.has(a.state) && !(REC.states[a.state] || {}).typedOf).map(a => a.id);
   rlogr(`resumed: ${Object.keys(REC.states).length} screens, ${REC.path.length} steps`);
   REC.loopP = recLoop();
+  REC.resumed = { at: new Date().toISOString(), states: Object.keys(REC.states).length, steps: REC.path.length, notOnTheirScreen: off };
   return { recording: true, resumed: true, states: Object.keys(REC.states).length, steps: REC.path.length, active: REC.active, notOnTheirScreen: off };
 }
 
@@ -368,7 +369,7 @@ OPS.recordStart = async c => {
   if (REC.on) return { error: 'already recording' };
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
-  Object.assign(REC, { on: true, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms });
+  Object.assign(REC, { on: true, resumed: undefined, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms });
   if (c.resume) return recResume(c);
   for (const a of c.apps) {
     const p = await pageFor(a.match);
@@ -402,7 +403,7 @@ OPS.recordStart = async c => {
 };
 // Stops recording without writing the recording, as if the agent had died (for testing record start --resume).
 OPS.recordAbort = async () => { if (!REC.on) return { error: 'not recording' }; REC.stop = true; await REC.loopP; await recSaving; for (const A of REC.apps) await recSetBusy(A.page, false).catch(() => {}); REC.on = false; return { aborted: true }; };
-OPS.recordStatus = async () => REC.on ? { recording: true, busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8) } : { recording: false };
+OPS.recordStatus = async () => REC.on ? { recording: true, resumed: REC.resumed, busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
   REC.stop = true; await REC.loopP;

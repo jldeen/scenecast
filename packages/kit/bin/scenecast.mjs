@@ -3,6 +3,7 @@
 // engine command; run it directly only to debug the engine: node packages/kit/bin/scenecast.mjs help
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { KIT, KIT_VERSION, loadDemo, arg } from '../lib/demo.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -13,7 +14,7 @@ const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(p
 const exit = code => process.exit(code || 0);
 const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary; see docs/cli.md)
 
-  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
+  preflight [--check] [--json]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release]
   text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
   check [--runs 2]  fidelity [--skip a,b] [--only a,b]  sheet  hovers  scan [<dir>]
@@ -34,7 +35,13 @@ async function main() {
   switch (cmd) {
     case undefined: case 'help': case '--help': case '-h': console.log(HELP); return 0;
     case 'new': console.log('scenecast new is in the scenecast binary (Rust): it writes the project and its manifest'); return 1;
+    case 'extension': {
+      // The recorder extension (MV3, Edge and Chrome), unpacked: ~/.scenecast/extension unless a folder is given.
+      const out = rest.find(a => !a.startsWith('--')) || join(homedir(), '.scenecast', 'extension');
+      return node('recorder/build.mjs', ['--extension', out, '--port', String(rx())]);
+    }
     case 'agent': { const out = rest.find(a => !a.startsWith('--')); return node('recorder/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
+    case 'preflight': return (await import('../lib/preflight.mjs')).main(rest, loadDemo);
     case 'receiver': return node('recorder/receiver.mjs', ['--demo', loadDemo(rest).dir]);
     case 'cmd': { const [op, j] = rest; return send(op, j && j.startsWith('{') ? JSON.parse(j) : {}); }
     case 'run': {

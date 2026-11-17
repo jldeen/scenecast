@@ -107,7 +107,7 @@ async function clickOn(page, m, app) {
 const focusIn = async (page, m, app) => { if (!(await page.evaluate(([m, a]) => window.d1.focused(m, a), [m, app]))) return clickOn(page, m, app); return true; };
 const streamTo = t => t.stream ? (flow.streams[t.stream] || {}).to : t.to;
 // The page's markup in short (an app, or one of its frames), to see it's back as it was.
-const bodySig = (page, app, frame) => page.evaluate(([a, f]) => { const d = window.d1.doc(a); const doc = f ? [...d.querySelectorAll('iframe')].map(x => { try { return x.contentDocument; } catch (e) { return null; } }).find(x => x && x.defaultView.frameElement.getAttribute('data-d1-frame') === f) : d; return doc.body.innerHTML.replace(/\sstyle="[^"]*anchor-name[^"]*"/g, '').length + ':' + doc.body.querySelectorAll('*').length + ':' + doc.body.innerText.length; }, [app, frame]);
+const bodySig = (page, app, frame) => page.evaluate(([a, f]) => { const d = window.d1.doc(a); const doc = f ? [...d.querySelectorAll('iframe')].map(x => { try { return x.contentDocument; } catch (e) { return null; } }).find(x => x && x.defaultView.frameElement.getAttribute('data-d1-frame') === f) : d; return doc.body.innerHTML.replace(/\sstyle="[^"]*anchor-name[^"]*"/g, '').replace(/\sstyle=""/g, '').length + ':' + doc.body.querySelectorAll('*').length + ':' + doc.body.innerText.length; }, [app, frame]);
 const hoversOf = app => { const f = join(demo.data, 'snaps', `hovers-${app}.json`); return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : {}; };
 const grpApps = flow.apps.map(a => a.id).filter(a => hoversOf(a).groups);
 // What changed since the last passing check: each state's fingerprint is its definition, its page and frames as

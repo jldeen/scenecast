@@ -151,9 +151,11 @@ async (opts) => {
     }
     let s = '<' + tag + attrs(el) + '>';
     if (VOID.has(tag) && !inSvg) return s;
-    if (el.shadowRoot && el.shadowRoot.mode === 'open') {
-      const sr = el.shadowRoot;
-      s += '<template shadowrootmode="open" shadowrootclonable=""' + (sr.delegatesFocus ? ' shadowrootdelegatesfocus=""' : '') + '>';
+    // Open roots, and closed ones the extension handed over (window.__scShadow): both written open, so the replica
+    // can reach into them.
+    const sr = (el.shadowRoot && el.shadowRoot.mode === 'open' && el.shadowRoot) || (window.__scShadow && window.__scShadow.get(el));
+    if (sr) {
+      s += '<template shadowrootmode="open" shadowrootclonable=""' + (sr.mode === 'closed' ? ' data-sc-closed=""' : '') + (sr.delegatesFocus ? ' shadowrootdelegatesfocus=""' : '') + '>';
       for (const c of sr.childNodes) s += ser(c, inSvg);
       s += adopted(sr) + '</template>';
     }

@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; width: 280px; margin: 12px; color: #1f2328; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #cf222e; }
+  .dot.on { background: #1a7f37; }
+  input { width: 70px; }
+  pre { white-space: pre-wrap; background: #f6f8fa; padding: 6px; border-radius: 6px; max-height: 160px; overflow: auto; font-size: 11px; }
+</style>
+<h1>Scenecast Recorder</h1>
+<div class="row"><span id="dot" class="dot"></span><span id="conn">Looking for the receiver…</span></div>
+<div class="row"><label for="port">Receiver port</label><input id="port" type="number" min="1024" max="65535"><button id="save">Save</button></div>
+<div id="rec"></div>
+<pre id="log" hidden></pre>
+<script src="popup.js"></script>

@@ -31,7 +31,7 @@ function storeBlob(buf, type, url) {
 }
 const fromDataUrl = d => { const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(d || ''); if (!m) return null; return { type: m[1], buf: m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])) }; };
 
-const cmds = []; let waiter = null; const results = {};
+const cmds = []; let waiter = null; let agentAt = 0; const results = {};
 function body(req) { return new Promise((res, rej) => { const c = []; req.on('data', d => c.push(d)); req.on('end', () => res(Buffer.concat(c))); req.on('error', rej); }); }
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(obj)); };
 
@@ -39,11 +39,13 @@ createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x');
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
-    if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, raw: RAW, urls: Object.keys(urlIndex).length });
+    // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
+    if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: !!waiter, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });
     // The recorder's checkpoint, for record start --resume.
     if (req.method === 'GET' && u.pathname === '/recording-partial') { const f = join(RAW, 'recording-partial.json'); return existsSync(f) ? json(res, 200, JSON.parse(readFileSync(f, 'utf8'))) : json(res, 404, { error: 'no checkpoint' }); }
     // Remote control: the driver long-polls for its next command.
     if (req.method === 'GET' && u.pathname === '/cmd') {
+      agentAt = Date.now();
       if (cmds.length) return json(res, 200, cmds.shift());
       const t = setTimeout(() => { waiter = null; json(res, 200, { op: 'idle' }); }, 20000);
       waiter = c => { clearTimeout(t); waiter = null; json(res, 200, c); };
@@ -57,7 +59,7 @@ createServer(async (req, res) => {
         if (waiter) waiter(c); else cmds.push(c);
         return json(res, 200, { id: c.id });
       }
-      case '/cmd/result': results[data.id] = data; log(`result ${data.id} ${String(data.ok)} ${(data.error || '').slice(0, 200)}`); return json(res, 200, { ok: true });
+      case '/cmd/result': agentAt = Date.now(); results[data.id] = data; log(`result ${data.id} ${String(data.ok)} ${(data.error || '').slice(0, 200)}`); return json(res, 200, { ok: true });
       case '/result': { const id = u.searchParams.get('id') || data.id; return json(res, 200, results[id] || { pending: true }); }
       case '/have': return json(res, 200, { missing: (data.urls || []).filter(x => !urlIndex[x] || urlIndex[x].error) });
       case '/res': {
