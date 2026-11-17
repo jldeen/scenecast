@@ -79,7 +79,7 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), ExportError> {
     Ok(())
 }
 
-/// Exports standard live-page captures. The destination must be empty.
+/// Exports live-page captures. The destination must be empty.
 /// Static browsers need an HTTP host because module and fetch requests cannot use `file://`.
 pub fn export_live(
     bundle: &Path,
@@ -97,12 +97,15 @@ pub fn export_live(
             .as_ref()
             .map(|live| live.snapshot.as_str())
             .unwrap_or("");
-        let name = snapshot
-            .strip_prefix("data/snaps/")
-            .and_then(|s| s.strip_suffix(".html"));
-        if !name.is_some_and(|s| !s.is_empty() && !s.contains('/')) {
+        if !snapshot.ends_with(".html")
+            || snapshot.contains('\\')
+            || snapshot.contains(':')
+            || snapshot
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
             return Err(ExportError::Invalid(format!(
-                "nonstandard snapshot path: {snapshot}"
+                "invalid snapshot path: {snapshot}"
             )));
         }
     }
@@ -193,9 +196,92 @@ pub fn export_live(
         copy_tree(&bundle.join("data").join(dir), &output.join(dir))?;
     }
     let mut exported = manifest.clone();
-    for scene in &mut exported.graph.scenes {
+    for (index, scene) in exported.graph.scenes.iter_mut().enumerate() {
         let live = scene.live.as_mut().expect("live scenes checked above");
-        live.snapshot = live.snapshot.strip_prefix("data/").unwrap().to_owned();
+        let standard = live
+            .snapshot
+            .strip_prefix("data/snaps/")
+            .is_some_and(|name| !name.contains('/'));
+        if standard {
+            live.snapshot = live.snapshot.strip_prefix("data/").unwrap().to_owned();
+        } else {
+            let source = bundle.join(&live.snapshot);
+            let real = fs::canonicalize(&source).map_err(|e| io(&source, e))?;
+            if !real.starts_with(&bundle_root) {
+                return Err(ExportError::Invalid(format!(
+                    "snapshot leaves bundle: {}",
+                    live.snapshot
+                )));
+            }
+            let parent = source.parent().expect("snapshot has a parent");
+            let stem = source.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+                ExportError::Invalid(format!("invalid snapshot filename: {}", live.snapshot))
+            })?;
+            let mut name = format!("scenecast-export-{index}");
+            let snaps = output.join("snaps");
+            let existing = if snaps.is_dir() {
+                fs::read_dir(&snaps)
+                    .map_err(|e| io(&snaps, e))?
+                    .map(|entry| entry.map(|e| e.file_name().to_string_lossy().into_owned()))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| io(&snaps, e))?
+            } else {
+                Vec::new()
+            };
+            while existing
+                .iter()
+                .any(|file| file.starts_with(&format!("{name}.")))
+            {
+                name.push('_');
+            }
+            let mut related = vec![(source.clone(), format!("{name}.html"))];
+            for entry in fs::read_dir(parent).map_err(|e| io(parent, e))? {
+                let entry = entry.map_err(|e| io(parent, e))?;
+                let file = entry.file_name().to_string_lossy().into_owned();
+                if file == format!("{stem}.json") {
+                    related.push((entry.path(), format!("{name}.json")));
+                } else if let Some(key) = file
+                    .strip_prefix(&format!("{stem}."))
+                    .and_then(|s| s.strip_suffix(".html"))
+                    && !key.is_empty()
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                {
+                    related.push((entry.path(), format!("{name}.{key}.html")));
+                }
+            }
+            for (file, dest) in related {
+                let real = fs::canonicalize(&file).map_err(|e| io(&file, e))?;
+                if !real.starts_with(&bundle_root) {
+                    return Err(ExportError::Invalid(format!(
+                        "snapshot file leaves bundle: {}",
+                        file.display()
+                    )));
+                }
+                let mut report = ScrubReport::default();
+                scrub_tree(&file, "built", &allowlist, false, &mut report)?;
+                if !report.findings.is_empty() {
+                    return Err(ExportError::Invalid(format!(
+                        "snapshot contains sensitive text or scripts: {}",
+                        file.display()
+                    )));
+                }
+                let dest = output.join("snaps").join(dest);
+                copy_tree(&file, &dest)?;
+                if dest.extension().is_some_and(|e| e == "html") {
+                    let html = fs::read_to_string(&dest).map_err(|e| io(&dest, e))?;
+                    let html = html
+                        .replace(&format!("../snaps/{stem}."), &format!("../snaps/{name}."))
+                        .replace(
+                            &format!("/bundle/{}.", live.snapshot.trim_end_matches(".html")),
+                            &format!("../snaps/{name}."),
+                        );
+                    write(&dest, html.as_bytes())?;
+                }
+            }
+            live.snapshot = format!("snaps/{name}.html");
+        }
         let path = output.join(&live.snapshot);
         let bytes = fs::read(&path).map_err(|e| io(&path, e))?;
         live.sha256 = Some(format!("{:x}", Sha256::digest(&bytes)));
@@ -331,5 +417,44 @@ mod tests {
             export_live(&bundle, &tmp.path().join("output"), &manifest),
             Err(ExportError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn exports_custom_snapshots_and_their_frames() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("bundle");
+        let output = tmp.path().join("output");
+        fs::create_dir_all(bundle.join("custom")).unwrap();
+        fs::write(
+            bundle.join("custom/page.html"),
+            r#"<iframe src="/snaps/page.f1.html"></iframe>"#,
+        )
+        .unwrap();
+        fs::write(bundle.join("custom/page.f1.html"), "<p>frame</p>").unwrap();
+        fs::write(
+            bundle.join("custom/page.json"),
+            r#"{"frames":[{"key":"f1"}]}"#,
+        )
+        .unwrap();
+        let mut manifest = BundleManifest::starter("Fixture");
+        manifest.graph.scenes[0].live = Some(LivePage {
+            app: "fixture".into(),
+            snapshot: "custom/page.html".into(),
+            title: None,
+            reference: None,
+            sha256: None,
+        });
+        export_live(&bundle, &output, &manifest).unwrap();
+        let exported = read_manifest(&output).unwrap();
+        let snapshot = &exported.graph.scenes[0].live.as_ref().unwrap().snapshot;
+        assert_eq!(snapshot, "snaps/scenecast-export-0.html");
+        assert!(
+            fs::read_to_string(output.join(snapshot))
+                .unwrap()
+                .contains("../snaps/scenecast-export-0.f1.html")
+        );
+        assert!(output.join("snaps/scenecast-export-0.f1.html").exists());
+        assert!(output.join("snaps/scenecast-export-0.json").exists());
+        assert!(validate_referenced_files(&output, &exported).is_valid());
     }
 }
