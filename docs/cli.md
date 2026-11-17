@@ -178,7 +178,9 @@ Exported HTML is intentionally static-host friendly: the output folder contains 
 
 Recorded live-page bundles export the morph player and built captures instead. Open `index.html` directly or serve
 the folder on a static host. Direct file playback currently excludes custom player modules; HTTP playback supports
-them. Mixed live and fallback scenes are not yet supported by this export.
+them. Explicit screenshot and video-frame fallback scenes can be mixed with live pages; their app is determined
+from their beat or connected scenes. An ambiguous fallback needs an `app` in its `playback.scenes` options.
+Fallback scenes remain flagged by `check`.
 
 The repository includes `examples\scroll.scenecast` as a complete static scroll sample. Export it with:
 

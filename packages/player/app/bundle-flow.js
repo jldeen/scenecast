@@ -7,16 +7,37 @@ export function flowFromBundle(bundle) {
     ...((playback.apps || {})[app.id] || {}),
     id: app.id, key: app.key, title: app.title,
   }));
+  const sceneApps = new Map(bundle.graph.scenes.map(scene => [scene.id, new Set(scene.live ? [scene.live.app] : [])]));
+  for (const beat of bundle.beats || []) for (const [app, id] of Object.entries(beat.scenes || {})) sceneApps.get(id)?.add(app);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const scene of bundle.graph.scenes) {
+      for (const target of [...(scene.transitions || []).map(t => t.target), ...(scene.hotspots || []).map(h => h.target)]) {
+        const from = sceneApps.get(scene.id), to = sceneApps.get(target);
+        if (!to) continue;
+        const targetScene = bundle.graph.scenes.find(s => s.id === target);
+        if (!scene.live) for (const app of to) if (!from.has(app)) { from.add(app); changed = true; }
+        if (!targetScene.live) for (const app of from) if (!to.has(app)) { to.add(app); changed = true; }
+      }
+    }
+  }
   flow.states = {};
   for (const scene of bundle.graph.scenes) {
-    if ((scene.kind || 'live-page') !== 'live-page' || !scene.live) continue;
+    const fallback = (scene.kind || 'live-page') !== 'live-page';
+    if (!fallback && !scene.live) continue;
     const data = (playback.scenes || {})[scene.id] || {};
-    const snapshot = scene.live.snapshot;
-    const match = /^(?:data\/)?snaps\/(.+)\.html$/.exec(snapshot);
+    const snapshot = scene.live?.snapshot;
+    const match = snapshot && /^(?:data\/)?snaps\/(.+)\.html$/.exec(snapshot);
+    const inferredApps = [...sceneApps.get(scene.id)];
+    const app = scene.live?.app || data.options?.app || (inferredApps.length === 1 ? inferredApps[0] : flow.apps.length === 1 ? flow.apps[0].id : null);
+    if (!app) throw new Error(`Cannot determine app for fallback scene ${scene.id}`);
+    if (fallback && !scene.assets?.screenshot && !scene.assets?.video) throw new Error(`Fallback scene ${scene.id} has no capture`);
     const state = {
       ...(data.options || {}),
-      app: scene.live.app, snap: match ? match[1] : `@scene:${scene.id}`,
-      snapshot, title: scene.live.title || scene.title,
+      app, snap: fallback ? `@fallback:${scene.id}` : match ? match[1] : `@scene:${scene.id}`,
+      ...(fallback ? { fallback: { assets: scene.assets, hotspots: scene.hotspots || [] } } : { snapshot }),
+      title: scene.live?.title || scene.title,
     };
     const ordered = (data.actions || []).map(a => ({ order: a.order, value: a.action }));
     const groups = new Map();

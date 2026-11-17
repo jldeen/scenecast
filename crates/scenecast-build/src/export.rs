@@ -1,10 +1,12 @@
-//! Export a live-page bundle for a static HTTP host.
+//! Export a live-page bundle for a static host or direct folder playback.
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use regex::Regex;
 use scenecast_core::{BundleManifest, SceneKind, validate_referenced_files};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -68,9 +70,11 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), ExportError> {
             let text = std::str::from_utf8(&bytes).map_err(|_| {
                 ExportError::Invalid(format!("invalid UTF-8: {}", source.display()))
             })?;
-            text.replace("/assets/", "../assets/")
-                .replace("/snaps/", "../snaps/")
-                .replace("/streams/", "../streams/")
+            static ROOT_URL: OnceLock<Regex> = OnceLock::new();
+            ROOT_URL
+                .get_or_init(|| Regex::new(r#"(^|[\s"'(=])/(assets|snaps|streams)/"#).unwrap())
+                .replace_all(text, "$1../$2/")
+                .into_owned()
                 .into_bytes()
         } else {
             bytes
@@ -120,6 +124,8 @@ fn offline_files(
             "woff2" => "font/woff2",
             "ttf" => "font/ttf",
             "otf" => "font/otf",
+            "mp4" => "video/mp4",
+            "webm" => "video/webm",
             _ => "application/octet-stream",
         };
         serde_json::json!({"url": format!("data:{mime};base64,{}", STANDARD.encode(bytes))})
@@ -154,18 +160,28 @@ try {
 }
 </script>"#;
 
-/// Exports live-page captures. The destination must be empty.
-/// Static browsers need an HTTP host because module and fetch requests cannot use `file://`.
+/// Exports live-page and explicitly selected fallback captures. The destination must be empty.
 pub fn export_live(
     bundle: &Path,
     output: &Path,
     manifest: &BundleManifest,
 ) -> Result<(), ExportError> {
+    let validation = manifest.validate();
+    if !validation.is_valid() {
+        return Err(ExportError::Invalid(format!(
+            "bundle manifest has {} validation error(s)",
+            validation.errors.len()
+        )));
+    }
     for scene in &manifest.graph.scenes {
         if scene.kind != SceneKind::LivePage {
-            return Err(ExportError::Invalid(
-                "mixed fallback scenes are not supported by the live player".into(),
-            ));
+            if scene.assets.screenshot.is_none() && scene.assets.video.is_none() {
+                return Err(ExportError::Invalid(format!(
+                    "fallback scene {} has no capture",
+                    scene.id
+                )));
+            }
+            continue;
         }
         let snapshot = scene
             .live
@@ -349,7 +365,9 @@ pub fn export_live(
     }
     let mut exported = manifest.clone();
     for (index, scene) in exported.graph.scenes.iter_mut().enumerate() {
-        let live = scene.live.as_mut().expect("live scenes checked above");
+        let Some(live) = scene.live.as_mut() else {
+            continue;
+        };
         let standard = live
             .snapshot
             .strip_prefix("data/snaps/")
@@ -450,6 +468,12 @@ pub fn export_live(
             continue;
         }
         let source = bundle.join(path);
+        let real = fs::canonicalize(&source).map_err(|e| io(&source, e))?;
+        if !real.starts_with(&bundle_root) {
+            return Err(ExportError::Invalid(format!(
+                "referenced asset leaves bundle: {path}"
+            )));
+        }
         let destination = output.join(path);
         if destination.exists() {
             return Err(ExportError::Invalid(format!(
@@ -464,6 +488,28 @@ pub fn export_live(
             )));
         }
         copy_tree(&source, &destination)?;
+    }
+    let mut fallback_assets = HashSet::new();
+    for scene in &exported.graph.scenes {
+        if scene.kind == SceneKind::LivePage {
+            continue;
+        }
+        for path in [
+            scene.assets.screenshot.as_deref(),
+            scene.assets.video.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .chain(scene.hotspots.iter().flat_map(|hotspot| {
+            hotspot
+                .transition
+                .iter()
+                .flat_map(|transition| transition.frames.iter().map(|frame| frame.path.as_str()))
+        })) {
+            if fallback_assets.insert(path) {
+                copy_tree(&output.join(path), &output.join("bundle").join(path))?;
+            }
+        }
     }
     let files = validate_referenced_files(output, &exported);
     if !files.is_valid() {
@@ -509,6 +555,7 @@ pub fn export_live(
         "snaps",
         "streams",
         "assets",
+        "bundle",
         "__replica",
     ] {
         let path = output.join(name);
@@ -546,7 +593,7 @@ mod tests {
         fs::create_dir_all(bundle.join("captures")).unwrap();
         fs::write(
             bundle.join("data/snaps/start.html"),
-            r#"<img src="/assets/example.png">"#,
+            r#"<img src="/assets/example.png"><img src="../assets/existing.png">"#,
         )
         .unwrap();
         fs::write(
@@ -567,6 +614,9 @@ mod tests {
         assert!(validate_referenced_files(&output, &exported).is_valid());
         let live = exported.graph.scenes[0].live.as_ref().unwrap();
         let bytes = fs::read(output.join(&live.snapshot)).unwrap();
+        let html = std::str::from_utf8(&bytes).unwrap();
+        assert!(html.contains(r#"src="../assets/example.png""#));
+        assert!(html.contains(r#"src="../assets/existing.png""#));
         assert_eq!(
             live.sha256.as_deref(),
             Some(format!("{:x}", Sha256::digest(&bytes)).as_str())

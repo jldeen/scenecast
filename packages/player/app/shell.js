@@ -48,12 +48,15 @@ const note = e => { errors.push(String(e && e.stack || e)); };
 
 // ---- loading and preparing documents -------------------------------------------------------------------------
 let loads = 0;
-async function loadFrame(iframe, url) {
-  const srcdoc = offline ? await getText(url) : null;
+async function loadFrame(iframe, url, html = null) {
+  const srcdoc = html ?? (offline ? await getText(url) : null);
   return new Promise(res => {
     iframe.addEventListener('load', () => res(), { once: true });
-    if (offline) iframe.srcdoc = srcdoc;
-    else iframe.src = url + (url.includes('?') ? '&' : '?') + 'v=' + (++loads);
+    if (srcdoc !== null) iframe.srcdoc = srcdoc;
+    else {
+      iframe.src = url + (url.includes('?') ? '&' : '?') + 'v=' + (++loads);
+      iframe.removeAttribute('srcdoc');
+    }
   });
 }
 function docsOf(doc, out = []) {
@@ -70,6 +73,7 @@ function prepare(doc, app) {
   W.console && Object.assign(W.console, { log() {}, warn() {}, error() {}, info() {}, debug() {} });
   W.addEventListener('error', e => { e.preventDefault(); }, true);
   doc.addEventListener('click', e => onClick(e, app, doc), true);
+  doc.addEventListener('wheel', e => fallbackInput(e, app, doc), { capture: true, passive: false });
   doc.addEventListener('auxclick', e => { if (e.target.closest && e.target.closest('a')) e.preventDefault(); }, true);
   doc.addEventListener('submit', e => e.preventDefault(), true);
   doc.addEventListener('keydown', e => onKey(e, app, doc), true);
@@ -185,6 +189,7 @@ function findTransition(app, kind, target, doc) {
 
 // ---- events --------------------------------------------------------------------------------------------------
 function onClick(e, app, doc) {
+  if (S[app.state]?.fallback) { fallbackInput(e, app, doc); return; }
   const a = e.target.closest && e.target.closest('a[href]');
   if (a) e.preventDefault();
   const isBox = e.target.type === 'checkbox' || e.target.type === 'radio';
@@ -220,6 +225,79 @@ function onClick(e, app, doc) {
   const field = hit.t.typedFrom && findEl(doc, hit.t.typedFrom);
   if (hit.t.typedFrom && !(field && textOf(field))) return;
   setTimeout(() => run(app, hit.t, { el: hit.el, doc, typed: field ? textOf(field) : undefined }), 0);
+}
+
+function fallbackUrl(path) {
+  const url = bundlePath(path);
+  return offline ? offline.asset(url) : url;
+}
+
+function fallbackDocument(state) {
+  const doc = document.implementation.createHTMLDocument(state.title || '');
+  const style = doc.createElement('style');
+  style.textContent = 'html,body{margin:0;width:100%;height:100%;overflow:hidden}img,video{position:absolute;width:100%;height:100%;object-fit:fill}';
+  doc.head.append(style);
+  const image = doc.createElement('img');
+  image.dataset.scenecastCapture = '';
+  image.alt = '';
+  if (state.fallback.assets.screenshot) image.src = fallbackUrl(state.fallback.assets.screenshot);
+  const videoPath = state.fallback.assets.video;
+  if (videoPath) {
+    image.style.display = 'none';
+    const video = doc.createElement('video');
+    video.dataset.scenecastCapture = '';
+    video.src = fallbackUrl(videoPath);
+    video.autoplay = true;
+    video.muted = true;
+    video.setAttribute('playsinline', '');
+    doc.body.append(video);
+  }
+  doc.body.append(image);
+  return doc;
+}
+
+function fallbackInput(e, app, doc) {
+  const fallback = S[app.state]?.fallback;
+  if (!fallback || busy) return;
+  const media = doc.querySelector('[data-scenecast-capture]:not([style*="display: none"])');
+  if (!media) return;
+  const rect = media.getBoundingClientRect();
+  const width = media.naturalWidth || media.videoWidth;
+  const height = media.naturalHeight || media.videoHeight;
+  if (!width || !height || !rect.width || !rect.height) return;
+  const x = (e.clientX - rect.left) * width / rect.width;
+  const y = (e.clientY - rect.top) * height / rect.height;
+  const trigger = e.type === 'wheel' ? 'scroll' : 'click';
+  const hotspot = fallback.hotspots.find(h => {
+    const b = h.bounds, direction = h.scroll_direction || 'any';
+    return (h.trigger || 'click') === trigger &&
+      (trigger !== 'scroll' || direction === 'any' || (direction === 'up' ? e.deltaY < 0 : e.deltaY > 0)) &&
+      x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height;
+  });
+  if (!hotspot) return;
+  e.preventDefault(); e.stopPropagation();
+  void playFallback(app, hotspot);
+}
+
+async function playFallback(app, hotspot) {
+  const my = gen;
+  busy++;
+  try {
+    const image = app.iframe.contentDocument.querySelector('img[data-scenecast-capture]');
+    const video = app.iframe.contentDocument.querySelector('video[data-scenecast-capture]');
+    for (const frame of hotspot.transition?.frames || []) {
+      const source = fallbackUrl(frame.path), loader = new Image();
+      loader.src = source;
+      await loader.decode();
+      if (gen !== my) return;
+      if (video) video.style.display = 'none';
+      image.style.display = '';
+      image.src = source;
+      await sleep(T(frame.duration_ms ?? hotspot.transition.default_frame_duration_ms ?? 90));
+      if (gen !== my) return;
+    }
+    await go(app, hotspot.target);
+  } catch (e) { note(e); } finally { busy--; }
 }
 
 function onKey(e, app, doc) {
@@ -920,7 +998,7 @@ function firstMatch(d, m) { for (const e of d.querySelectorAll(m.sel || '*')) if
 function applyLayout(app) {
   for (const h of hvState(app).on) hvPlace(h);
   for (const r of clkState(app).open) hvPlace(r.place);
-  if (!app.state) return;
+  if (!app.state || S[app.state]?.fallback) return;
   const L = layoutOf(app.id) || {};
   const doc = app.iframe.contentDocument;
   if (!doc || !doc.body) return;
@@ -1048,6 +1126,7 @@ function queueLayout(app) {
   requestAnimationFrame(() => { layoutQueued.delete(app); try { applyLayout(app); } catch (e) { note(e); } });
 }
 async function prepareLayout(app) {
+  if (S[app.state]?.fallback) return;
   const L = layoutOf(app.id);
   if (!L) return;
   const snaps = new Set([S[app.state].snap]);
@@ -1106,7 +1185,10 @@ function subst(app, html) {
   for (const [a, b] of app.subst || []) if (a !== b) html = html.split(a).join(b);
   return html;
 }
-async function targetDoc(app, stateId) { return parse(subst(app, await getText(snapUrl(S[stateId].snap)))); }
+async function targetDoc(app, stateId) {
+  const state = S[stateId];
+  return state.fallback ? fallbackDocument(state) : parse(subst(app, await getText(snapUrl(state.snap))));
+}
 
 // Frame captures of a state, fetched and parsed up front, so the morph itself is one synchronous step.
 async function frameTargets(snap) {
@@ -1137,7 +1219,21 @@ function morphFrames(liveDoc, targetSnap, scroll, targets, later) {
 
 async function go(app, stateId, { scroll = 'target', keep } = {}) {
   if (!S[stateId]) throw new Error('no state ' + stateId);
-  const [target, frames] = await Promise.all([targetDoc(app, stateId), frameTargets(S[stateId].snap)]);
+  if (S[stateId].fallback || S[app.state]?.fallback) {
+    hvClear(app); clkClear(app);
+    app.state = stateId;
+    const state = S[stateId];
+    const html = state.fallback ? '<!DOCTYPE html>' + fallbackDocument(state).documentElement.outerHTML : null;
+    app.customElements = state.fallback ? [] : ((await getJson(snapRelated(state.snap, '.json')).catch(() => ({}))).customElements) || [];
+    await Promise.all([loadFrame(app.iframe, state.fallback ? null : snapUrl(state.snap), html), prepareLayout(app)]);
+    prepare(app.iframe.contentDocument, app);
+    applyLayout(app);
+    await afterFonts(app, docs => { for (const d of docs) post(d, scroll, []); applyLayout(app); });
+    if (app.id === active) { syncChrome(); autofocus(app); }
+    prefetch(app);
+    return;
+  }
+  const [target, frames] = await Promise.all([targetDoc(app, stateId), S[stateId].fallback ? new Map() : frameTargets(S[stateId].snap)]);
   const doc = app.iframe.contentDocument;
   hvClear(app); clkClear(app);
   const before = scrolled(doc);
@@ -1257,7 +1353,7 @@ function frameTimes(frames, dur, s) {
 function prefetch(app) {
   for (const t of [...transitions(app, 'click'), ...transitions(app, 'enter'), ...transitions(app, 'type'), ...transitions(app, 'hover')]) {
     const ids = t.stream ? [flow.streams[t.stream].to] : t.query ? Object.values(t.query) : t.to ? [t.to] : [];
-    for (const id of ids) if (S[id]) getText(snapUrl(S[id].snap)).catch(note);
+    for (const id of ids) if (S[id] && !S[id].fallback) getText(snapUrl(S[id].snap)).catch(note);
     if (t.stream) getJson(local(`/streams/${t.stream}.json`)).then(ix => ix.frames.forEach(f => getText(local(`/streams/${t.stream}/${f.file}`)).catch(note))).catch(note);
   }
 }
@@ -1290,8 +1386,10 @@ async function loadApp(app, stateId) {
   clkState(app).sticky.clear(); grpState(app).open.clear(); app.flags = {}; app.sizes = {}; app.playing = null;
   app.state = stateId; app.hover = null; app.subst = []; app.morphGen = (app.morphGen || 0) + 1;
   const snap = S[stateId].snap;
-  app.customElements = ((await getJson(snapRelated(snap, '.json')).catch(() => ({}))).customElements) || [];
-  await Promise.all([loadFrame(app.iframe, snapUrl(snap)), prepareLayout(app), loadHovers(app)]);
+  const state = S[stateId];
+  app.customElements = state.fallback ? [] : ((await getJson(snapRelated(snap, '.json')).catch(() => ({}))).customElements) || [];
+  const html = state.fallback ? '<!DOCTYPE html>' + fallbackDocument(state).documentElement.outerHTML : null;
+  await Promise.all([loadFrame(app.iframe, state.fallback ? null : snapUrl(snap), html), prepareLayout(app), loadHovers(app)]);
   prepare(app.iframe.contentDocument, app);
   applyLayout(app);
   await afterFonts(app, docs => { for (const d of docs) post(d, 'target', []); applyLayout(app); });

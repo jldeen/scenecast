@@ -140,6 +140,13 @@ pub fn sync_manifest(dir: &Path) -> Result<SyncReport, SyncError> {
         .filter(|s| s.kind.is_fallback())
         .cloned()
         .collect();
+    if let Some(playback) = &manifest.playback {
+        for scene in &fallback {
+            if let Some(data) = playback.scenes.get(scene.id.as_str()) {
+                scene_playback.insert(scene.id.to_string(), data.clone());
+            }
+        }
+    }
 
     manifest.streams = flow
         .get("streams")
@@ -540,6 +547,18 @@ mod tests {
             "Native",
             None,
         ));
+        m.playback = Some(PlaybackData {
+            scenes: [(
+                "native".to_owned(),
+                ScenePlayback {
+                    options: serde_json::json!({"app": "chat"}),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        });
         write_manifest(d, &m).unwrap();
 
         let r = sync_manifest(d).unwrap();
@@ -565,6 +584,10 @@ mod tests {
             Some("https://chat.example.test/x")
         );
         assert_eq!(m.focus_points[0].find.as_deref(), Some("Two builds"));
+        assert_eq!(
+            m.playback.as_ref().unwrap().scenes["native"].options["app"],
+            "chat"
+        );
 
         // Unchanged inputs: nothing rewritten.
         assert!(!sync_manifest(d).unwrap().written);

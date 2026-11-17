@@ -41,3 +41,25 @@ test('live override paths cannot mutate object prototypes', () => {
   assert.throws(() => applyFlowOverrides({}, [{ path: ['__proto__', 'polluted'], value: true }]), /Invalid override path/);
   assert.equal({}.polluted, undefined);
 });
+
+test('explicit fallback scenes join the live graph without becoming live pages', () => {
+  const bundle = {
+    schema_version: 'scenecast.bundle.v2', title: 'Fixture',
+    apps: [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }],
+    graph: { start_scene: 'live', scenes: [
+      { id: 'live', title: 'Live', live: { app: 'a', snapshot: 'data/snaps/live.html' },
+        transitions: [{ trigger: 'click', target: 'still', matcher: { sel: 'button' } }] },
+      { id: 'still', title: 'Still', kind: 'screenshot', assets: { screenshot: 'captures/still.png' },
+        hotspots: [{ id: 'next', target: 'live', bounds: { x: 1, y: 2, width: 3, height: 4 } }] },
+      { id: 'other', title: 'Other', live: { app: 'b', snapshot: 'data/snaps/other.html' } },
+    ] },
+    beats: [{ active: 'a', scenes: { a: 'live', b: 'other' } }],
+  };
+  const state = flowFromBundle(bundle).states.still;
+  assert.equal(state.app, 'a');
+  assert.equal(state.snap, '@fallback:still');
+  assert.equal(state.fallback.assets.screenshot, 'captures/still.png');
+  assert.equal(state.fallback.hotspots[0].target, 'live');
+  bundle.graph.scenes[2].transitions = [{ trigger: 'click', target: 'still' }];
+  assert.throws(() => flowFromBundle(bundle), /Cannot determine app for fallback scene still/);
+});
