@@ -2,16 +2,13 @@
 //! checks) on a project folder, with the bundle manifest kept in step by Rust.
 
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
+use scenecast_build::build::BuildProgress;
 use scenecast_build::engine::with_demo;
-use scenecast_build::fingerprint::fingerprint_tree;
-use scenecast_build::scrub::{ScrubReport, scrub_tree};
-use scenecast_build::{Engine, NewProject, SyncReport, create_project, fallback_scenes};
-use serde::{Deserialize, Serialize};
+use scenecast_build::{Engine, NewProject, Progress, SyncReport, create_project, fallback_scenes};
 
 /// Arguments passed through to the engine as they are (`--demo <dir>` picks the project; else the folder you're in).
 #[derive(Debug, Clone, Args)]
@@ -97,14 +94,9 @@ fn project_dir(args: &[OsString]) -> Result<PathBuf> {
     })
 }
 
-/// Runs an engine subcommand with the terminal attached, on the project (when it takes one), and comes back.
-pub fn passthrough(sub: &str, args: &Passthrough, takes_project: bool) -> Result<i32> {
-    run_engine(sub, args, takes_project, false)
-}
-
 /// The same, as the last thing this process does (servers, the receiver, the recorder): the engine takes over.
 pub fn handover(sub: &str, args: &Passthrough, takes_project: bool) -> Result<i32> {
-    run_engine(sub, args, takes_project, true)
+    run_engine(sub, args, takes_project)
 }
 
 pub fn present(args: &Passthrough) -> Result<i32> {
@@ -113,7 +105,7 @@ pub fn present(args: &Passthrough) -> Result<i32> {
     handover("serve", &args, true)
 }
 
-fn run_engine(sub: &str, args: &Passthrough, takes_project: bool, last: bool) -> Result<i32> {
+fn run_engine(sub: &str, args: &Passthrough, takes_project: bool) -> Result<i32> {
     let engine = engine()?;
     let argv = if takes_project {
         with_demo(sub, &args.args, &project_dir(&args.args)?)
@@ -122,133 +114,34 @@ fn run_engine(sub: &str, args: &Passthrough, takes_project: bool, last: bool) ->
             .chain(args.args.iter().cloned())
             .collect()
     };
-    Ok(if last {
-        engine.exec_attached(argv)?
-    } else {
-        engine.run_attached(argv)?
-    })
+    Ok(engine.exec_attached(argv)?)
 }
 
 /// `scenecast build`: the engine's build (flow, captures → data/, secret scan), then the manifest from it.
 pub fn build(args: &Passthrough) -> Result<i32> {
     let dir = project_dir(&args.args)?;
-    let config: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("demo.json"))?)?;
-    let raw = std::env::var_os("REPLICA_RAW")
-        .map(PathBuf::from)
-        .or_else(|| config["raw"].as_str().map(PathBuf::from))
-        .unwrap_or_else(|| {
-            PathBuf::from(format!(
-                "~/.scenecast/{}/raw",
-                config["name"].as_str().unwrap_or("demo")
-            ))
-        });
-    let raw = if let Ok(rest) = raw.strip_prefix("~") {
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .context("cannot resolve raw capture folder: HOME and USERPROFILE are unset")?;
-        PathBuf::from(home).join(rest)
-    } else if raw.is_absolute() {
-        raw
-    } else {
-        dir.join(raw)
-    };
-    let allowlist = match config.pointer("/scrub/allowlist") {
-        Some(value) => serde_json::from_value::<Vec<String>>(value.clone())
-            .context("demo.json scrub.allowlist must be an array of strings")?,
-        None => Vec::new(),
-    };
-    let mut report = ScrubReport::default();
-    if raw.exists() {
-        scrub_tree(&raw, "raw", &allowlist, false, &mut report)?;
-    }
-    if report.has_credentials() {
-        write_scrub_report(&dir, &report)?;
-        eprintln!("build stopped: credentials found in raw captures (see .out/scrub.json)");
-        return Ok(1);
-    }
-    let raw_hash = if raw.is_dir() {
-        Some(fingerprint_tree(&raw, |_| {})?)
-    } else {
-        None
-    };
-    let cache_path = dir.join(".out/build-fingerprint.json");
-    let previous: Option<BuildFingerprint> = match fs::read(&cache_path) {
-        Ok(bytes) => Some(serde_json::from_slice(&bytes).context("invalid build fingerprint")?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e.into()),
-    };
-    let data = dir.join("data");
-    let output_hash = if data.is_dir() {
-        Some(fingerprint_tree(&data, |_| {})?)
-    } else {
-        None
-    };
-    let unchanged = previous.as_ref().is_some_and(|p| {
-        raw_hash.as_ref() == Some(&p.raw) && output_hash.as_ref() == Some(&p.output)
-    });
-    let mut build_args = args.clone();
-    if !unchanged && !build_args.args.iter().any(|a| a == "--force") {
-        build_args.args.push("--force".into());
-    }
-    let code = passthrough("build", &build_args, true)?;
-    for path in [
-        dir.join("data"),
-        dir.join("recording.json"),
-        dir.join("flow.json"),
-    ] {
-        if path.exists() {
-            scrub_tree(&path, "built", &allowlist, true, &mut report)?;
+    let result = scenecast_build::build::build(&dir, &args.args, |progress| match progress {
+        BuildProgress::Engine(Progress::Stdout(line)) => println!("{line}"),
+        BuildProgress::Engine(Progress::Stderr(line)) => eprintln!("{line}"),
+        _ => {}
+    })?;
+    if let Some(source) = result.credentials_in {
+        if source == "raw" {
+            eprintln!("build stopped: credentials found in raw captures (see .out/scrub.json)");
+        } else {
+            eprintln!("build stopped: credentials or scripts found (see .out/scrub.json)");
         }
     }
-    write_scrub_report(&dir, &report)?;
-    if report.has_credentials() {
-        eprintln!("build stopped: credentials or scripts found (see .out/scrub.json)");
-        return Ok(1);
+    if let Some(report) = &result.sync {
+        print_sync(report);
     }
-    if code != 0 {
-        return Ok(code);
-    }
-    let code = sync(&dir)?;
-    if code == 0
-        && let Some(raw) = raw_hash
-    {
-        let output = fingerprint_tree(&data, |_| {})?;
-        fs::write(
-            cache_path,
-            format!(
-                "{}\n",
-                serde_json::to_string_pretty(&BuildFingerprint { raw, output })?
-            ),
-        )?;
-    }
-    Ok(code)
-}
-
-#[derive(Serialize, Deserialize)]
-struct BuildFingerprint {
-    raw: String,
-    output: String,
-}
-
-fn write_scrub_report(dir: &Path, report: &ScrubReport) -> Result<()> {
-    let out = dir.join(".out");
-    fs::create_dir_all(&out)?;
-    fs::write(
-        out.join("scrub.json"),
-        format!("{}\n", serde_json::to_string_pretty(report)?),
-    )?;
-    Ok(())
+    Ok(result.exit_code)
 }
 
 /// `scenecast sync`: the manifest from what was built.
 pub fn sync(dir: &Path) -> Result<i32> {
-    let report = scenecast_build::sync_manifest(dir)?;
+    let report = scenecast_build::build::sync_with_baseline(dir)?;
     print_sync(&report);
-    if report.is_valid() {
-        let out = dir.join(".out");
-        fs::create_dir_all(&out)?;
-        fs::copy(dir.join("flow.json"), out.join("live-base.json"))?;
-    }
     Ok(if report.is_valid() { 0 } else { 1 })
 }
 

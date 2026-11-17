@@ -6,7 +6,9 @@
 //! - [`engine`]: the JavaScript engine in `packages/` (recorder, player, checks), run under Node.
 //! - [`recorder`]: preflight, the recorder extension and the recording, with per-item progress and timing.
 //! - [`sync`]: the bundle manifest (v2) from what the engine built (`flow.json`, `data/`).
+//! - [`build`]: content-hashed build orchestration and scrub reporting with structured progress.
 
+pub mod build;
 pub mod engine;
 pub mod export;
 pub mod fingerprint;
