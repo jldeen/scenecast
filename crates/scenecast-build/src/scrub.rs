@@ -105,7 +105,20 @@ pub fn scrub_tree(
                     Ok(())
                 };
             }
-            let (scrubbed, mut findings) = scrub_text(text, allowlist);
+            let mut decoded_findings = Vec::new();
+            let mut decoded = None;
+            if ext.eq_ignore_ascii_case("json")
+                && let Ok(mut json) = serde_json::from_str::<serde_json::Value>(text)
+            {
+                scrub_json_strings(&mut json, None, allowlist, &mut decoded_findings);
+                decoded = Some(serde_json::to_string(&json).expect("JSON value serializes"));
+            }
+            let (mut scrubbed, mut findings) =
+                scrub_text(decoded.as_deref().unwrap_or(text), allowlist);
+            findings.extend(decoded_findings);
+            if findings.is_empty() {
+                scrubbed = text.to_owned();
+            }
             if source == "built" && contains_script(ext, text) {
                 findings.push(Finding {
                     kind: "script",
@@ -134,6 +147,59 @@ pub fn scrub_tree(
         Ok(())
     }
     walk(root, root, source, allowlist, redact, report)
+}
+
+fn scrub_json_strings(
+    value: &mut serde_json::Value,
+    key: Option<&str>,
+    allowlist: &[String],
+    findings: &mut Vec<Finding>,
+) {
+    match value {
+        serde_json::Value::String(text) => {
+            let prefix = key
+                .filter(|key| {
+                    scrub_text(&format!("{key}=x"), &[])
+                        .1
+                        .iter()
+                        .any(|finding| finding.credential)
+                })
+                .map(|key| format!("{key}="))
+                .unwrap_or_default();
+            let input = format!("{prefix}{text}");
+            let (output, mut found) = scrub_text(&input, allowlist);
+            for finding in &mut found {
+                finding.line = 0;
+            }
+            findings.extend(found);
+            if output != input {
+                *text = output.strip_prefix(&prefix).unwrap_or(&output).to_owned();
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for item in values {
+                scrub_json_strings(item, None, allowlist, findings);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for (key, item) in values {
+                scrub_json_strings(item, Some(key), allowlist, findings);
+            }
+        }
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => {
+            if let Some(key) = key {
+                let (_, mut found) = scrub_text(&format!("{key}={value}"), allowlist);
+                if found.iter().any(|finding| finding.credential) {
+                    for finding in &mut found {
+                        finding.line = 0;
+                    }
+                    findings.extend(found);
+                    *value = serde_json::Value::String("[REDACTED]".to_owned());
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn contains_script(ext: &str, text: &str) -> bool {
@@ -382,5 +448,47 @@ mod tests {
             assert!(contains_script("json", &json), "{json}");
         }
         assert!(!contains_script("html", "<p>Use the onclick event.</p>"));
+    }
+
+    #[test]
+    fn detects_and_redacts_escaped_json_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("capture.json");
+        fs::write(
+            &path,
+            r#"{"client_secr\u0065t":"synthetic","person":"pers\u006fn@example.test"}"#,
+        )
+        .unwrap();
+        let mut report = ScrubReport::default();
+        scrub_tree(dir.path(), "raw", &[], false, &mut report).unwrap();
+        assert!(report.has_credentials());
+        assert!(report.findings.iter().any(|f| f.finding.kind == "email"));
+        let mut report = ScrubReport::default();
+        scrub_tree(dir.path(), "built", &[], true, &mut report).unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(result["client_secret"], "[REDACTED]");
+        assert_eq!(result["person"], "[REDACTED]");
+        assert!(report.has_credentials());
+
+        fs::write(
+            dir.path().join("allowlisted.json"),
+            r#"{"person":"pers\u006fn@example.test","tok\u0065n":12345}"#,
+        )
+        .unwrap();
+        let mut report = ScrubReport::default();
+        scrub_tree(
+            dir.path(),
+            "built",
+            &["person@example.test".to_owned()],
+            true,
+            &mut report,
+        )
+        .unwrap();
+        let result: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("allowlisted.json")).unwrap())
+                .unwrap();
+        assert_eq!(result["person"], "person@example.test");
+        assert_eq!(result["token"], "[REDACTED]");
+        assert!(report.has_credentials());
     }
 }
