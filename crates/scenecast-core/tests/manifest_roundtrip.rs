@@ -1,11 +1,24 @@
-use scenecast_core::{BundleManifest, HotspotId, SceneId};
+use scenecast_core::{
+    BundleManifest, HotspotId, SCHEMA_VERSION, SCHEMA_VERSION_V1, SceneId, SceneKind,
+};
 
 #[test]
 fn interactive_manifest_fixture_round_trips_and_validates() {
-    let manifest: BundleManifest =
-        serde_json::from_str(include_str!("fixtures/interactive.scenecast/manifest.json")).unwrap();
+    // A v1 bundle: it loads, migrated to v2, with its scenes read as fallback scenes.
+    let (manifest, read_as) =
+        BundleManifest::from_json_str(include_str!("fixtures/interactive.scenecast/manifest.json"))
+            .unwrap();
 
+    assert_eq!(read_as, SCHEMA_VERSION_V1);
+    assert_eq!(manifest.schema_version, SCHEMA_VERSION);
     assert!(manifest.validate().is_valid());
+    assert!(
+        manifest
+            .graph
+            .scenes
+            .iter()
+            .all(|scene| scene.kind == SceneKind::Screenshot)
+    );
     assert_eq!(manifest.title, "Interactive fixture");
 
     let start = manifest

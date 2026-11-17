@@ -1,8 +1,9 @@
-// Replica server. No dependencies, no network: it serves the kit's shell (engine/app/), the demo's flow (flow.json)
-// and its captured pages and assets (data/) on localhost.
-//   node engine/serve.mjs --demo <dir> [--port 4620] [--open] [--pace N] [--release]
-// --open opens it in Chrome as an app window (no tabs or address bar), on the profile named in demo.json; then
-// ⌃⌘F for full screen. REPLICA_NO_OPEN=1 serves without opening Chrome (checks while her window is in use).
+// Replica server. No dependencies, no network: it serves the player (packages/player/app/), the demo's flow
+// (flow.json) and its captured pages and assets (data/) on localhost.
+//   node packages/player/serve.mjs --demo <dir> [--port 4620] [--open] [--pace N] [--release]
+// --open opens it as an app window (no tabs or address bar; launch.mjs): Chrome on the Mac (⌃⌘F for full screen),
+// Edge on Windows (F11), or demo.json chrome.browser, on chrome.profile. REPLICA_NO_OPEN=1 serves without opening
+// a window (checks while her window is in use).
 //
 // Tweaks show on reload, without a build: when recording.json, flow.overrides.mjs or demo.json changes, the flow is
 // compiled again (and flow.json written); text edits the last build hasn't baked in (data/build.json) are applied to
@@ -10,13 +11,13 @@
 // --release serves data/ and flow.json exactly as built (what a pushed replica runs).
 import { createServer } from 'node:http';
 import { createReadStream, existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
-import { join, normalize, extname, dirname } from 'node:path';
+import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
-import { loadDemo, arg } from '../lib/demo.mjs';
-import { compileFlow } from '../compile/flow.mjs';
-import { buildInputs, buildDiff } from '../lib/buildkey.mjs';
-import { compileEdits, applyEdits, applyEditsJson } from '../lib/edits.mjs';
+import { openApp } from './launch.mjs';
+import { loadDemo, arg } from '../kit/lib/demo.mjs';
+import { compileFlow } from '../kit/compile/flow.mjs';
+import { buildInputs, buildDiff } from '../kit/lib/buildkey.mjs';
+import { compileEdits, applyEdits, applyEditsJson } from '../kit/lib/edits.mjs';
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), 'app');
 const args = process.argv.slice(2);
@@ -60,7 +61,7 @@ async function refresh(force) {
     live.error = String(e.message || e);
     if (!live.json && existsSync(demo.flowPath)) live.json = readFileSync(demo.flowPath, 'utf8');
   }
-  const note = [live.error && `flow: ${live.error}`, live.pending.length && `${live.pending.length} text edit(s) applied as served (not built in yet)`, live.needsBuild.length && `needs replica build: ${live.needsBuild.join(', ')}`].filter(Boolean).join(' · ');
+  const note = [live.error && `flow: ${live.error}`, live.pending.length && `${live.pending.length} text edit(s) applied as served (not built in yet)`, live.needsBuild.length && `needs scenecast build: ${live.needsBuild.join(', ')}`].filter(Boolean).join(' · ');
   if (note !== lastNote) { lastNote = note; console.log(`${new Date().toISOString().slice(11, 19)} ${note || 'flow and data up to date'}`); }
 }
 // Pending edits on a text response: pages (and in-capture edits on their main document), stream frames, hover data.
@@ -82,7 +83,7 @@ function resolve(path) {
   if (path === '/favicon.ico') return null;
   for (const [pre, dir] of MAP) if (path.startsWith(pre)) {
     const f = normalize(join(dir, decodeURIComponent(path.slice(pre.length))));
-    if (!f.startsWith(dir)) return null;
+    if (!f.startsWith(dir + sep)) return null;
     if (pre === '/demo/' && !/\.(m?js|css|json)$/.test(f)) return null;
     return f;
   }
@@ -117,7 +118,5 @@ createServer(async (req, res) => {
   const url = `http://127.0.0.1:${PORT}/${PACE > 0 ? `?pace=${PACE}` : ''}`;
   console.log(`${demo.cfg.title || demo.name} replica: ${url}${RELEASE ? ' (release: as built)' : ''}`);
   refresh();
-  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) {
-    execFile('open', ['-na', 'Google Chrome', '--args', `--profile-directory=${demo.cfg.chrome.profile}`, `--app=${url}`], err => { if (err) console.log('open Chrome yourself: ' + url); });
-  }
+  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) openApp(url, demo.cfg.chrome);
 });

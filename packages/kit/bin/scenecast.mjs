@@ -6,42 +6,42 @@ import { join, resolve, basename } from 'node:path';
 import { KIT, KIT_VERSION, loadDemo, arg } from '../lib/demo.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
-// Children get the signals this process gets, so stopping `replica serve` stops the server too.
+// Children get the signals this process gets, so stopping `scenecast serve` stops the server too.
 const kids = new Set();
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { for (const k of kids) k.kill(sig); process.exit(130); });
 const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(process.execPath, [join(KIT, script), ...args], { stdio: 'inherit', ...opts }); kids.add(p); p.on('close', code => { kids.delete(p); res(code); }); });
 const exit = code => process.exit(code || 0);
 const HELP = `replica-kit ${KIT_VERSION}: record a live web demo once, replay it offline the same way every time.
 
-  replica new <name> [--dir <parent>] [--title "…"] [--port N] [--app id=url …]
+  scenecast new <name> [--dir <parent>] [--title "…"] [--port N] [--app id=url …]
                                    a new demo folder from the template
-  replica agent [<outDir>]         build the capture agent (agent.js) to run with playwright-chrome
-  replica receiver                 the local receiver the agent posts captures to (keep it running)
-  replica record start [--resume] [--no-auto] | status | stop
+  scenecast agent [<outDir>]         build the capture agent (agent.js) to run with playwright-chrome
+  scenecast receiver                 the local receiver the agent posts captures to (keep it running)
+  scenecast record start [--resume] [--no-auto] | status | stop
                                    record the demo once; each new screen's side states are captured as you go
-  replica record side hovers|clicks|drags|groups|chips|zoom|list [--app id] ['{json options}']
+  scenecast record side hovers|clicks|drags|groups|chips|zoom|list [--app id] ['{json options}']
                                    one side path on the screen an app is on (one the automatic pass capped)
-  replica cmd <op> ['{json}']      one command to the agent (snap, tabs, eval, click, …)
-  replica run <script.js> ['{json}']  a capture script on the agent (capture/lib.js helpers in scope)
-  replica flow [--from-raw]        recording.json + flow.overrides.mjs → flow.json
-  replica build                    flow, then raw captures → data/ (scrubbed), then the secret scan
-  replica serve [--open] [--pace N] [--port N]
-  replica text "<old>" "<new>" [--in snap]   a wording or date tweak (shows on reload, no build)
-  replica quick                    check only what changed since the last pass (seconds) → .out/quick.md
-  replica status                   where the demo is, and the next step (after an interruption, start here)
-  replica save "<message>"         secret scan, then commit (after every step that works)
-  replica release [--push]         bake the tweaks in, the full checklist, scan, commit (and push)
-  replica check [--runs 2] [--zoom 150] [--speed 10]   the recorded path, twice: identical, no errors, no network
-  replica fidelity [--skip a,b]    the whole fidelity checklist (docs/checklist.md) → .out/fidelity.md
-  replica sheet                    real vs replica contact sheet (after check)
-  replica scan [<dir>]             secret scan: fails on any token, key or script
-  replica install-skill            installs the "replicate a demo" skill to ~/.copilot/skills
+  scenecast cmd <op> ['{json}']      one command to the agent (snap, tabs, eval, click, …)
+  scenecast run <script.js> ['{json}']  a capture script on the agent (capture/lib.js helpers in scope)
+  scenecast flow [--from-raw]        recording.json + flow.overrides.mjs → flow.json
+  scenecast build                    flow, then raw captures → data/ (scrubbed), then the secret scan
+  scenecast serve [--open] [--pace N] [--port N]
+  scenecast text "<old>" "<new>" [--in snap]   a wording or date tweak (shows on reload, no build)
+  scenecast quick                    check only what changed since the last pass (seconds) → .out/quick.md
+  scenecast status                   where the demo is, and the next step (after an interruption, start here)
+  scenecast save "<message>"         secret scan, then commit (after every step that works)
+  scenecast release [--push]         bake the tweaks in, the full checklist, scan, commit (and push)
+  scenecast check [--runs 2] [--zoom 150] [--speed 10]   the recorded path, twice: identical, no errors, no network
+  scenecast fidelity [--skip a,b]    the whole fidelity checklist (docs/checklist.md) → .out/fidelity.md
+  scenecast sheet                    real vs replica contact sheet (after check)
+  scenecast scan [<dir>]             secret scan: fails on any token, key or script
+  scenecast install-skill            installs the "replicate a demo" skill to ~/.copilot/skills
 
 Every demo command takes --demo <dir>, or runs from inside the demo folder.`;
 
 function rx() { try { return loadDemo(rest).cfg.receiverPort; } catch (e) { return 47621; } }
 async function send(op, args = {}, tmo = 900) {
-  const { send } = await import(join(KIT, 'capture/cli.mjs'));
+  const { send } = await import(join(KIT, 'recorder/cli.mjs'));
   process.env.REPLICA_RX_PORT = process.env.REPLICA_RX_PORT || String(rx());
   const r = await send({ op, ...args }, tmo);
   console.log(JSON.stringify(r.ok ? r.value : { error: r.error }, null, 1));
@@ -52,7 +52,7 @@ const jsonArg = () => { const j = rest.find(a => a.trim().startsWith('{')); retu
 async function scaffold() {
   const VALUED = new Set(['--dir', '--title', '--port', '--app']);
   const name = rest.find((a, i) => !a.startsWith('--') && !VALUED.has(rest[i - 1]));
-  if (!name || !/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.log('replica new <name>: lowercase letters, digits and dashes'); return 1; }
+  if (!name || !/^[a-z0-9][a-z0-9-]*$/.test(name)) { console.log('scenecast new <name>: lowercase letters, digits and dashes'); return 1; }
   const dir = resolve(arg(rest, '--dir', '.'), name);
   if (existsSync(dir) && readdirSync(dir).length) { console.log(`${dir} exists and isn't empty`); return 1; }
   // --app id=url: the app's tab is found by its host (edit match in demo.json when two apps share one); its
@@ -80,7 +80,7 @@ async function scaffold() {
       if (statSync(s).isDirectory()) copy(s, d); else writeFileSync(d, sub(readFileSync(s, 'utf8')));
     }
   };
-  copy(join(KIT, 'template'), dir);
+  copy(join(KIT, 'kit', 'template'), dir);
   mkdirSync(join(dir, 'data'), { recursive: true });
   console.log(`new demo: ${dir}
   apps: ${apps.map(a => `${a.id} (⌥${a.key}) ${a.url}`).join(', ')}
@@ -93,11 +93,11 @@ async function main() {
   switch (cmd) {
     case undefined: case 'help': case '--help': case '-h': console.log(HELP); return 0;
     case 'new': return scaffold();
-    case 'agent': { const out = rest.find(a => !a.startsWith('--')); return node('capture/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
-    case 'receiver': return node('capture/receiver.mjs', ['--demo', loadDemo(rest).dir]);
+    case 'agent': { const out = rest.find(a => !a.startsWith('--')); return node('recorder/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
+    case 'receiver': return node('recorder/receiver.mjs', ['--demo', loadDemo(rest).dir]);
     case 'cmd': { const [op, j] = rest; return send(op, j && j.startsWith('{') ? JSON.parse(j) : {}); }
     case 'run': {
-      const { send: s, flowScript } = await import(join(KIT, 'capture/cli.mjs'));
+      const { send: s, flowScript } = await import(join(KIT, 'recorder/cli.mjs'));
       let extra = jsonArg();
       try { const d = loadDemo(rest); extra = { apps: d.cfg.apps, ...extra }; } catch (e) {}
       process.env.REPLICA_RX_PORT = process.env.REPLICA_RX_PORT || String(rx());
@@ -116,18 +116,18 @@ async function main() {
         if (kind === 'zoom' && !extra.zooms) extra.zooms = demo.cfg.zooms;
         return send('recordSide', { kind, app: arg(rest, '--app'), ...extra }, 3600);
       }
-      console.log('replica record start|status|stop|side'); return 1;
+      console.log('scenecast record start|status|stop|side'); return 1;
     }
-    case 'flow': return node('compile/flow.mjs', rest);
+    case 'flow': return node('kit/compile/flow.mjs', rest);
     case 'build': {
       const demo = loadDemo(rest);
-      let code = await node('compile/flow.mjs', ['--demo', demo.dir, ...(rest.includes('--from-raw') ? ['--from-raw'] : [])]);
+      let code = await node('kit/compile/flow.mjs', ['--demo', demo.dir, ...(rest.includes('--from-raw') ? ['--from-raw'] : [])]);
       if (code) return code;
-      code = await node('capture/process.mjs', ['--demo', demo.dir]);
+      code = await node('recorder/process.mjs', ['--demo', demo.dir]);
       if (code) return code;
       return node('checks/secrets.mjs', [demo.dir]);
     }
-    case 'serve': return node('engine/serve.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'serve': return node('player/serve.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'check': return node('checks/check.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'fidelity': return node('checks/fidelity.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'quick': return node('checks/fidelity.mjs', ['--quick', ...(rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest])]);

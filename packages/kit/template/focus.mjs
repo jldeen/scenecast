@@ -1,5 +1,5 @@
 // Focus points: ⌥F zooms to the next one for the beat and draws its mark, like ZoomIt by hand. ⌥⇧F goes back, Esc
-// zooms out, ↑/↓ and the wheel zoom in and out a step. They show on reload (no build); replica quick checks them.
+// zooms out, ↑/↓ and the wheel zoom in and out a step. They show on reload (no build); scenecast quick checks them.
 // One per thing a line of the script points at, in script order. Leave the list empty for none.
 //   id     a name of its own
 //   beat   the ⌥ beat key (1–9, 0 for the start) that lands just before it: ⌥F after that key starts here

@@ -9,7 +9,7 @@
 // --quick checks only what changed since the last passing check (.out/check-base.json): the screens whose served
 // page, frames or definition changed (tweaks included, as the server applies them), with their controls, groups,
 // panes and chips; the presenter keys if the beats changed; hovers if an app's hover data changed. No two-run, zoom,
-// drags, reset or contact sheet: those are for a release (replica fidelity, no --quick).
+// drags, reset or contact sheet: those are for a release (scenecast fidelity, no --quick).
 import { chromium } from 'playwright-core';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmSync, statSync, copyFileSync, mkdtempSync, constants } from 'node:fs';
@@ -18,7 +18,7 @@ import { cpus, tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadDemo, readFlow, arg } from '../lib/demo.mjs';
+import { loadDemo, readFlow, arg } from '../kit/lib/demo.mjs';
 import { scan } from './secrets.mjs';
 import { comparePngs, luminance } from './compare.mjs';
 
@@ -47,7 +47,7 @@ mkdirSync(demo.out, { recursive: true });
 let server = null;
 const up = async () => { try { return (await fetch(URL + 'flow.json')).ok; } catch (e) { return false; } };
 if (!(await up())) {
-  server = spawn(process.execPath, [join(KIT, 'engine/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+  server = spawn(process.execPath, [join(KIT, 'player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
   for (let i = 0; i < 50 && !(await up()); i++) await sleep(100);
 }
 // The flow as the server has it now (tweaks in flow.overrides.mjs included).
@@ -226,7 +226,7 @@ try {
         const dir = join(root, `clone${i + 1}`), out = join(demo.out, 'cold', `clone${i + 1}`);
         for (const f of files) { mkdirSync(dirname(join(dir, f)), { recursive: true }); copyFileSync(join(demo.dir, f), join(dir, f), constants.COPYFILE_FICLONE); }
         const port = await freePort();
-        const srv = spawn(process.execPath, [join(KIT, 'engine/serve.mjs'), '--demo', dir, '--port', String(port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+        const srv = spawn(process.execPath, [join(KIT, 'player/serve.mjs'), '--demo', dir, '--port', String(port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
         try {
           for (let k = 0; k < 150; k++) { try { if ((await fetch(`http://127.0.0.1:${port}/__replica/status`)).ok) break; } catch (e) {} await sleep(100); }
           rmSync(out, { recursive: true, force: true });
@@ -250,7 +250,7 @@ try {
         }
       }
       await cp.close();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
     add('cold-start', 'Cold start, three fresh clones', bad.length ? 'fail' : 'pass', bad.length ? [...new Set(bad)].slice(0, 30).join('\n') : `${N} clones (${files.length} files each), first runs identical to the warm runs, ${secs.map(x => x + ' s').join(' / ')}`);
   } });
 
@@ -480,7 +480,7 @@ try {
     // ---- lists: a virtualized list captured in full has every row in the replica, and scrolls to the last.
     if (want('lists')) {
       if (QUICK && !(flow.lists || []).some(l => inScope(l.state))) return;
-      if (!(flow.lists || []).length) add('lists', 'Virtualized lists in full', 'skip', 'no list captures (replica record side list)');
+      if (!(flow.lists || []).length) add('lists', 'Virtualized lists in full', 'skip', 'no list captures (scenecast record side list)');
       else {
         const page = await open();
         const bad = [];
@@ -562,7 +562,7 @@ try {
       const defsOf = app => { const f = join(demo.data, 'snaps', `hovers-${app}.json`); return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')).clicks || []) : []; };
       const pages = flow.clickPages || [];
       if (QUICK && !pages.some(cp => inScope((Object.entries(S).find(([, x]) => x.snap === cp.base) || [cp.base])[0]))) return;
-      if (!pages.length) add('clicks', 'Panes, sections and menus', 'warn', 'no click captures: run replica record side clicks on screens with panes that close, sections that collapse, or menus');
+      if (!pages.length) add('clicks', 'Panes, sections and menus', 'warn', 'no click captures: run scenecast record side clicks on screens with panes that close, sections that collapse, or menus');
       else {
         const page = await open();
         const vp = page.viewportSize();
@@ -625,7 +625,7 @@ try {
     // ---- drags: every resize handle follows the pointer (live) or applies on release like the real one, stops at the
     // real limits, and keeps its size through a morph.
     if (want('drags') && !QUICK) {
-      if (!(flow.drags || []).length) add('drags', 'Resizing panes', 'skip', 'no resize handles recorded (replica record side drags on screens with them)');
+      if (!(flow.drags || []).length) add('drags', 'Resizing panes', 'skip', 'no resize handles recorded (scenecast record side drags on screens with them)');
       else {
         const page = await open();
         const vp = page.viewportSize();
@@ -663,7 +663,7 @@ try {
     // page, resting on it first; and one opened while an answer is still coming in stays open to the end. Each screen
     // and each answer on its own page, all at once.
     if (!want('groups')) return;
-    if (!grpApps.length) return add('groups', 'Step groups', 'skip', 'no step groups (replica record side groups on a screen with them)');
+    if (!grpApps.length) return add('groups', 'Step groups', 'skip', 'no step groups (scenecast record side groups on a screen with them)');
     const bad = [], errs = []; let n = 0, mid = 0;
     const screens = pathStates.filter(s => grpApps.includes(S[s].app) && inScope(s));
     const screenJob = async st => {
@@ -736,7 +736,7 @@ try {
     if (want('chips')) {
       const rules = flow.apps.flatMap(a => ((a.layout || {}).chips || []).map((r, ri) => ({ app: a.id, r, ri }))).filter(x => !QUICK || inScope(x.r.state && S[x.r.state] ? x.r.state : pathStates.find(st => S[st].app === x.app)));
       if (QUICK && !rules.length) return;
-      if (!rules.length) add('chips', '"+N" chips', 'skip', 'no chip lists (replica record side chips on a screen with "+N")');
+      if (!rules.length) add('chips', '"+N" chips', 'skip', 'no chip lists (scenecast record side chips on a screen with "+N")');
       else {
         const bad = [], done = [];
         for (const { app, r, ri } of rules) {
@@ -839,7 +839,7 @@ try {
   tasks.push({ id: 'hovers', deps: [], run: async () => {
     // ---- hovers: every hover captured from the real pages shows in the replica.
     if (want('hovers')) {
-      if (!(flow.hoverPages || []).length) add('hovers', 'Hover states', 'warn', 'no hover captures: run replica record side hovers on each screen with hover cards or tooltips');
+      if (!(flow.hoverPages || []).length) add('hovers', 'Hover states', 'warn', 'no hover captures: run scenecast record side hovers on each screen with hover cards or tooltips');
       else {
         if (QUICK && !changedHovers.size) return;
         const r = await node('checks/hover-check.mjs', ['--demo', demo.dir, '--url', URL, '--speed', String(SPEED), '--no-sheet', ...(QUICK ? ['--apps', [...changedHovers].join(',')] : [])]);

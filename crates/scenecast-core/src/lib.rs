@@ -5,11 +5,43 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
+mod live;
+pub use live::{
+    App, Beat, FocusMark, FocusPoint, LiveError, LivePage, PresenterConfig, PresenterModifier,
+    StateTransition, StateTrigger, Stream, StreamTiming, Viewport,
+};
+
 pub const MANIFEST_FILE_NAME: &str = "manifest.json";
-pub const SCHEMA_VERSION: &str = "scenecast.bundle.v1";
+/// The bundle schema this crate writes and validates.
+pub const SCHEMA_VERSION: &str = "scenecast.bundle.v2";
+/// The first schema. v1 bundles still load: they're migrated on read, their scenes read as fallback scenes.
+pub const SCHEMA_VERSION_V1: &str = "scenecast.bundle.v1";
+
+macro_rules! id_schema {
+    ($ty:ty, $name:literal) => {
+        impl JsonSchema for $ty {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                $name.into()
+            }
+
+            fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                schemars::json_schema!({
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 96,
+                    "pattern": "^[A-Za-z0-9._-]+$"
+                })
+            }
+        }
+    };
+}
+id_schema!(SceneId, "SceneId");
+id_schema!(HotspotId, "HotspotId");
+id_schema!(GuideMarkId, "GuideMarkId");
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SceneId(String);
@@ -28,7 +60,7 @@ impl SceneId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TranscriptSegmentRef {
     pub source_id: String,
     pub segment_id: String,
@@ -161,13 +193,30 @@ pub struct HotspotIdError {
     reason: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BundleManifest {
     pub schema_version: String,
     pub title: String,
+    /// The web apps (browser tabs) the demo shows. Live-page scenes belong to one each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<App>,
+    /// The size the demo was recorded and is shown at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<Viewport>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sections: Vec<Section>,
     pub graph: SceneGraph,
+    /// Streamed AI answers, replayed from their captured frames.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streams: Vec<Stream>,
+    /// Presenter beats: modifier+0 is beats[0] (reset), modifier+1…9 the rest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beats: Vec<Beat>,
+    /// ZoomIt-style focus points, in script order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focus_points: Vec<FocusPoint>,
+    #[serde(default)]
+    pub presenter: PresenterConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<SourceArtifact>,
     #[serde(default)]
@@ -182,6 +231,12 @@ impl BundleManifest {
         Self {
             schema_version: SCHEMA_VERSION.to_owned(),
             title: title.clone(),
+            apps: Vec::new(),
+            viewport: None,
+            streams: Vec::new(),
+            beats: Vec::new(),
+            focus_points: Vec::new(),
+            presenter: PresenterConfig::default(),
             sections: vec![Section {
                 id: "main".to_owned(),
                 title: "Main".to_owned(),
@@ -190,15 +245,8 @@ impl BundleManifest {
             graph: SceneGraph {
                 start_scene: start_scene.clone(),
                 scenes: vec![Scene {
-                    id: start_scene,
-                    title: "Start".to_owned(),
-                    kind: SceneKind::Screenshot,
-                    assets: SceneAssets::default(),
-                    hotspots: Vec::new(),
-                    guide_marks: Vec::new(),
-                    description: None,
                     notes: Some(format!("Starter scene for {title}")),
-                    provenance: None,
+                    ..Scene::live_page(start_scene, "Start", None)
                 }],
             },
             sources: Vec::new(),
@@ -233,11 +281,25 @@ impl BundleManifest {
         Ok(())
     }
 
+    /// Scenes that aren't live pages (screenshot, video-frame, composite): the fallbacks a check flags.
+    pub fn fallback_scenes(&self) -> impl Iterator<Item = &Scene> {
+        self.graph
+            .scenes
+            .iter()
+            .filter(|scene| scene.kind.is_fallback())
+    }
+
     pub fn referenced_asset_paths(&self) -> Vec<&str> {
         let mut paths = Vec::new();
 
         paths.extend(self.assets.iter().map(|asset| asset.path.as_str()));
         for scene in &self.graph.scenes {
+            if let Some(live) = &scene.live {
+                paths.push(live.snapshot.as_str());
+                if let Some(reference) = live.reference.as_deref() {
+                    paths.push(reference);
+                }
+            }
             if let Some(path) = scene.assets.screenshot.as_deref() {
                 paths.push(path);
             }
@@ -296,11 +358,54 @@ impl BundleManifest {
         report.extend(validate_sections(&self.sections, &self.graph));
         report.extend(validate_scene_provenance(&self.graph, &self.sources));
         report.extend(self.graph.validate());
+        report.extend(live::validate_live(self));
         report
+    }
+
+    /// Parses a manifest, migrating a v1 manifest to v2 on the way. Returns the schema it was read from.
+    pub fn from_json_str(contents: &str) -> Result<(Self, String), serde_json::Error> {
+        let mut value: serde_json::Value = serde_json::from_str(contents)?;
+        let read_as = value
+            .get("schema_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        if read_as == SCHEMA_VERSION_V1 {
+            migrate_v1_value(&mut value);
+        }
+        Ok((serde_json::from_value(value)?, read_as))
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// v1 → v2: a scene without a `kind` was a screenshot scene (v1's default); in v2 the default is `live-page`, so it
+/// is written out as `screenshot`, a fallback scene. Nothing else changes: every v1 field is still in v2.
+fn migrate_v1_value(value: &mut serde_json::Value) {
+    if let Some(scenes) = value
+        .pointer_mut("/graph/scenes")
+        .and_then(|scenes| scenes.as_array_mut())
+    {
+        for scene in scenes {
+            if let Some(scene) = scene.as_object_mut() {
+                scene
+                    .entry("kind")
+                    .or_insert_with(|| serde_json::Value::from("screenshot"));
+            }
+        }
+    }
+    value["schema_version"] = serde_json::Value::from(SCHEMA_VERSION);
+}
+
+/// The JSON Schema of a v2 bundle manifest, generated from these types (the JS packages read this, so the two
+/// can't drift).
+pub fn bundle_json_schema() -> serde_json::Value {
+    let mut schema = serde_json::to_value(schemars::schema_for!(BundleManifest))
+        .expect("the bundle schema serializes");
+    schema["$id"] = serde_json::Value::from("https://scenecast.dev/schema/bundle.v2.json");
+    schema["title"] = serde_json::Value::from("Scenecast bundle manifest (scenecast.bundle.v2)");
+    schema
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Section {
     pub id: String,
     pub title: String,
@@ -319,7 +424,7 @@ pub enum AddHotspotError {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BundleAsset {
     pub path: String,
     pub media_type: String,
@@ -327,7 +432,7 @@ pub struct BundleAsset {
     pub role: AssetRole,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceArtifact {
     pub id: String,
     #[serde(default)]
@@ -339,7 +444,7 @@ pub struct SourceArtifact {
     pub transcript_segments: Vec<TranscriptSegment>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TranscriptSegment {
     pub id: String,
     pub start_ms: u64,
@@ -347,7 +452,7 @@ pub struct TranscriptSegment {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceArtifactKind {
     #[default]
@@ -358,7 +463,7 @@ pub enum SourceArtifactKind {
     Manual,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum AssetRole {
     #[default]
@@ -367,7 +472,7 @@ pub enum AssetRole {
     Supporting,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SceneGraph {
     pub start_scene: SceneId,
     pub scenes: Vec<Scene>,
@@ -429,7 +534,7 @@ impl SceneGraph {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Scene {
     pub id: SceneId,
     pub title: String,
@@ -447,9 +552,32 @@ pub struct Scene {
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<SceneProvenance>,
+    /// The captured page, for a `live-page` scene (absent until it's recorded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<LivePage>,
+    /// Moves to other live-page scenes (clicks, typing, Enter, hovers, Escape), morphed by the player.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<StateTransition>,
 }
 
 impl Scene {
+    /// A live-page scene: the default kind. `live` is `None` until the page is recorded.
+    pub fn live_page(id: SceneId, title: impl Into<String>, live: Option<LivePage>) -> Self {
+        Self {
+            id,
+            title: title.into(),
+            kind: SceneKind::LivePage,
+            assets: SceneAssets::default(),
+            hotspots: Vec::new(),
+            guide_marks: Vec::new(),
+            description: None,
+            notes: None,
+            provenance: None,
+            live,
+            transitions: Vec::new(),
+        }
+    }
+
     pub fn screenshot(id: SceneId, title: impl Into<String>, screenshot: Option<String>) -> Self {
         Self {
             id,
@@ -464,6 +592,8 @@ impl Scene {
             description: None,
             notes: None,
             provenance: None,
+            live: None,
+            transitions: Vec::new(),
         }
     }
 
@@ -476,7 +606,10 @@ impl Scene {
         let mut hotspot_ids = HashSet::new();
         let mut guide_mark_ids = HashSet::new();
 
-        if self.assets.screenshot.is_none() && self.assets.video.is_none() {
+        if self.kind.is_fallback()
+            && self.assets.screenshot.is_none()
+            && self.assets.video.is_none()
+        {
             report.warnings.push(ValidationWarning::SceneHasNoCapture {
                 scene_id: self.id.clone(),
             });
@@ -593,7 +726,7 @@ impl Scene {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SceneProvenance {
     pub source_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -608,7 +741,7 @@ pub struct SceneProvenance {
     pub confidence: Option<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EvidenceRef {
     #[serde(default)]
     pub kind: EvidenceKind,
@@ -619,7 +752,7 @@ pub struct EvidenceRef {
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum EvidenceKind {
     #[default]
@@ -631,16 +764,36 @@ pub enum EvidenceKind {
     Agent,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SceneKind {
+    /// The engine's captured page (DOM, CSSOM, fonts, shadow DOM, iframes). The default, and the primary kind.
     #[default]
+    LivePage,
+    /// Fallback: a still image, only for a screen that can't be captured live.
     Screenshot,
+    /// Fallback: a frame from an imported video.
     VideoFrame,
+    /// Fallback: an image composed from several captures.
     Composite,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+impl SceneKind {
+    pub fn is_fallback(self) -> bool {
+        self != SceneKind::LivePage
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SceneKind::LivePage => "live-page",
+            SceneKind::Screenshot => "screenshot",
+            SceneKind::VideoFrame => "video-frame",
+            SceneKind::Composite => "composite",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SceneAssets {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screenshot: Option<String>,
@@ -648,7 +801,7 @@ pub struct SceneAssets {
     pub video: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum InteractionTrigger {
     #[default]
@@ -656,7 +809,7 @@ pub enum InteractionTrigger {
     Scroll,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ScrollDirection {
     #[default]
@@ -669,7 +822,7 @@ fn is_default_scroll_direction(direction: &ScrollDirection) -> bool {
     *direction == ScrollDirection::Any
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Hotspot {
     pub id: HotspotId,
     pub label: String,
@@ -712,7 +865,7 @@ impl Hotspot {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GuideMark {
     pub id: GuideMarkId,
     pub label: String,
@@ -732,7 +885,7 @@ impl GuideMark {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum GuideMarkStyle {
     #[default]
@@ -741,7 +894,7 @@ pub enum GuideMarkStyle {
     Highlight,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Rect {
     pub x: f32,
     pub y: f32,
@@ -769,7 +922,7 @@ impl Rect {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Transition {
     #[serde(default)]
     pub kind: TransitionKind,
@@ -779,14 +932,14 @@ pub struct Transition {
     pub default_frame_duration_ms: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TransitionKind {
     #[default]
     FrameSequence,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TransitionFrame {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -957,6 +1110,7 @@ pub enum ValidationError {
         hotspot_id: HotspotId,
         target: SceneId,
     },
+    Live(LiveError),
 }
 
 impl fmt::Display for ValidationError {
@@ -1213,6 +1367,7 @@ impl fmt::Display for ValidationError {
                     "scene `{scene_id}` hotspot `{hotspot_id}` targets missing scene `{target}`"
                 )
             }
+            Self::Live(error) => error.fmt(formatter),
         }
     }
 }
@@ -1423,6 +1578,7 @@ fn validate_sections(sections: &[Section], graph: &SceneGraph) -> ValidationRepo
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationWarning {
     SceneHasNoCapture { scene_id: SceneId },
+    SceneNotRecorded { scene_id: SceneId },
 }
 
 impl fmt::Display for ValidationWarning {
@@ -1432,6 +1588,12 @@ impl fmt::Display for ValidationWarning {
                 write!(
                     formatter,
                     "scene `{scene_id}` has no screenshot or video asset"
+                )
+            }
+            Self::SceneNotRecorded { scene_id } => {
+                write!(
+                    formatter,
+                    "live-page scene `{scene_id}` has not been recorded yet (scenecast record, then scenecast build)"
                 )
             }
         }
@@ -1473,12 +1635,19 @@ pub fn manifest_path(bundle_path: impl AsRef<Path>) -> std::path::PathBuf {
 }
 
 pub fn read_manifest(bundle_path: impl AsRef<Path>) -> Result<BundleManifest, BundleIoError> {
+    read_manifest_with_version(bundle_path).map(|(manifest, _)| manifest)
+}
+
+/// Reads a manifest (migrating v1 to v2) and says which schema it was read from.
+pub fn read_manifest_with_version(
+    bundle_path: impl AsRef<Path>,
+) -> Result<(BundleManifest, String), BundleIoError> {
     let path = manifest_path(bundle_path);
     let contents = fs::read_to_string(&path).map_err(|source| BundleIoError::Read {
         path: path.display().to_string(),
         source,
     })?;
-    serde_json::from_str(&contents).map_err(|source| BundleIoError::Parse {
+    BundleManifest::from_json_str(&contents).map_err(|source| BundleIoError::Parse {
         path: path.display().to_string(),
         source,
     })
@@ -1604,7 +1773,7 @@ fn referenced_file_exists_exact_case(bundle_path: &Path, portable_path: &str) ->
     false
 }
 
-fn validate_identifier(value: &str) -> Result<(), &'static str> {
+pub(crate) fn validate_identifier(value: &str) -> Result<(), &'static str> {
     if value.is_empty() {
         return Err("must not be empty");
     }
@@ -1627,7 +1796,7 @@ fn validate_identifier(value: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn validate_portable_asset_path(value: &str) -> Result<(), &'static str> {
+pub(crate) fn validate_portable_asset_path(value: &str) -> Result<(), &'static str> {
     if value.trim().is_empty() {
         return Err("must not be empty");
     }
@@ -1725,6 +1894,8 @@ mod tests {
             description: None,
             notes: None,
             provenance: None,
+            live: None,
+            transitions: Vec::new(),
         });
 
         let report = manifest.validate();
@@ -2109,5 +2280,129 @@ mod tests {
         let paths = manifest.referenced_asset_paths();
         assert!(paths.contains(&"captures/scroll-0001.png"));
         assert!(paths.contains(&"captures/scroll-0002.png"));
+    }
+
+    #[test]
+    fn starter_scene_is_live_page_and_unrecorded() {
+        let manifest = BundleManifest::starter("Demo");
+        let scene = &manifest.graph.scenes[0];
+
+        assert_eq!(manifest.schema_version, SCHEMA_VERSION);
+        assert_eq!(scene.kind, SceneKind::LivePage);
+        assert_eq!(manifest.fallback_scenes().count(), 0);
+        assert!(matches!(
+            manifest.validate().warnings.as_slice(),
+            [ValidationWarning::SceneNotRecorded { .. }]
+        ));
+    }
+
+    #[test]
+    fn v1_scene_without_kind_migrates_to_a_fallback_screenshot() {
+        let json = r#"{
+            "schema_version": "scenecast.bundle.v1",
+            "title": "Demo",
+            "graph": { "start_scene": "start", "scenes": [{ "id": "start", "title": "Start" }] }
+        }"#;
+
+        let (manifest, read_as) = BundleManifest::from_json_str(json).unwrap();
+
+        assert_eq!(read_as, SCHEMA_VERSION_V1);
+        assert_eq!(manifest.schema_version, SCHEMA_VERSION);
+        assert_eq!(manifest.graph.scenes[0].kind, SceneKind::Screenshot);
+        assert_eq!(manifest.fallback_scenes().count(), 1);
+    }
+
+    #[test]
+    fn v2_scene_without_kind_is_a_live_page() {
+        let json = r#"{
+            "schema_version": "scenecast.bundle.v2",
+            "title": "Demo",
+            "graph": { "start_scene": "start", "scenes": [{ "id": "start", "title": "Start" }] }
+        }"#;
+
+        let (manifest, _) = BundleManifest::from_json_str(json).unwrap();
+
+        assert_eq!(manifest.graph.scenes[0].kind, SceneKind::LivePage);
+    }
+
+    #[test]
+    fn live_validation_checks_apps_transitions_streams_and_focus() {
+        let mut manifest = BundleManifest::starter("Demo");
+        manifest.apps.push(App {
+            id: "chat".to_owned(),
+            title: "Chat".to_owned(),
+            key: Some("F".to_owned()),
+            url: None,
+        });
+        let start = &mut manifest.graph.scenes[0];
+        start.live = Some(LivePage {
+            app: "mail".to_owned(),
+            snapshot: "data/snaps/start.html".to_owned(),
+            title: None,
+            reference: None,
+            sha256: None,
+        });
+        start.transitions.push(StateTransition {
+            trigger: StateTrigger::Click,
+            target: SceneId::new("missing").unwrap(),
+            matcher: None,
+            stream: Some("s001".to_owned()),
+            app: None,
+        });
+        manifest.focus_points.push(FocusPoint {
+            id: "cost".to_owned(),
+            beat: 3,
+            app: "chat".to_owned(),
+            scenes: vec![SceneId::new("start").unwrap()],
+            find: None,
+            union: Vec::new(),
+            mark: FocusMark::Box,
+            dir: None,
+            line: None,
+        });
+        manifest.beats.push(Beat {
+            label: "Start".to_owned(),
+            active: "chat".to_owned(),
+            scenes: [("chat".to_owned(), SceneId::new("start").unwrap())].into(),
+        });
+
+        let errors: Vec<String> = manifest
+            .validate()
+            .errors
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+
+        for expected in [
+            "app `chat` key `F`",
+            "scene `start` refers to unknown app `mail`",
+            "transition to missing scene `missing`",
+            "missing stream `s001`",
+            "focus point `cost` is on beat 3, but there are only 1 beats",
+            "focus point `cost` needs `find` text",
+        ] {
+            assert!(
+                errors.iter().any(|e| e.contains(expected)),
+                "{expected} not in {errors:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn live_data_on_a_fallback_scene_is_an_error() {
+        let mut manifest = BundleManifest::starter("Demo");
+        manifest.graph.scenes[0].kind = SceneKind::Screenshot;
+        manifest.graph.scenes[0].live = Some(LivePage {
+            app: "chat".to_owned(),
+            snapshot: "data/snaps/start.html".to_owned(),
+            title: None,
+            reference: None,
+            sha256: None,
+        });
+
+        assert!(manifest.validate().errors.iter().any(|e| matches!(
+            e,
+            ValidationError::Live(LiveError::LiveDataOnFallbackScene { .. })
+        )));
     }
 }

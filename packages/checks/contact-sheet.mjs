@@ -5,7 +5,7 @@ import { chromium } from 'playwright-core';
 import { readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { comparePngs } from './compare.mjs';
-import { loadDemo, readFlow, arg } from '../lib/demo.mjs';
+import { loadDemo, readFlow, arg } from '../kit/lib/demo.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
@@ -13,7 +13,7 @@ const flow = readFlow(demo);
 const RUN = arg(args, '--run', join(demo.out, 'check', 'run1'));
 const OUT = arg(args, '--out', join(demo.out, 'contact-sheet'));
 const SHOTS = join(demo.raw, 'shots');
-if (!existsSync(RUN)) { console.log(`no replica screens in ${RUN}: run "replica check" first`); process.exit(1); }
+if (!existsSync(RUN)) { console.log(`no replica screens in ${RUN}: run "scenecast check" first`); process.exit(1); }
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(join(OUT, 'pairs'), { recursive: true });
 const rec = existsSync(join(demo.dir, 'recording.json')) ? JSON.parse(readFileSync(join(demo.dir, 'recording.json'), 'utf8')) : {};

@@ -11,9 +11,9 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { compose, cssFor, elementEnd, isolateClasses, ancestorsAt, around } from './compose.mjs';
-import { loadDemo, arg, KIT_VERSION } from '../lib/demo.mjs';
-import { compileEdits, applyEdits } from '../lib/edits.mjs';
-import { buildInputs, buildKey } from '../lib/buildkey.mjs';
+import { loadDemo, arg, KIT_VERSION } from '../kit/lib/demo.mjs';
+import { compileEdits, applyEdits } from '../kit/lib/edits.mjs';
+import { buildInputs, buildKey } from '../kit/lib/buildkey.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
@@ -205,7 +205,7 @@ for (const step of flow.compose || []) {
     if (!html.includes(step.anchor)) continue;
     const out = compose(html, step, part, html.includes('</head>') ? cssFor(part, src, html) : '');
     writeFileSync(f, out); step.n++;
-    report.composed = (report.composed || []).concat(f.split('/').slice(-2).join('/'));
+    report.composed = (report.composed || []).concat(f.replace(/\\/g, '/').split('/').slice(-2).join('/'));
   }
   if (!step.n) throw new Error('compose: anchor not found anywhere: ' + step.anchor);
 }
@@ -666,7 +666,7 @@ for (const [app, h] of Object.entries(hoverOut)) writeFileSync(join(OUT, 'snaps'
 const changed = [], files0 = {};
 {
   const fileHash = buf => createHash('sha256').update(buf).digest('hex').slice(0, 16);
-  const list = dir => existsSync(dir) ? readdirSync(dir, { recursive: true }).map(String).filter(f => statSync(join(dir, f)).isFile()) : [];
+  const list = dir => existsSync(dir) ? readdirSync(dir, { recursive: true }).map(f => String(f).replace(/\\/g, '/')).filter(f => statSync(join(dir, f)).isFile()) : [];
   for (const d of ['snaps', 'streams']) {
     const from = join(OUT, d), to = join(DATA, d);
     const next = new Set(list(from)), prev = new Set(list(to));
@@ -701,7 +701,7 @@ const changed = [], files0 = {};
 const leaks = [];
 const files = [...readdirSync(join(DATA, 'snaps')).map(f => join(DATA, 'snaps', f)), ...readdirSync(join(DATA, 'streams'), { recursive: true }).map(f => join(DATA, 'streams', f)).filter(f => /\.(html|json)$/.test(f))];
 for (const file of files) {
-  const f = file.split('/').slice(-2).join('/');
+  const f = file.replace(/\\/g, '/').split('/').slice(-2).join('/');
   const t = readFileSync(file, 'utf8');
   if (JWT.test(t)) leaks.push(f + ' jwt');
   if (/Bearer\s+[A-Za-z0-9._-]{20,}/.test(t)) leaks.push(f + ' bearer');

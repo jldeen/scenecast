@@ -30,7 +30,7 @@ export function scan(dirs) {
       if (st.isDirectory()) { if (!SKIP_DIRS.has(f)) walk(root, p); continue; }
       if (BINARY.has(extname(f).toLowerCase()) || st.size > 64 * 1024 * 1024) continue;
       const text = readFileSync(p).toString('latin1');
-      const rel = relative(root, p);
+      const rel = relative(root, p).replace(/\\/g, '/');
       for (const [name, re] of RULES) {
         re.lastIndex = 0;
         let m;

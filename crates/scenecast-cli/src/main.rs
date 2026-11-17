@@ -3,14 +3,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
+mod engine_cmds;
+use engine_cmds::{NewArgs, Passthrough};
+
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use scenecast_core::{
     BundleManifest, EvidenceKind, EvidenceRef, GuideMark, GuideMarkId, GuideMarkStyle, Hotspot,
-    HotspotId, InteractionTrigger, MANIFEST_FILE_NAME, Rect, Scene, SceneId, SceneKind,
-    SceneProvenance, ScrollDirection, Section, SourceArtifact, SourceArtifactKind,
+    HotspotId, InteractionTrigger, Rect, SCHEMA_VERSION, SCHEMA_VERSION_V1, Scene, SceneId,
+    SceneKind, SceneProvenance, ScrollDirection, Section, SourceArtifact, SourceArtifactKind,
     TranscriptSegment, TranscriptSegmentRef, Transition, TransitionFrame, TransitionKind,
-    ValidationReport, manifest_path, read_manifest, validate_referenced_files, write_manifest,
+    ValidationReport, read_manifest, read_manifest_with_version, validate_referenced_files,
+    write_manifest,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -19,7 +23,12 @@ use tracing::{info, instrument};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = "Scenecast bundle authoring CLI")]
+#[command(
+    name = "scenecast",
+    author,
+    version,
+    about = "Record a live web demo once, replay it offline the same way every time: real captured pages (live-page scenes), streamed answers, presenter keys and focus points. macOS and Windows."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -27,10 +36,54 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Create a new .scenecast bundle directory.
+    /// Create a new project: a demo folder that is also a .scenecast bundle. Its scenes are live pages.
     New(NewArgs),
-    /// Initialize a .scenecast bundle directory. Alias for `new`.
+    /// Alias for `new`.
     Init(NewArgs),
+    /// Record the demo once in the browser (start [--resume] [--no-auto] | status | stop | side <kind>).
+    Record(Passthrough),
+    /// Build the capture agent (agent.js) the recorder runs in the browser.
+    Agent(Passthrough),
+    /// The local receiver the capture agent posts captures to (keep it running while recording).
+    Receiver(Passthrough),
+    /// One command to the capture agent (snap, tabs, eval, click, …).
+    Cmd(Passthrough),
+    /// A capture script on the agent (the recorder's helpers in scope).
+    Run(Passthrough),
+    /// recording.json + flow.overrides.mjs → flow.json.
+    Flow(Passthrough),
+    /// Build: flow, raw captures → data/ (scrubbed, changed captures only), secret scan, then manifest.json.
+    Build(Passthrough),
+    /// Write manifest.json (bundle v2) from what was built.
+    Sync(Passthrough),
+    /// Serve the replica on localhost (--open: an app window in Chrome or Edge).
+    Serve(Passthrough),
+    /// A wording or date tweak, live on reload: scenecast text "<old>" "<new>".
+    Text(Passthrough),
+    /// The full fidelity checklist (two runs, cold start ×3, clicks, hovers, drags, zoom, focus, …); flags every
+    /// fallback scene.
+    Check(Passthrough),
+    /// The checks for only what changed since the last pass.
+    Quick(Passthrough),
+    /// Alias for `check`.
+    Fidelity(Passthrough),
+    /// Where the project is and what to run next.
+    Status(Passthrough),
+    /// Secret scan, then commit.
+    Save(Passthrough),
+    /// Build, manifest, the full checklist, secret scan, commit (--push: and push).
+    Release(Passthrough),
+    /// Real-vs-replica contact sheet.
+    Sheet(Passthrough),
+    /// Hover sheet.
+    Hovers(Passthrough),
+    /// Secret scan of a folder.
+    Scan(Passthrough),
+    /// Print the bundle manifest's JSON Schema (v2), or write it with --out.
+    Schema {
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Print a summary of a bundle manifest.
     Inspect {
         /// Path to a .scenecast bundle directory.
@@ -41,7 +94,7 @@ enum Command {
         /// Path to a .scenecast bundle directory.
         bundle: PathBuf,
     },
-    /// Add a screenshot-backed scene to an existing bundle.
+    /// Add a scene: a live page (the default), or with --screenshot a fallback screenshot scene.
     AddScene {
         /// Path to a .scenecast bundle directory.
         bundle: PathBuf,
@@ -49,7 +102,7 @@ enum Command {
         id: String,
         /// Human-readable scene title.
         title: String,
-        /// Optional screenshot path relative to the bundle root.
+        /// A fallback screenshot (relative to the bundle root): only for a screen that can't be captured live.
         #[arg(long)]
         screenshot: Option<String>,
         /// Optional authored description for search, narration, and presenter surfaces.
@@ -181,15 +234,6 @@ enum Command {
     },
 }
 
-#[derive(Debug, Clone, Parser)]
-struct NewArgs {
-    /// Path to the .scenecast bundle directory to create.
-    path: PathBuf,
-    /// Bundle title. Defaults to the directory name.
-    #[arg(long)]
-    title: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum TriggerArg {
     Click,
@@ -241,7 +285,11 @@ impl From<GuideMarkStyleArg> for GuideMarkStyle {
 
 fn main() -> Result<()> {
     init_tracing();
-    run(Cli::parse())
+    let code = run(Cli::parse())?;
+    if code != 0 {
+        std::process::exit(code);
+    }
+    Ok(())
 }
 
 fn init_tracing() {
@@ -253,9 +301,53 @@ fn init_tracing() {
         .init();
 }
 
-fn run(cli: Cli) -> Result<()> {
-    match cli.command {
-        Command::New(args) | Command::Init(args) => new_bundle(args),
+fn run(cli: Cli) -> Result<i32> {
+    let command = match cli.command {
+        Command::New(args) | Command::Init(args) => {
+            return engine_cmds::new_project(args).map(|()| 0);
+        }
+        Command::Record(a) => return engine_cmds::passthrough("record", &a, true),
+        Command::Agent(a) => return engine_cmds::passthrough("agent", &a, false),
+        Command::Receiver(a) => return engine_cmds::passthrough("receiver", &a, true),
+        Command::Cmd(a) => return engine_cmds::passthrough("cmd", &a, false),
+        Command::Run(a) => return engine_cmds::passthrough("run", &a, false),
+        Command::Flow(a) => return engine_cmds::passthrough("flow", &a, true),
+        Command::Build(a) => return engine_cmds::build(&a),
+        Command::Sync(a) => return engine_cmds::sync_cmd(&a),
+        Command::Serve(a) => return engine_cmds::passthrough("serve", &a, true),
+        Command::Text(a) => return engine_cmds::passthrough("text", &a, true),
+        Command::Check(a) | Command::Fidelity(a) => return engine_cmds::check(&a, false),
+        Command::Quick(a) => return engine_cmds::check(&a, true),
+        Command::Status(a) => return engine_cmds::passthrough("status", &a, true),
+        Command::Save(a) => return engine_cmds::passthrough("save", &a, true),
+        Command::Release(a) => return engine_cmds::release(&a),
+        Command::Sheet(a) => return engine_cmds::passthrough("sheet", &a, true),
+        Command::Hovers(a) => return engine_cmds::passthrough("hovers", &a, true),
+        Command::Scan(a) => return engine_cmds::passthrough("scan", &a, false),
+        Command::Schema { out } => return write_schema(out.as_deref()).map(|()| 0),
+        other => other,
+    };
+    run_bundle_command(command).map(|()| 0)
+}
+
+fn write_schema(out: Option<&Path>) -> Result<()> {
+    let text = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&scenecast_core::bundle_json_schema())?
+    );
+    match out {
+        Some(path) => {
+            fs::write(path, text)
+                .with_context(|| format!("failed to write `{}`", path.display()))?;
+            println!("wrote {}", path.display());
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
+}
+
+fn run_bundle_command(command: Command) -> Result<()> {
+    match command {
         Command::Inspect { bundle } => inspect_bundle(&bundle),
         Command::Validate { bundle } => validate_bundle(&bundle),
         Command::AddScene {
@@ -358,67 +450,8 @@ fn run(cli: Cli) -> Result<()> {
         ),
         Command::ExportHtml { bundle, output } => export_html(&bundle, &output),
         Command::ExportDraft { bundle, output } => export_draft(&bundle, &output),
+        _ => unreachable!("handled in run"),
     }
-}
-
-#[instrument(skip(args), fields(path = %args.path.display()))]
-fn new_bundle(args: NewArgs) -> Result<()> {
-    ensure_new_bundle_target(&args.path)?;
-    fs::create_dir_all(args.path.join("assets")).with_context(|| {
-        format!(
-            "failed to create assets directory in `{}`",
-            args.path.display()
-        )
-    })?;
-    fs::create_dir_all(args.path.join("captures")).with_context(|| {
-        format!(
-            "failed to create captures directory in `{}`",
-            args.path.display()
-        )
-    })?;
-
-    let title = args
-        .title
-        .unwrap_or_else(|| default_title(&args.path))
-        .trim()
-        .to_owned();
-    if title.is_empty() {
-        bail!("bundle title must not be empty");
-    }
-    let manifest = BundleManifest::starter(title);
-    reject_validation_errors("starter bundle", &manifest.validate())?;
-    write_manifest(&args.path, &manifest)?;
-    info!("created scenecast bundle");
-
-    println!("Created {}", args.path.display());
-    Ok(())
-}
-
-fn ensure_new_bundle_target(path: &Path) -> Result<()> {
-    if manifest_path(path).exists() {
-        bail!(
-            "`{}` already contains a {MANIFEST_FILE_NAME}",
-            path.display()
-        );
-    }
-
-    if path.is_file() {
-        bail!("`{}` exists and is not a directory", path.display());
-    }
-
-    if path.exists() && path.read_dir()?.next().is_some() {
-        bail!("`{}` exists and is not empty", path.display());
-    }
-
-    Ok(())
-}
-
-fn default_title(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("Untitled Scenecast")
-        .to_owned()
 }
 
 #[instrument(fields(bundle = %bundle.display()))]
@@ -428,9 +461,23 @@ fn inspect_bundle(bundle: &Path) -> Result<()> {
 
     println!("Title: {}", manifest.title);
     println!("Schema: {}", manifest.schema_version);
+    println!("Apps: {}", manifest.apps.len());
     println!("Start scene: {}", manifest.graph.start_scene);
     println!("Sections: {}", section_count(&manifest));
     println!("Scenes: {}", manifest.graph.scenes.len());
+    println!(
+        "Live-page scenes: {}",
+        manifest
+            .graph
+            .scenes
+            .iter()
+            .filter(|scene| !scene.kind.is_fallback())
+            .count()
+    );
+    println!("Fallback scenes: {}", manifest.fallback_scenes().count());
+    println!("Streams: {}", manifest.streams.len());
+    println!("Beats: {}", manifest.beats.len());
+    println!("Focus points: {}", manifest.focus_points.len());
     println!("Assets: {}", manifest.assets.len());
     println!("Warnings: {}", report.warnings.len());
     println!("Errors: {}", report.errors.len());
@@ -440,12 +487,24 @@ fn inspect_bundle(bundle: &Path) -> Result<()> {
 
 #[instrument(fields(bundle = %bundle.display()))]
 fn validate_bundle(bundle: &Path) -> Result<()> {
-    let manifest = read_manifest(bundle)?;
+    let (manifest, read_as) = read_manifest_with_version(bundle)?;
     let report = manifest.validate();
     let file_report = validate_referenced_files(bundle, &manifest);
 
+    if read_as == SCHEMA_VERSION_V1 {
+        eprintln!(
+            "note: a {SCHEMA_VERSION_V1} bundle, read as {SCHEMA_VERSION}: its scenes are fallback scenes"
+        );
+    }
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
+    }
+    for scene in manifest.fallback_scenes() {
+        eprintln!(
+            "note: scene `{}` is a fallback ({}) scene, not a live page",
+            scene.id,
+            scene.kind.as_str()
+        );
     }
 
     if report.is_valid() && file_report.is_valid() {
@@ -482,7 +541,11 @@ fn add_scene(
     }
 
     let before_report = manifest.validate();
-    let mut scene = Scene::screenshot(id.clone(), title, screenshot);
+    // A live page unless a screenshot is given: the CLI never picks a fallback scene on its own.
+    let mut scene = match screenshot {
+        Some(path) => Scene::screenshot(id.clone(), title, Some(path)),
+        None => Scene::live_page(id.clone(), title, None),
+    };
     scene.description = description.filter(|value| !value.trim().is_empty());
     scene.notes = notes.filter(|value| !value.trim().is_empty());
     manifest.add_scene(scene);
@@ -491,8 +554,19 @@ fn add_scene(
     write_manifest(bundle, &manifest)?;
     info!(scene_id = %id, "added scene to bundle");
 
-    println!("Added scene {id}");
+    if scene_kind_is_fallback(&manifest, &id) {
+        println!("Added scene {id} (fallback: screenshot)");
+    } else {
+        println!("Added scene {id} (live-page, to be recorded)");
+    }
     Ok(())
+}
+
+fn scene_kind_is_fallback(manifest: &BundleManifest, id: &SceneId) -> bool {
+    manifest
+        .graph
+        .scene(id)
+        .is_some_and(|scene| scene.kind.is_fallback())
 }
 
 #[derive(Debug)]

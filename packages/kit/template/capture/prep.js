@@ -1,5 +1,5 @@
 // Gets each app's tab to its start screen before recording, and reports whether each is in light mode.
-// ARGS: { apps: [{ id, match, url }] } (replica run capture/prep.js passes demo.json's apps).
+// ARGS: { apps: [{ id, match, url }] } (scenecast run capture/prep.js passes demo.json's apps).
 const out = {};
 for (const a of ARGS.apps || []) {
   let p = null; try { p = await H.pageFor(a.match); } catch (e) {}

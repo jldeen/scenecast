@@ -8,10 +8,11 @@ export default function focusModule(api) {
     stage: api.stage, points: api.flow.focus || [], options: api.flow.focusOptions || {}, speed: api.speed, docsOf: api.docsOf,
     current: api.current, groupButton: api.groupButton, openGroup: api.openGroup,
   });
-  // While zoomed: Esc and ↑/↓ are ZoomIt's, before anything else. ⌥F and ⌥⇧F step through the points.
+  // While zoomed: Esc and ↑/↓ are ZoomIt's, before anything else. ⌥F and ⌥⇧F step through the points; Ctrl+Alt+F
+  // and Ctrl+Alt+Shift+F too, on any OS (Edge on Windows keeps Alt+F for its menu).
   api.on('key', e => {
     if (focus.key(e)) return true;
-    if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === 'KeyF') { if (e.shiftKey) focus.back(); else focus.next(); return true; }
+    if (e.altKey && !e.metaKey && e.code === 'KeyF') { if (e.shiftKey) focus.back(); else focus.next(); return true; }
     return false;
   });
   api.on('activate', () => focus.clear());

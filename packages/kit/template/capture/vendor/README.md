@@ -1,7 +1,7 @@
 # Styles that no capture has
 
 A menu or popup can load its stylesheet only when it first opens (and some apps remove it when it closes). The
-click audit (`replica record side clicks`) keeps every stylesheet a click brings in, and the build adds Griffel rules
+click audit (`scenecast record side clicks`) keeps every stylesheet a click brings in, and the build adds Griffel rules
 from any other capture with the same classes. If a popup still comes out unstyled in the replica, put its rules in a
 `.css` file here, one rule per line, and list it in `flow.overrides.mjs`:
 

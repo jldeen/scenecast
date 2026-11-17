@@ -1,6 +1,6 @@
 // What a build's output depends on, hashed: the build code, the parts of the flow the build reads, the raw captures
 // (by name, size and time), and vendor CSS. data/build.json keeps the hashes of the last build, so
-//   - replica build skips a build whose inputs haven't changed, and
+//   - scenecast build skips a build whose inputs haven't changed, and
 //   - the server knows which tweaks are already baked in, which it can apply as it serves (text edits), and which
 //     only a build can make (everything else the build reads).
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -10,7 +10,7 @@ import { KIT } from './demo.mjs';
 import { editSig } from './edits.mjs';
 
 const sha = s => createHash('sha256').update(s).digest('hex').slice(0, 16);
-const CODE = ['capture/process.mjs', 'capture/compose.mjs', 'lib/edits.mjs'];
+const CODE = ['recorder/process.mjs', 'recorder/compose.mjs', 'kit/lib/edits.mjs'];
 let codeHash = null;
 
 // Parts of the flow the build reads, by name (so a change can say which part needs a build).

@@ -4,8 +4,8 @@
   "title": "__TITLE__",
   "port": __PORT__,
   "viewport": { "width": 1920, "height": 1080, "dpr": 2 },
-  "chrome": { "profile": "Profile 10" },
-  "raw": "~/.replica-kit/__NAME__/raw",
+  "chrome": { "profile": "Default" },
+  "raw": "~/.scenecast/__NAME__/raw",
   "apps": __APPS__,
   "record": {
     "ignore": [],

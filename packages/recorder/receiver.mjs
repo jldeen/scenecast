@@ -1,13 +1,13 @@
 // Capture receiver: a local HTTP endpoint the capture driver (running inside playwright-chrome) posts to.
 // Raw captures hold real URLs (some with sign-in tokens), so they're written outside the repo (the demo's raw
-// folder, ~/.replica-kit/<demo>/raw by default). It also queues remote-control commands for the driver's command
+// folder, ~/.scenecast/<demo>/raw by default). It also queues remote-control commands for the driver's command
 // loop (GET /cmd, POST /cmd/result), and keeps the recorder's recording (recording.json).
 //   node capture/receiver.mjs --demo <dir>        or        node capture/receiver.mjs <rawDir> [port]
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { loadDemo } from '../lib/demo.mjs';
+import { loadDemo } from '../kit/lib/demo.mjs';
 
 const argv = process.argv.slice(2);
 const demo = argv.includes('--demo') || !argv[0] ? loadDemo(argv) : null;

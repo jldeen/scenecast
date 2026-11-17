@@ -3,7 +3,7 @@
 // widths and every inline style the page wrote; then lets go where it started and checks the size is as before
 // (and drags it back if not). Also one short drag that is let go, to see what the page keeps. Read-only apart
 // from that, which it undoes. Runs as the recorder's drags side path (recordSide: it turns each handle's record into
-// a flow.drags rule), or on its own with replica run.
+// a flow.drags rule), or on its own with scenecast run.
 // ARGS: { tab | p, page, frameRe?, only?: [label or testid], step?, range?, axis?, releaseDx?, maxHandles? }
 const p = ARGS.p || await H.pageFor(ARGS.tab);
 await p.bringToFront();

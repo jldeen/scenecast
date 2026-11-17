@@ -5,8 +5,8 @@ import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const KIT_VERSION = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8')).version;
+export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const KIT_VERSION = JSON.parse(readFileSync(join(KIT, 'kit', 'package.json'), 'utf8')).version;
 export const FLOW_VERSION = 1;
 
 const home = p => p.startsWith('~/') ? join(homedir(), p.slice(2)) : p;
@@ -26,7 +26,7 @@ export function findDemoDir(args = process.argv.slice(2)) {
   const given = arg(args, '--demo');
   let dir = resolve(given || process.cwd());
   if (!given) for (let d = dir; d !== dirname(d); d = dirname(d)) if (existsSync(join(d, 'demo.json'))) { dir = d; break; }
-  if (!existsSync(join(dir, 'demo.json'))) throw new Error(`no demo.json in ${dir} (pass --demo <dir>, or run "replica new <name>" first)`);
+  if (!existsSync(join(dir, 'demo.json'))) throw new Error(`no demo.json in ${dir} (pass --demo <dir>, or run "scenecast new <name>" first)`);
   return dir;
 }
 
@@ -35,7 +35,7 @@ export function loadDemo(dirOrArgs) {
   const cfg = JSON.parse(readFileSync(join(dir, 'demo.json'), 'utf8'));
   const c = { ...DEFAULTS, ...cfg, viewport: { ...DEFAULTS.viewport, ...(cfg.viewport || {}) }, chrome: { ...DEFAULTS.chrome, ...(cfg.chrome || {}) }, record: { ...DEFAULTS.record, ...(cfg.record || {}) } };
   // Raw captures hold real URLs (some with sign-in tokens): they live outside the demo folder by default.
-  const raw = home(process.env.REPLICA_RAW || c.raw || `~/.replica-kit/${c.name}/raw`);
+  const raw = home(process.env.REPLICA_RAW || c.raw || `~/.scenecast/${c.name}/raw`);
   const out = home(process.env.REPLICA_OUT || c.out || '.out');
   const d = {
     dir, cfg: c, name: c.name,

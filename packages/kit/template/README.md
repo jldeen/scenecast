@@ -1,6 +1,6 @@
 # __TITLE__ replica
 
-A local, offline replica of the __TITLE__ demo, made with [replica-kit](https://github.com/jldeen/replica-kit).
+A local, offline replica of the __TITLE__ demo, made with scenecast.
 Every screen is the real page, captured in light mode: the DOM with its CSS, fonts and images, with no scripts or
 sign-in tokens. Clicks, typing and Enter move between those captures the way the app would, and answers replay from
 their real streamed frames. Nothing touches the network. It runs the same way every time.
@@ -8,14 +8,16 @@ their real streamed frames. Nothing touches the network. It runs the same way ev
 ## Start it
 
 ```bash
-replica serve --demo . --open
+scenecast serve --demo . --open
 ```
 
-That serves `http://127.0.0.1:__PORT__/` and opens it in Chrome as an app window. Press **⌃⌘F** for full screen.
+That serves `http://127.0.0.1:__PORT__/` and opens it as an app window: Chrome on the Mac (**⌃⌘F** for full
+screen), Edge on Windows (**F11**). `chrome.browser` in `demo.json` picks the other one.
 
 ## Presenter keys
 
-All keys use ⌥ (Option) and show nothing on screen.
+All keys use ⌥ (Option) on the Mac and show nothing on screen. On Windows, and in Edge, use **Ctrl+Alt** in place
+of ⌥ (Edge keeps Alt alone for its menus); both work everywhere.
 
 | Key | What |
 |---|---|
@@ -43,7 +45,7 @@ All keys use ⌥ (Option) and show nothing on screen.
 
 ## Changing it
 
-Most changes are tweaks: `replica text "<old>" "<new>"` (or an edit in `flow.overrides.mjs`), reload, `replica
-quick`, `replica save "<what>"`. `replica release --push` once at the end. `replica status` says where things stand.
-A new screen means a short recording (`replica record start`, only the new part, `replica record stop`). See the
-kit's README.
+Most changes are tweaks: `scenecast text "<old>" "<new>"` (or an edit in `flow.overrides.mjs`), reload, `scenecast
+quick`, `scenecast save "<what>"`. `scenecast release --push` once at the end. `scenecast status` says where things stand.
+A new screen means a short recording (`scenecast record start`, only the new part, `scenecast record stop`). See the
+scenecast README.

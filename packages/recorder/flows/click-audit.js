@@ -4,7 +4,7 @@
 // Never clicks anything that acts: Send, Like, Delete, menu items, links, dictation (and ARGS.block, a regex of more
 // labels). Stylesheets a click brings in (styles that load only when a menu first opens) are kept with the click.
 // Results go to the receiver as page "click-<page>"; ends with a snapshot (ARGS.snapId) for the page's CSS.
-// Runs as the recorder's clicks side path (recordSide), or on its own with replica run.
+// Runs as the recorder's clicks side path (recordSide), or on its own with scenecast run.
 // ARGS: { tab | p, page, frameRe?, controls?: [{ name, sel, text?, textStarts?, label?, in?, nth?, auto?: ms,
 // snap?: id }], pick?: { region?, perLabel?, max? }, skip?: selector, probeSend?: { composer, send }, block?, snapId?,
 // maxS?, skipNames?: [name] }. skip: controls pick leaves out (step groups, which the replica opens on its own:

@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright-core';
-import { startFixture } from './fixture/server.mjs';
+import { startFixture } from '../../examples/fixture-app/server.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
@@ -24,12 +24,12 @@ const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + nam
 // A fresh clone has no git identity of its own: the test demo's commits get this one.
 const GIT_ID = { GIT_AUTHOR_NAME: 'replica selftest', GIT_AUTHOR_EMAIL: 'selftest@localhost', GIT_COMMITTER_NAME: 'replica selftest', GIT_COMMITTER_EMAIL: 'selftest@localhost' };
 const run = (args, opts = {}) => new Promise(res => {
-  const p = spawn(process.execPath, [join(KIT, 'bin/replica.mjs'), ...args], { cwd: opts.cwd || tmp, env: { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(process.execPath, [join(KIT, 'kit/bin/scenecast.mjs'), ...args], { cwd: opts.cwd || tmp, env: { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; p.stdout.on('data', d => { out += d; if (opts.echo) process.stdout.write(d); }); p.stderr.on('data', d => { out += d; process.stderr.write(d); });
   p.on('close', code => res({ code, out }));
 });
 const procs = [];
-const bg = (args) => { const p = spawn(process.execPath, [join(KIT, 'bin/replica.mjs'), ...args], { cwd: tmp, env: { ...process.env, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: 'ignore' }); procs.push(p); return p; };
+const bg = (args) => { const p = spawn(process.execPath, [join(KIT, 'kit/bin/scenecast.mjs'), ...args], { cwd: tmp, env: { ...process.env, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: 'ignore' }); procs.push(p); return p; };
 const json = s => { const i = s.indexOf('{'); return JSON.parse(s.slice(i)); };
 
 // Ports in use mean a server from another run is still up: its data would be read instead of this run's.

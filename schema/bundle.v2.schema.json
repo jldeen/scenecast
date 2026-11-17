@@ -1,0 +1,964 @@
+{
+  "$defs": {
+    "App": {
+      "description": "One web app the demo shows (a browser tab on the real machine).",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "description": "Presenter key: one letter, pressed with the presenter modifier (⌥ on the Mac, Ctrl+Alt on Windows).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "description": "The page's start URL on the real product. Only the origin and path; never tokens.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "AssetRole": {
+      "enum": [
+        "capture",
+        "thumbnail",
+        "supporting"
+      ],
+      "type": "string"
+    },
+    "Beat": {
+      "description": "A presenter beat: modifier+0 is beats[0] (reset), modifier+1…9 are beats[1…9].",
+      "properties": {
+        "active": {
+          "description": "The app on screen.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "scenes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SceneId"
+          },
+          "default": {},
+          "description": "The scene each app is on at this beat.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "label",
+        "active"
+      ],
+      "type": "object"
+    },
+    "BundleAsset": {
+      "properties": {
+        "media_type": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/AssetRole",
+          "default": "capture"
+        }
+      },
+      "required": [
+        "path",
+        "media_type"
+      ],
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "enum": [
+        "other",
+        "frame",
+        "transcript-segment",
+        "event",
+        "heuristic",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "EvidenceRef": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/EvidenceKind",
+          "default": "other"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "FocusMark": {
+      "oneOf": [
+        {
+          "const": "box",
+          "description": "A rectangle around the target (ZoomIt's box).",
+          "type": "string"
+        },
+        {
+          "const": "arrow",
+          "description": "An arrow pointing at the target.",
+          "type": "string"
+        },
+        {
+          "const": "zoom",
+          "description": "Zoom only, no mark.",
+          "type": "string"
+        }
+      ]
+    },
+    "FocusPoint": {
+      "description": "A ZoomIt-style focus point: zoom to fit the target and draw its mark.",
+      "properties": {
+        "app": {
+          "type": "string"
+        },
+        "beat": {
+          "description": "The beat it belongs to (the presenter key that lands just before it).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dir": {
+          "description": "For an arrow: the side its tail comes from (`n`, `ne`, `e`, `se`, `s`, `sw`, `w`, `nw`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "find": {
+          "description": "Text on screen to find.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "line": {
+          "description": "The script line it goes with.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mark": {
+          "$ref": "#/$defs/FocusMark",
+          "default": "box"
+        },
+        "scenes": {
+          "items": {
+            "$ref": "#/$defs/SceneId"
+          },
+          "type": "array"
+        },
+        "union": {
+          "description": "Matchers whose combined box is the target.",
+          "items": true,
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "beat",
+        "app",
+        "scenes"
+      ],
+      "type": "object"
+    },
+    "GuideMark": {
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/Rect"
+        },
+        "id": {
+          "$ref": "#/$defs/GuideMarkId"
+        },
+        "label": {
+          "type": "string"
+        },
+        "style": {
+          "$ref": "#/$defs/GuideMarkStyle",
+          "default": "pulse"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "bounds"
+      ],
+      "type": "object"
+    },
+    "GuideMarkId": {
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "type": "string"
+    },
+    "GuideMarkStyle": {
+      "enum": [
+        "pulse",
+        "ring",
+        "highlight"
+      ],
+      "type": "string"
+    },
+    "Hotspot": {
+      "properties": {
+        "bounds": {
+          "$ref": "#/$defs/Rect"
+        },
+        "id": {
+          "$ref": "#/$defs/HotspotId"
+        },
+        "label": {
+          "type": "string"
+        },
+        "scroll_direction": {
+          "$ref": "#/$defs/ScrollDirection"
+        },
+        "target": {
+          "$ref": "#/$defs/SceneId"
+        },
+        "transition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Transition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trigger": {
+          "$ref": "#/$defs/InteractionTrigger",
+          "default": "click"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "target",
+        "bounds"
+      ],
+      "type": "object"
+    },
+    "HotspotId": {
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "type": "string"
+    },
+    "InteractionTrigger": {
+      "enum": [
+        "click",
+        "scroll"
+      ],
+      "type": "string"
+    },
+    "LivePage": {
+      "description": "The captured page behind a `live-page` scene.",
+      "properties": {
+        "app": {
+          "description": "The app (tab) the page belongs to.",
+          "type": "string"
+        },
+        "reference": {
+          "description": "A screenshot of the real page, kept only as the fidelity reference (never shown as the scene).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha256": {
+          "description": "SHA-256 of the snapshot as built, for incremental builds and drift checks.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot": {
+          "description": "The captured page, relative to the bundle root (`data/snaps/<id>.html`).",
+          "type": "string"
+        },
+        "title": {
+          "description": "The window title while the scene shows.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "app",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    "PresenterConfig": {
+      "description": "Hidden presenter keys. The player accepts both modifiers on every OS; these are the ones the docs and cue\nsheets show.",
+      "properties": {
+        "fill_key": {
+          "description": "Type the scripted text into the field.",
+          "type": "string"
+        },
+        "focus_key": {
+          "description": "Next focus point (with Shift: the one before).",
+          "type": "string"
+        },
+        "macos": {
+          "$ref": "#/$defs/PresenterModifier"
+        },
+        "next_key": {
+          "description": "The screen's next step.",
+          "type": "string"
+        },
+        "windows": {
+          "$ref": "#/$defs/PresenterModifier"
+        }
+      },
+      "required": [
+        "macos",
+        "windows",
+        "focus_key",
+        "fill_key",
+        "next_key"
+      ],
+      "type": "object"
+    },
+    "PresenterModifier": {
+      "oneOf": [
+        {
+          "const": "alt",
+          "description": "⌥ alone.",
+          "type": "string"
+        },
+        {
+          "const": "ctrl-alt",
+          "description": "Ctrl+Alt: for Windows and Edge, which keep Alt alone for their menus.",
+          "type": "string"
+        }
+      ]
+    },
+    "Rect": {
+      "properties": {
+        "height": {
+          "format": "float",
+          "type": "number"
+        },
+        "width": {
+          "format": "float",
+          "type": "number"
+        },
+        "x": {
+          "format": "float",
+          "type": "number"
+        },
+        "y": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "type": "object"
+    },
+    "Scene": {
+      "properties": {
+        "assets": {
+          "$ref": "#/$defs/SceneAssets",
+          "default": {}
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "guide_marks": {
+          "items": {
+            "$ref": "#/$defs/GuideMark"
+          },
+          "type": "array"
+        },
+        "hotspots": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Hotspot"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/SceneId"
+        },
+        "kind": {
+          "$ref": "#/$defs/SceneKind",
+          "default": "live-page"
+        },
+        "live": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LivePage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The captured page, for a `live-page` scene (absent until it's recorded)."
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SceneProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "transitions": {
+          "description": "Moves to other live-page scenes (clicks, typing, Enter, hovers, Escape), morphed by the player.",
+          "items": {
+            "$ref": "#/$defs/StateTransition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "SceneAssets": {
+      "properties": {
+        "screenshot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "video": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SceneGraph": {
+      "properties": {
+        "scenes": {
+          "items": {
+            "$ref": "#/$defs/Scene"
+          },
+          "type": "array"
+        },
+        "start_scene": {
+          "$ref": "#/$defs/SceneId"
+        }
+      },
+      "required": [
+        "start_scene",
+        "scenes"
+      ],
+      "type": "object"
+    },
+    "SceneId": {
+      "maxLength": 96,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "type": "string"
+    },
+    "SceneKind": {
+      "oneOf": [
+        {
+          "const": "live-page",
+          "description": "The engine's captured page (DOM, CSSOM, fonts, shadow DOM, iframes). The default, and the primary kind.",
+          "type": "string"
+        },
+        {
+          "const": "screenshot",
+          "description": "Fallback: a still image, only for a screen that can't be captured live.",
+          "type": "string"
+        },
+        {
+          "const": "video-frame",
+          "description": "Fallback: a frame from an imported video.",
+          "type": "string"
+        },
+        {
+          "const": "composite",
+          "description": "Fallback: an image composed from several captures.",
+          "type": "string"
+        }
+      ]
+    },
+    "SceneProvenance": {
+      "properties": {
+        "confidence": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "type": "array"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "timestamp_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "transcript_segment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "transcript_segments": {
+          "items": {
+            "$ref": "#/$defs/TranscriptSegmentRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "ScrollDirection": {
+      "enum": [
+        "any",
+        "down",
+        "up"
+      ],
+      "type": "string"
+    },
+    "Section": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "scenes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SceneId"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "SourceArtifact": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SourceArtifactKind",
+          "default": "other"
+        },
+        "label": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transcript_segments": {
+          "items": {
+            "$ref": "#/$defs/TranscriptSegment"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "SourceArtifactKind": {
+      "enum": [
+        "other",
+        "video",
+        "transcript",
+        "trace",
+        "manual"
+      ],
+      "type": "string"
+    },
+    "StateTransition": {
+      "description": "A move from one live-page scene to another: the player morphs the page into the target's capture.",
+      "properties": {
+        "app": {
+          "description": "Switches to another app after.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "matcher": {
+          "description": "What the trigger acts on: a matcher (`sel`, `text`, `label`, `testid`, `in`, `nth`, `frame`, …). Never a\ngenerated class."
+        },
+        "stream": {
+          "description": "A streamed answer that plays before the target settles.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/SceneId"
+        },
+        "trigger": {
+          "$ref": "#/$defs/StateTrigger"
+        }
+      },
+      "required": [
+        "trigger",
+        "target"
+      ],
+      "type": "object"
+    },
+    "StateTrigger": {
+      "enum": [
+        "click",
+        "enter",
+        "type",
+        "hover",
+        "escape"
+      ],
+      "type": "string"
+    },
+    "Stream": {
+      "description": "A streamed AI answer, replayed from its captured frames at a set pace.",
+      "properties": {
+        "duration_ms": {
+          "description": "Replay length at the default pace.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "frames": {
+          "description": "How many captured frames it plays.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "prompt": {
+          "description": "What was sent to get it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/SceneId",
+          "description": "The scene the answer ends on."
+        },
+        "timing": {
+          "$ref": "#/$defs/StreamTiming",
+          "default": "real"
+        }
+      },
+      "required": [
+        "id",
+        "target",
+        "frames"
+      ],
+      "type": "object"
+    },
+    "StreamTiming": {
+      "oneOf": [
+        {
+          "const": "real",
+          "description": "Each frame at its recorded time, scaled to the stream's duration.",
+          "type": "string"
+        },
+        {
+          "const": "even",
+          "description": "Frames spread evenly.",
+          "type": "string"
+        }
+      ]
+    },
+    "TranscriptSegment": {
+      "properties": {
+        "end_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "start_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "start_ms",
+        "end_ms",
+        "text"
+      ],
+      "type": "object"
+    },
+    "TranscriptSegmentRef": {
+      "properties": {
+        "segment_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "segment_id"
+      ],
+      "type": "object"
+    },
+    "Transition": {
+      "properties": {
+        "default_frame_duration_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "frames": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TransitionFrame"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/TransitionKind",
+          "default": "frame-sequence"
+        }
+      },
+      "type": "object"
+    },
+    "TransitionFrame": {
+      "properties": {
+        "duration_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "TransitionKind": {
+      "enum": [
+        "frame-sequence"
+      ],
+      "type": "string"
+    },
+    "Viewport": {
+      "properties": {
+        "dpr": {
+          "default": 1.0,
+          "format": "float",
+          "type": "number"
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://scenecast.dev/schema/bundle.v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "apps": {
+      "description": "The web apps (browser tabs) the demo shows. Live-page scenes belong to one each.",
+      "items": {
+        "$ref": "#/$defs/App"
+      },
+      "type": "array"
+    },
+    "assets": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BundleAsset"
+      },
+      "type": "array"
+    },
+    "beats": {
+      "description": "Presenter beats: modifier+0 is beats[0] (reset), modifier+1…9 the rest.",
+      "items": {
+        "$ref": "#/$defs/Beat"
+      },
+      "type": "array"
+    },
+    "focus_points": {
+      "description": "ZoomIt-style focus points, in script order.",
+      "items": {
+        "$ref": "#/$defs/FocusPoint"
+      },
+      "type": "array"
+    },
+    "graph": {
+      "$ref": "#/$defs/SceneGraph"
+    },
+    "presenter": {
+      "$ref": "#/$defs/PresenterConfig",
+      "default": {
+        "fill_key": "P",
+        "focus_key": "F",
+        "macos": "alt",
+        "next_key": "N",
+        "windows": "ctrl-alt"
+      }
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/Section"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceArtifact"
+      },
+      "type": "array"
+    },
+    "streams": {
+      "description": "Streamed AI answers, replayed from their captured frames.",
+      "items": {
+        "$ref": "#/$defs/Stream"
+      },
+      "type": "array"
+    },
+    "title": {
+      "type": "string"
+    },
+    "viewport": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Viewport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The size the demo was recorded and is shown at."
+    }
+  },
+  "required": [
+    "schema_version",
+    "title",
+    "graph"
+  ],
+  "title": "Scenecast bundle manifest (scenecast.bundle.v2)",
+  "type": "object"
+}

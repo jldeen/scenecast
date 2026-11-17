@@ -1,0 +1,2 @@
+# Captures are served byte for byte: no line-ending conversion on any OS (a fresh clone must match).
+* -text

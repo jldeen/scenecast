@@ -1,11 +1,11 @@
 // Renders processed snapshots (data/snaps/<id>.html, through the replica server) in headless system Chrome at
 // 1920×1080 CSS, 2x, and compares each with its real capture (raw shots/<id>.png). Writes side-by-side PNGs.
 // A quick look at one capture without the shell (to see whether a problem is in the capture or in the replay).
-//   node checks/render-check.mjs --demo <dir> <id> [id...]   (replica serve must be running)
+//   node checks/render-check.mjs --demo <dir> <id> [id...]   (scenecast serve must be running)
 import { chromium } from 'playwright-core';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadDemo } from '../lib/demo.mjs';
+import { loadDemo } from '../kit/lib/demo.mjs';
 
 const demo = loadDemo(process.argv.slice(2));
 const RAW = demo.raw;

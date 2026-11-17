@@ -14,22 +14,109 @@ fn new_creates_valid_starter_bundle() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap(), "--title", "Demo"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Created"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("Valid"))
         .stderr(predicate::str::contains(
-            "warning: scene `start` has no screenshot",
+            "warning: live-page scene `start` has not been recorded yet",
         ));
+
+    // live-page is the default scene kind: new never makes a fallback scene.
+    let manifest = scenecast_core::read_manifest(&bundle).unwrap();
+    assert_eq!(manifest.schema_version, scenecast_core::SCHEMA_VERSION);
+    assert_eq!(manifest.graph.scenes[0].kind, SceneKind::LivePage);
+    assert_eq!(manifest.fallback_scenes().count(), 0);
+    assert!(bundle.join("demo.json").is_file());
+    assert!(bundle.join("focus.mjs").is_file());
+}
+
+#[test]
+fn add_scene_is_a_live_page_unless_a_screenshot_is_given() {
+    let temp = tempdir().unwrap();
+    let bundle = temp.path().join("demo.scenecast");
+    Command::cargo_bin("scenecast")
+        .unwrap()
+        .args(["new", bundle.to_str().unwrap()])
+        .assert()
+        .success();
+
+    Command::cargo_bin("scenecast")
+        .unwrap()
+        .args(["add-scene", bundle.to_str().unwrap(), "pricing", "Pricing"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("live-page"));
+    Command::cargo_bin("scenecast")
+        .unwrap()
+        .args([
+            "add-scene",
+            bundle.to_str().unwrap(),
+            "native",
+            "Native",
+            "--screenshot",
+            "captures/native.png",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("fallback"));
+
+    let manifest = scenecast_core::read_manifest(&bundle).unwrap();
+    let kind = |id: &str| {
+        manifest
+            .graph
+            .scene(&SceneId::new(id).unwrap())
+            .unwrap()
+            .kind
+    };
+    assert_eq!(kind("pricing"), SceneKind::LivePage);
+    assert_eq!(kind("native"), SceneKind::Screenshot);
+}
+
+#[test]
+fn v1_bundle_validates_with_its_scenes_flagged_as_fallbacks() {
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/scroll.scenecast")
+        .canonicalize()
+        .unwrap();
+
+    Command::cargo_bin("scenecast")
+        .unwrap()
+        .args(["validate", sample.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("a scenecast.bundle.v1 bundle"))
+        .stderr(predicate::str::contains("is a fallback (screenshot) scene"));
+}
+
+#[test]
+fn committed_json_schema_matches_the_rust_types() {
+    let committed = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/bundle.v2.schema.json"),
+    )
+    .unwrap();
+    let output = Command::cargo_bin("scenecast")
+        .unwrap()
+        .arg("schema")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        committed.replace("\r\n", "\n"),
+        "schema/bundle.v2.schema.json is stale: run scenecast schema --out schema/bundle.v2.schema.json"
+    );
 }
 
 #[test]
@@ -37,14 +124,14 @@ fn init_alias_creates_valid_starter_bundle() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["init", bundle.to_str().unwrap(), "--title", "Demo"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Created"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["inspect", bundle.to_str().unwrap()])
         .assert()
@@ -57,7 +144,7 @@ fn new_rejects_empty_title() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap(), "--title", "   "])
         .assert()
@@ -70,13 +157,13 @@ fn inspect_prints_bundle_summary() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap(), "--title", "Demo"])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["inspect", bundle.to_str().unwrap()])
         .assert()
@@ -90,13 +177,13 @@ fn add_scene_persists_scene_and_rejects_duplicates() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-scene",
@@ -110,7 +197,7 @@ fn add_scene_persists_scene_and_rejects_duplicates() {
         .success()
         .stdout(predicate::str::contains("Added scene pricing"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["add-scene", bundle.to_str().unwrap(), "pricing", "Pricing"])
         .assert()
@@ -132,12 +219,12 @@ fn validate_fails_when_referenced_capture_is_missing() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-scene",
@@ -150,7 +237,7 @@ fn validate_fails_when_referenced_capture_is_missing() {
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
@@ -180,7 +267,7 @@ fn validate_surfaces_manifest_errors() {
     )
     .unwrap();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
@@ -194,13 +281,13 @@ fn validate_accepts_existing_referenced_capture() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
     fs::write(bundle.join("captures").join("pricing.png"), []).unwrap();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-scene",
@@ -213,7 +300,7 @@ fn validate_accepts_existing_referenced_capture() {
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
@@ -226,13 +313,13 @@ fn add_scene_rejects_non_portable_capture_paths() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-scene",
@@ -252,18 +339,18 @@ fn add_hotspot_links_scenes_and_rejects_invalid_targets() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["add-scene", bundle.to_str().unwrap(), "pricing", "Pricing"])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-hotspot",
@@ -291,7 +378,7 @@ fn add_hotspot_links_scenes_and_rejects_invalid_targets() {
             "Added hotspot pricing-link to scene start",
         ));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-hotspot",
@@ -331,13 +418,13 @@ fn add_guide_mark_and_section_are_exported_to_static_player() {
     let bundle = temp.path().join("demo.scenecast");
     let output = temp.path().join("player");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap(), "--title", "Demo"])
         .assert()
         .success();
     fs::write(bundle.join("captures").join("pricing.png"), []).unwrap();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-scene",
@@ -354,7 +441,7 @@ fn add_guide_mark_and_section_are_exported_to_static_player() {
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-guide-mark",
@@ -379,7 +466,7 @@ fn add_guide_mark_and_section_are_exported_to_static_player() {
             "Added guide mark annual-plan to scene pricing",
         ));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-section",
@@ -411,7 +498,7 @@ fn add_guide_mark_and_section_are_exported_to_static_player() {
     );
     assert_eq!(manifest.sections[1].title, "Overview");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "export-html",
@@ -437,14 +524,14 @@ fn import_video_extracts_frames_with_ffmpeg_and_adds_scenes() {
     fs::write(&input, []).unwrap();
     let fake_ffmpeg = write_fake_ffmpeg(temp.path());
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
 
     let frame_path = bundle.join("captures").join("clip-0001.png");
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .env("SCENECAST_FAKE_FFMPEG_FRAME", &frame_path)
         .args([
@@ -462,7 +549,7 @@ fn import_video_extracts_frames_with_ffmpeg_and_adds_scenes() {
         .success()
         .stdout(predicate::str::contains("Imported 1 frame scene(s)"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
@@ -504,13 +591,13 @@ fn import_video_links_multiple_frames_as_clickthrough_sequence() {
     fs::write(&input, []).unwrap();
     let fake_ffmpeg = write_fake_ffmpeg_sequence(temp.path());
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .env(
             "SCENECAST_FAKE_FFMPEG_FRAME_ONE",
@@ -569,14 +656,14 @@ fn import_video_links_multiple_frames_as_clickthrough_sequence() {
         .unwrap();
     assert!(second.hotspot(&HotspotId::new("next").unwrap()).is_none());
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("Valid"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "export-html",
@@ -617,13 +704,13 @@ fn import_video_with_srt_sidecar_creates_valid_transcript_draft_and_player_data(
     .unwrap();
     let fake_ffmpeg = write_fake_ffmpeg_sequence(temp.path());
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .env(
             "SCENECAST_FAKE_FFMPEG_FRAME_ONE",
@@ -646,7 +733,7 @@ fn import_video_with_srt_sidecar_creates_valid_transcript_draft_and_player_data(
         .success()
         .stdout(predicate::str::contains("Imported 2 frame scene(s)"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
@@ -711,7 +798,7 @@ fn import_video_with_srt_sidecar_creates_valid_transcript_draft_and_player_data(
         .reverse();
     write_manifest(&bundle, &manifest).unwrap();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "export-draft",
@@ -750,7 +837,7 @@ fn import_video_with_srt_sidecar_creates_valid_transcript_draft_and_player_data(
             .is_file()
     );
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "export-html",
@@ -779,13 +866,13 @@ fn export_html_writes_clickthrough_player_and_assets() {
     let bundle = temp.path().join("demo.scenecast");
     let output = temp.path().join("player");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
     fs::write(bundle.join("captures").join("pricing.png"), []).unwrap();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-scene",
@@ -797,7 +884,7 @@ fn export_html_writes_clickthrough_player_and_assets() {
         ])
         .assert()
         .success();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-hotspot",
@@ -821,7 +908,7 @@ fn export_html_writes_clickthrough_player_and_assets() {
         ])
         .assert()
         .success();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-transition",
@@ -837,7 +924,7 @@ fn export_html_writes_clickthrough_player_and_assets() {
         .success()
         .stdout(predicate::str::contains("Added transition"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "export-html",
@@ -863,19 +950,19 @@ fn add_transition_attaches_frame_sequence_to_hotspot() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
     fs::write(bundle.join("captures").join("scroll-0001.png"), []).unwrap();
     fs::write(bundle.join("captures").join("scroll-0002.png"), []).unwrap();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["add-scene", bundle.to_str().unwrap(), "pricing", "Pricing"])
         .assert()
         .success();
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-hotspot",
@@ -900,7 +987,7 @@ fn add_transition_attaches_frame_sequence_to_hotspot() {
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "add-transition",
@@ -942,14 +1029,14 @@ fn checked_in_scroll_sample_validates_and_exports() {
     let bundle = repo_root.join("examples").join("scroll.scenecast");
     let output = temp.path().join("scroll-player");
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["validate", bundle.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("Valid"));
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "export-html",
@@ -980,13 +1067,13 @@ fn import_video_reports_missing_ffmpeg() {
     let input = temp.path().join("demo.mp4");
     fs::write(&input, []).unwrap();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "import-video",
@@ -1007,13 +1094,13 @@ fn import_video_rejects_invalid_crop() {
     let input = temp.path().join("demo.mp4");
     fs::write(&input, []).unwrap();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args([
             "import-video",
@@ -1037,14 +1124,14 @@ fn import_video_rejects_existing_capture_prefix() {
     fs::write(&input, []).unwrap();
     let fake_ffmpeg = write_fake_ffmpeg(temp.path());
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .args(["new", bundle.to_str().unwrap()])
         .assert()
         .success();
     fs::write(bundle.join("captures").join("clip-0001.png"), []).unwrap();
 
-    Command::cargo_bin("scenecast-cli")
+    Command::cargo_bin("scenecast")
         .unwrap()
         .env(
             "SCENECAST_FAKE_FFMPEG_FRAME",

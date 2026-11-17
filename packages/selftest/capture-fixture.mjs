@@ -39,8 +39,8 @@ const b = srv(47702, { '/x.css': ['text/css', '.ext{background:url("sub/ext.png"
 // Its own receiver port: never a receiver another session is using.
 const RXP = '47692';
 if (await fetch(`http://127.0.0.1:${RXP}/ping`).then(() => true, () => false)) { console.log(`port ${RXP} is in use: stop whatever is on it and run again`); process.exit(1); }
-spawnSync(process.execPath, [join(here, '../capture/build.mjs'), join(raw, 'agent'), '--port', RXP], { stdio: 'ignore' });
-const rx = spawn(process.execPath, [join(here, '../capture/receiver.mjs'), raw, RXP], { stdio: 'inherit' });
+spawnSync(process.execPath, [join(here, '../recorder/build.mjs'), join(raw, 'agent'), '--port', RXP], { stdio: 'ignore' });
+const rx = spawn(process.execPath, [join(here, '../recorder/receiver.mjs'), raw, RXP], { stdio: 'inherit' });
 await new Promise(r => setTimeout(r, 500));
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 800, height: 600 } });
@@ -50,7 +50,7 @@ await page.waitForTimeout(500);
 const agentSrc = readFileSync(join(raw, 'agent', 'agent.js'), 'utf8');
 const agent = eval(agentSrc);
 console.log(await agent(page));
-const cli = (op, args) => new Promise(res => { const p = spawn(process.execPath, [join(here, '../capture/cli.mjs'), op, JSON.stringify(args)], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, REPLICA_RX_PORT: RXP } }); let o = ''; p.stdout.on('data', d => o += d); p.on('close', code => res({ code, o })); });
+const cli = (op, args) => new Promise(res => { const p = spawn(process.execPath, [join(here, '../recorder/cli.mjs'), op, JSON.stringify(args)], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, REPLICA_RX_PORT: RXP } }); let o = ''; p.stdout.on('data', d => o += d); p.on('close', code => res({ code, o })); });
 const r = await cli('snap', { tab: '127.0.0.1:47701', id: 'fixture' });
 console.log('snap result', r.o.slice(0, 800));
 await cli('quit', {});

@@ -6,7 +6,7 @@
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { comparePngs } from './compare.mjs';
-import { loadDemo, readFlow, arg as argOf } from '../lib/demo.mjs';
+import { loadDemo, readFlow, arg as argOf } from '../kit/lib/demo.mjs';
 
 const demo = loadDemo(process.argv.slice(2));
 const arg = (k, d) => argOf(process.argv.slice(2), k, d);
@@ -37,7 +37,7 @@ for (const hp of flow.hoverPages) {
   if (APPS.length && !APPS.includes(hp.app)) continue;
   if (ONLY && hp.page !== ONLY) continue;
   const hf = `${ROOT}data/snaps/hovers-${hp.app}.json`;
-  if (!existsSync(hf)) { report.failed.push({ id: hp.page, text: 'no hover data: run replica build' }); continue; }
+  if (!existsSync(hf)) { report.failed.push({ id: hp.page, text: 'no hover data: run scenecast build' }); continue; }
   const data = JSON.parse(readFileSync(hf, 'utf8'));
   const defs = data.defs.filter(d => d.page === hp.page);
   if (!defs.length) continue;

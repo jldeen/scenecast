@@ -1,4 +1,4 @@
-// Replica shell (replica-kit). Each app in flow.json is a frame holding a real captured page. Clicks, hovers,
+// Replica shell (scenecast, from replica-kit). Each app in flow.json is a frame holding a real captured page. Clicks, hovers,
 // typing and Enter move an app between captured states by morphing the live page into the next capture (morph.js).
 // Streamed answers replay the real run's frames, then its final page, at the flow's pace. Everything is local and
 // fixed, so it runs the same way every time. Presenter keys are hidden (see docs/flow-format.md).
@@ -209,9 +209,11 @@ function onClick(e, app, doc) {
   setTimeout(() => run(app, hit.t, { el: hit.el, doc, typed: field ? textOf(field) : undefined }), 0);
 }
 
+const presenterKey = e => e.altKey && !e.metaKey;
 function onKey(e, app, doc) {
   for (const h of hooks.key) if (h(e, app, doc)) { e.preventDefault(); e.stopPropagation(); return; }
-  if (e.altKey && !e.metaKey && !e.ctrlKey) {
+  // Presenter keys: ⌥ on the Mac; Ctrl+Alt too, on any OS (Windows and Edge keep Alt alone for their menus).
+  if (presenterKey(e)) {
     const c = e.code;
     let handled = true;
     if (/^Digit\d$/.test(c)) jump(+c.slice(5));
@@ -513,13 +515,13 @@ function hvPlace(h) {
 }
 
 // ---- clicks and drags captured from the real pages --------------------------------------------------------------
-// The click audit (capture/flows/click-audit.js, replica record side clicks) recorded what clicking each pane, menu
+// The click audit (capture/flows/click-audit.js, scenecast record side clicks) recorded what clicking each pane, menu
 // and expander control does on the real page: changes in place, from an ancestor of the control (a pane closing, a
 // folder collapsing), and popups (menus, flyouts). It also recorded how the page undoes it: the same control again
 // (toggle), Escape or a click elsewhere (escape), a control that appears in its place (reopen: a "Show details panel"
 // button), or by itself (auto: a Copy button's check mark). Panes and sections stay as she left them when the page
 // changes (sticky), until ⌥0 or a beat jump puts everything back as captured.
-// Data: clicks in /snaps/hovers-<app>.json. Drags: flow.drags, from the drag audit (replica record side drags).
+// Data: clicks in /snaps/hovers-<app>.json. Drags: flow.drags, from the drag audit (scenecast record side drags).
 function clkState(app) { return app.clk || (app.clk = { open: [], sticky: new Set(), dirty: false }); }
 const clickDefs = app => ((hoverData[app.id] || {}).clicks) || [];
 const upFrom = (el, n) => { let e = el; for (let i = 0; e && i < (n || 0); i++) e = e.parentElement; return e; };
