@@ -74,6 +74,7 @@ fn algorithm_hash() -> String {
     for source in [
         include_bytes!("assets.rs").as_slice(),
         include_bytes!("compose.rs").as_slice(),
+        include_bytes!("interactions.rs").as_slice(),
         include_bytes!("publish.rs").as_slice(),
     ] {
         hash.update((source.len() as u64).to_le_bytes());

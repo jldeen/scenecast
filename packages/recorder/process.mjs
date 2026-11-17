@@ -355,6 +355,11 @@ const isolateHover = (html, prefix) => process.env.SCENECAST_RUST_ASSETS === '1'
 const fixClassValue = (v, prefix) => v == null ? v : process.env.SCENECAST_RUST_ASSETS === '1'
   ? rustAsset('isolate-class-value', JSON.stringify([v, prefix, true]))
   : v.split(/(\s+)/).map(t => /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(t) || REACT_ID_CLASS.test(t) ? prefix + t : t).join('');
+const filterInteractionOps = (ops, hover) => process.env.SCENECAST_RUST_ASSETS === '1'
+  ? JSON.parse(rustAsset('filter-interaction-ops', JSON.stringify([ops, hover])))
+  : ops.filter(o => !(o.kind === 'remove' && o.restTag !== '#text' && !o.restText)
+    && !(o.kind === 'attr' && Object.keys(o.set).every(k => k === 'style') && styleBookkeeping(o))
+    && !(o.kind === 'attr' && (hover ? /^(g|svg|path|circle|rect|ellipse|line|polygon|polyline|stop|lineargradient|radialgradient)$/i : /^(g|svg|path|circle|rect)$/i).test(o.tag || '') && Object.keys(o.set).every(k => k === 'style')));
 report.hovers = {};
 const hoverOut = Object.fromEntries(flow.apps.map(a => [a.id, { css: {}, defs: [] }]));
 const appSeenOf = Object.fromEntries(flow.apps.map(a => [a.id, new Map()]));
@@ -403,14 +408,12 @@ const appSeenOf = Object.fromEntries(flow.apps.map(a => [a.id, new Map()]));
     // belongs to the element it's attached to. They are two hovers, each with its own delay.
     // An empty placeholder the previous hover left behind (Fluent's hidden tooltip <span>) going away is not part of
     // this hover: the replica never had it.
-    if (r.ops) r.ops = r.ops.filter(o => !(o.kind === 'remove' && o.restTag !== '#text' && !o.restText));
     // Likewise an empty hidden placeholder this hover leaves somewhere (Fluent puts one next to each tooltip).
     if (r.ops) r.ops = r.ops.filter(o => !(o.kind === 'add' && /^<([a-z]+)[^>]*\shidden=""[^>]*><\/\1>$/.test((rec.parts[o.part] || '').replace(/\sdata-d1-hpart="\d+"/g, ''))));
     // Script bookkeeping in inline styles (CSS anchor names, custom properties, a style emptied on the item hovered
     // before) changes nothing on screen by itself and would replay on fixed items in a list.
-    if (r.ops) r.ops = r.ops.filter(o => !(o.kind === 'attr' && Object.keys(o.set).every(k => k === 'style') && styleBookkeeping(o)));
     // Style ticks on SVG parts are an animation running on the page, not the hover.
-    if (r.ops) r.ops = r.ops.filter(o => !(o.kind === 'attr' && /^(g|svg|path|circle|rect|ellipse|line|polygon|polyline|stop|lineargradient|radialgradient)$/i.test(o.tag || '') && Object.keys(o.set).every(k => k === 'style')));
+    if (r.ops) r.ops = filterInteractionOps(r.ops, true);
     // An anchor with no name of its own (a plain div around a rail button) is found by its size, next to a target
     // that has a name.
     const bySize = r.ops && r.ops.length && !usable(r.anchor) && usable(r.target) && r.anchor && r.anchor.sel;
@@ -514,7 +517,7 @@ report.clicks = {};
     const popup = (r.portals || []).length || /^(menu|dialog|true|listbox)$/.test((rec.ctl.attrs || {})['aria-haspopup'] || '');
     if (restore === 'stuck' && popup) restore = 'escape';
     if (restore === 'stuck') { report.clicks[cp.page + ':' + name] = 'skipped: stuck'; continue; }
-    let ops = (r.ops || []).filter(o => !(o.kind === 'remove' && o.restTag !== '#text' && !o.restText) && !(o.kind === 'attr' && Object.keys(o.set).every(k2 => k2 === 'style') && styleBookkeeping(o)) && !(o.kind === 'attr' && /^(g|svg|path|circle|rect)$/i.test(o.tag || '') && Object.keys(o.set).every(k2 => k2 === 'style')));
+    let ops = filterInteractionOps(r.ops || [], false);
     ops = ops.map(o => {
       const op = { ...o };
       if (o.kind === 'add') { op.html = fixPart(rec.parts[o.part], rec); used.push(op.html); delete op.part; }

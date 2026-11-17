@@ -59,6 +59,20 @@ try {
     n, t: n * 100, urls: ['https://fixture.invalid/img.svg'], inline: { canvas1: 'data:image/svg+xml,%3Csvg%3E' },
     html: '<body focusgroup="x" style="appearance:slider-vertical"><div><div>replace this</div></div><img src="d1res://0"><canvas data-d1-canvas="canvas1"></canvas></body>',
   }));
+  const ops = [
+    { kind: 'remove', restTag: 'span', restText: '', path: [0] },
+    { kind: 'attr', set: { style: 'color:red;--anchor:a' }, was: { style: 'color:red;--anchor:b' }, path: [0] },
+    { kind: 'attr', set: { style: 'display:block' }, was: { style: 'display:none' }, path: [0] },
+  ];
+  for (const dir of ['page', 'click-page']) mkdirSync(join(raw, 'hovers', dir), { recursive: true });
+  writeFileSync(join(raw, 'hovers', 'page', '0.json'), JSON.stringify({
+    n: 0, kind: 'send-hover', cand: { text: 'Trigger' }, parts: [], urls: [], inline: {}, firstMs: 100,
+    viewport: [800, 600], res: { anchor: { sel: 'button', text: 'Trigger' }, anchorRect: { w: 20, h: 20 }, ops },
+  }));
+  writeFileSync(join(raw, 'hovers', 'click-page', '0.json'), JSON.stringify({
+    n: 0, kind: 'click', cand: { text: 'Trigger' }, ctl: { spec: { sel: 'button' }, rect: {}, attrs: {} },
+    parts: [], urls: [], inline: {}, restore: 'again', res: { up: 1, anchorTag: 'div', ops },
+  }));
   writeFileSync(join(demo, 'recording.json'), JSON.stringify({
     states: { start: { app: 'app', snap: 'start' }, part: { app: 'app', snap: 'part' } },
     streams: { s1: { to: 'start', frames: [0, 1] } },
@@ -67,6 +81,8 @@ try {
   writeFileSync(join(demo, 'flow.overrides.mjs'), `export default flow => {
     flow.compose = [{ from: 'part', marker: 'source part', tag: 'div', anchor: 'replace this' }];
     flow.apps[0].layout.responsive = [{ part: { css: '<body[ >]', up: 0 }, variant: 'part' }];
+    flow.hoverPages = [{ page: 'page', app: 'app', base: 'start' }];
+    flow.clickPages = [{ page: 'page', app: 'app', base: 'start' }];
   };\n`);
   run(process.execPath, ['packages/kit/compile/flow.mjs', '--demo', demo]);
   run(process.execPath, ['packages/recorder/process.mjs', '--demo', demo, '--force']);
@@ -77,6 +93,9 @@ try {
   assert.match(readFileSync(join(demo, 'data', 'snaps', 'start.html'), 'utf8'), /data-d1-compose=""[^]*@keyframes spin/);
   assert.match(readFileSync(join(demo, 'data', 'streams', 's1', '000.html'), 'utf8'), /<div><div class="card root-123">source part<\/div><\/div>/);
   assert.match(readFileSync(join(demo, 'data', 'snaps', 'part.html'), 'utf8'), /class="card d1v-root-123"/);
+  const interactions = JSON.parse(readFileSync(join(demo, 'data', 'snaps', 'hovers-app.json'), 'utf8'));
+  assert.equal(interactions.defs[0].ops.length, 1);
+  assert.equal(interactions.clicks[0].ops.length, 1);
   console.log('Rust asset and CSS resolution matches the JavaScript capture processor');
 } finally {
   rmSync(temp, { recursive: true, force: true });

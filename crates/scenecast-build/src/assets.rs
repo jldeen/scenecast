@@ -434,6 +434,12 @@ impl AssetResolver {
                     crate::compose::isolate_class_value(&input, &prefix, hover)
                 })
             }
+            "filter-interaction-ops" => {
+                let (ops, hover): (Vec<Value>, bool) = serde_json::from_str(value)?;
+                Some(serde_json::to_string(
+                    &crate::interactions::filter_ops(&ops, hover).map_err(AssetError::Invalid)?,
+                )?)
+            }
             _ => return Err(AssetError::Invalid("unknown asset operation")),
         };
         Ok(Resolution {

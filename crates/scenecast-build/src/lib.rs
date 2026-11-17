@@ -14,6 +14,7 @@ pub mod engine;
 pub mod export;
 pub mod fingerprint;
 pub mod flow;
+pub mod interactions;
 pub mod project;
 pub mod publish;
 pub mod recorder;
