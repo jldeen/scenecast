@@ -24,7 +24,7 @@ pub struct StreamWriter {
 impl StreamWriter {
     pub fn new(root: &Path, name: String) -> Result<Self, String> {
         let mut components = Path::new(&name).components();
-        if name.contains('\\')
+        if name.contains(['/', '\\'])
             || !matches!(components.next(), Some(Component::Normal(_)))
             || components.next().is_some()
         {
@@ -109,5 +109,6 @@ mod tests {
             "{\n \"name\": \"sample\",\n \"frames\": [\n  {\n   \"file\": \"000.html\",\n   \"t\": 0,\n   \"raw\": 1\n  },\n  {\n   \"file\": \"001.html\",\n   \"t\": 20,\n   \"raw\": 3\n  }\n ]\n}"
         );
         assert!(StreamWriter::new(dir.path(), "../outside".into()).is_err());
+        assert!(StreamWriter::new(dir.path(), "sample/".into()).is_err());
     }
 }
