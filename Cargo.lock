@@ -472,6 +472,7 @@ dependencies = [
 name = "scenecast-build"
 version = "0.2.0"
 dependencies = [
+ "regex",
  "scenecast-core",
  "serde",
  "serde_json",

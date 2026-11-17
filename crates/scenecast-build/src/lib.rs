@@ -10,6 +10,7 @@
 pub mod engine;
 pub mod project;
 pub mod recorder;
+pub mod scrub;
 pub mod sync;
 
 use std::path::{Path, PathBuf};
