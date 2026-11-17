@@ -316,6 +316,13 @@ export default flow => {
       writeFileSync(marker, '{"value":"alpha"}');
       const first = await run(['build', '--from-raw'], at);
       const stable = await run(['build', '--from-raw'], at);
+      const fingerprintPath = join(DEMO, '.out', 'build-fingerprint.json');
+      const fingerprint = JSON.parse(readFileSync(fingerprintPath, 'utf8'));
+      fingerprint.algorithm = 'outdated';
+      writeFileSync(fingerprintPath, JSON.stringify(fingerprint));
+      const codeChanged = await run(['build', '--from-raw'], at);
+      check('build: Rust processing changes invalidate the cache',
+        codeChanged.code === 0 && !/"upToDate":true/.test(codeChanged.out), codeChanged.out.slice(-500));
       const before = statSync(marker);
       writeFileSync(marker, '{"value":"omega"}');
       utimesSync(marker, before.atime, before.mtime);

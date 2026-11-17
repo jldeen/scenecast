@@ -37,3 +37,4 @@ pub fn find_project_dir(given: Option<&Path>, cwd: &Path) -> Option<PathBuf> {
         .find(|dir| dir.join(DEMO_FILE).is_file())
         .map(Path::to_path_buf)
 }
+pub mod assets;

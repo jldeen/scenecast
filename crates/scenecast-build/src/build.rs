@@ -5,8 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::assets::{AssetError, AssetResolver};
 use crate::engine::{Engine, EngineError, Progress, with_demo};
 use crate::fingerprint::{FingerprintError, fingerprint_tree};
 use crate::flow::{FlowError, compile_recording};
@@ -32,6 +34,8 @@ pub enum BuildError {
     Flow(#[from] FlowError),
     #[error(transparent)]
     Publish(#[from] PublishError),
+    #[error(transparent)]
+    Asset(#[from] AssetError),
     #[error("cannot resolve raw capture folder: HOME and USERPROFILE are unset")]
     MissingHome,
     #[error("raw capture folder is not UTF-8")]
@@ -61,6 +65,20 @@ pub struct BuildResult {
 struct BuildFingerprint {
     raw: String,
     output: String,
+    #[serde(default)]
+    algorithm: String,
+}
+
+fn algorithm_hash() -> String {
+    let mut hash = Sha256::new();
+    for source in [
+        include_bytes!("assets.rs").as_slice(),
+        include_bytes!("publish.rs").as_slice(),
+    ] {
+        hash.update((source.len() as u64).to_le_bytes());
+        hash.update(source);
+    }
+    format!("{:x}", hash.finalize())
 }
 
 fn compile_base(
@@ -222,8 +240,11 @@ fn build_with_raw(
     } else {
         None
     };
+    let algorithm = algorithm_hash();
     let unchanged = previous.as_ref().is_some_and(|p| {
-        raw_hash.as_ref() == Some(&p.raw) && output_hash.as_ref() == Some(&p.output)
+        raw_hash.as_ref() == Some(&p.raw)
+            && output_hash.as_ref() == Some(&p.output)
+            && p.algorithm == algorithm
     });
     let mut args = args.to_vec();
     if args.iter().any(|a| a == "--compiled-flow") {
@@ -257,6 +278,7 @@ fn build_with_raw(
             OsString::from("SCENECAST_RUST_PUBLISH"),
             OsString::from("1"),
         ),
+        (OsString::from("SCENECAST_RUST_ASSETS"), OsString::from("1")),
     ];
     if let Some(path) = &base {
         env.push((
@@ -265,8 +287,37 @@ fn build_with_raw(
         ));
     }
     let mut publication_error = None;
+    let mut asset_error = None;
+    let mut resolver = None;
     let mut published = false;
     let mut control = |line: &str| {
+        if let Some(request) = line.strip_prefix("SCENECAST_ASSET_V1 ") {
+            #[derive(Deserialize)]
+            struct Request {
+                op: String,
+                value: String,
+                inline: Option<String>,
+            }
+            let response = (|| {
+                let request: Request = serde_json::from_str(request)?;
+                if resolver.is_none() {
+                    resolver = Some(AssetResolver::new(&raw, &data.join(".next/assets"))?);
+                }
+                resolver.as_mut().expect("resolver initialized").resolve(
+                    &request.op,
+                    &request.value,
+                    request.inline.as_deref(),
+                )
+            })();
+            return Some(match response {
+                Ok(result) => serde_json::to_string(&result).expect("resolution serializes"),
+                Err(error) => {
+                    let message = error.to_string();
+                    asset_error = Some(error);
+                    serde_json::json!({"error": message}).to_string()
+                }
+            });
+        }
         let mode = match line {
             "SCENECAST_PUBLISH_V1" => PublishMode::Captures,
             "SCENECAST_PUBLISH_V2" => PublishMode::Assets,
@@ -311,6 +362,9 @@ fn build_with_raw(
     if let Some(error) = publication_error {
         return Err(error.into());
     }
+    if let Some(error) = asset_error {
+        return Err(error.into());
+    }
     let code = code?;
     if report.has_credentials() {
         return Ok(BuildResult {
@@ -344,7 +398,11 @@ fn build_with_raw(
             cache_path,
             format!(
                 "{}\n",
-                serde_json::to_string_pretty(&BuildFingerprint { raw, output })?
+                serde_json::to_string_pretty(&BuildFingerprint {
+                    raw,
+                    output,
+                    algorithm
+                })?
             ),
         )?;
     }

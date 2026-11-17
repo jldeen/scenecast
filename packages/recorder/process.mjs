@@ -6,7 +6,7 @@
 // Incremental: it skips the build when nothing it reads has changed (data/build.json), builds into data/.next, then
 // writes only the files that changed and deletes the ones no longer made. data/build.json lists what changed (the
 // quick check uses it) and which text edits are built in (the server applies the rest as it serves).
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, copyFileSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, readSync, writeFileSync, mkdirSync, existsSync, readdirSync, copyFileSync, rmSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -39,6 +39,33 @@ mkdirSync(ASSETS, { recursive: true });
 
 const used = new Set();
 const missing = new Map();
+let assetReply = Buffer.alloc(0);
+function rustAsset(op, value, inline) {
+  writeFileSync(1, 'SCENECAST_ASSET_V1 ' + JSON.stringify({ op, value, inline }) + '\n');
+  const chunks = [];
+  for (;;) {
+    if (!assetReply.length) {
+      const chunk = Buffer.allocUnsafe(65536);
+      const n = readSync(0, chunk, 0, chunk.length, null);
+      if (!n) throw new Error('asset resolver closed without a response');
+      assetReply = chunk.subarray(0, n);
+    }
+    const end = assetReply.indexOf(10);
+    if (end >= 0) {
+      chunks.push(assetReply.subarray(0, end));
+      assetReply = assetReply.subarray(end + 1);
+      break;
+    }
+    chunks.push(assetReply);
+    assetReply = Buffer.alloc(0);
+  }
+  const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (result.error) throw new Error(result.error);
+  if (!Array.isArray(result.used) || !Array.isArray(result.missing)) throw new Error('invalid asset resolver response');
+  for (const name of result.used) used.add(name);
+  for (const [url, reason] of result.missing) missing.set(url, reason);
+  return result.value;
+}
 const EMPTY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 function asset(buf, ext) {
   const f = createHash('sha256').update(buf).digest('hex').slice(0, 24) + '.' + ext;
@@ -49,6 +76,7 @@ function asset(buf, ext) {
 }
 const emptyAsset = () => asset(EMPTY_PNG, 'png');
 function fromData(d) {
+  if (process.env.SCENECAST_RUST_ASSETS === '1') return rustAsset('data', d || '');
   const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(d || '');
   if (!m) return null;
   const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
@@ -56,6 +84,7 @@ function fromData(d) {
   return asset(buf, ext);
 }
 function cssFile(url, depth = 0) {
+  if (process.env.SCENECAST_RUST_ASSETS === '1' && typeof url === 'string') return rustAsset('css', url);
   const e = urlIndex[url];
   if (!e || !e.file) return null;
   const text = readFileSync(join(RAW, 'blobs', e.file), 'utf8');
@@ -76,6 +105,7 @@ function rewriteCss(text, base, depth = 0) {
     });
 }
 function local(abs, inline) {
+  if (process.env.SCENECAST_RUST_ASSETS === '1' && typeof abs === 'string') return rustAsset('local', abs, inline && inline[abs]);
   if (inline && inline[abs]) return fromData(inline[abs]) || emptyAsset();
   const e = urlIndex[abs];
   if (!e || !e.file) { missing.set(abs.split('?')[0].slice(0, 140), (e && e.error) || 'not fetched'); return /\.(woff2?|ttf|otf)(\?|$)/i.test(abs) ? '/assets/missing.woff2' : emptyAsset(); }
