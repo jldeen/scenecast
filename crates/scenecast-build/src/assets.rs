@@ -11,7 +11,7 @@ use base64::{
 };
 use regex::{Captures, Regex};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
@@ -30,7 +30,7 @@ pub enum AssetError {
     Url(#[from] url::ParseError),
     #[error("invalid captured base64 data")]
     Base64(#[from] base64::DecodeError),
-    #[error("invalid resource index")]
+    #[error("invalid resource JSON")]
     Json(#[from] serde_json::Error),
 }
 
@@ -284,6 +284,110 @@ impl AssetResolver {
         })
     }
 
+    fn rewrite_document(&mut self, snap: &str, input: &str) -> Result<String, AssetError> {
+        let input: Value = serde_json::from_str(input)?;
+        let doc = input
+            .get("doc")
+            .and_then(Value::as_object)
+            .ok_or(AssetError::Invalid("missing captured document"))?;
+        let html = doc
+            .get("html")
+            .and_then(Value::as_str)
+            .ok_or(AssetError::Invalid("missing captured document HTML"))?;
+        let urls = doc
+            .get("urls")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let inline = doc.get("inline").and_then(Value::as_object);
+        let keys = input
+            .get("keys")
+            .and_then(Value::as_array)
+            .ok_or(AssetError::Invalid("missing captured frame keys"))?;
+        let url = |index: &str| -> Result<&str, AssetError> {
+            index
+                .parse::<usize>()
+                .ok()
+                .and_then(|i| urls.get(i))
+                .and_then(Value::as_str)
+                .ok_or(AssetError::Invalid("invalid captured resource reference"))
+        };
+        let styles = re!(r#"<style([^>]*) data-d1-fetch="d1res://(\d+)"([^>]*)></style>"#);
+        let html = replace(html, styles, |c| {
+            let url = url(&c[2])?;
+            let css = self.css_file(url, 0)?;
+            if css.is_none() {
+                self.missing(url, "stylesheet", false);
+            }
+            let css = re!(r"(?i)</style").replace_all(css.as_deref().unwrap_or(""), r"<\/style");
+            Ok(format!("<style{}{}>{css}</style>", &c[1], &c[3]))
+        })?;
+        let imports = re!(r"/\* d1-import d1res://(\d+) \*/");
+        let html = replace(&html, imports, |c| {
+            Ok(self.css_file(url(&c[1])?, 0)?.unwrap_or_default())
+        })?;
+        let html = self.rewrite_resources(&html, urls, inline)?;
+        let iframe = re!(r#"(<iframe\b[^>]*?)\s(?:sandbox|csp)="[^"]*""#);
+        let html = iframe.replace_all(&html, "$1");
+        let html = iframe.replace_all(&html, "$1");
+        let frames = re!(r"d1frame://(f\d+)");
+        let html = frames.replace_all(&html, |c: &Captures<'_>| {
+            if keys.iter().any(|key| key.as_str() == Some(&c[1])) {
+                format!("/snaps/{snap}.{}.html", &c[1])
+            } else {
+                "about:blank".to_owned()
+            }
+        });
+        Ok(scrub(quiet(&drop_missing_fonts(&html))))
+    }
+
+    fn rewrite_resources(
+        &mut self,
+        html: &str,
+        urls: &[Value],
+        inline: Option<&Map<String, Value>>,
+    ) -> Result<String, AssetError> {
+        let resources = re!(r"d1res://(\d+)");
+        let html = replace(html, resources, |c| {
+            let url = c[1]
+                .parse::<usize>()
+                .ok()
+                .and_then(|i| urls.get(i))
+                .and_then(Value::as_str)
+                .ok_or(AssetError::Invalid("invalid captured resource reference"))?;
+            let data = inline
+                .and_then(|values| values.get(url))
+                .and_then(Value::as_str);
+            self.local(url, data)
+        })?;
+        let canvases = re!(r#"data-d1-canvas="(canvas\d+)""#);
+        replace(&html, canvases, |c| {
+            let data = inline
+                .and_then(|values| values.get(&c[1]))
+                .and_then(Value::as_str);
+            let asset = match data.filter(|value| !value.is_empty()) {
+                Some(data) => self.data(data)?.unwrap_or_else(|| "null".into()),
+                None => String::new(),
+            };
+            Ok(format!("data-d1-canvas=\"{asset}\""))
+        })
+    }
+
+    fn rewrite_frame(&mut self, input: &str) -> Result<String, AssetError> {
+        let frame: Value = serde_json::from_str(input)?;
+        let html = frame
+            .get("html")
+            .and_then(Value::as_str)
+            .ok_or(AssetError::Invalid("missing stream frame HTML"))?;
+        let urls = frame
+            .get("urls")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let inline = frame.get("inline").and_then(Value::as_object);
+        Ok(scrub(quiet(&self.rewrite_resources(html, urls, inline)?)))
+    }
+
     pub fn resolve(
         &mut self,
         op: &str,
@@ -296,6 +400,11 @@ impl AssetResolver {
             "local" => Some(self.local(value, inline)?),
             "data" => self.data(value)?,
             "css" => self.css_file(value, 0)?,
+            "document" => Some(self.rewrite_document(
+                value,
+                inline.ok_or(AssetError::Invalid("missing captured document input"))?,
+            )?),
+            "frame" => Some(self.rewrite_frame(value)?),
             _ => return Err(AssetError::Invalid("unknown asset operation")),
         };
         Ok(Resolution {
@@ -331,6 +440,23 @@ fn percent_decode(text: &str) -> Result<Vec<u8>, AssetError> {
     Ok(out)
 }
 
+fn quiet(text: &str) -> String {
+    let text = re!(r"(-webkit-)?appearance:\s*slider-vertical\s*;?").replace_all(text, "");
+    re!(r#"\sfocusgroup="[^"]*""#)
+        .replace_all(&text, "")
+        .into_owned()
+}
+
+fn scrub(text: String) -> String {
+    let text = re!(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(\.[A-Za-z0-9_-]{8,})?")
+        .replace_all(&text, "");
+    let text = re!(r#"(?i)([?&;](?:access_token|id_token|token|sig|signature|code|skypetoken|authorization|auth|session_state|client_info|sv|se|sp|spr|srt|ss|st|skoid|sktid|skt|ske|sks|skv)=)[^&"'\s<>]*"#)
+        .replace_all(&text, "$1");
+    re!(r"Bearer\s+[A-Za-z0-9._-]{20,}")
+        .replace_all(&text, "Bearer")
+        .into_owned()
+}
+
 fn drop_missing_fonts(text: &str) -> String {
     let pattern = re!(r"@font-face\s*\{[^}]*\}");
     pattern
@@ -356,6 +482,13 @@ fn drop_missing_fonts(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removes_signed_parameters_and_bearer_values_from_capture_text() {
+        let token = format!("?{}=value&x=1", "sig");
+        let bearer = format!("Bearer {}", "a".repeat(20));
+        assert_eq!(scrub(format!("{token} {bearer}")), "?sig=&x=1 Bearer");
+    }
 
     #[test]
     fn resolves_css_imports_and_local_resources() {

@@ -143,6 +143,7 @@ const HOOK = HOOK_SPEC ? (await import(pathToFileURL(join(demo.dir, HOOK_SPEC)).
 const edit = (s, ctx = '', opt) => { s = applyEdits(s, EDITS); return HOOK ? HOOK.html(s, ctx, opt) : s; };
 
 function rewriteDoc(doc, snapId, docsByKey) {
+  if (process.env.SCENECAST_RUST_ASSETS === '1') return edit(rustAsset('document', snapId, JSON.stringify({ doc, keys: Object.keys(docsByKey) })), snapId);
   let h = doc.html;
   h = h.replace(/<style([^>]*) data-d1-fetch="d1res:\/\/(\d+)"([^>]*)><\/style>/g, (m, a, n, b) => {
     const url = doc.urls[+n]; const t = cssFile(url);
@@ -200,8 +201,10 @@ for (const [name, def] of Object.entries(flow.streams || {})) {
   mkdirSync(join(OUT, 'streams', name), { recursive: true });
   const index = []; let prev = '';
   for (const fr of frames) {
-    const html = edit(scrub(quiet(fr.html.replace(/d1res:\/\/(\d+)/g, (m, n) => local(fr.urls[+n], fr.inline))
-      .replace(/data-d1-canvas="(canvas\d+)"/g, (m, k) => `data-d1-canvas="${fr.inline && fr.inline[k] ? fromData(fr.inline[k]) : ''}"`))), 'stream:' + name, { partial: true });
+    const rawHtml = process.env.SCENECAST_RUST_ASSETS === '1' ? rustAsset('frame', JSON.stringify(fr))
+      : scrub(quiet(fr.html.replace(/d1res:\/\/(\d+)/g, (m, n) => local(fr.urls[+n], fr.inline))
+        .replace(/data-d1-canvas="(canvas\d+)"/g, (m, k) => `data-d1-canvas="${fr.inline && fr.inline[k] ? fromData(fr.inline[k]) : ''}"`)));
+    const html = edit(rawHtml, 'stream:' + name, { partial: true });
     if (html === prev) continue;
     prev = html;
     const file = String(index.length).padStart(3, '0') + '.html';

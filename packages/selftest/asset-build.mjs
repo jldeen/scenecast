@@ -35,18 +35,28 @@ try {
     writeFileSync(join(raw, 'blobs', file), value);
     urls[url] = { file };
   }
-  blob('https://fixture.invalid/a.css', 'css', '@import "b.css" screen; @font-face{src:url("missing.woff2")} .a{background:url(img.svg)}');
+  blob('https://fixture.invalid/a.css', 'css', '@import "b.css" screen; @font-face{src:url("missing.woff2")} .a{background:url(img.svg);content:"</style"}');
   blob('https://fixture.invalid/b.css', 'css', '.b{background:url("img.svg")}');
   blob('https://fixture.invalid/img.svg', 'svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
   writeFileSync(join(raw, 'urls.json'), JSON.stringify(urls));
   writeFileSync(join(raw, 'snaps', 'start.json'), JSON.stringify({ docs: [{
-    key: 'main', parent: null, frameUrl: '', urls: ['https://fixture.invalid/a.css', 'https://fixture.invalid/img.svg'],
+    key: 'main', parent: null, frameUrl: '', urls: ['https://fixture.invalid/a.css', 'https://fixture.invalid/img.svg', 'https://fixture.invalid/missing.css'],
     inline: { canvas1: 'data:image/svg+xml,%3Csvg%3E' },
     meta: { title: 'Fixture', url: 'https://fixture.invalid/', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
-    html: '<!doctype html><html><head><style data-d1-fetch="d1res://0"></style></head><body><img src="d1res://1"><canvas data-d1-canvas="canvas1"></canvas></body></html>',
+    html: '<!doctype html><html><head><style data-d1-fetch="d1res://0"></style><style data-d1-fetch="d1res://2"></style></head><body focusgroup="x" style="appearance:slider-vertical"><img src="d1res://1"><canvas data-d1-canvas="canvas1"></canvas><iframe sandbox="" csp="" src="d1frame://f1"></iframe><iframe src="d1frame://f9"></iframe></body></html>',
+  }, {
+    key: 'f1', parent: 'main', frameUrl: 'https://fixture.invalid/frame', urls: [], inline: {},
+    meta: { title: 'Frame', url: 'https://fixture.invalid/frame', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
+    html: '<!doctype html><html><body>Frame</body></html>',
   }] }));
+  mkdirSync(join(raw, 'streams', 's1'));
+  for (const n of [0, 1]) writeFileSync(join(raw, 'streams', 's1', `${n}.json`), JSON.stringify({
+    n, t: n * 100, urls: ['https://fixture.invalid/img.svg'], inline: { canvas1: 'data:image/svg+xml,%3Csvg%3E' },
+    html: '<body focusgroup="x" style="appearance:slider-vertical"><img src="d1res://0"><canvas data-d1-canvas="canvas1"></canvas></body>',
+  }));
   writeFileSync(join(demo, 'recording.json'), JSON.stringify({
     states: { start: { app: 'app', snap: 'start' } },
+    streams: { s1: { to: 'start', frames: [0, 1] } },
     beats: [{ label: 'Start', active: 'app', states: { app: 'start' } }],
   }));
   run(process.execPath, ['packages/kit/compile/flow.mjs', '--demo', demo]);
