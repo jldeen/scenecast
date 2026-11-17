@@ -177,7 +177,7 @@ export function validate(flow) {
   for (const st of flow.apps || []) if (flow.beats && flow.beats[0] && !flow.beats[0].states[st.id]) out.push(`beat 0: no state for ${st.id}`);
   const keys = (flow.apps || []).map(a => a.key).filter(Boolean).map(k => k.toUpperCase());
   if (new Set(keys).size !== keys.length) out.push('two apps share a key');
-  for (const k of keys) if ('0123456789PN'.includes(k) || k.length !== 1) out.push(`app key ${k} is taken (⌥0-9, ⌥P, ⌥N) or not one letter`);
+  for (const k of keys) if (!/^[A-Z]$/.test(k) || 'FPN'.includes(k)) out.push(`app key ${k} must be one letter A-Z, not F, N or P (presenter keys)`);
   return out;
 }
 
