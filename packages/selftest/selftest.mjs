@@ -284,13 +284,15 @@ export default flow => {
     const assetName = readdirSync(join(DEMO, 'data', 'assets')).find(name => name !== 'missing.woff2');
     const asset = assetName && join(DEMO, 'data', 'assets', assetName);
     const assetBytes = asset && readFileSync(asset);
+    const staleAsset = join(DEMO, 'data', 'assets', 'stale-publish-test.png');
     const before = statSync(unchanged).mtimeMs;
     writeFileSync(stale, 'stale');
+    writeFileSync(staleAsset, 'stale');
     if (asset) unlinkSync(asset);
     const rebuilt = await run(['build', '--force'], at);
     const built = JSON.parse(readFileSync(join(DEMO, 'data', 'build.json'), 'utf8'));
     check('build: publication keeps unchanged files and removes stale files',
-      rebuilt.code === 0 && statSync(unchanged).mtimeMs === before && !existsSync(stale)
+      rebuilt.code === 0 && statSync(unchanged).mtimeMs === before && !existsSync(stale) && !existsSync(staleAsset)
         && built.changed.includes('snaps/stale-publish-test.html (removed)')
         && /^[0-9a-f]{16}$/.test(built.files['snaps/chat-start.html'])
         && asset && existsSync(asset) && readFileSync(asset).equals(assetBytes),

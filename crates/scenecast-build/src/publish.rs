@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -33,6 +35,14 @@ fn io(path: &Path, source: std::io::Error) -> PublishError {
 pub struct Published {
     pub changed: Vec<String>,
     pub files: BTreeMap<String, String>,
+    pub pruned_assets: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PublishMode {
+    Captures,
+    Assets,
+    AssetsAndPrune,
 }
 
 fn files(root: &Path) -> Result<BTreeSet<String>, PublishError> {
@@ -69,8 +79,71 @@ fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))[..16].to_owned()
 }
 
+fn prune_assets(data: &Path) -> Result<usize, PublishError> {
+    static ASSET: OnceLock<Regex> = OnceLock::new();
+    let pattern = ASSET
+        .get_or_init(|| Regex::new(r"/assets/([0-9a-f]{24}\.[a-z0-9]+|missing\.woff2)").unwrap());
+    let assets = data.join("assets");
+    let mut references = BTreeSet::new();
+    {
+        let mut scan = |path: &Path| -> Result<(), PublishError> {
+            let bytes = fs::read(path).map_err(|e| io(path, e))?;
+            let text = String::from_utf8_lossy(&bytes);
+            references.extend(pattern.captures_iter(&text).map(|c| c[1].to_owned()));
+            Ok(())
+        };
+        for dir in ["snaps", "streams"] {
+            let root = data.join(dir);
+            let metadata = fs::symlink_metadata(&root).map_err(|e| io(&root, e))?;
+            if !metadata.is_dir() {
+                return Err(io(
+                    &root,
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "expected a directory"),
+                ));
+            }
+            for name in files(&root)? {
+                if dir == "snaps" || name.ends_with(".html") || name.ends_with(".json") {
+                    scan(&root.join(name))?;
+                }
+            }
+        }
+    }
+    let mut visited = BTreeSet::new();
+    loop {
+        let pending: Vec<_> = references
+            .difference(&visited)
+            .filter(|name| name.ends_with(".css"))
+            .cloned()
+            .collect();
+        if pending.is_empty() {
+            break;
+        }
+        for name in pending {
+            visited.insert(name.clone());
+            let path = assets.join(name);
+            match fs::read(&path) {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes);
+                    references.extend(pattern.captures_iter(&text).map(|c| c[1].to_owned()));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io(&path, e)),
+            }
+        }
+    }
+    let mut pruned = 0;
+    for name in files(&assets)? {
+        if !references.contains(&name) && name != "missing.woff2" {
+            let path = assets.join(name);
+            fs::remove_file(&path).map_err(|e| io(&path, e))?;
+            pruned += 1;
+        }
+    }
+    Ok(pruned)
+}
+
 /// Publish staged capture files into `data`, retaining unchanged files.
-pub fn publish(data: &Path, staged_assets: bool) -> Result<Published, PublishError> {
+pub fn publish(data: &Path, mode: PublishMode) -> Result<Published, PublishError> {
     let next = data.join(".next");
     let metadata = fs::symlink_metadata(&next).map_err(|e| io(&next, e))?;
     if metadata.file_type().is_symlink() {
@@ -82,10 +155,9 @@ pub fn publish(data: &Path, staged_assets: bool) -> Result<Published, PublishErr
             std::io::Error::new(std::io::ErrorKind::InvalidData, "expected a directory"),
         ));
     }
-    let dirs: &[&str] = if staged_assets {
-        &["snaps", "streams", "assets"]
-    } else {
-        &["snaps", "streams"]
+    let dirs: &[&str] = match mode {
+        PublishMode::Captures => &["snaps", "streams"],
+        PublishMode::Assets | PublishMode::AssetsAndPrune => &["snaps", "streams", "assets"],
     };
     for dir in dirs {
         let from = next.join(dir);
@@ -151,9 +223,15 @@ pub fn publish(data: &Path, staged_assets: bool) -> Result<Published, PublishErr
         }
     }
     fs::remove_dir_all(&next).map_err(|e| io(&next, e))?;
+    let pruned_assets = if matches!(mode, PublishMode::AssetsAndPrune) {
+        Some(prune_assets(data)?)
+    } else {
+        None
+    };
     Ok(Published {
         changed,
         files: output,
+        pruned_assets,
     })
 }
 
@@ -176,7 +254,7 @@ mod tests {
             .unwrap()
             .modified()
             .unwrap();
-        let result = publish(data, false).unwrap();
+        let result = publish(data, PublishMode::Captures).unwrap();
         assert_eq!(
             result.changed,
             ["snaps/new.html", "streams/old/frame.html (removed)"]
@@ -200,7 +278,7 @@ mod tests {
         fs::create_dir_all(temp.path().join("snaps")).unwrap();
         let existing = temp.path().join("snaps/existing.html");
         fs::write(&existing, "existing").unwrap();
-        assert!(publish(temp.path(), false).is_err());
+        assert!(publish(temp.path(), PublishMode::Captures).is_err());
         assert_eq!(fs::read_to_string(existing).unwrap(), "existing");
     }
 
@@ -213,11 +291,41 @@ mod tests {
         }
         fs::write(data.join(".next/assets/new.png"), "image").unwrap();
         fs::write(data.join("assets/old.png"), "old").unwrap();
-        let result = publish(data, true).unwrap();
+        let result = publish(data, PublishMode::Assets).unwrap();
         assert_eq!(fs::read(data.join("assets/new.png")).unwrap(), b"image");
         assert!(data.join("assets/old.png").exists());
         assert!(result.changed.is_empty());
         assert!(result.files.is_empty());
+    }
+
+    #[test]
+    fn prunes_unreferenced_assets_and_keeps_transitive_css_references() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        for dir in [".next/snaps", ".next/streams", ".next/assets"] {
+            fs::create_dir_all(data.join(dir)).unwrap();
+        }
+        let css = "aaaaaaaaaaaaaaaaaaaaaaaa.css";
+        let image = "bbbbbbbbbbbbbbbbbbbbbbbb.png";
+        let unused = "cccccccccccccccccccccccc.png";
+        fs::write(
+            data.join(".next/snaps/main.html"),
+            format!("<link href=\"/assets/{css}\">"),
+        )
+        .unwrap();
+        fs::write(data.join(".next/streams/index.json"), "{}").unwrap();
+        fs::write(
+            data.join(".next/assets").join(css),
+            format!("p {{ background: url(/assets/{image}) }}"),
+        )
+        .unwrap();
+        fs::write(data.join(".next/assets").join(image), "image").unwrap();
+        fs::write(data.join(".next/assets").join(unused), "unused").unwrap();
+        let result = publish(data, PublishMode::AssetsAndPrune).unwrap();
+        assert_eq!(result.pruned_assets, Some(1));
+        assert!(data.join("assets").join(css).exists());
+        assert!(data.join("assets").join(image).exists());
+        assert!(!data.join("assets").join(unused).exists());
     }
 
     #[cfg(unix)]
@@ -228,7 +336,7 @@ mod tests {
         fs::create_dir_all(temp.path().join(".next/streams")).unwrap();
         std::os::unix::fs::symlink("missing", temp.path().join(".next/snaps/link")).unwrap();
         assert!(matches!(
-            publish(temp.path(), false),
+            publish(temp.path(), PublishMode::Captures),
             Err(PublishError::Symlink(_))
         ));
     }

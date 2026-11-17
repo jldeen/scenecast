@@ -678,13 +678,14 @@ if (process.env.SCENECAST_RUST_PUBLISH === '1') {
     });
     input.once('close', () => { if (!received) reject(new Error('capture publisher closed without a response')); });
     input.once('error', reject);
-    console.log('SCENECAST_PUBLISH_V2');
+    console.log('SCENECAST_PUBLISH_V3');
   });
   if (result.error) throw new Error(result.error);
-  if (!Array.isArray(result.changed) || !result.files || typeof result.files !== 'object') throw new Error('invalid capture publisher response');
+  if (!Array.isArray(result.changed) || !result.files || typeof result.files !== 'object' || !Number.isInteger(result.prunedAssets)) throw new Error('invalid capture publisher response');
   changed.push(...result.changed);
   Object.assign(files0, result.files);
   report.changed = changed.length;
+  report.prunedAssets = result.prunedAssets;
 } else {
   const fileHash = buf => createHash('sha256').update(buf).digest('hex').slice(0, 16);
   const list = dir => existsSync(dir) ? readdirSync(dir, { recursive: true }).map(f => String(f).replace(/\\/g, '/')).filter(f => statSync(join(dir, f)).isFile()) : [];
@@ -708,7 +709,7 @@ if (process.env.SCENECAST_RUST_PUBLISH === '1') {
 }
 ASSETS = FINAL_ASSETS;
 // Assets nothing refers to any more (the hover audit's full-page snapshots are read only for their CSS) go.
-{
+if (process.env.SCENECAST_RUST_PUBLISH !== '1') {
   const refs = new Set();
   const scan = t => { for (const m of t.matchAll(/\/assets\/([0-9a-f]{24}\.[a-z0-9]+|missing\.woff2)/g)) refs.add(m[1]); };
   for (const f of readdirSync(join(DATA, 'snaps'))) scan(readFileSync(join(DATA, 'snaps', f), 'utf8'));

@@ -10,7 +10,7 @@ use thiserror::Error;
 use crate::engine::{Engine, EngineError, Progress, with_demo};
 use crate::fingerprint::{FingerprintError, fingerprint_tree};
 use crate::flow::{FlowError, compile_recording};
-use crate::publish::{PublishError, publish};
+use crate::publish::{PublishError, PublishMode, publish};
 use crate::scrub::{ScrubError, ScrubReport, scrub_tree};
 use crate::sync::{SyncError, SyncReport, sync_manifest};
 
@@ -267,9 +267,10 @@ fn build_with_raw(
     let mut publication_error = None;
     let mut published = false;
     let mut control = |line: &str| {
-        let staged_assets = match line {
-            "SCENECAST_PUBLISH_V1" => false,
-            "SCENECAST_PUBLISH_V2" => true,
+        let mode = match line {
+            "SCENECAST_PUBLISH_V1" => PublishMode::Captures,
+            "SCENECAST_PUBLISH_V2" => PublishMode::Assets,
+            "SCENECAST_PUBLISH_V3" => PublishMode::AssetsAndPrune,
             _ => return None,
         };
         if published {
@@ -278,10 +279,10 @@ fn build_with_raw(
             );
         }
         published = true;
-        Some(match publish(&data, staged_assets) {
-            Ok(result) => {
-                serde_json::json!({"changed": result.changed, "files": result.files}).to_string()
-            }
+        Some(match publish(&data, mode) {
+            Ok(result) => serde_json::json!({
+                "changed": result.changed, "files": result.files, "prunedAssets": result.pruned_assets
+            }).to_string(),
             Err(error) => {
                 let message = error.to_string();
                 publication_error = Some(error);
