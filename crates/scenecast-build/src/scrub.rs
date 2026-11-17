@@ -44,6 +44,8 @@ pub enum ScrubError {
     },
     #[error("scrub: symbolic link not allowed: {0}")]
     Symlink(PathBuf),
+    #[error("scrub: capture text is not valid UTF-8: {0}")]
+    InvalidText(PathBuf),
 }
 
 fn io_error(path: &Path, source: std::io::Error) -> ScrubError {
@@ -85,19 +87,26 @@ pub fn scrub_tree(
             }
         } else if metadata.is_file() {
             let bytes = fs::read(path).map_err(|e| io_error(path, e))?;
+            let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+            let text_capture = ["html", "htm", "svg", "json", "css", "js", "mjs"]
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate));
             let Ok(text) = std::str::from_utf8(&bytes) else {
-                return Ok(());
+                return if text_capture {
+                    Err(ScrubError::InvalidText(path.to_path_buf()))
+                } else {
+                    Ok(())
+                };
             };
             if text.contains('\0') {
-                return Ok(());
+                return if text_capture {
+                    Err(ScrubError::InvalidText(path.to_path_buf()))
+                } else {
+                    Ok(())
+                };
             }
             let (scrubbed, mut findings) = scrub_text(text, allowlist);
-            if source == "built"
-                && path.extension().is_some_and(|ext| ext == "html")
-                && Regex::new(r"(?i)<script(?:\s|>)")
-                    .expect("static script pattern")
-                    .is_match(text)
-            {
+            if source == "built" && contains_script(ext, text) {
                 findings.push(Finding {
                     kind: "script",
                     line: 0,
@@ -125,6 +134,28 @@ pub fn scrub_tree(
         Ok(())
     }
     walk(root, root, source, allowlist, redact, report)
+}
+
+fn contains_script(ext: &str, text: &str) -> bool {
+    static SCRIPT: OnceLock<Regex> = OnceLock::new();
+    let pattern = SCRIPT.get_or_init(|| Regex::new(r"(?i)<script(?:\s|/|>)").unwrap());
+    if ext.eq_ignore_ascii_case("js") || ext.eq_ignore_ascii_case("mjs") || pattern.is_match(text) {
+        return true;
+    }
+    fn strings_contain_script(value: &serde_json::Value, pattern: &Regex) -> bool {
+        match value {
+            serde_json::Value::String(value) => pattern.is_match(value),
+            serde_json::Value::Array(values) => {
+                values.iter().any(|v| strings_contain_script(v, pattern))
+            }
+            serde_json::Value::Object(values) => {
+                values.values().any(|v| strings_contain_script(v, pattern))
+            }
+            _ => false,
+        }
+    }
+    ext.eq_ignore_ascii_case("json")
+        && serde_json::from_str(text).is_ok_and(|value| strings_contain_script(&value, pattern))
 }
 
 struct Rule {
@@ -285,5 +316,31 @@ mod tests {
                 .unwrap()
                 .contains("abcdefghijklmnop12345")
         );
+    }
+
+    #[test]
+    fn detects_scripts_in_svg_and_json_and_rejects_invalid_capture_text() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("page.svg"), "<svg><script/></svg>").unwrap();
+        fs::write(
+            dir.path().join("capture.json"),
+            r#"{"html":"\u003cscript\u003ealert(1)\u003c/script\u003e"}"#,
+        )
+        .unwrap();
+        let mut report = ScrubReport::default();
+        scrub_tree(dir.path(), "built", &[], false, &mut report).unwrap();
+        assert_eq!(
+            report
+                .findings
+                .iter()
+                .filter(|f| f.finding.kind == "script")
+                .count(),
+            2
+        );
+        fs::write(dir.path().join("bad.html"), [0xff]).unwrap();
+        assert!(matches!(
+            scrub_tree(dir.path(), "built", &[], false, &mut report),
+            Err(ScrubError::InvalidText(_))
+        ));
     }
 }

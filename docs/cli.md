@@ -57,7 +57,9 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 Builds inspect raw captures before processing and write `.out/scrub.json` without including matched values.
 Detected credentials stop the build; email addresses and labeled tenant IDs in built text are redacted unless
 their exact values appear in `demo.json` as `"scrub": { "allowlist": ["value"] }`. Credentials cannot be
-allowlisted. Treat the raw capture folder as sensitive even after building.
+allowlisted. Scripts in built captures, including SVG and JSON-embedded markup, fail the build; malformed
+UTF-8 in text capture files is rejected rather than skipped. Binary files are not inspected for PII.
+Treat the raw capture folder as sensitive even after building.
 
 `build` writes `manifest.json`: every state in `flow.json` becomes a `live-page` scene (`data/snaps/<id>.html`,
 its SHA-256, its transitions), with the streams, beats, focus points and apps. Fallback scenes already in the
