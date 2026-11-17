@@ -1,5 +1,6 @@
 //! Export a live-page bundle for a static HTTP host.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -199,6 +200,33 @@ pub fn export_live(
         let bytes = fs::read(&path).map_err(|e| io(&path, e))?;
         live.sha256 = Some(format!("{:x}", Sha256::digest(&bytes)));
     }
+    let snapshots: Vec<&str> = exported
+        .graph
+        .scenes
+        .iter()
+        .filter_map(|scene| scene.live.as_ref().map(|live| live.snapshot.as_str()))
+        .collect();
+    let mut seen = HashSet::new();
+    for path in exported.referenced_asset_paths() {
+        if snapshots.contains(&path) || !seen.insert(path) {
+            continue;
+        }
+        let source = bundle.join(path);
+        let destination = output.join(path);
+        if destination.exists() {
+            return Err(ExportError::Invalid(format!(
+                "asset conflicts with player output: {path}"
+            )));
+        }
+        let mut report = ScrubReport::default();
+        scrub_tree(&source, "built", &allowlist, false, &mut report)?;
+        if !report.findings.is_empty() {
+            return Err(ExportError::Invalid(format!(
+                "referenced asset contains sensitive text or scripts: {path}"
+            )));
+        }
+        copy_tree(&source, &destination)?;
+    }
     let files = validate_referenced_files(output, &exported);
     if !files.is_valid() {
         return Err(ExportError::Invalid(format!(
@@ -237,4 +265,71 @@ pub fn export_live(
         &serde_json::to_vec(&fonts)?,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scenecast_core::{LivePage, read_manifest};
+
+    #[test]
+    fn exports_valid_references_and_rehashes_rewritten_snapshots() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("bundle");
+        let output = tmp.path().join("output");
+        fs::create_dir_all(bundle.join("data/snaps")).unwrap();
+        fs::create_dir_all(bundle.join("captures")).unwrap();
+        fs::write(
+            bundle.join("data/snaps/start.html"),
+            r#"<img src="/assets/example.png">"#,
+        )
+        .unwrap();
+        fs::write(
+            bundle.join("captures/reference.png"),
+            [0x89, b'P', b'N', b'G'],
+        )
+        .unwrap();
+        let mut manifest = BundleManifest::starter("Fixture");
+        manifest.graph.scenes[0].live = Some(LivePage {
+            app: "fixture".into(),
+            snapshot: "data/snaps/start.html".into(),
+            title: None,
+            reference: Some("captures/reference.png".into()),
+            sha256: Some("old".into()),
+        });
+        export_live(&bundle, &output, &manifest).unwrap();
+        let exported = read_manifest(&output).unwrap();
+        assert!(validate_referenced_files(&output, &exported).is_valid());
+        let live = exported.graph.scenes[0].live.as_ref().unwrap();
+        let bytes = fs::read(output.join(&live.snapshot)).unwrap();
+        assert_eq!(
+            live.sha256.as_deref(),
+            Some(format!("{:x}", Sha256::digest(&bytes)).as_str())
+        );
+        assert_eq!(
+            fs::read(output.join("captures/reference.png")).unwrap(),
+            [0x89, b'P', b'N', b'G']
+        );
+    }
+
+    #[test]
+    fn rejects_sensitive_referenced_assets() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("bundle");
+        fs::create_dir_all(bundle.join("data/snaps")).unwrap();
+        fs::write(bundle.join("data/snaps/start.html"), "<p>clean</p>").unwrap();
+        fs::write(bundle.join("reference.txt"), "client_secret=short").unwrap();
+        let mut manifest = BundleManifest::starter("Fixture");
+        manifest.graph.scenes[0].live = Some(LivePage {
+            app: "fixture".into(),
+            snapshot: "data/snaps/start.html".into(),
+            title: None,
+            reference: Some("reference.txt".into()),
+            sha256: None,
+        });
+        assert!(matches!(
+            export_live(&bundle, &tmp.path().join("output"), &manifest),
+            Err(ExportError::Invalid(_))
+        ));
+    }
 }
