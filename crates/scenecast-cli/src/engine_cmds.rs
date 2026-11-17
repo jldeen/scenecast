@@ -101,7 +101,8 @@ pub fn handover(sub: &str, args: &Passthrough, takes_project: bool) -> Result<i3
 
 pub fn present(args: &Passthrough) -> Result<i32> {
     let mut args = args.clone();
-    args.args.push("--open".into());
+    // Presenting: no editor in the page at all.
+    args.args.extend(["--open".into(), "--no-editor".into()]);
     handover("serve", &args, true)
 }
 
@@ -360,6 +361,207 @@ pub fn fidelity(args: &FidelityArgs) -> Result<i32> {
         println!("report: {}", outcome.report_html.display());
     }
     Ok(if outcome.passed() { 0 } else { 1 })
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ScriptArgs {
+    /// The presenter's script: plain text, Markdown (> quotes are the lines, ## headings the beats) or RunLines (.sk).
+    pub file: PathBuf,
+    /// The project folder (default: the one you're in, or above it).
+    #[arg(long)]
+    pub demo: Option<PathBuf>,
+    /// A replica already served for authoring (default: one is started for the run).
+    #[arg(long)]
+    pub url: Option<String>,
+    /// `text` (deterministic, the default) or a matcher module of the demo's own.
+    #[arg(long)]
+    pub matcher: Option<String>,
+    /// The sheets only: leave focus.json as it is.
+    #[arg(long)]
+    pub no_write: bool,
+    /// No PDF of the sheet.
+    #[arg(long)]
+    pub no_pdf: bool,
+    /// Exit 1 when any line is not backed.
+    #[arg(long)]
+    pub strict: bool,
+    /// Print the outcome as JSON at the end (and nothing else).
+    #[arg(long, conflicts_with = "ndjson")]
+    pub json: bool,
+    /// Print each event as one line of JSON as it comes (what the desktop app shows).
+    #[arg(long)]
+    pub ndjson: bool,
+}
+
+/// `scenecast script <file>`: script to focus (scenecast_build::script), with its progress printed.
+pub fn script(args: &ScriptArgs) -> Result<i32> {
+    use scenecast_build::script::{LineStatus, ScriptOptions, ScriptProgress, run};
+    let mut given = Vec::new();
+    if let Some(d) = &args.demo {
+        given.extend([OsString::from("--demo"), d.clone().into_os_string()]);
+    }
+    let dir = project_dir(&given)?;
+    let human = !args.json && !args.ndjson;
+    let opts = ScriptOptions {
+        file: args.file.clone(),
+        url: args.url.clone(),
+        matcher: args.matcher.clone(),
+        write: !args.no_write,
+        pdf: !args.no_pdf,
+    };
+    let s = |v: &serde_json::Value| {
+        v.as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| v.to_string())
+    };
+    let outcome = run(&dir, &opts, |p| match p {
+        ScriptProgress::Event(e) if args.ndjson => {
+            println!("{}", serde_json::to_string(&e).unwrap_or_default())
+        }
+        ScriptProgress::Event(e) if human => {
+            let d = &e.data;
+            match e.event.as_str() {
+                "parsed" => println!("{} lines, {} beats", d["lines"], d["beats"]),
+                "indexed" => println!(
+                    "  screen {}/{} {} ({} items)",
+                    d["n"],
+                    d["of"],
+                    s(&d["state"]),
+                    d["items"]
+                ),
+                "matched" => println!(
+                    "  {} {:<6} {:<28} {} focus point(s){}",
+                    match s(&d["status"]).as_str() {
+                        "backed" => "ok  ",
+                        "partial" => "PART",
+                        _ => "GAP ",
+                    },
+                    s(&d["line"]),
+                    s(&d["state"]),
+                    d["points"],
+                    d["missing"]
+                        .as_array()
+                        .filter(|m| !m.is_empty())
+                        .map(|m| format!(
+                            " (not on screen: {})",
+                            m.iter().map(s).collect::<Vec<_>>().join(", ")
+                        ))
+                        .unwrap_or_default()
+                ),
+                _ => {}
+            }
+        }
+        ScriptProgress::Engine(Progress::Stderr(line)) if !args.json => eprintln!("{line}"),
+        _ => {}
+    })?;
+    let r = &outcome.report;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "summary": r.summary, "lines": r.lines, "sheet": outcome.sheet_html, "pdf": outcome.sheet_pdf,
+                "cues": outcome.cues, "focus": outcome.focus_json, "json": outcome.report_json,
+            }))?
+        );
+    } else if human {
+        for l in r.lines.iter().filter(|l| l.status != LineStatus::Backed) {
+            println!(
+                "{} {} {}",
+                if l.status == LineStatus::Unbacked {
+                    "NOT BACKED"
+                } else {
+                    "PARTLY    "
+                },
+                l.id,
+                l.text.chars().take(90).collect::<String>()
+            );
+        }
+        println!(
+            "{} lines: {} backed, {} partly, {} not backed; {} focus points{}",
+            r.summary.lines,
+            r.summary.backed,
+            r.summary.partial,
+            r.summary.unbacked,
+            r.summary.points,
+            if outcome.focus_json.is_some() {
+                " in focus.json"
+            } else {
+                " (focus.json not written)"
+            }
+        );
+        println!("sheet: {}", outcome.sheet_html.display());
+        if let Some(pdf) = &outcome.sheet_pdf {
+            println!("pdf:   {}", pdf.display());
+        }
+        println!("cues:  {}", outcome.cues.display());
+    }
+    Ok(if args.strict && r.summary.unbacked > 0 {
+        1
+    } else {
+        0
+    })
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct EditArgs {
+    /// The project folder (default: the one you're in, or above it).
+    #[arg(long)]
+    pub demo: Option<PathBuf>,
+    /// The port (default: the demo's own).
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// Only print the URL; don't open a window.
+    #[arg(long)]
+    pub no_open: bool,
+    /// Print each event as one line of JSON (what the desktop app shows).
+    #[arg(long)]
+    pub ndjson: bool,
+}
+
+/// `scenecast edit`: the editor's server (scenecast_build::edit), each saved change printed, until stopped.
+pub fn edit(args: &EditArgs) -> Result<i32> {
+    use scenecast_build::edit::{EditOptions, EditProgress, start};
+    let mut given = Vec::new();
+    if let Some(d) = &args.demo {
+        given.extend([OsString::from("--demo"), d.clone().into_os_string()]);
+    }
+    let dir = project_dir(&given)?;
+    let mut server = start(
+        &dir,
+        &EditOptions {
+            port: args.port,
+            open: !args.no_open,
+        },
+    )?;
+    if args.ndjson {
+        println!(
+            "{}",
+            serde_json::json!({"event": "ready", "url": server.url})
+        );
+    } else {
+        println!(
+            "@edit {}",
+            serde_json::json!({"event": "ready", "url": server.url})
+        );
+        println!(
+            "editor: {}  (⌥⇧E / Ctrl+Alt+Shift+E toggles it; Ctrl+C stops)",
+            server.url
+        );
+    }
+    for p in server.events() {
+        match p {
+            EditProgress::Saved(e) if args.ndjson => {
+                println!("{}", serde_json::to_string(&e).unwrap_or_default())
+            }
+            EditProgress::Saved(e) => {
+                println!("@edit {}", serde_json::to_string(&e).unwrap_or_default());
+            }
+            EditProgress::Engine(Progress::Stdout(line)) if !args.ndjson => println!("{line}"),
+            EditProgress::Engine(Progress::Stderr(line)) => eprintln!("{line}"),
+            _ => {}
+        }
+    }
+    Ok(server.wait()?)
 }
 
 /// `scenecast release`: build, manifest, then the engine's full checklist, secret scan and commit (and push).

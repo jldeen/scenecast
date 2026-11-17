@@ -366,6 +366,11 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
     state: () => ({ run: st.run, limit: st.shown ? st.shown.limit : null, s: st.s, A: st.A.slice(), z: st.z, draw: st.draw, cursor: st.cursor, id: st.cursor >= 0 ? points[st.cursor].id : null, last: st.last, marks: st.marks.map(m => ({ kind: m.kind, a: m.a.map(v => Math.round(v * 100) / 100), b: m.b.map(v => Math.round(v * 100) / 100) })) }),
     ready: () => points.map(p => ready(p) ? p.id : null).filter(Boolean),
     locate: id => { const p = points.find(x => x.id === id); const t = p && locate(p); return t && t.box; },
+    // Where a point that isn't in the list would land (the script matcher and the editor check a target with it).
+    locatePoint: p => { const t = locate(p); return t ? { box: t.box } : null; },
+    // The editor's changes, at once: the new list, zoomed out, the sequence from the start of the beat.
+    setPoints(list) { const at = st.cursor >= 0 && points[st.cursor] ? points[st.cursor].id : null; clear(); points.splice(0, points.length, ...list); st.cursor = at ? points.findIndex(p => p.id === at) : -1; },
+    get points() { return points.slice(); },
     // Play explicit ZoomIt moves (screen points): for the side-by-side clip against the real ZoomIt recording.
     async play(moves) {
       const my = ++st.gen;

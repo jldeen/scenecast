@@ -25,7 +25,13 @@ first-class. Phases:
   pages, late styles, script-pinned and script-sized layout, virtualized lists), writes per-demo patches to
   `flow.fixes.json`, builds and checks again, and writes a residual report. Never a screenshot in a page's place.
   The fixture's lab app seeds each problem; the loop finds and fixes all of them on Ubuntu, macOS and Windows.
-- **Phase 4: script to focus points, and the editor.**
+- **Phase 4 (done on the fixture; Demo 1's 27 checked in the pilots): script to focus points, and the editor.**
+  `scenecast script <file>` puts each line of the presenter's script (text, Markdown or RunLines) on the screen it
+  plays over and turns what backs it into focus points (`focus.json`), with the line-to-screen sheet (HTML and PDF,
+  unbacked lines flagged) and the cue sheet; the matcher is pluggable, deterministic by default. The editor, inside
+  the replica (⌥⇧E, or `scenecast edit`): dots that snap to what they point at, wording and date changes everywhere
+  the text appears, beat starts, undo; every change shows at once and is saved. Both are Rust library calls with
+  progress (`scenecast_build::script`, `scenecast_build::edit`).
 - **Phase 5: ready for anyone**, then a desktop app (Tauri, macOS and Windows) on the same Rust core.
 
 ## Foundation from Seth's scenecast

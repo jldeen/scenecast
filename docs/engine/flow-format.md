@@ -8,6 +8,8 @@ A demo folder holds:
 | `recording.json` | the recorder (`replica build --from-raw`) | What happened when the demo was recorded. Don't edit. |
 | `flow.fixes.json` | `scenecast fidelity` | The fidelity loop's per-demo patches (fonts, assets, click CSS, pin, set, rows), each with its cause and evidence. Applied before the overrides. Remove one to undo it. |
 | `flow.overrides.mjs` | you | Hand edits, applied after the recording. Keep every edit here, with why. |
+| `flow.editor.json` | the editor (`scenecast edit`) | Wording and date changes and beat starts made in the replica. Applied after `flow.overrides.mjs`. |
+| `focus.mjs`, `focus.json` | you; `scenecast script` and the editor | Focus points (below). |
 | `flow.json` | `replica flow` / `replica build` | What the replica runs. Never edit by hand. |
 | `data/` | `replica build` | `snaps/` (pages), `streams/` (answers' frames), `assets/` (CSS, fonts, images). |
 
@@ -265,6 +267,21 @@ screen, and skips points that aren't. `{ text, up }` is the element around a tex
 or a number of parents). `open` opens step groups first. The view zooms to fit the target and its mark with a 9%
 margin, never past `zoom`; a target against the screen's edge gets the most zoom that keeps the mark on screen.
 
+### `focus.json` and `flow.editor.json`
+
+`scenecast script` and the editor write these; by hand is fine too. `focus.json` is `{ version: 1, script, points }`:
+points as above, each with `source` (`script`, `dot` for the editor's, `edited` for a script point moved in the
+editor) and `label` (what it points at, for people); `scenecast script` replaces only its own (`script`) points.
+They're merged with `focus.mjs`'s into `flow.focus` in order: by beat, then where the screen comes in the
+run-through, keeping the order within a screen (`packages/player/app/focus-order.js`).
+
+```js
+// flow.editor.json
+{ "version": 1,
+  "edits": [{ "replace": ["Friday", "Monday"] }],                       // added to flow.edits (served live, built in)
+  "beats": { "2": { "active": "chat", "states": { "chat": "chat-02" } } } }  // where ⌥2 starts (a new beat may follow the last)
+```
+
 ### Serve-time tweaks and `data/build.json`
 
 `replica serve` re-reads `flow.overrides.mjs` (and the demo's other `.mjs`/`.json`) on every reload and recompiles
@@ -293,9 +310,12 @@ the checks; `?pace=N` sets the stream pace for a person.
 All keys use ⌥ and show nothing: **⌥0** reset, **⌥1–⌥9** beats, **⌥ + an app's key** switch app, **⌥← ⌥→**
 previous / next app, **⌥P** type the scripted text into the field she's in, **⌥N** the screen's next step, **⌥F**
 the next focus point (**⌥⇧F** the one before; while zoomed, **Esc** zooms out and **↑ ↓** or the wheel step the zoom).
+**⌥⇧E** turns the editor on and off where the replica is served for authoring (docs/cli.md).
 
 ## Changes
 
+- **1** (scenecast 0.2, Phase 4): added, all optional: `focus.json` (with `source`, `label`) and
+  `flow.editor.json` in the demo folder; focus points `line` may be a script line id (`"2.1"`).
 - **1** (kit 1.4.0): added, all optional: `focus`, `focusOptions`, `modules` (from `focus.mjs` and demo.json
   `engine`); demo.json `engine`, `build`, `checks` (from the Demo 1 replica, Nov 16).
 - **1** (kit 1.3.0): no format change. Added `record.auto` in demo.json, `data/build.json`, serve-time edits and

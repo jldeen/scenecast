@@ -3,7 +3,8 @@
 // the recorder exactly the way a demo is (a "person" clicks, types and presses Enter in two app tabs while the
 // agent watches), side paths are captured (hovers, clicks with a menu whose styles load on open, a resize handle,
 // step groups, a "+N" chip list, zoom, a virtualized grid), the replica is built, served, and the fidelity checklist
-// runs on it, including two identical runs of the recorded path.
+// runs on it, including two identical runs of the recorded path; then script to focus points and the editor
+// (script-focus.mjs).
 //   node test/selftest.mjs [--keep]        (--keep leaves the temp demo folder and prints where it is)
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, unlinkSync, utimesSync, renameSync } from 'node:fs';
@@ -19,6 +20,7 @@ import { startFixture } from '../../examples/fixture-app/server.mjs';
 import { compileFlow } from '../kit/compile/flow.mjs';
 import { loadDemo } from '../kit/lib/demo.mjs';
 import { flowParts } from '../kit/lib/buildkey.mjs';
+import { scriptAndEditor } from './script-focus.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -500,6 +502,8 @@ export default flow => {
   }
   r = await run(['status'], at);
   check('status: nothing pending', /build +up to date/.test(r.out) && /all committed/.test(r.out), r.out);
+  // 9 · Script to focus points, and the editor in Chrome and Edge (script-focus.mjs).
+  await scriptAndEditor({ DEMO, BIN, check, times });
   console.log('TIMES ' + JSON.stringify(times));
   writeFileSync(join(tmp, 'times.json'), JSON.stringify(times));
 } catch (e) {

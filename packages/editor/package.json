@@ -3,5 +3,5 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Placeholder (Phase 4): edit mode inside the player: focus dots, wording and date overrides, beat starts."
+  "description": "The editor inside the replica: focus-point dots, wording and date overrides, beat starts, undo."
 }

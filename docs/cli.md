@@ -44,8 +44,10 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 | `scenecast flow [--from-raw]` | `recording.json` + `flow.overrides.mjs` → `flow.json`. |
 | `scenecast build [--from-raw] [--force]` | Flow, raw captures → `data/` (changed captures only, scrubbed), secret scan, then `manifest.json` (below). |
 | `scenecast sync` | `manifest.json` from what was built, on its own. |
-| `scenecast serve [--open] [--pace N] [--release]` | The replica on localhost. `--open`: an app window, Chrome on the Mac and Edge on Windows (`chrome.browser` and `chrome.profile` in `demo.json`). |
-| `scenecast present [--pace N] [--release]` | Serve the replica and open the same app window. The URL is printed if the browser cannot be opened. |
+| `scenecast serve [--open] [--pace N] [--release] [--no-editor]` | The replica on localhost. `--open`: an app window, Chrome on the Mac and Edge on Windows (`chrome.browser` and `chrome.profile` in `demo.json`). Served for authoring (not `--release`), the editor is in the page, hidden until its key. |
+| `scenecast present [--pace N] [--release]` | Serve the replica and open the same app window, with no editor in the page. The URL is printed if the browser cannot be opened. |
+| `scenecast script <file> [--matcher text\|<file.mjs>] [--no-write] [--no-pdf] [--strict] [--json\|--ndjson]` | Script to focus points (below). |
+| `scenecast edit [--port N] [--no-open] [--ndjson]` | The replica in edit mode (below). |
 | `scenecast text "<old>" "<new>"` | A wording or date tweak, live on reload. |
 | `scenecast check [--only a,b] [--skip a,b]` | The whole fidelity checklist. Flags every fallback scene first. |
 | `scenecast fidelity [--rounds 3] [--threshold 0.5] [--no-fix] [--json\|--ndjson]` | The fidelity loop: real vs replica for every captured state, each difference diagnosed and fixed in `flow.fixes.json`, built and checked again (below). |
@@ -108,6 +110,58 @@ the fixes) and, per round, `.out/fidelity/round-N/` (the comparison, its picture
 compares and reports. `--ndjson` prints each event as it comes (what the desktop app shows); `--json` the outcome.
 The exit code is 0 when every state is within the threshold, every font matches and no fallback scene was added.
 From Rust: `scenecast_build::fidelity::run(dir, &FidelityOptions, |progress| …)`.
+
+## Script to focus points: `scenecast script <file>`
+
+The presenter pastes their script; Scenecast works out what each line points at. The script is plain text (each
+line a line), Markdown (`>` quotes are the spoken lines, `##` headings or `Beat N:` lines start beats, `**Do:** …`
+after a line is its cue; everything else is notes) or a RunLines `.sk` file (a row per beat). Beats are optional.
+The fixture's sample is [examples/fixture-app/script.md](../examples/fixture-app/script.md).
+
+1. Every screen of the run-through (the recorded path, in order) is opened in the replica and indexed: its text
+   blocks, controls, lists and regions, with their accessibility roles and boxes.
+2. A matcher puts each line on the screen it plays over (in order: a line is never on an earlier screen than the
+   line before; a line nothing backs stays on the screen before it) and picks up to three elements that back it.
+3. Each pick becomes a focus point: its target (the text, or the sentence in a long paragraph; a control by its
+   label; list items together as one box), a box or, for a small control, an arrow whose tail comes from the open
+   side of the screen; its beat (the ⌥ key that lands just before it); its order (as the line mentions them). Each
+   target is checked with the focus engine's own locate, and each point is played once the way ⌥F plays it, to
+   see where it lands (the zoom it fits, never past 2×, with the 9% margin).
+
+It writes `focus.json` (the script's points; the editor's dots and points moved in the editor are kept on a
+re-run), and in `.out/script/`: `sheet.html` and `sheet.pdf` (each line next to its screen, what backs it
+highlighted and numbered in ⌥F order, where each point lands; a line nothing backs is flagged, and so are facts a
+line states, numbers and names, that its screen doesn't show), `cues.md` and `cues.html` (the presenter's cue
+sheet: per line, the steps to its screen or the beat key, then ⌥F per point) and `script.json` (all of it, for
+tools). The exit code is 0 even with unbacked lines (they're flagged); `--strict` makes them fail.
+
+The matcher is pluggable. `text`, the default, is deterministic (text similarity weighted by how rare each word
+is across the screens, sentence by sentence, with accessibility roles), so CI runs it with no model. A demo can
+bring its own, a model for instance: `--matcher my-matcher.mjs` or `demo.json` `"script": { "matcher": "…" }`,
+whose default export is `{ name, async match({ lines, screens, sequence, flow }) }` (the interface and helpers
+are in `packages/script/match.mjs`). From Rust: `scenecast_build::script::run(dir, &ScriptOptions, |progress| …)`.
+
+## The editor: `scenecast edit`
+
+The replica in edit mode, for people to adjust what the script matcher did, or to add their own focus points.
+`scenecast edit` serves the demo and opens it in edit mode; in any replica served for authoring (`scenecast serve`)
+the key **⌥⇧E** (**Ctrl+Alt+Shift+E** on Windows) turns it on and off. It's never in the page with `present`,
+`--release` or an export, and nothing of it shows until its key.
+
+| Do | How |
+|---|---|
+| Add a focus point | Click what the line points at: a dot. It snaps to the element (a control, the sentence under the pointer, a list item), and gets its zoom, a box or an arrow, its beat and its place in the beat (reading order). |
+| Move one | Drag its dot onto something else. |
+| Delete, reorder, box or arrow | Click its dot (or its row in the panel), then Delete; `[` `]` (or ↑ ↓) for its place in the beat; M for box or arrow. ▶ plays it as ⌥F does. |
+| Change wording or a date | Drag across the text, type the new words, Enter. It changes everywhere the text appears (every screen and answer frame; the panel says how many). |
+| Set where a beat starts | Go to the screen, then Start here next to the beat (⌥1–⌥9), or next to a new one. |
+| Undo | ⌘Z / Ctrl+Z, or Undo. |
+| Click the app itself | Use the app (the panel's button), then Edit again. Presenter keys work all the time. |
+
+Every change shows at once (no rebuild, no reload) and is saved: focus points to `focus.json`, wording and beat
+starts to `flow.editor.json` (docs/engine/flow-format.md). `scenecast build` bakes the wording in. The server prints
+one `@edit {"event":"saved",…}` line per change. From Rust: `scenecast_build::edit::start(dir, &EditOptions)` returns
+the server with its URL; its `events()` are the saved changes, until it stops.
 
 Environment: `SCENECAST_JS` (the `packages` folder), `SCENECAST_NODE` (the Node binary), and the engine's
 `REPLICA_RAW`, `REPLICA_PORT`, `REPLICA_RX_PORT`, `REPLICA_NO_OPEN=1`, `REPLICA_CHROME_CHANNEL` (`chrome`, or

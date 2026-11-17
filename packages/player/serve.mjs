@@ -14,6 +14,8 @@ import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp } from './launch.mjs';
 import { diffFlow } from './app/bundle-flow.js';
+import { readFocusJson, readEditorOverrides, checkFocusJson, checkEditorOverrides, writeJsonAtomic, FOCUS_JSON, EDITOR_JSON } from '../kit/lib/overrides.mjs';
+import { textRe } from '../kit/lib/edits.mjs';
 import { loadDemo, arg } from '../kit/lib/demo.mjs';
 import { compileFlow } from '../kit/compile/flow.mjs';
 import { buildInputs, buildDiff } from '../kit/lib/buildkey.mjs';
@@ -26,13 +28,17 @@ const PORT = +arg(args, '--port', 0) || demo.port;
 // --pace N opens the replica at N seconds per streamed answer (the bundle's pace otherwise).
 const PACE = +arg(args, '--pace', 0);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.bin': 'application/octet-stream' };
-const MAP = [['/app/', APP], ['/snaps/', join(demo.data, 'snaps')], ['/streams/', join(demo.data, 'streams')], ['/assets/', join(demo.data, 'assets')]];
+const EDITOR = join(dirname(fileURLToPath(import.meta.url)), '..', 'editor', 'app');
+const MAP = [['/app/', APP], ['/editor/', EDITOR], ['/snaps/', join(demo.data, 'snaps')], ['/streams/', join(demo.data, 'streams')], ['/assets/', join(demo.data, 'assets')]];
 // demo.json engine: { dir, modules }: the demo's own engine modules (flow.modules), served from its dir as /demo/.
 const ENGINE = demo.cfg.engine || null;
 if (ENGINE) MAP.push(['/demo/', join(demo.dir, ENGINE.dir || 'app')]);
 
 // ---- the live flow and the edits not built in yet --------------------------------------------------------------
 const RELEASE = args.includes('--release');
+// The editor (packages/editor): loaded in the replica whenever it's served for authoring (not --release, not an
+// export), hidden until its key (⌥⇧E, Ctrl+Alt+Shift+E on Windows) or ?edit=1. --no-editor leaves it out.
+const EDITING = !RELEASE && !args.includes('--no-editor');
 const live = { key: null, flow: null, error: null, needsBuild: [], pending: [], at: null };
 const watched = () => {
   const parts = [];
@@ -79,6 +85,46 @@ function edited(path, f) {
   return applyEdits(readFileSync(f, 'utf8'), live.pending, m ? decodeURIComponent(m[1]) : null);
 }
 
+// ---- the editor's files ------------------------------------------------------------------------------------------
+// GET  /__replica/editor            focus.json and flow.editor.json as they are
+// POST /__replica/editor            { focus?, overrides?, what }: both checked, then written (and the flow compiled again)
+// GET  /__replica/editor/count?text= how many captured screens and answer frames have that text (a wording change
+//                                   applies to all of them)
+// Only from the replica's own page: the Host must be this server and the request must carry x-scenecast-editor (which
+// a page from anywhere else can't send without a CORS preflight this server never answers).
+const json = (res, code, v) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' }); res.end(JSON.stringify(v)); };
+function countText(text) {
+  const re = new RegExp(textRe(text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')), 'g');
+  let screens = 0, matches = 0;
+  const scan = dir => { if (!existsSync(dir)) return; for (const f of readdirSync(dir)) { const p = join(dir, f); let st; try { st = statSync(p); } catch (e) { continue; } if (st.isDirectory()) scan(p); else if (f.endsWith('.html')) { const n = (applyEdits(readFileSync(p, 'utf8'), live.pending).match(re) || []).length; if (n) { screens++; matches += n; } } } };
+  scan(join(demo.data, 'snaps')); scan(join(demo.data, 'streams'));
+  return { screens, matches };
+}
+async function editorApi(req, res, path) {
+  if (!EDITING) return json(res, 404, { error: 'the editor is off (--release or --no-editor)' });
+  const host = String(req.headers.host || '');
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || req.headers['x-scenecast-editor'] !== '1') return json(res, 403, { error: 'forbidden' });
+  try {
+    if (req.method === 'GET' && path === '/__replica/editor') return json(res, 200, { focus: readFocusJson(demo.dir), overrides: readEditorOverrides(demo.dir) });
+    if (req.method === 'GET' && path === '/__replica/editor/count') { await refresh(); const t = new URL(req.url, 'http://x').searchParams.get('text') || ''; return json(res, 200, t ? countText(t) : { screens: 0, matches: 0 }); }
+    if (req.method === 'POST' && path === '/__replica/editor') {
+      let body = '';
+      for await (const c of req) { body += c; if (body.length > 4e6) return json(res, 413, { error: 'too large' }); }
+      const v = JSON.parse(body || '{}');
+      const bad = [...(v.focus ? checkFocusJson(v.focus) : []), ...(v.overrides ? checkEditorOverrides(v.overrides) : [])];
+      if (bad.length) return json(res, 400, { error: bad.join('; ') });
+      const written = [];
+      if (v.focus) { writeJsonAtomic(join(demo.dir, FOCUS_JSON), { version: 1, ...v.focus }); written.push(FOCUS_JSON); }
+      if (v.overrides) { writeJsonAtomic(join(demo.dir, EDITOR_JSON), { version: 1, edits: v.overrides.edits || [], beats: v.overrides.beats || {} }); written.push(EDITOR_JSON); }
+      live.key = null; await refresh();
+      // One machine-readable line per change, for whoever runs the server (scenecast edit, the desktop app).
+      console.log('@edit ' + JSON.stringify({ event: 'saved', what: String(v.what || '').slice(0, 200), files: written, error: live.error, pendingEdits: live.pending.length, needsBuild: live.needsBuild }));
+      return json(res, 200, { ok: !live.error, error: live.error, pendingEdits: live.pending.map(e => e.what), needsBuild: live.needsBuild });
+    }
+  } catch (e) { return json(res, 400, { error: String(e.message || e) }); }
+  return json(res, 404, { error: 'no such editor call' });
+}
+
 function resolve(path) {
   if (path === '/' || path === '/index.html') return join(APP, 'index.html');
   if (path === '/favicon.ico') return null;
@@ -114,6 +160,7 @@ function resolve(path) {
     const f = normalize(join(dir, decodeURIComponent(path.slice(pre.length))));
     if (!f.startsWith(dir + sep)) return null;
     if (pre === '/demo/' && !/\.(m?js|css|json)$/.test(f)) return null;
+    if (pre === '/editor/' && !EDITING) return null;
     return f;
   }
   return null;
@@ -142,6 +189,11 @@ createServer(async (req, res) => {
           console.warn('live overrides need a build or sync; serving the bundle as built');
         }
       }
+      if (EDITING) {
+        // The focus engine (for dots and previews, even before a demo has focus points) and the editor.
+        const mods = [...((live.flow && live.flow.modules) || manifest.playback?.options?.modules || [])].filter(m => m !== '/app/focus-module.js' && m !== '/editor/editor.js');
+        (manifest.development_overrides ||= []).push({ path: ['modules'], value: ['/app/focus-module.js', ...mods, '/editor/editor.js'] });
+      }
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' });
       return res.end(JSON.stringify(manifest));
     } catch (e) {
@@ -155,6 +207,7 @@ createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
     return res.end(JSON.stringify({ release: RELEASE, error: live.error, needsBuild: live.needsBuild, pendingEdits: live.pending.map(e => e.what), compiledAt: live.at }));
   }
+  if (path.startsWith('/__replica/editor')) return editorApi(req, res, path);
   const f = resolve(path);
   if (path.startsWith('/snaps/') || path.startsWith('/streams/')) await refresh();
   if (!f || !existsSync(f) || !statSync(f).isFile()) {
@@ -170,5 +223,6 @@ createServer(async (req, res) => {
   const url = `http://127.0.0.1:${PORT}/${PACE > 0 ? `?pace=${PACE}` : ''}`;
   console.log(`${demo.cfg.title || demo.name} replica: ${url}${RELEASE ? ' (release: as built)' : ''}`);
   refresh();
-  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) openApp(url, demo.cfg.chrome);
+  if (EDITING && args.includes('--edit')) console.log('@edit ' + JSON.stringify({ event: 'ready', url: url + (url.includes('?') ? '&' : '?') + 'edit=1' }));
+  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) openApp(args.includes('--edit') ? url + (url.includes('?') ? '&' : '?') + 'edit=1' : url, demo.cfg.chrome);
 });

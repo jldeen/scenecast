@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadDemo, KIT_VERSION, FLOW_VERSION } from '../lib/demo.mjs';
 import { applyFixesToFlow, readFixes } from '../../fixer/patches.mjs';
+import { mergeFocus } from '../../player/app/focus-order.js';
+import { readEditorOverrides, applyEditorOverrides, readFocusJson } from '../lib/overrides.mjs';
 
 export async function compileFlow(demo, { fromRaw = false } = {}) {
   // A demo without a recording (a flow written by hand) is its own flow.json.
@@ -136,15 +138,21 @@ export async function finishFlow(demo, flow, rec) {
     const out = await mod.default(flow, { recording: rec, demo: cfg });
     if (out) Object.assign(flow, out);
   }
+  // The editor's changes (flow.editor.json: wording and date edits, beat starts), after the hand edits, so what was
+  // set in the replica wins.
+  applyEditorOverrides(flow, readEditorOverrides(demo.dir));
   // Focus points (⌥F, engine/app/focus.js): the demo's focus.mjs, whose default export is the points (or a function
-  // of the flow that returns them) and whose `options` export can set { zoom, pen, color }. The kit's focus module
-  // loads when there are any.
+  // of the flow that returns them) and whose `options` export can set { zoom, pen, color }, and focus.json (written
+  // by scenecast script and the editor's dots), merged in beat order. The kit's focus module loads when there are any.
   const fp = join(demo.dir, 'focus.mjs');
+  let hand = [];
   if (existsSync(fp)) {
     const m = await import(pathToFileURL(fp).href + '?t=' + Date.now());
-    flow.focus = (typeof m.default === 'function' ? await m.default(flow) : m.default) || [];
+    hand = (typeof m.default === 'function' ? await m.default(flow) : m.default) || [];
     if (m.options) flow.focusOptions = m.options;
   }
+  const generated = readFocusJson(demo.dir).points;
+  if (existsSync(fp) || generated.length) flow.focus = mergeFocus(generated, hand, flow);
   if ((flow.focus || []).length) flow.modules = ['/app/focus-module.js', ...(flow.modules || [])];
   const problems = validate(flow);
   writeFileSync(demo.flowPath, JSON.stringify(flow, null, 1) + '\n');

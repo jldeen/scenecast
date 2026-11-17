@@ -15,7 +15,8 @@ const exit = code => process.exit(code || 0);
 const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary; see docs/cli.md)
 
   preflight [--check] [--json|--ndjson]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
-  flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release]
+  flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release] [--no-editor]
+  script <file> [--matcher text|<file.mjs>] [--no-write] [--no-pdf] [--strict]  edit [--no-open] [--port N]
   text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
   check [--runs 2]  checklist [--skip a,b] [--only a,b]  fidelity-compare|fidelity-fix|fidelity-report  sheet  hovers  scan [<dir>]
 
@@ -76,6 +77,14 @@ async function main() {
       return node('checks/secrets.mjs', [demo.dir]);
     }
     case 'serve': return node('player/serve.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    // The editor: the replica served for authoring, opened in edit mode (?edit=1). --no-open only prints the URL.
+    // In this process (not a child), so whoever stops `scenecast edit` stops the server.
+    case 'edit': {
+      process.argv = [process.argv[0], join(KIT, 'player', 'serve.mjs'), ...(rest.includes('--demo') ? [] : ['--demo', loadDemo(rest).dir]), ...rest.filter(a => a !== '--no-open'), '--edit', ...(rest.includes('--no-open') ? [] : ['--open'])];
+      await import('../../player/serve.mjs');
+      return new Promise(() => {});
+    }
+    case 'script': return node('script/cli.mjs', rest.includes('--demo') ? rest : [...rest, '--demo', loadDemo(rest).dir]);
     case 'check': return node('checks/check.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     // The checklist (scenecast check). `fidelity` is its old engine name.
     case 'checklist': case 'fidelity': return node('checks/fidelity.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);

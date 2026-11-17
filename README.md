@@ -28,7 +28,9 @@ window) and the checks run on both, and CI tests both (and Linux).
 | `packages/recorder` | Capture: the recorder extension (MV3, Edge and Chrome), serializer, driver, recorder, side-state audits (hovers, clicks, drags, lists), receiver, build of raw captures. |
 | `packages/player` | The replica: server, morph engine, streams, presenter keys, focus points, app-window launcher. |
 | `packages/checks` | The fidelity checklist. |
-| `packages/editor`, `packages/fixer` | Placeholders for later phases. |
+| `packages/script` | Script to focus points: the script parsed, every screen indexed, the pluggable matcher (deterministic by default), the line-to-screen sheet and the cue sheet. |
+| `packages/editor` | The editor inside the replica: focus-point dots, wording and date changes, beat starts, undo. |
+| `packages/fixer` | The fidelity fixer: pluggable diagnosers and the per-demo patches. |
 | `packages/selftest` | End-to-end tests against `examples/fixture-app` (a local fake product). |
 | `schema/bundle.v2.schema.json` | The manifest schema, generated from the Rust types (`scenecast schema`). |
 | `docs/` | [CLI](docs/cli.md), [bundle format](docs/bundle-format.md), [architecture](docs/architecture.md), [engine flow format](docs/engine/flow-format.md), [checklist](docs/engine/checklist.md), [lessons](docs/engine/lessons.md). |
@@ -57,13 +59,16 @@ scenecast record start           # run the demo once; side states are captured o
 scenecast record stop
 scenecast build --from-raw       # data/ (scrubbed) and manifest.json (live-page scenes)
 scenecast serve --open           # an app window: Chrome on the Mac, Edge on Windows
+scenecast script script.md       # each line on its screen, its focus points, the line-to-screen and cue sheets
+scenecast edit                   # adjust in the replica: dots, wording and dates, beat starts (⌥⇧E toggles it)
 scenecast check                  # the whole checklist; quick for only what changed
 scenecast release --push
 ```
 
 Presenter keys: ⌥ on the Mac; **Ctrl+Alt** on Windows (where browsers keep Alt for their menus). Modifier+0
 resets, modifier+1–9 selects a beat, modifier+an app's key switches apps, modifier+P types the scripted text,
-modifier+N advances, and modifier+F / modifier+Shift+F moves through focus points.
+modifier+N advances, and modifier+F / modifier+Shift+F moves through focus points. Modifier+Shift+E turns the editor on
+and off (only where the replica is served for authoring; never with `present` or in an export).
 
 Full command reference: [docs/cli.md](docs/cli.md).
 

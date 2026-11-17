@@ -1468,6 +1468,13 @@ const moduleApi = {
   openGroup: (app, label) => { const b = grpButton(app, label); return !!b && b.getAttribute('aria-expanded') === 'false' && grpToggle(app, b); },
   on: (kind, fn) => hooks[kind].push(fn),
   expose: (name, value) => { exposed[name] = value; },
+  // What another module exposed (the editor uses the focus engine).
+  get: name => exposed[name],
+  jump: n => jump(n), activate: id => activate(id),
+  // The editor's changes: forget fetched captures (the server serves them with the new edits), and load each app's
+  // screen again as it is now.
+  invalidate: () => { texts.clear(); parsedSnaps.clear(); },
+  reload: async () => { const my = ++gen, was = active; busy++; try { await Promise.all(order.map(id => apps[id].state && loadApp(apps[id], apps[id].hover ? apps[id].hover.base : apps[id].state))); if (gen === my) activate(was); } finally { busy--; } },
 };
 for (const m of flow.modules || []) { try { (await import(offline ? offline.module(m) : m.startsWith('/') ? local(m) : m)).default(moduleApi); } catch (e) { note(e); } }
 // Fonts first. Chrome draws a fallback font while a web font is still loading whenever it judges the network slow

@@ -76,6 +76,13 @@ enum Command {
     /// menus and panes, fonts by file), each difference diagnosed and fixed in the demo's flow.fixes.json, built and
     /// checked again; then .out/fidelity/report.html with what's still different.
     Fidelity(engine_cmds::FidelityArgs),
+    /// Script to focus points: each line of the presenter's script (.md, .txt or .sk) on the screen it plays over,
+    /// the elements that back it as focus points (focus.json), and the line-to-screen sheet (HTML and PDF, unbacked
+    /// lines flagged) and cue sheet in .out/script/.
+    Script(engine_cmds::ScriptArgs),
+    /// The editor: the replica in edit mode (dots for focus points, wording and date changes, beat starts, undo),
+    /// every change saved to focus.json and flow.editor.json. In the replica its key is ⌥⇧E (Ctrl+Alt+Shift+E).
+    Edit(engine_cmds::EditArgs),
     /// Where the project is and what to run next.
     Status(Passthrough),
     /// Secret scan, then commit.
@@ -330,6 +337,8 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Text(a) => return engine_cmds::handover("text", &a, true),
         Command::Check(a) => return engine_cmds::check(&a, false),
         Command::Fidelity(a) => return engine_cmds::fidelity(&a),
+        Command::Script(a) => return engine_cmds::script(&a),
+        Command::Edit(a) => return engine_cmds::edit(&a),
         Command::Quick(a) => return engine_cmds::check(&a, true),
         Command::Status(a) => return engine_cmds::handover("status", &a, true),
         Command::Save(a) => return engine_cmds::handover("save", &a, true),

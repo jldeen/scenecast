@@ -17,7 +17,8 @@ packages/            npm workspaces: everything that runs in the browser
   checks             the fidelity checklist; real vs replica (real-vs-replica.mjs) and the fidelity report
   fixer              the fidelity fixer: pluggable diagnosers (rule-based by default) and the per-demo patches
                      (flow.fixes.json) the flow compiler and build apply
-  editor             placeholder (later phase)
+  script             script to focus points: parse, index each screen, pluggable matcher, sheets
+  editor             the editor inside the replica (dots, wording and dates, beat starts, undo)
   selftest           end-to-end tests against examples/fixture-app (and the fidelity loop on its seeded lab app)
 ```
 
@@ -27,7 +28,9 @@ runs in a browser. The manifest's JSON Schema is generated from the Rust types, 
 `PreflightReport` item by item, `RecordStatus`, `RecordSummary` with `RecordTiming`) and line-by-line progress
 (`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
 `build::build` also reports build stages and per-file fingerprint progress. `fidelity::run` runs the fidelity loop
-(compare, diagnose and patch, build, again) with `FidelityProgress` events and a typed `FidelityReport`. Rust compiles the recorded base flow
+(compare, diagnose and patch, build, again) with `FidelityProgress` events and a typed `FidelityReport`.
+`script::run` runs script to focus with `ScriptProgress` events and a typed `ScriptReport`; `edit::start` runs the
+editor's server and reports each saved change. Rust compiles the recorded base flow
 and rewrites captured pages, stream frames, interaction fragments, assets and CSS, deduplicates and indexes streams, composes captured parts, isolates generated classes and filters non-visual interaction operations, publishes staged outputs by
 content hash, and prunes unreferenced assets. JavaScript still applies flow overrides and focus hooks and orchestrates
 composition and interaction processing; moving that processing to Rust remains unfinished. The resolved raw folder is passed explicitly
