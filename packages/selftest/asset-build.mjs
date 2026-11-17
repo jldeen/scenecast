@@ -52,7 +52,7 @@ try {
   writeFileSync(join(raw, 'snaps', 'part.json'), JSON.stringify({ docs: [{
     key: 'main', parent: null, frameUrl: '', urls: [], inline: {},
     meta: { title: 'Part', url: 'https://fixture.invalid/', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
-    html: '<!doctype html><html><head><style>.card{animation:spin 1s}@media screen{.card{color:red}.other{color:blue}}@keyframes spin{from{opacity:0}to{opacity:1}}</style></head><body><div class="card">source part</div></body></html>',
+    html: '<!doctype html><html><head><style>.card{animation:spin 1s}.root-123{color:green}@media screen{.card{color:red}.other{color:blue}}@keyframes spin{from{opacity:0}to{opacity:1}}</style></head><body><div class="card root-123">source part</div></body></html>',
   }] }));
   mkdirSync(join(raw, 'streams', 's1'));
   for (const n of [0, 1]) writeFileSync(join(raw, 'streams', 's1', `${n}.json`), JSON.stringify({
@@ -66,6 +66,7 @@ try {
   }));
   writeFileSync(join(demo, 'flow.overrides.mjs'), `export default flow => {
     flow.compose = [{ from: 'part', marker: 'source part', tag: 'div', anchor: 'replace this' }];
+    flow.apps[0].layout.responsive = [{ part: { css: '<body[ >]', up: 0 }, variant: 'part' }];
   };\n`);
   run(process.execPath, ['packages/kit/compile/flow.mjs', '--demo', demo]);
   run(process.execPath, ['packages/recorder/process.mjs', '--demo', demo, '--force']);
@@ -74,7 +75,8 @@ try {
   const after = Object.fromEntries(['snaps', 'streams', 'assets'].map(dir => [dir, files(join(demo, 'data', dir))]));
   assert.deepEqual(after, before);
   assert.match(readFileSync(join(demo, 'data', 'snaps', 'start.html'), 'utf8'), /data-d1-compose=""[^]*@keyframes spin/);
-  assert.match(readFileSync(join(demo, 'data', 'streams', 's1', '000.html'), 'utf8'), /<div><div class="card">source part<\/div><\/div>/);
+  assert.match(readFileSync(join(demo, 'data', 'streams', 's1', '000.html'), 'utf8'), /<div><div class="card root-123">source part<\/div><\/div>/);
+  assert.match(readFileSync(join(demo, 'data', 'snaps', 'part.html'), 'utf8'), /class="card d1v-root-123"/);
   console.log('Rust asset and CSS resolution matches the JavaScript capture processor');
 } finally {
   rmSync(temp, { recursive: true, force: true });

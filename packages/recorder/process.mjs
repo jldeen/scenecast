@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
-import { compose as composeJs, cssFor as cssForJs, elementEnd, isolateClasses, ancestorsAt, around } from './compose.mjs';
+import { compose as composeJs, cssFor as cssForJs, elementEnd, isolateClasses as isolateClassesJs, ancestorsAt, around } from './compose.mjs';
 import { loadDemo, arg, KIT_VERSION } from '../kit/lib/demo.mjs';
 import { compileEdits, applyEdits } from '../kit/lib/edits.mjs';
 import { buildInputs, buildKey } from '../kit/lib/buildkey.mjs';
@@ -72,6 +72,9 @@ const cssFor = (part, source, target) => process.env.SCENECAST_RUST_ASSETS === '
 const compose = (html, step, part, css) => process.env.SCENECAST_RUST_ASSETS === '1'
   ? rustAsset('compose', JSON.stringify([html, step.anchor, step.tag, part, css]))
   : composeJs(html, step, part, css);
+const isolateClasses = (html, prefix = 'd1v-') => process.env.SCENECAST_RUST_ASSETS === '1'
+  ? rustAsset('isolate-classes', JSON.stringify([html, prefix, false]))
+  : isolateClassesJs(html, prefix);
 const EMPTY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 function asset(buf, ext) {
   const f = createHash('sha256').update(buf).digest('hex').slice(0, 24) + '.' + ext;
@@ -341,12 +344,17 @@ const REACT_ID_CLASS = /_r_[0-9a-z]+_/;
 // the same before and after. (A change that also removes display: none is not.)
 const visibleDecl = v => String(v || '').split(';').map(x => x.trim()).filter(x => x && !/^(anchor-name|--[\w-]+)\s*:/.test(x)).sort().join(';');
 const styleBookkeeping = o => visibleDecl(o.set.style) === visibleDecl(o.was && o.was.style);
-function isolateHover(html, prefix) {
+function isolateHoverJs(html, prefix) {
   const fix = v => v.split(/(\s+)/).map(t => /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(t) || REACT_ID_CLASS.test(t) ? prefix + t : t).join('');
   html = html.replace(/class="([^"]*)"/g, (m, v) => 'class="' + fix(v) + '"');
   return html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/g, (m, a, css, b) => a + css.replace(/\.([A-Za-z][A-Za-z0-9]*-\d+|[A-Za-z0-9_-]*_r_[0-9a-z]+_[A-Za-z0-9_-]*)(?![\w-])/g, '.' + prefix + '$1') + b);
 }
-const fixClassValue = (v, prefix) => v == null ? v : v.split(/(\s+)/).map(t => /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(t) || REACT_ID_CLASS.test(t) ? prefix + t : t).join('');
+const isolateHover = (html, prefix) => process.env.SCENECAST_RUST_ASSETS === '1'
+  ? rustAsset('isolate-classes', JSON.stringify([html, prefix, true]))
+  : isolateHoverJs(html, prefix);
+const fixClassValue = (v, prefix) => v == null ? v : process.env.SCENECAST_RUST_ASSETS === '1'
+  ? rustAsset('isolate-class-value', JSON.stringify([v, prefix, true]))
+  : v.split(/(\s+)/).map(t => /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(t) || REACT_ID_CLASS.test(t) ? prefix + t : t).join('');
 report.hovers = {};
 const hoverOut = Object.fromEntries(flow.apps.map(a => [a.id, { css: {}, defs: [] }]));
 const appSeenOf = Object.fromEntries(flow.apps.map(a => [a.id, new Map()]));

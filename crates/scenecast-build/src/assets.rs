@@ -426,6 +426,14 @@ impl AssetResolver {
                 crate::compose::compose(&html, &anchor, &tag, &part, &css)
                     .map_err(AssetError::Compose)?
             }
+            "isolate-classes" | "isolate-class-value" => {
+                let (input, prefix, hover): (String, String, bool) = serde_json::from_str(value)?;
+                Some(if op == "isolate-classes" {
+                    crate::compose::isolate_classes(&input, &prefix, hover)
+                } else {
+                    crate::compose::isolate_class_value(&input, &prefix, hover)
+                })
+            }
             _ => return Err(AssetError::Invalid("unknown asset operation")),
         };
         Ok(Resolution {

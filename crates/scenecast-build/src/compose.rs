@@ -3,12 +3,67 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use regex::Regex;
+use regex::{Captures, Regex};
 
 fn js_whitespace(c: char) -> bool {
     matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' |
         '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' |
         '\u{205f}' | '\u{3000}' | '\u{feff}')
+}
+
+fn isolated_class(value: &str, hover: bool) -> bool {
+    static MERGE: OnceLock<Regex> = OnceLock::new();
+    static REACT: OnceLock<Regex> = OnceLock::new();
+    MERGE
+        .get_or_init(|| Regex::new(r"^[A-Za-z][A-Za-z0-9]*-[0-9]+$").unwrap())
+        .is_match(value)
+        || hover
+            && REACT
+                .get_or_init(|| Regex::new(r"_r_[0-9a-z]+_").unwrap())
+                .is_match(value)
+}
+
+/// Prefix capture-specific generated class names in an attribute value.
+pub fn isolate_class_value(value: &str, prefix: &str, hover: bool) -> String {
+    let mut result = String::new();
+    for token in value.split_inclusive(js_whitespace) {
+        let trimmed = token.trim_end_matches(js_whitespace);
+        if isolated_class(trimmed, hover) {
+            result.push_str(prefix);
+        }
+        result.push_str(token);
+    }
+    result
+}
+
+/// Isolate generated names in markup and matching inline style selectors.
+pub fn isolate_classes(html: &str, prefix: &str, hover: bool) -> String {
+    static ATTRIBUTE: OnceLock<Regex> = OnceLock::new();
+    static STYLE: OnceLock<Regex> = OnceLock::new();
+    static SELECTOR: OnceLock<Regex> = OnceLock::new();
+    let attributes = ATTRIBUTE
+        .get_or_init(|| Regex::new(r#"class="([^"]*)""#).unwrap())
+        .replace_all(html, |captures: &Captures<'_>| {
+            format!(
+                "class=\"{}\"",
+                isolate_class_value(&captures[1], prefix, hover)
+            )
+        });
+    STYLE
+        .get_or_init(|| Regex::new(r"(?s)(<style[^>]*>)(.*?)(</style>)").unwrap())
+        .replace_all(&attributes, |captures: &Captures<'_>| {
+            let css = SELECTOR
+                .get_or_init(|| Regex::new(r"\.([A-Za-z0-9_-]+)").unwrap())
+                .replace_all(&captures[2], |selector: &Captures<'_>| {
+                    if isolated_class(&selector[1], hover) {
+                        format!(".{prefix}{}", &selector[1])
+                    } else {
+                        selector[0].to_owned()
+                    }
+                });
+            format!("{}{css}{}", &captures[1], &captures[3])
+        })
+        .into_owned()
 }
 
 fn blocks(css: &str) -> Vec<&str> {
@@ -246,5 +301,15 @@ mod tests {
         );
         assert_eq!(compose(html, "missing", "div", "", "").unwrap(), None);
         assert!(compose("<div>anchor", "anchor", "div", "", "").is_err());
+    }
+
+    #[test]
+    fn isolates_generated_class_names_without_touching_other_names() {
+        let html = "<style>.root-123,.x_r_a_foo,.root-123-more{color:red}</style><div class=\"root-123 \u{feff}x_r_a_foo root-123-more\"></div>";
+        assert_eq!(
+            isolate_classes(html, "x-", true),
+            "<style>.x-root-123,.x-x_r_a_foo,.root-123-more{color:red}</style><div class=\"x-root-123 \u{feff}x-x_r_a_foo root-123-more\"></div>"
+        );
+        assert!(!isolate_classes(html, "x-", false).contains("x-x_r_a_foo"));
     }
 }
