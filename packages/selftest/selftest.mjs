@@ -6,7 +6,7 @@
 // runs on it, including two identical runs of the recorded path.
 //   node test/selftest.mjs [--keep]        (--keep leaves the temp demo folder and prints where it is)
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, unlinkSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -267,6 +267,25 @@ export default flow => {
     const texts = H.defs.flatMap(d => (d.portals || []).map(q => q.text));
     check('hovers: a chip\'s card and the Projects section', texts.some(t => /Your work: mail/.test(t)) && H.defs.some(d => (d.ops || []).some(o => /New project/.test(o.html || ''))), JSON.stringify(texts).slice(0, 300));
     check('clicks: the menu with its lazy stylesheet', (H.clicks || []).some(c => c.name === 'More options' && c.restore === 'escape') && /fx-menu/.test(Object.values(H.css).join('')), JSON.stringify((H.clicks || []).map(c => [c.name, c.restore])));
+  }
+
+  {
+    const marker = join(tmp, 'raw', 'fingerprint-probe.json');
+    try {
+      writeFileSync(marker, '{"value":"alpha"}');
+      const first = await run(['build', '--from-raw'], at);
+      const stable = await run(['build', '--from-raw'], at);
+      const before = statSync(marker);
+      writeFileSync(marker, '{"value":"omega"}');
+      utimesSync(marker, before.atime, before.mtime);
+      const after = statSync(marker);
+      const changed = await run(['build', '--from-raw'], at);
+      check('build: content changes with the same size and timestamp force a rebuild',
+        first.code === 0 && stable.code === 0 && /"upToDate":true/.test(stable.out)
+          && before.size === after.size && Math.round(before.mtimeMs) === Math.round(after.mtimeMs)
+          && changed.code === 0 && !/"upToDate":true/.test(changed.out),
+        changed.out.slice(-500));
+    } finally { if (existsSync(marker)) unlinkSync(marker); }
   }
 
   // 5 · Serve the replica (tweaks show on reload), and look at the parts that only show when clicked.

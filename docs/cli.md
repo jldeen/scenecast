@@ -64,6 +64,9 @@ its SHA-256, its transitions), with the streams, beats, focus points and apps. F
 manifest are kept and listed. The build fails if the manifest doesn't validate or a page is missing. The file is
 only rewritten when it changes.
 
+Rust fingerprints the raw capture tree and built data by content; changing either forces capture processing even
+when file sizes and modification times are unchanged. The cache is kept in `.out/build-fingerprint.json`.
+
 Environment: `SCENECAST_JS` (the `packages` folder), `SCENECAST_NODE` (the Node binary), and the engine's
 `REPLICA_RAW`, `REPLICA_PORT`, `REPLICA_RX_PORT`, `REPLICA_NO_OPEN=1`, `REPLICA_CHROME_CHANNEL` (`chrome`, or
 `msedge` for Edge).

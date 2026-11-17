@@ -71,7 +71,7 @@ async function main() {
       const demo = loadDemo(rest);
       let code = await node('kit/compile/flow.mjs', ['--demo', demo.dir, ...(rest.includes('--from-raw') ? ['--from-raw'] : [])]);
       if (code) return code;
-      code = await node('recorder/process.mjs', ['--demo', demo.dir]);
+      code = await node('recorder/process.mjs', ['--demo', demo.dir, ...(rest.includes('--force') ? ['--force'] : [])]);
       if (code) return code;
       return node('checks/secrets.mjs', [demo.dir]);
     }

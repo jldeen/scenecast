@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use scenecast_build::engine::with_demo;
+use scenecast_build::fingerprint::fingerprint_tree;
 use scenecast_build::scrub::{ScrubReport, scrub_tree};
 use scenecast_build::{Engine, NewProject, SyncReport, create_project, fallback_scenes};
+use serde::{Deserialize, Serialize};
 
 /// Arguments passed through to the engine as they are (`--demo <dir>` picks the project; else the folder you're in).
 #[derive(Debug, Clone, Args)]
@@ -164,7 +166,31 @@ pub fn build(args: &Passthrough) -> Result<i32> {
         eprintln!("build stopped: credentials found in raw captures (see .out/scrub.json)");
         return Ok(1);
     }
-    let code = passthrough("build", args, true)?;
+    let raw_hash = if raw.is_dir() {
+        Some(fingerprint_tree(&raw, |_| {})?)
+    } else {
+        None
+    };
+    let cache_path = dir.join(".out/build-fingerprint.json");
+    let previous: Option<BuildFingerprint> = match fs::read(&cache_path) {
+        Ok(bytes) => Some(serde_json::from_slice(&bytes).context("invalid build fingerprint")?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    let data = dir.join("data");
+    let output_hash = if data.is_dir() {
+        Some(fingerprint_tree(&data, |_| {})?)
+    } else {
+        None
+    };
+    let unchanged = previous.as_ref().is_some_and(|p| {
+        raw_hash.as_ref() == Some(&p.raw) && output_hash.as_ref() == Some(&p.output)
+    });
+    let mut build_args = args.clone();
+    if !unchanged && !build_args.args.iter().any(|a| a == "--force") {
+        build_args.args.push("--force".into());
+    }
+    let code = passthrough("build", &build_args, true)?;
     for path in [
         dir.join("data"),
         dir.join("recording.json"),
@@ -182,7 +208,26 @@ pub fn build(args: &Passthrough) -> Result<i32> {
     if code != 0 {
         return Ok(code);
     }
-    sync(&dir)
+    let code = sync(&dir)?;
+    if code == 0
+        && let Some(raw) = raw_hash
+    {
+        let output = fingerprint_tree(&data, |_| {})?;
+        fs::write(
+            cache_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&BuildFingerprint { raw, output })?
+            ),
+        )?;
+    }
+    Ok(code)
+}
+
+#[derive(Serialize, Deserialize)]
+struct BuildFingerprint {
+    raw: String,
+    output: String,
 }
 
 fn write_scrub_report(dir: &Path, report: &ScrubReport) -> Result<()> {
