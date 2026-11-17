@@ -48,7 +48,7 @@ async function launchWithExtension(ext, profile) {
   const channel = process.env.SCENECAST_EXT_CHANNEL || 'chromium';
   const args = ['--silent-debugger-extension-api', '--force-device-scale-factor=1', '--window-size=1700,1100', '--screen-info={0,0 2560x1600}', '--disable-features=DisableLoadExtensionCommandLineSwitch'];
   const branded = channel !== 'chromium';
-  const ctx = await chromium.launchPersistentContext(profile, { channel, headless: true, viewport: null, colorScheme: 'light',
+  const ctx = await chromium.launchPersistentContext(profile, { channel, headless: true, viewport: null, colorScheme: 'light', ignoreDefaultArgs: ['--disable-extensions'],
     args: branded ? [...args, '--enable-unsafe-extension-debugging'] : [...args, `--disable-extensions-except=${ext}`, `--load-extension=${ext}`] });
   if (branded) {
     const b = await ctx.browser().newBrowserCDPSession();

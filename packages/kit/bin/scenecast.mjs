@@ -14,7 +14,7 @@ const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(p
 const exit = code => process.exit(code || 0);
 const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary; see docs/cli.md)
 
-  preflight [--check] [--json]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
+  preflight [--check] [--json|--ndjson]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release]
   text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
   check [--runs 2]  fidelity [--skip a,b] [--only a,b]  sheet  hovers  scan [<dir>]

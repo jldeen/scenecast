@@ -26,7 +26,8 @@ export function parseProcs(text, platform = process.platform) {
     if (/ --type=/.test(cmd)) continue;
     const browser = Object.entries(BIN[platform] || {}).find(([, re]) => re.test(cmd));
     if (!browser) continue;
-    const flag = k => { const f = new RegExp(`--${k}=("([^"]*)"|(\\S+))`).exec(cmd); return f ? (f[2] !== undefined ? f[2] : f[3]) : null; };
+    // ps doesn't quote: an unquoted value runs to the next flag (--profile-directory=Profile 10 --…).
+    const flag = k => { const f = new RegExp(`--${k}=("([^"]*)"|(.*?))(?= --|$)`).exec(cmd); return f ? (f[2] !== undefined ? f[2] : f[3].trim()) : null; };
     out.push({ pid: +m[1], browser: browser[0], userDataDir: flag('user-data-dir'), profile: flag('profile-directory'), debugPort: flag('remote-debugging-port') && +flag('remote-debugging-port') });
   }
   return out;
@@ -150,10 +151,12 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
 
 export async function main(args, loadDemo) {
   const demo = loadDemo(args);
-  const json = args.includes('--json');
+  const json = args.includes('--json'), ndjson = args.includes('--ndjson');
   const mark = { ok: 'ok   ', fixed: 'FIXED', fail: 'FAIL ', skip: 'skip ' };
-  const r = await preflight(demo, { fix: !args.includes('--check'), onItem: json ? undefined : i => console.log(`${mark[i.status]} ${i.id.padEnd(12)} ${i.detail}  (${(i.ms / 1000).toFixed(1)} s)`) });
-  if (json) console.log(JSON.stringify(r, null, 1));
+  // --ndjson: one JSON line per item as it lands, then the result (for the desktop app's live checklist).
+  const r = await preflight(demo, { fix: !args.includes('--check'), onItem: ndjson ? i => console.log(JSON.stringify({ item: i })) : json ? undefined : i => console.log(`${mark[i.status]} ${i.id.padEnd(12)} ${i.detail}  (${(i.ms / 1000).toFixed(1)} s)`) });
+  if (ndjson) console.log(JSON.stringify({ result: r }));
+  else if (json) console.log(JSON.stringify(r, null, 1));
   else console.log(`${r.ready ? 'ready to record' : 'NOT READY: fix what FAIL says, then run scenecast preflight again'} (${r.secs} s)`);
   return r.ready ? 0 : 1;
 }

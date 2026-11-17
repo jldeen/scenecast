@@ -29,7 +29,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   engine:
-    # The JS engine end to end, headless, through the scenecast binary: the fixture app recorded, built, served,
+    # The JS engine end to end, headless, through the scenecast binary: the fixture app recorded by the extension, built, served,
     # and checked (two runs, three cold starts, focus points, the whole checklist), with only live-page scenes.
     name: Engine (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -48,6 +48,10 @@ jobs:
           cache: npm
       - name: Install
         run: npm ci
+      # The recorder extension is tested in Playwright's Chromium (it takes --load-extension); branded Chrome and Edge
+      # (on the runners already) get it through the DevTools protocol.
+      - name: Chromium for the extension tests
+        run: npx playwright-core install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       # Google Chrome comes with the GitHub runners (Playwright's "chrome" channel uses it).
       - name: Build the scenecast binary
         run: cargo build -p scenecast-cli

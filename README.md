@@ -25,7 +25,7 @@ window) and the checks run on both, and CI tests both (and Linux).
 | `crates/scenecast-build` | Library: new projects, running the JS engine with progress, `manifest.json` from a build. |
 | `crates/scenecast-cli` | The `scenecast` binary. |
 | `packages/kit` | The engine's CLI entry (run by `scenecast`), demo settings, flow compiler, workflow, project template. |
-| `packages/recorder` | Capture: serializer, driver, recorder, side-state audits (hovers, clicks, drags, lists), receiver, build of raw captures. |
+| `packages/recorder` | Capture: the recorder extension (MV3, Edge and Chrome), serializer, driver, recorder, side-state audits (hovers, clicks, drags, lists), receiver, build of raw captures. |
 | `packages/player` | The replica: server, morph engine, streams, presenter keys, focus points, app-window launcher. |
 | `packages/checks` | The fidelity checklist. |
 | `packages/editor`, `packages/fixer` | Placeholders for later phases. |
@@ -51,8 +51,8 @@ cargo build --release -p scenecast-cli   # target/release/scenecast (scenecast.e
 ```bash
 scenecast new ignite-demo2 --title "Ignite Demo 2" --app teams=https://teams.cloud.microsoft/ --app copilot=https://copilot.cloud.microsoft/
 cd ignite-demo2
-scenecast receiver               # keep running; raw captures go outside the folder (~/.scenecast/<demo>/raw)
-scenecast agent <dir>            # builds agent.js for the browser the demo runs in
+scenecast extension              # once: load ~/.scenecast/extension unpacked in Edge or Chrome (docs/recorder.md)
+scenecast preflight              # receiver, browser, recorder, each app's tab; fixes only what fails
 scenecast record start           # run the demo once; side states are captured on the way
 scenecast record stop
 scenecast build --from-raw       # data/ (scrubbed) and manifest.json (live-page scenes)

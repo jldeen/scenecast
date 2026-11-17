@@ -4,10 +4,12 @@
 //!
 //! - [`project`]: a new demo project (`scenecast new`): live-page by default.
 //! - [`engine`]: the JavaScript engine in `packages/` (recorder, player, checks), run under Node.
+//! - [`recorder`]: preflight, the recorder extension and the recording, with per-item progress and timing.
 //! - [`sync`]: the bundle manifest (v2) from what the engine built (`flow.json`, `data/`).
 
 pub mod engine;
 pub mod project;
+pub mod recorder;
 pub mod sync;
 
 use std::path::{Path, PathBuf};

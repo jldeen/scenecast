@@ -11,7 +11,8 @@ crates/
   scenecast-cli      the scenecast binary
 packages/            npm workspaces: everything that runs in the browser
   kit                the engine's CLI entry, demo settings, flow compiler, workflow, template
-  recorder           capture (DOM, CSSOM, fonts, shadow DOM, iframes) and side-state audits
+  recorder           the recorder extension (MV3, Edge and Chrome), capture (DOM, CSSOM, fonts, shadow DOM, iframes),
+                     side-state audits, preflight
   player             server, morph engine, streams, presenter keys, focus points, launcher
   checks             the fidelity checklist
   editor, fixer      placeholders (later phases)
@@ -20,8 +21,14 @@ packages/            npm workspaces: everything that runs in the browser
 
 **The split.** Rust owns the bundle format, validation, build orchestration and the CLI; JavaScript owns what
 runs in a browser. The manifest's JSON Schema is generated from the Rust types, so the two can't drift.
-`scenecast-build` is a library with structured results (`ProjectCreated`, `SyncReport`) and line-by-line
-progress (`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
+`scenecast-build` is a library with structured results (`ProjectCreated`, `SyncReport`, and in `recorder`:
+`PreflightReport` item by item, `RecordStatus`, `RecordSummary` with `RecordTiming`) and line-by-line progress
+(`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
+
+**The recorder** is one body of code (driver, recorder, side-state audits) that runs two ways: as an MV3 extension
+in the presenter's own Edge or Chrome, where a Playwright-shaped shim over `chrome.debugger` gives it pages, frames
+(cross-site ones in their own process too), input and screenshots; or as `agent.js` in a Playwright-driven browser.
+See [recorder.md](recorder.md).
 
 **Cross-platform.** Everything works the same on macOS and Windows: paths are normalized to `/` in the bundle and
 the build's records, the launcher opens Chrome on the Mac and Edge on Windows as an app window (either can be

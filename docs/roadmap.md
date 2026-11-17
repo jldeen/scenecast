@@ -11,7 +11,10 @@ first-class. Phases:
 - **Phase 0 (done): foundation.** Bundle v2 with live-page scenes, states, transitions, streams, beats, focus
   points and presenter config; JSON Schema from Rust; v1 migration; replica-kit 1.4.0's engine in `packages/`,
   wrapped by the `scenecast` binary; CI on Ubuntu, macOS and Windows, including the fixture app end to end.
-- **Phase 1: recorder extension** (MV3 for Edge and Chrome, side-state sweep, stream detection, resume).
+- **Phase 1 (fixture done; pilots next): recorder extension.** MV3 for Edge and Chrome over `chrome.debugger`
+  (closed shadow roots, cross-site frames, a real screenshot per state), the side-state sweep with quiet waits, stream
+  detection, resume after the browser stops the extension, `scenecast preflight`, and the recorder as a Rust library
+  for the desktop app. Next: Demo 1 and Seth's Alaska app recorded with it (docs/recorder.md).
 - **Phase 2: player and build** that read bundle v2 directly; Windows/Edge launcher polish; PII scrub report.
 - **Phase 3: fidelity loop and AI fixer.**
 - **Phase 4: script to focus points, and the editor.**
