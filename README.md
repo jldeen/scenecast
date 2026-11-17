@@ -61,9 +61,9 @@ scenecast check                  # the whole checklist; quick for only what chan
 scenecast release --push
 ```
 
-Presenter keys: ⌥ on the Mac; **Ctrl+Alt** on Windows and in Edge (which keeps Alt for its menus). Both work
-everywhere. ⌥0 reset, ⌥1–⌥9 beats, ⌥ + an app's key to switch, ⌥P type the scripted text, ⌥N next step, ⌥F next
-focus point.
+Presenter keys: ⌥ on the Mac; **Ctrl+Alt** on Windows (where browsers keep Alt for their menus). Modifier+0
+resets, modifier+1–9 selects a beat, modifier+an app's key switches apps, modifier+P types the scripted text,
+modifier+N advances, and modifier+F / modifier+Shift+F moves through focus points.
 
 Full command reference: [docs/cli.md](docs/cli.md).
 

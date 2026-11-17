@@ -29,6 +29,7 @@ const demo = loadDemo(args);
 const URL = arg(args, '--url', demo.url);
 const QUICK = args.includes('--quick');
 const SPEED = +arg(args, '--speed', 10);
+const MOD = process.platform === 'win32' ? 'Control+Alt+' : 'Alt+';
 const JOBS = +arg(args, '--jobs', Math.max(2, Math.min(6, cpus().length - 2)));
 const T_START = Date.now();
 const skip = new Set((arg(args, '--skip', '') || '').split(',').filter(Boolean));
@@ -371,7 +372,7 @@ try {
         if (st.fill && st.fill.length && (st.on || []).some(t => t.type && t.to)) {
           await go(page, id); await page.evaluate(a => window.d1.activate(a), st.app);
           await focusIn(page, st.fill[0], st.app);
-          await page.keyboard.press('Alt+KeyP'); await sleep(200);
+          await page.keyboard.press(MOD + 'KeyP'); await sleep(200);
           await page.waitForFunction(() => !window.d1.filling, null, { timeout: 120000 }); await idle(page); n++;
           const typedTo = (st.on.find(t => t.type && t.to) || {}).to;
           const now = await stateOf(page, st.app);
@@ -396,14 +397,14 @@ try {
       const page = await open();
       const bad = [];
       for (let i = 0; i < Math.min(10, (flow.beats || []).length); i++) {
-        await page.keyboard.press('Alt+Digit' + i); await sleep(200); await idle(page);
+        await page.keyboard.press(MOD + 'Digit' + i); await sleep(200); await idle(page);
         const st = await page.evaluate(() => window.d1.state);
         const b = flow.beats[i];
         if (st.active !== b.active) bad.push(`⌥${i}: active ${st.active}, beat says ${b.active}`);
         for (const [a, s] of Object.entries(b.states)) if (st.states[a] !== s) bad.push(`⌥${i}: ${a} on ${st.states[a]}, beat says ${s}`);
       }
       for (const a of flow.apps.filter(x => x.key)) {
-        await page.keyboard.press('Alt+Key' + a.key.toUpperCase()); await sleep(150);
+        await page.keyboard.press(MOD + 'Key' + a.key.toUpperCase()); await sleep(150);
         if ((await page.evaluate(() => window.d1.state)).active !== a.id) bad.push(`⌥${a.key} doesn't switch to ${a.id}`);
       }
       add('keys', 'Presenter keys (⌥0–9, app keys)', bad.length ? 'fail' : 'pass', bad.length ? bad.join('\n') : `${Math.min(10, flow.beats.length)} beats, ${flow.apps.filter(x => x.key).length} app keys`);
@@ -430,7 +431,7 @@ try {
       const vp = page.viewportSize(); await page.mouse.move(vp.width - 1, vp.height - 1);
       await settle(page, p.id);
       await page.evaluate(id => window.d1.focus.at(id), p.id);
-      await page.keyboard.press('Alt+KeyF'); await sleep(50); await quiet(page);
+      await page.keyboard.press(MOD + 'KeyF'); await sleep(50); await quiet(page);
       const st = await state(page);
       if (st.id !== p.id || st.z !== 2 || !st.draw || !st.marks.length) { bad.push(`${p.id}: not shown on ${p.states[0]} (${p.find ? JSON.stringify(p.find) : 'union'} not found?)`); return null; }
       const L = st.last, on = L.on, m = Math.min(on[0] / L.W, on[1] / L.H, (L.W - on[2]) / L.W, (L.H - on[3]) / L.H);
@@ -453,11 +454,11 @@ try {
       const page = await open();
       const b = Math.max(1, Math.min(...all.map(p => p.beat)));
       if ((flow.beats || [])[b]) {
-        await page.keyboard.press('Alt+Digit' + b); await sleep(200); await idle(page);
+        await page.keyboard.press(MOD + 'Digit' + b); await sleep(200); await idle(page);
         const ready = await page.evaluate(() => window.d1.focus.ready());
         const first = all.slice(Math.max(0, all.findIndex(p => p.beat >= b))).find(p => ready.includes(p.id));
         if (first) await settle(page, first.id);
-        await page.keyboard.press('Alt+KeyF'); await sleep(50); await quiet(page);
+        await page.keyboard.press(MOD + 'KeyF'); await sleep(50); await quiet(page);
         const a = await state(page);
         if (first && (a.id !== first.id || a.z !== 2)) bad.push(`⌥${b} then ⌥F: ${a.id || 'nothing'}, expected ${first.id}`);
         if (a.z === 2) {
@@ -465,8 +466,8 @@ try {
           for (let i = 0; i < 40; i++) await page.keyboard.press('ArrowDown');
           const down = (await state(page)).s;
           if (!(up > a.s || Math.abs(a.s - a.limit) < 1e-3) || down !== 1) bad.push(`↑/↓: ${a.s} → ${up} → ${down}`);
-          await page.keyboard.press('Alt+KeyF'); await sleep(50); await quiet(page);
-          await page.keyboard.press('Alt+Digit0'); await sleep(100); await idle(page);
+          await page.keyboard.press(MOD + 'KeyF'); await sleep(50); await quiet(page);
+          await page.keyboard.press(MOD + 'Digit0'); await sleep(100); await idle(page);
           const z = await state(page);
           if (z.z !== 0 || z.s !== 1 || z.marks.length) bad.push('⌥0 left it zoomed');
         }
@@ -775,7 +776,7 @@ try {
       if (!sticky.length && !(flow.drags || []).length && !grpApps.length && !chipRules.length) add('reset', '⌥0 and jumps reset panes and sizes', 'skip', 'no clicks, drags, groups or chips to reset');
       else {
         const fresh = await open();
-        await fresh.keyboard.press('Alt+Digit0'); await idle(fresh); await fresh.mouse.move(fresh.viewportSize().width - 1, 5); await sleep(300);
+        await fresh.keyboard.press(MOD + 'Digit0'); await idle(fresh); await fresh.mouse.move(fresh.viewportSize().width - 1, 5); await sleep(300);
         const FP = readFileSync(join(here, 'fingerprint.js'), 'utf8').replace(/^\/\/.*\n/gm, '');
         const want0 = await fresh.evaluate(`(${FP})()`);
         await fresh.context().close();
@@ -820,13 +821,13 @@ try {
         const left = () => page.evaluate(ids => ids.flatMap(a => [...window.d1.clicks(a).map(c => `${a}: ${c.name} open`), ...Object.keys(window.d1.sizes(a)).map(k => `${a}: size ${k}`), ...Object.keys(window.d1.flags(a)).filter(k => window.d1.flags(a)[k]).map(k => `${a}: flag ${k}`), ...window.d1.groups(a).open.map(k => `${a}: group ${k} open`)]), flow.apps.map(a => a.id));
         const n = await mess();
         if (!(await left()).length) bad.push('nothing stayed open or resized to reset');
-        await page.keyboard.press('Alt+Digit0'); await idle(page); await page.mouse.move(vp.width - 1, 5); await sleep(300);
+        await page.keyboard.press(MOD + 'Digit0'); await idle(page); await page.mouse.move(vp.width - 1, 5); await sleep(300);
         const after0 = await left();
         if (after0.length) bad.push('after ⌥0: ' + after0.join(', '));
         if ((await page.evaluate(`(${FP})()`)) !== want0) bad.push('after ⌥0 the page differs from a fresh start');
         if ((flow.beats || []).length > 1) {
           await mess();
-          await page.keyboard.press('Alt+Digit1'); await idle(page);
+          await page.keyboard.press(MOD + 'Digit1'); await idle(page);
           const after1 = await left();
           if (after1.length) bad.push('after ⌥1: ' + after1.join(', '));
         }

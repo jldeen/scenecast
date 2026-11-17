@@ -3,6 +3,7 @@
 // Streamed answers replay the real run's frames, then its final page, at the flow's pace. Everything is local and
 // fixed, so it runs the same way every time. Presenter keys are hidden (see docs/flow-format.md).
 import { morphDocument, morphNode, morphChildren, pathOf, atPath, wasInserted } from './morph.js';
+import { presenterKey } from './presenter-key.js';
 
 const flow = await (await fetch('/flow.json', { cache: 'no-store' })).json();
 const stage = document.getElementById('stage');
@@ -209,7 +210,6 @@ function onClick(e, app, doc) {
   setTimeout(() => run(app, hit.t, { el: hit.el, doc, typed: field ? textOf(field) : undefined }), 0);
 }
 
-const presenterKey = e => e.altKey && !e.metaKey;
 function onKey(e, app, doc) {
   for (const h of hooks.key) if (h(e, app, doc)) { e.preventDefault(); e.stopPropagation(); return; }
   // Presenter keys: ⌥ on the Mac; Ctrl+Alt too, on any OS (Windows and Edge keep Alt alone for their menus).
