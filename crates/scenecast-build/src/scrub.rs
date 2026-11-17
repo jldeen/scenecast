@@ -169,14 +169,15 @@ fn rules() -> &'static [Rule] {
     RULES.get_or_init(|| {
         [
             ("jwt", r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b", true),
-            ("bearer-token", r"(?i)\bbearer\s+[a-z0-9._~+/\-]{16,}", true),
-            ("credential", r#"(?i)\b(?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|password|accountkey|sharedaccesssignature|authorization|set-cookie|cookie)\b["'\\]*\s*[:=]\s*["'\\]*(?P<value>[a-z0-9%._~+/\-=]+)"#, true),
+            ("bearer-token", r"(?i)\bbearer\s+[a-z0-9._~+/\-]+", true),
+            ("credential", r#"(?i)\b(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|password|accountkey|sharedaccesskey|sharedaccesssignature|authorization|set-cookie|cookie)\b["'\\]*\s*[:=]\s*["'\\]*(?P<value>[a-z0-9%._~+/\-=]+)"#, true),
             ("sas-signature", r"(?i)[?&;](?:sig|signature)=(?P<value>[a-z0-9%._~+/\-=]+)", true),
             ("private-key", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----", true),
             ("github-token", r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})\b", true),
             ("aws-access-key", r"\bAKIA[0-9A-Z]{16}\b", true),
             ("email", r"(?i)\b[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+\b", false),
             ("tenant-id", r#"(?i)\b(?:tenant[_-]?id|tenantid|tid)\b[\s"'\\:=]+(?P<value>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b"#, false),
+            ("tenant-id", r"(?i)\b(?:login\.microsoftonline\.com|login\.windows\.net)/(?P<value>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b", false),
         ]
         .into_iter()
         .map(|(kind, pattern, credential)| Rule {
@@ -276,12 +277,29 @@ mod tests {
             "Cookie: a=1".to_owned(),
             "client_secret=x".to_owned(),
             "Authorization: Basic eA==".to_owned(),
+            "token=abc".to_owned(),
+            "SharedAccessKey=x".to_owned(),
+            "Bearer abc".to_owned(),
             format!("https://example.test/?{}={}", "sig", "abcdefghijklmnop"),
             "AccountKey=abcdefghijklmnop12345".to_owned(),
         ] {
             let (_, findings) = scrub_text(&value, &[]);
             assert!(findings.iter().any(|f| f.credential), "{value}");
         }
+    }
+
+    #[test]
+    fn redacts_tenant_id_in_identity_urls_and_honors_allowlist() {
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let input = format!("https://login.microsoftonline.com/{id}/oauth2");
+        let (output, findings) = scrub_text(&input, &[]);
+        assert!(!output.contains(id));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.kind == "tenant-id" && !f.credential)
+        );
+        assert_eq!(scrub_text(&input, &[id.into()]).0, input);
     }
 
     #[test]
