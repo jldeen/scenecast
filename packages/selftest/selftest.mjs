@@ -29,7 +29,7 @@ const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + nam
 // A fresh clone has no git identity of its own: the test demo's commits get this one.
 const GIT_ID = { GIT_AUTHOR_NAME: 'replica selftest', GIT_AUTHOR_EMAIL: 'selftest@localhost', GIT_COMMITTER_NAME: 'replica selftest', GIT_COMMITTER_EMAIL: 'selftest@localhost' };
 const run = (args, opts = {}) => new Promise(res => {
-  const p = spawn(BIN, args, { cwd: opts.cwd || tmp, env: { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(BIN, args, { cwd: opts.cwd || tmp, env: { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1', ...opts.env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; p.stdout.on('data', d => { out += d; if (opts.echo) process.stdout.write(d); }); p.stderr.on('data', d => { out += d; process.stderr.write(d); });
   p.on('close', code => res({ code, out }));
 });
@@ -336,6 +336,11 @@ export default flow => {
   check('focus points: each lands on screen with its mark, the same twice; beat keys, ↑/↓, Esc and ⌥0', it('focus').status === 'pass' && /4 points/.test(it('focus').detail), JSON.stringify(it('focus')));
   check('cold start: three fresh clones, each first run identical to the warm runs', it('cold-start').status === 'pass' && /^3 clones/.test(it('cold-start').detail), JSON.stringify(it('cold-start')));
   times.focus = it('focus').secs; times.coldStart = it('cold-start').secs;
+  if (process.platform === 'win32') {
+    const edge = await run(['fidelity', '--only', 'keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
+    const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
+    check('Windows Edge: presenter keys and focus', edge.code === 0 && ['keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-800));
+  }
   // 7 · A tweak: one line, shown on reload with no build; the quick check covers only the screens it touched.
   t1 = Date.now();
   r = await run(['text', 'by six days', 'by a week'], at);

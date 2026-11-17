@@ -441,6 +441,14 @@ try {
       await page.keyboard.press('Escape'); await quiet(page);
       const out = await state(page);
       if (out.z !== 0 || out.s !== 1 || out.marks.length) bad.push(`${p.id}: Esc left it zoomed`);
+      const later = all[all.indexOf(p) + 2];
+      if (later) {
+        await page.evaluate(id => window.d1.focus.at(id), later.id);
+        await page.keyboard.press(MOD + 'Shift+KeyF'); await sleep(50); await quiet(page);
+        const back = await state(page);
+        if (back.id !== p.id || back.z !== 2) bad.push(`${p.id}: reverse focus did not return to this point`);
+        await page.keyboard.press('Escape'); await quiet(page);
+      }
       return { last: L, marks: st.marks, s: st.s, A: st.A };
     };
     const pass = async () => {
