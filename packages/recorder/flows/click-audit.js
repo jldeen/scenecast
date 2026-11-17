@@ -25,7 +25,7 @@ const install = async () => { await f.evaluate(`(${HOVER_PAGE})()`); };
 await install();
 const ev = (fn, a) => f.evaluate(fn, a);
 const move = (x, y, steps = 2) => p.mouse.move(off.x + x, off.y + y, { steps });
-const quiet = async (ms, max) => { const s = Date.now(); while (Date.now() - s < max) { if ((await ev(() => window.__d1h.quietFor())) >= ms) return true; await sleep(60); } return false; };
+const quiet = async (ms, max) => { const s = Date.now(); while (Date.now() - s < max) { if ((await ev(() => window.__d1h.quietFor())) >= ms) return true; await H.poll(60); } return false; };
 const vw = await ev(() => [innerWidth, innerHeight]);
 const NEUTRAL = ARGS.neutral || [vw[0] - 4, Math.round(vw[1] / 2)];
 const url0 = p.url();
@@ -34,9 +34,6 @@ const out = { page: ARGS.page, n: 0, tried: 0, results: [] };
 const BLOCK0 = /^(Send|Like|Dislike|Delete|Remove|Duplicate|Start dictation|Stop|Approve|Cancel|Sign out|Leave|Add to |Add group|Add file|Add skill|Add context|Find context|Suggest|New |Certified|Promoted|Rename|Archive|Pin|Unpin|Share|Retry|Regenerate|Run|Save|Upload|Publish|Block|Unblock|Deploy|Export|Install|Uninstall|Reply|Post|Join|Meet|Call|Video call|Audio call|Mute|Follow)/i;
 const BLOCK = ARGS.block ? new RegExp(BLOCK0.source + '|' + ARGS.block, 'i') : BLOCK0;
 
-await move(...NEUTRAL, 4); await quiet(300, 2000);
-await ev(() => window.__d1h.takeRest()); await sleep(1500);
-out.noise = await ev(() => window.__d1h.noise());
 
 // Controls: the listed ones, then (pick) every visible expander or menu button that isn't blocked.
 let controls = ARGS.controls || [];
@@ -62,10 +59,15 @@ if (ARGS.pick) {
 }
 if (ARGS.skipNames) { const sk = new Set(ARGS.skipNames); out.skippedSeen = controls.filter(c => sk.has(c.name)).length; controls = controls.filter(c => !sk.has(c.name)); }
 out.controls = controls.map(c => c.name);
+// Nothing to click (none here, or all clicked on another screen): done, before any waiting.
+if (!controls.length && !ARGS.probeSend) { out.frameUrl = f === p.mainFrame() ? null : f.url().split('?')[0]; out.secs = Math.round((Date.now() - t0) / 1000); return out; }
+await move(...NEUTRAL, 4); await quiet(300, 2000);
+await ev(() => window.__d1h.takeRest()); await sleep(1000);
+out.noise = await ev(() => window.__d1h.noise());
 
 async function settle(maxMs = 3000) {
   let last = await ev(() => window.__d1h.sig()), stable = Date.now(); const s = Date.now();
-  while (Date.now() - s < maxMs) { await sleep(150); const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500) break; }
+  while (Date.now() - s < maxMs) { await H.poll(150); const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500) break; }
 }
 const vis = () => ev(() => window.__d1h.visibleOps());
 async function backToRest() {
@@ -85,7 +87,7 @@ for (const c of controls) {
     await move(...NEUTRAL); await quiet(300, 2000);
     const ctl = await ev(m => window.__d1h.markCtl(m), c);
     if (!ctl) { r.skip = 'not on screen'; out.results.push(r); continue; }
-    await sleep(250);
+    await sleep(100);
     await ev(() => window.__d1h.takeRest());
     const urlBefore = p.url();
     await move(ctl.x, ctl.y, 3); await sleep(120);
@@ -114,7 +116,7 @@ for (const c of controls) {
     // Putting it back, the way the page does.
     let restore = null, reopen = null, revertMs = null;
     if (c.auto) { const s = Date.now(); while (Date.now() - s < c.auto) { await sleep(150); if (!(await vis())) { restore = 'auto'; revertMs = Date.now() - tc; break; } } }
-    if (!restore && !c.noEscape) { await p.keyboard.press('Escape'); await sleep(500); await settle(1500); if (!(await vis())) restore = 'escape'; }
+    if (!restore && !c.noEscape) { await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await vis())) restore = 'escape'; }
     if (!restore) {
       const again = await ev(() => { const e = window.__d1h.ctl; if (!e || !e.isConnected) return null; const b = e.getBoundingClientRect(); return b.width > 2 ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null; });
       if (again) { await move(again.x, again.y, 3); await sleep(100); await p.mouse.click(off.x + again.x, off.y + again.y); await sleep(200); await move(...NEUTRAL); await settle(2000); if (!(await vis())) restore = 'toggle'; }
@@ -167,7 +169,7 @@ if (ARGS.probeSend) {
   await H.post('/hover', { page: 'click-' + ARGS.page, n: 999, kind: 'send-probe', cand: { text: 'send probe' }, res: {}, probe });
   out.sendProbe = { empty: probe.empty && probe.empty.attrs, typed: probe.typed && probe.typed.attrs, boxText: probe.boxText };
 }
-await move(...NEUTRAL); await sleep(600);
+await move(...NEUTRAL); await quiet(300, 1500);
 if (ARGS.snapId && out.n) out.snap = (await H.snap(p, ARGS.snapId, { shot: false })).docs.slice(0, 3);
 out.frameUrl = f === p.mainFrame() ? null : f.url().split('?')[0];
 out.secs = Math.round((Date.now() - t0) / 1000);

@@ -5,11 +5,15 @@
 // ARGS: { tab | p, id, frameRe?, sel?: the list (default: the biggest scrolling grid/list), row?: row selector,
 //         index?: the row's index attribute (aria-rowindex, aria-posinset, data-index, data-item-index) }
 const a = ARGS.p || await H.pageFor(ARGS.tab);
-await a.bringToFront(); await sleep(800);
+await a.bringToFront(); await H.waitQuiet(a, 200, 2000);
 let lf = a.mainFrame();
 if (ARGS.frameRe) { const re = new RegExp(ARGS.frameRe); lf = a.frames().find(x => re.test(x.url())) || lf; }
 const list = await lf.evaluate(async ARGS => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const frame = () => new Promise(r => { const t = setTimeout(r, 100); requestAnimationFrame(() => { clearTimeout(t); r(); }); });
+  // After a scroll: the rows the list put in, once it stops adding them (at least minMs, three frames with no new
+  // row, at most maxMs), rather than a fixed wait.
+  const rowsIn = async (minMs, maxMs) => { const t = performance.now(); let n = -1, same = 0; while (performance.now() - t < maxMs) { await frame(); take(); if (seen.size === n) { if (++same >= 3 && performance.now() - t >= minMs) break; } else { n = seen.size; same = 0; } } };
   const scroller = e => { let s = e; while (s && !(s.scrollHeight > s.clientHeight + 50 && /(auto|scroll)/.test(getComputedStyle(s).overflowY))) s = s.parentElement; return s; };
   const lists = ARGS.sel ? [...document.querySelectorAll(ARGS.sel)] : [...document.querySelectorAll('[role=grid],[role=treegrid],[role=list],[role=listbox],[role=feed],[role=table],[role=tree]')];
   let grid = null, sc = null, best = 0;
@@ -27,9 +31,9 @@ const list = await lf.evaluate(async ARGS => {
   const placed = /absolute/.test(getComputedStyle(first).position) || /translate|matrix/.test(first.style.transform || '');
   const seen = new Map();
   const take = () => { for (const r of rowsNow()) if (r.parentElement === box) { const i = idxOf(r); if (!seen.has(i)) seen.set(i, r.cloneNode(true)); } };
-  sc.scrollTop = 0; await sleep(500); take();
-  for (let k = 0; k < 600 && sc.scrollTop + sc.clientHeight < sc.scrollHeight - 2; k++) { sc.scrollTop += Math.round(sc.clientHeight * 0.6); await sleep(250); take(); }
-  sc.scrollTop = 0; await sleep(800); take();
+  sc.scrollTop = 0; await rowsIn(150, 500);
+  for (let k = 0; k < 600 && sc.scrollTop + sc.clientHeight < sc.scrollHeight - 2; k++) { sc.scrollTop += Math.round(sc.clientHeight * 0.6); await rowsIn(120, 400); }
+  sc.scrollTop = 0; await rowsIn(200, 800);
   const have = new Set(rowsNow().filter(r => r.parentElement === box).map(idxOf));
   const missing = [...seen].filter(([i]) => !have.has(i)).sort((x, y) => +x[0] - +y[0]);
   let added = 0;
@@ -46,7 +50,7 @@ const list = await lf.evaluate(async ARGS => {
   const tag = grid.getAttribute('role') ? `[role=${grid.getAttribute('role')}]` : grid.localName;
   return { list: tag + (grid.getAttribute('aria-label') ? `[aria-label="${grid.getAttribute('aria-label')}"]` : ''), placed, count: count === null ? null : +count, seen: seen.size, added, rendered: rowsNow().length };
 }, { sel: ARGS.sel, row: ARGS.row, index: ARGS.index });
-await sleep(600);
+await H.waitQuiet(a, 200, 2000);
 if (list.error) throw new Error('list: ' + list.error);
 const out = { list };
 out.snap = (await H.snap(a, ARGS.id)).docs[0];

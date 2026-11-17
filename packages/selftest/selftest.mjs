@@ -6,7 +6,7 @@
 // runs on it, including two identical runs of the recorded path.
 //   node test/selftest.mjs [--keep]        (--keep leaves the temp demo folder and prints where it is)
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,6 +80,7 @@ async function stopWorker(ctx, sw) {
   await b.detach();
   await sleep(1500);
 }
+const RECORD_ONLY = new Error('record only');
 const fx = startFixture();
 let browser, ctx;
 try {
@@ -203,7 +204,24 @@ export default flow => {
   check('record stop', s.states >= 10 && s.streams === 2, JSON.stringify(s).slice(0, 600));
   check('side states captured on the way', (s.autos || []).length >= 8, JSON.stringify(s.autos));
   console.log(`TIME recording, one Chrome pass with every side state: ${times.recording} s (side paths ${s.autoSecs} s)\n  ` + (s.autos || []).join('\n  '));
+  {
+    // The recorder's own time, apart from the product's, and what it comes to at Demo 1's shape (4 apps, 38 screens)
+    // at this fixture's density: each app's first screen (its full sweep), every later screen, and each screen's
+    // capture and confirm time.
+    const T = s.timing || {};
+    const autos = (s.autos || []).map(x => ({ state: x.split(' ')[0], secs: +x.split(' ')[1] }));
+    const starts = autos.filter(a => /-start$/.test(a.state)), later = autos.filter(a => !/-start$/.test(a.state));
+    const avg = xs => xs.reduce((n, x) => n + x.secs, 0) / Math.max(1, xs.length);
+    const perState = (T.captureSecs + T.confirmSecs) / Math.max(1, s.states);
+    const demo1 = (4 * avg(starts) + 34 * avg(later) + 38 * perState) / 60;
+    Object.assign(times, { recorderSecs: T.recorderSecs, productSecs: T.productSecs, sweepSecs: T.sweepSecs, startScreenSecs: +avg(starts).toFixed(1), laterScreenSecs: +avg(later).toFixed(1), perStateSecs: +perState.toFixed(1), demo1RecorderMin: +demo1.toFixed(1) });
+    console.log(`TIME recorder ${T.recorderSecs} s (side states ${T.sweepSecs} s, captures ${T.captureSecs} s, confirming ${T.confirmSecs} s); product ${T.productSecs} s`);
+    console.log(`TIME per screen: an app's first ${times.startScreenSecs} s, later ${times.laterScreenSecs} s, capture+confirm ${times.perStateSecs} s → Demo 1's shape (4 apps, 38 screens) at this density: ${times.demo1RecorderMin} min (budget 15)`);
+    check('recorder time measured apart from the product\'s', T.recorderSecs > 0 && T.productSecs > 0, JSON.stringify(T));
+  }
   if (MODE === 'extension') { await ctx.close(); ctx = null; } else { await browser.close(); browser = null; }
+  // --record-only: stop here (for timing the recorder while working on it).
+  if (process.argv.includes('--record-only')) throw RECORD_ONLY;
 
   // 4 · Build: flow.json from the recording, raw captures → data/, secret scan.
   let t1 = Date.now();
@@ -330,7 +348,7 @@ export default flow => {
   console.log('TIMES ' + JSON.stringify(times));
   writeFileSync(join(tmp, 'times.json'), JSON.stringify(times));
 } catch (e) {
-  check('selftest ran to the end', false, String(e.stack || e));
+  if (e !== RECORD_ONLY) check('selftest ran to the end', false, String(e.stack || e));
 } finally {
   if (browser) await browser.close().catch(() => {});
   if (ctx && MODE === 'extension') await ctx.close().catch(() => {});

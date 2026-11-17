@@ -3,7 +3,27 @@
 // that long-polls the local receiver (RX, set by build.mjs), and returns. Commands come from capture/cli.mjs
 // (bash). Nothing here clicks or types unless a command says so; the recorder (recorder.js) only watches.
 const ctx = page0.context();
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Every fixed wait is counted (SLEPT.ms), so the recorder can say how much of its time was waiting rather than work.
+const SLEPT = { ms: 0 };
+const sleep = ms => { SLEPT.ms += ms; return new Promise(r => setTimeout(r, ms)); };
+const poll = ms => new Promise(r => setTimeout(r, ms));
+// Is the screen quiet? No DOM change for ms, no finite animation running, and (where the browser's requests are
+// visible: the extension) no request in flight and none finished in the last ms. Long-lived streams and sockets
+// don't count. Waiting for this, never a fixed delay, is what keeps the recorder quick on a quick page.
+const QUIET_PAGE = `(() => { const w = window; if (!w.__scq) { w.__scq = { at: performance.now() }; try { new MutationObserver(() => { w.__scq.at = performance.now(); }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true }); } catch (e) {} }
+  let anims = 0; try { anims = document.getAnimations().filter(a => a.playState === 'running' && a.effect && isFinite(a.effect.getComputedTiming().endTime)).length; } catch (e) {}
+  return { mut: performance.now() - w.__scq.at, anims }; })()`;
+async function isQuiet(p, ms, f) {
+  const q = await (f || p.mainFrame()).evaluate(QUIET_PAGE).catch(() => null);
+  if (!q || q.mut < ms || q.anims) return false;
+  if (p.net) { const now = Date.now(); if ([...p.net.values()].some(t => now - t < 15000) || now - p.netAt < ms) return false; }
+  return true;
+}
+async function waitQuiet(p, ms = 300, maxMs = 5000, f) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) { if (await isQuiet(p, ms, f)) return true; await poll(60); }
+  return false;
+}
 const post = (path, data) => page0.request.post(RX + path, { data, timeout: 180000 }).then(r => r.json()).catch(e => ({ error: String(e && e.message || e) }));
 const get = path => page0.request.get(RX + path, { timeout: 60000 }).then(r => r.json()).catch(e => ({ op: 'idle', error: String(e) }));
 const rlog = msg => post('/log', { msg });
@@ -178,7 +198,7 @@ async function stream(p, name, { everyMs = 600, maxS = 900, until = 'quiet', set
 }
 
 const H = {
-  sleep, post, rlog, snap, stream, STREAMS, pageFor, frameFor, SERX, fetchResources,
+  sleep, poll, isQuiet, waitQuiet, post, rlog, snap, stream, STREAMS, pageFor, frameFor, SERX, fetchResources,
   async mark(p, kind) { await p.evaluate(k => sessionStorage.setItem('d1tab', k), kind); },
   async tabs() { const out = []; for (const p of ctx.pages()) { let m = null; try { if (p.attached !== false) m = await p.evaluate(() => sessionStorage.getItem('d1tab')); } catch (e) {} out.push({ url: p.url().slice(0, 160), title: (await p.title().catch(() => '')).slice(0, 80), mark: m }); } return out; },
   // Centre of the smallest visible element whose text matches, in page coordinates (frame offsets included).

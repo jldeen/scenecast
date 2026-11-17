@@ -19,24 +19,42 @@ const off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()
 await f.evaluate(`(${HOVER_PAGE})()`);
 const ev = (fn, a) => f.evaluate(fn, a);
 const move = (x, y, steps = 2) => p.mouse.move(off.x + x, off.y + y, { steps });
-const quiet = async (ms, max) => { const s = Date.now(); while (Date.now() - s < max) { if ((await ev(() => window.__d1h.quietFor())) >= ms) return true; await sleep(60); } return false; };
+const quiet = async (ms, max) => { const s = Date.now(); while (Date.now() - s < max) { if ((await ev(() => window.__d1h.quietFor())) >= ms) return true; await H.poll(60); } return false; };
 const t0 = Date.now();
 const out = { page: ARGS.page, n: 0, tried: 0, steps: [], neutral: null };
 const vw = await ev(() => [innerWidth, innerHeight]);
 
-// Churn that happens with no hover at all (timers, presence) is noise.
-const tries = ARGS.neutral || [[vw[0] - 4, Math.round(vw[1] / 2)], [Math.round(vw[0] / 2), vw[1] - 4], [vw[0] - 4, vw[1] - 4], [4, vw[1] - 4], [Math.round(vw[0] * 0.6), Math.round(vw[1] * 0.55)]];
-await move(...tries[0], 4); await quiet(300, 2000);
-await ev(() => window.__d1h.takeRest()); await sleep(1800);
-out.noise = await ev(() => window.__d1h.noise());
-// A neutral spot: moving there from elsewhere changes nothing.
-for (const pt of tries) {
-  await ev(() => window.__d1h.takeRest());
-  await move(...pt, 3); await sleep(1100);
-  if (!(await ev(() => window.__d1h.sig()))) { out.neutral = pt; break; }
-  await quiet(300, 1500);
+// Nothing new to hover on this screen (every control was hovered on another): done, before any waiting.
+if (!ARGS.scroll && !ARGS.only) {
+  const skip0 = new Set(ARGS.skipKeys || []);
+  const c0 = await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel });
+  if (!c0.some(c => !skip0.has(c.sel + '|' + c.text))) return { page: ARGS.page, n: 0, tried: 0, skipped: c0.length, steps: [0], keys: [], frameUrl: f === p.mainFrame() ? null : f.url().split('?')[0], secs: Math.round((Date.now() - t0) / 1000) };
 }
-if (!out.neutral) out.neutral = tries[0];
+// ARGS.ctx: the neutral spot and the noise this app showed on its last screen (the recorder keeps them): the spot is
+// used again and the noise only topped up, instead of finding both from scratch on every screen.
+if (ARGS.ctx && ARGS.ctx.neutral) {
+  out.neutral = ARGS.ctx.neutral;
+  await move(...out.neutral, 4); await quiet(300, 2000);
+  await ev(sigs => { sigs.forEach(x => window.__d1h.noiseSigs.add(x)); window.__d1h.takeRest(); }, ARGS.ctx.noise || []);
+  await sleep(400);
+  out.noise = await ev(() => window.__d1h.noise());
+} else {
+  // Churn that happens with no hover at all (timers, presence) is noise.
+  const tries = ARGS.neutral || [[vw[0] - 4, Math.round(vw[1] / 2)], [Math.round(vw[0] / 2), vw[1] - 4], [vw[0] - 4, vw[1] - 4], [4, vw[1] - 4], [Math.round(vw[0] * 0.6), Math.round(vw[1] * 0.55)]];
+  await move(...tries[0], 4); await quiet(300, 2000);
+  await ev(() => window.__d1h.takeRest()); await sleep(1000);
+  out.noise = await ev(() => window.__d1h.noise());
+  // A neutral spot: moving there from elsewhere changes nothing (a hover there would show within waitMs).
+  for (const pt of tries) {
+    await ev(() => window.__d1h.takeRest());
+    await move(...pt, 3);
+    let moved = false; const s0 = Date.now();
+    while (Date.now() - s0 < (ARGS.waitMs || 900)) { await H.poll(80); if (await ev(() => window.__d1h.sig())) { moved = true; break; } }
+    if (!moved) { out.neutral = pt; break; }
+    await quiet(300, 1500);
+  }
+  if (!out.neutral) out.neutral = tries[0];
+}
 
 const steps = ARGS.scroll ? ARGS.scroll.steps : 0;
 for (let step = 0; step <= steps; step++) {
@@ -52,13 +70,16 @@ for (let step = 0; step <= steps; step++) {
   const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text));
   out.skipped = (out.skipped || 0) + cands.length - todo.length;
   out.steps.push(todo.length);
+  // After a control that showed nothing (not one change in the page since the rest copy), the page is still at
+  // rest: straight on to the next one, without the trip back to the neutral spot.
+  let atRest = false;
   for (const c of todo) {
     if (ARGS.max && out.tried >= ARGS.max) { out.capped = true; break; }
     (out.keys = out.keys || []).push(c.sel + '|' + c.text);
     if (Date.now() - t0 > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
     out.tried++;
-    await move(...out.neutral); await quiet(250, 1500);
-    await ev(() => window.__d1h.takeRest());
+    if (!atRest) { await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest()); }
+    atRest = false;
     if (c.id > 0) await ev(id => window.__d1h.markDone(id), c.id);
     await move(c.x, c.y);
     const s = Date.now(); let first = null;
@@ -66,7 +87,7 @@ for (let step = 0; step <= steps; step++) {
       await sleep(70);
       if ((await ev(() => window.__d1h.count())) > 0 && (await ev(() => window.__d1h.sig()))) { first = Date.now() - s; break; }
     }
-    if (first === null) continue;
+    if (first === null) { atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
     let last = await ev(() => window.__d1h.sig()), stable = Date.now(), farMs = null;
     while (Date.now() - s < (ARGS.settleMaxMs || 4000)) {
       if (farMs === null && await ev(([x, y]) => window.__d1h.farVisible(x, y), [c.x, c.y])) farMs = Date.now() - s;
@@ -92,10 +113,10 @@ for (let step = 0; step <= steps; step++) {
   if (out.timedOut) break;
 }
 await move(...out.neutral); await quiet(400, 2500);
-if (ARGS.scroll && ARGS.scroll.sel !== undefined) await ev(sel => { const e = sel ? document.querySelector(sel) : document.scrollingElement; if (e) e.scrollTop = 0; }, ARGS.scroll.sel || null);
-await sleep(600);
+if (ARGS.scroll && ARGS.scroll.sel !== undefined) { await ev(sel => { const e = sel ? document.querySelector(sel) : document.scrollingElement; if (e) e.scrollTop = 0; }, ARGS.scroll.sel || null); await sleep(600); }
 // The page's CSS, for the hovers' parts (none to keep when nothing showed).
 if (out.n || ARGS.snapAlways) { const snap = await H.snap(p, ARGS.snapId || ('hov-' + ARGS.page), { shot: false }); out.snap = snap.docs.slice(0, 3); }
+out.ctx = { neutral: out.neutral, noise: await ev(() => [...window.__d1h.noiseSigs]).catch(() => []) };
 out.frameUrl = f === p.mainFrame() ? null : f.url().split('?')[0];
 out.secs = Math.round((Date.now() - t0) / 1000);
 return out;

@@ -12,6 +12,8 @@ if (ARGS.frameRe) { const re = new RegExp(ARGS.frameRe); let area = 0; for (cons
 const off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox();
 await f.evaluate(`(${HOVER_PAGE})()`);
 const ev = (fn, a) => f.evaluate(fn, a);
+// Two painted frames: the page has drawn what the pointer did (at most 200 ms, for a tab that isn't drawing).
+const frames2 = () => ev(() => new Promise(r => { const t = setTimeout(r, 200); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(); })); }));
 const STEP = ARGS.step || 40, RANGE = ARGS.range || 800;
 const out = { page: ARGS.page, handles: [] };
 let handles = await ev(() => window.__d1h.handles());
@@ -61,8 +63,8 @@ for (const h of handles) {
     for (let d = -RANGE + STEP; d <= 0; d += STEP) seq.push(d);
     for (let d = STEP; d <= RANGE; d += STEP) seq.push(d);
     for (let d = RANGE - STEP; d >= 0; d -= STEP) seq.push(d);
-    for (const d of seq) { await p.mouse.move(...at(d), { steps: 2 }); await sleep(90); const s = await sample(); s.d = d; rec.samples.push(s); }
-    await p.mouse.up(); await sleep(500);
+    for (const d of seq) { await p.mouse.move(...at(d), { steps: 2 }); await frames2(); const s = await sample(); s.d = d; rec.samples.push(s); }
+    await p.mouse.up(); await H.waitQuiet(p, 200, 1500, f);
     rec.afterUp = await sample();
     // What each written element is, to name it in a rule.
     rec.styleMeta = await ev(() => Object.fromEntries([...window.__d1styles].map(([k, v]) => [k, { tag: v.tag, testid: v.testid, label: v.label, attr: v.attr, cls: v.cls }])));
@@ -75,7 +77,7 @@ for (const h of handles) {
       const px = off.x + hb[0], py = off.y + hb[1];
       await p.mouse.move(px, py, { steps: 2 }); await sleep(150); await p.mouse.down(); await sleep(100);
       await p.mouse.move(vertical ? px + d : px, vertical ? py : py + d, { steps: 6 }); await sleep(150);
-      await p.mouse.up(); await sleep(600);
+      await p.mouse.up(); await H.waitQuiet(p, 200, 1500, f);
       const s1 = await sample(); s1.d = d; s1.before = s0; (rec.release = rec.release || []).push(s1);
     }
     // Back where it was.
@@ -84,7 +86,7 @@ for (const h of handles) {
     if (Math.abs(moved) > 0.5 || end.now !== rec.start.now) {
       const hb = await ev(() => { const e = document.querySelector('[data-d1-drag]'); const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; });
       await p.mouse.move(off.x + hb[0], off.y + hb[1], { steps: 2 }); await p.mouse.down(); await sleep(100);
-      await p.mouse.move(off.x + hb[0] - (vertical ? moved : 0), off.y + hb[1] - (vertical ? 0 : moved), { steps: 8 }); await sleep(150); await p.mouse.up(); await sleep(500);
+      await p.mouse.move(off.x + hb[0] - (vertical ? moved : 0), off.y + hb[1] - (vertical ? 0 : moved), { steps: 8 }); await sleep(150); await p.mouse.up(); await H.waitQuiet(p, 200, 1500, f);
     }
     rec.restored = await sample();
     rec.restoredOk = rec.restored.now === rec.start.now && Math.abs((rec.restored.handle || [0])[0] - (rec.start.handle || [0])[0]) < 1.5;
