@@ -1,11 +1,15 @@
-// Replica shell (scenecast, from replica-kit). Each app in flow.json is a frame holding a real captured page. Clicks, hovers,
+// Replica shell (scenecast, from replica-kit). Each app in the bundle is a frame holding a real captured page. Clicks, hovers,
 // typing and Enter move an app between captured states by morphing the live page into the next capture (morph.js).
 // Streamed answers replay the real run's frames, then its final page, at the flow's pace. Everything is local and
 // fixed, so it runs the same way every time. Presenter keys are hidden (see docs/flow-format.md).
 import { morphDocument, morphNode, morphChildren, pathOf, atPath, wasInserted } from './morph.js';
 import { presenterKey } from './presenter-key.js';
+import { flowFromBundle, applyFlowOverrides } from './bundle-flow.js';
 
-const flow = await (await fetch('/flow.json', { cache: 'no-store' })).json();
+const manifestResponse = await fetch('/manifest.json', { cache: 'no-store' });
+if (!manifestResponse.ok) throw new Error(`manifest.json ${manifestResponse.status}`);
+const manifest = await manifestResponse.json();
+const flow = applyFlowOverrides(flowFromBundle(manifest), manifest.development_overrides);
 const stage = document.getElementById('stage');
 const fav = document.getElementById('d1-fav');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -13,9 +17,12 @@ const texts = new Map();
 const getText = url => { if (!texts.has(url)) texts.set(url, fetch(url).then(r => { if (!r.ok) throw new Error(url + ' ' + r.status); return r.text(); })); return texts.get(url); };
 const getJson = url => getText(url).then(t => JSON.parse(t));
 const parse = html => (Document.parseHTMLUnsafe ? Document.parseHTMLUnsafe(html) : new DOMParser().parseFromString(html, 'text/html'));
-const snapUrl = id => `/snaps/${id}.html`;
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\u00a0/g, '&nbsp;');
 const S = flow.states;
+const snapshots = Object.fromEntries(Object.values(S).filter(s => s.snap.startsWith('@scene:')).map(s => [s.snap, s.snapshot]));
+const bundlePath = path => '/bundle/' + path.split('/').map(encodeURIComponent).join('/');
+const snapUrl = id => snapshots[id] ? bundlePath(snapshots[id]) : `/snaps/${id}.html`;
+const snapRelated = (id, suffix) => snapshots[id] ? bundlePath(snapshots[id].replace(/\.html$/i, '') + suffix) : `/snaps/${id}${suffix}`;
 // Replay pace (seconds per prompt): flow.pace, or ?pace= in the URL. Stream timings are written for pace 5.
 const PACE = (q => q > 0 ? q : flow.pace || 5)(+new URLSearchParams(location.search).get('pace'));
 // ?speed=N runs every timer N times faster (answers, hover delays, slides): the checks' virtual clock. The order of
@@ -1098,10 +1105,10 @@ async function targetDoc(app, stateId) { return parse(subst(app, await getText(s
 
 // Frame captures of a state, fetched and parsed up front, so the morph itself is one synchronous step.
 async function frameTargets(snap) {
-  const meta = await getJson(`/snaps/${snap}.json`).catch(() => ({ frames: [] }));
+  const meta = await getJson(snapRelated(snap, '.json')).catch(() => ({ frames: [] }));
   const out = new Map();
   await Promise.all((meta.frames || []).map(async f => {
-    const t = await getText(`/snaps/${snap}.${f.key}.html`).catch(() => null);
+    const t = await getText(snapRelated(snap, `.${f.key}.html`)).catch(() => null);
     if (t) out.set(f.key, parse(t));
   }));
   return out;
@@ -1109,7 +1116,7 @@ async function frameTargets(snap) {
 function morphFrames(liveDoc, targetSnap, scroll, targets, later) {
   for (const f of liveDoc.querySelectorAll('iframe[data-d1-frame]')) {
     const key = f.getAttribute('data-d1-frame');
-    const want = `/snaps/${targetSnap}.${key}.html`;
+    const want = snapRelated(targetSnap, `.${key}.html`);
     if (f.__d1src === want) continue;
     let fd; try { fd = f.contentDocument; } catch (e) { continue; }
     if (!fd || !fd.body) { f.__d1src = want; later.push(() => loadFrame(f, want)); continue; }
@@ -1181,7 +1188,7 @@ async function scoped(app, t, ctx) {
   const snap = t.snap ? (t.snap === '@self' ? S[app.state].snap : t.snap) : S[which].snap;
   if (!scopeEl) return which ? go(app, which, { scroll: 'keep' }) : undefined;
   const fk = frameKeyOf(ctx.doc);
-  const target = fk ? parse(await getText(`/snaps/${snap}.${fk}.html`)) : parse(subst(app, await getText(snapUrl(snap))));
+  const target = fk ? parse(await getText(snapRelated(snap, `.${fk}.html`))) : parse(subst(app, await getText(snapUrl(snap))));
   const twin = atPath(target, pathOf(scopeEl));
   if (!twin || twin.localName !== scopeEl.localName) return which ? go(app, which, { scroll: 'keep' }) : undefined;
   hvClear(app); clkClear(app);
@@ -1278,7 +1285,7 @@ async function loadApp(app, stateId) {
   clkState(app).sticky.clear(); grpState(app).open.clear(); app.flags = {}; app.sizes = {}; app.playing = null;
   app.state = stateId; app.hover = null; app.subst = []; app.morphGen = (app.morphGen || 0) + 1;
   const snap = S[stateId].snap;
-  app.customElements = ((await getJson(`/snaps/${snap}.json`).catch(() => ({}))).customElements) || [];
+  app.customElements = ((await getJson(snapRelated(snap, '.json')).catch(() => ({}))).customElements) || [];
   await Promise.all([loadFrame(app.iframe, snapUrl(snap)), prepareLayout(app), loadHovers(app)]);
   prepare(app.iframe.contentDocument, app);
   applyLayout(app);

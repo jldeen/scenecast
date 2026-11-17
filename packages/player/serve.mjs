@@ -1,5 +1,4 @@
-// Replica server. No dependencies, no network: it serves the player (packages/player/app/), the demo's flow
-// (flow.json) and its captured pages and assets (data/) on localhost.
+// Replica server. No dependencies, no network: it serves the player, bundle, captured pages and assets on localhost.
 //   node packages/player/serve.mjs --demo <dir> [--port 4620] [--open] [--pace N] [--release]
 // --open opens it as an app window (no tabs or address bar; launch.mjs): Chrome on the Mac (⌃⌘F for full screen),
 // Edge on Windows (F11), or demo.json chrome.browser, on chrome.profile. REPLICA_NO_OPEN=1 serves without opening
@@ -8,12 +7,13 @@
 // Tweaks show on reload, without a build: when recording.json, flow.overrides.mjs or demo.json changes, the flow is
 // compiled again (and flow.json written); text edits the last build hasn't baked in (data/build.json) are applied to
 // each page, frame and hover as it's served. What only a build can do is listed at /__replica/status and in the log.
-// --release serves data/ and flow.json exactly as built (what a pushed replica runs).
+// --release serves the bundle and data exactly as built.
 import { createServer } from 'node:http';
-import { createReadStream, existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
+import { createReadStream, existsSync, statSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp } from './launch.mjs';
+import { diffFlow } from './app/bundle-flow.js';
 import { loadDemo, arg } from '../kit/lib/demo.mjs';
 import { compileFlow } from '../kit/compile/flow.mjs';
 import { buildInputs, buildDiff } from '../kit/lib/buildkey.mjs';
@@ -41,6 +41,7 @@ const watched = () => {
   return parts.join('|');
 };
 let lastNote = '';
+let warnedMissingBase = false;
 let refreshing = Promise.resolve();
 async function refresh() {
   const pending = refreshing.then(() => refreshNow());
@@ -48,7 +49,7 @@ async function refresh() {
   return pending;
 }
 async function refreshNow() {
-  if (RELEASE) { if (!live.json) live.json = readFileSync(demo.flowPath, 'utf8'); return; }
+  if (RELEASE) return;
   const key = watched();
   if (key === live.key) return;
   live.key = key;
@@ -83,6 +84,29 @@ function resolve(path) {
   if (path === '/' || path === '/index.html') return join(APP, 'index.html');
   if (path === '/flow.json') return demo.flowPath;
   if (path === '/favicon.ico') return null;
+  if (path.startsWith('/bundle/')) {
+    let rel;
+    try { rel = decodeURIComponent(path.slice('/bundle/'.length)); } catch { return null; }
+    if (!rel || rel.includes('\\') || rel.split('/').some(part => !part || part.startsWith('.'))) return null;
+    const manifest = JSON.parse(readFileSync(join(demo.dir, 'manifest.json'), 'utf8'));
+    const snapshots = (manifest.graph?.scenes || []).map(s => s.live?.snapshot).filter(Boolean);
+    const allowed = snapshots.some(snapshot => {
+      if (rel === snapshot) return true;
+      const base = snapshot.replace(/\.html$/i, '');
+      if (rel === base + '.json') return true;
+      if (!rel.startsWith(base + '.') || !rel.endsWith('.html')) return false;
+      return /^[a-z0-9_-]+$/i.test(rel.slice(base.length + 1, -5));
+    });
+    if (!allowed) return null;
+    const f = normalize(join(demo.dir, rel));
+    try {
+      const actual = realpathSync(f), root = realpathSync(demo.dir);
+      return actual.startsWith(root + sep) ? actual : null;
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;
+      throw e;
+    }
+  }
   for (const [pre, dir] of MAP) if (path.startsWith(pre)) {
     const f = normalize(join(dir, decodeURIComponent(path.slice(pre.length))));
     if (!f.startsWith(dir + sep)) return null;
@@ -99,6 +123,29 @@ createServer(async (req, res) => {
     const dir = join(demo.data, 'assets');
     const list = existsSync(dir) ? readdirSync(dir).filter(f => /\.(woff2?|ttf|otf)$/.test(f) && statSync(join(dir, f)).size > 0).sort().map(f => '/assets/' + f) : [];
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' }); return res.end(JSON.stringify(list));
+  }
+  if (path === '/manifest.json') {
+    await refresh();
+    const file = join(demo.dir, 'manifest.json');
+    try {
+      const manifest = JSON.parse(readFileSync(file, 'utf8'));
+      if (!RELEASE && live.flow) {
+        const basePath = join(demo.dir, '.out', 'live-base.json');
+        if (existsSync(basePath)) {
+          const base = JSON.parse(readFileSync(basePath, 'utf8'));
+          manifest.development_overrides = diffFlow(base, live.flow);
+        } else if (!warnedMissingBase) {
+          warnedMissingBase = true;
+          console.warn('live overrides need a build or sync; serving the bundle as built');
+        }
+      }
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' });
+      return res.end(JSON.stringify(manifest));
+    } catch (e) {
+      console.error(`manifest: ${e.message}`);
+      res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+      return res.end('Could not load bundle manifest');
+    }
   }
   if (path === '/flow.json' || path === '/__replica/status') {
     await refresh();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { flowFromBundle } from './app/bundle-flow.js';
+import { applyFlowOverrides, flowFromBundle } from './app/bundle-flow.js';
 
 test('bundle graph drives scenes, queries, streams and focus', () => {
   const bundle = {
@@ -33,4 +33,9 @@ test('bundle graph drives scenes, queries, streams and focus', () => {
   assert.deepEqual(flow.focus[0].grow, [1, 2, 3, 4]);
   bundle.graph.scenes[0].transitions[1].target = 'start';
   assert.equal(flowFromBundle(bundle).states.start.on[0].query.answer, 'start');
+});
+
+test('live override paths cannot mutate object prototypes', () => {
+  assert.throws(() => applyFlowOverrides({}, [{ path: ['__proto__', 'polluted'], value: true }]), /Invalid override path/);
+  assert.equal({}.polluted, undefined);
 });

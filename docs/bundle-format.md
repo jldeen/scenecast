@@ -64,8 +64,9 @@ v2 validation adds: app ids and keys valid and unique; every scene, transition, 
 known apps and existing scenes and streams; focus beats within the beats; a focus point has a target; no captured
 page on a fallback scene; snapshot and reference paths portable (and, with files checked, present).
 
-`scenecast build` writes all of this from the engine's `flow.json` (docs/engine/flow-format.md). The player still
-reads `flow.json` in this phase; it reads the bundle directly from Phase 2.
+`scenecast build` writes all of this from the recording and engine's `flow.json`
+(docs/engine/flow-format.md). The player reads the bundle manifest, not `flow.json`. During development, the
+server applies changes since the last build or sync as live overrides; release mode serves the bundle as built.
 
 **v1 bundles still load.** A `scenecast.bundle.v1` manifest is migrated on read: a scene without `kind` (v1's
 default, a screenshot) becomes `screenshot`, a fallback scene; every v1 field is still in v2. Edits write v2.

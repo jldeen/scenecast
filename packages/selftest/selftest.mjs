@@ -295,7 +295,10 @@ export default flow => {
   {
     const b2 = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
     const p2 = await b2.newPage({ viewport: { width: 1600, height: 900 } });
+    const playerRequests = [];
+    p2.on('request', request => playerRequests.push(new URL(request.url()).pathname));
     await p2.goto(`http://127.0.0.1:${REPLICA_PORT}/`); await p2.waitForFunction(() => window.d1 && window.d1.state.active);
+    check('replica: reads the bundle, not flow.json', playerRequests.includes('/manifest.json') && !playerRequests.includes('/flow.json'), playerRequests.join(' '));
     await p2.evaluate(() => window.d1.go('chat', 'chat-01-message'));
     const at = await p2.evaluate(() => window.d1.locate({ sel: 'button[aria-label="More options"]' }));
     await p2.mouse.click(at.x, at.y); await sleep(300);

@@ -15,7 +15,7 @@ export function flowFromBundle(bundle) {
     const match = /^data\/snaps\/(.+)\.html$/.exec(snapshot);
     const state = {
       ...(data.options || {}),
-      app: scene.live.app, snap: match ? match[1] : scene.id,
+      app: scene.live.app, snap: match ? match[1] : `@scene:${scene.id}`,
       snapshot, title: scene.live.title || scene.title,
     };
     const ordered = (data.actions || []).map(a => ({ order: a.order, value: a.action }));
@@ -68,6 +68,46 @@ export function flowFromBundle(bundle) {
   }
   if (flow.focus.length && !(flow.modules || []).includes('/app/focus-module.js')) {
     flow.modules = ['/app/focus-module.js', ...(flow.modules || [])];
+  }
+  return flow;
+}
+
+const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const reserved = key => ['__proto__', 'prototype', 'constructor'].includes(key);
+
+// Development overrides are a sparse delta over the bundle, not a second runtime source.
+export function diffFlow(base, live) {
+  const changes = [];
+  function visit(before, after, path) {
+    if (path[0] === 'states' && path[2] === 'snapshot') return;
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    if (object(before) && object(after)) {
+      for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (reserved(key)) throw new Error('Invalid override key');
+        if (path[0] === 'states' && path.length === 2 && key === 'snapshot') continue;
+        if (!Object.hasOwn(after, key)) changes.push({ path: [...path, key], remove: true });
+        else if (!Object.hasOwn(before, key)) changes.push({ path: [...path, key], value: after[key] });
+        else visit(before[key], after[key], [...path, key]);
+      }
+    } else {
+      changes.push({ path, value: after });
+    }
+  }
+  visit(base, live, []);
+  return changes;
+}
+
+export function applyFlowOverrides(flow, changes) {
+  for (const change of changes || []) {
+    if (!Array.isArray(change.path) || !change.path.length || change.path.some(reserved)) throw new Error('Invalid override path');
+    let target = flow;
+    for (const key of change.path.slice(0, -1)) {
+      if (!object(target[key])) throw new Error('Invalid override target');
+      target = target[key];
+    }
+    const key = change.path.at(-1);
+    if (change.remove) delete target[key];
+    else target[key] = change.value;
   }
   return flow;
 }

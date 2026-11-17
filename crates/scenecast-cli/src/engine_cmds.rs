@@ -244,6 +244,11 @@ fn write_scrub_report(dir: &Path, report: &ScrubReport) -> Result<()> {
 pub fn sync(dir: &Path) -> Result<i32> {
     let report = scenecast_build::sync_manifest(dir)?;
     print_sync(&report);
+    if report.is_valid() {
+        let out = dir.join(".out");
+        fs::create_dir_all(&out)?;
+        fs::copy(dir.join("flow.json"), out.join("live-base.json"))?;
+    }
     Ok(if report.is_valid() { 0 } else { 1 })
 }
 
