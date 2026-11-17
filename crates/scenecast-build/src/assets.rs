@@ -32,6 +32,8 @@ pub enum AssetError {
     Base64(#[from] base64::DecodeError),
     #[error("invalid resource JSON")]
     Json(#[from] serde_json::Error),
+    #[error("{0}")]
+    Compose(String),
 }
 
 fn io(path: &Path, source: std::io::Error) -> AssetError {
@@ -418,6 +420,11 @@ impl AssetResolver {
                     crate::compose::css_for(&part, &source, &target)
                         .map_err(AssetError::Invalid)?,
                 )
+            }
+            "compose" => {
+                let [html, anchor, tag, part, css]: [String; 5] = serde_json::from_str(value)?;
+                crate::compose::compose(&html, &anchor, &tag, &part, &css)
+                    .map_err(AssetError::Compose)?
             }
             _ => return Err(AssetError::Invalid("unknown asset operation")),
         };

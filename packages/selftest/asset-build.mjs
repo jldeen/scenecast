@@ -57,7 +57,7 @@ try {
   mkdirSync(join(raw, 'streams', 's1'));
   for (const n of [0, 1]) writeFileSync(join(raw, 'streams', 's1', `${n}.json`), JSON.stringify({
     n, t: n * 100, urls: ['https://fixture.invalid/img.svg'], inline: { canvas1: 'data:image/svg+xml,%3Csvg%3E' },
-    html: '<body focusgroup="x" style="appearance:slider-vertical"><img src="d1res://0"><canvas data-d1-canvas="canvas1"></canvas></body>',
+    html: '<body focusgroup="x" style="appearance:slider-vertical"><div><div>replace this</div></div><img src="d1res://0"><canvas data-d1-canvas="canvas1"></canvas></body>',
   }));
   writeFileSync(join(demo, 'recording.json'), JSON.stringify({
     states: { start: { app: 'app', snap: 'start' }, part: { app: 'app', snap: 'part' } },
@@ -74,6 +74,7 @@ try {
   const after = Object.fromEntries(['snaps', 'streams', 'assets'].map(dir => [dir, files(join(demo, 'data', dir))]));
   assert.deepEqual(after, before);
   assert.match(readFileSync(join(demo, 'data', 'snaps', 'start.html'), 'utf8'), /data-d1-compose=""[^]*@keyframes spin/);
+  assert.match(readFileSync(join(demo, 'data', 'streams', 's1', '000.html'), 'utf8'), /<div><div class="card">source part<\/div><\/div>/);
   console.log('Rust asset and CSS resolution matches the JavaScript capture processor');
 } finally {
   rmSync(temp, { recursive: true, force: true });

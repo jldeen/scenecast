@@ -130,6 +130,82 @@ pub fn css_for(part: &str, source: &str, target: &str) -> Result<String, &'stati
     Ok(keep.join("\n"))
 }
 
+/// Replace the element surrounding an anchor with a captured part.
+pub fn compose(
+    html: &str,
+    anchor: &str,
+    tag: &str,
+    part: &str,
+    css: &str,
+) -> Result<Option<String>, String> {
+    let Some(at) = html.find(anchor) else {
+        return Ok(None);
+    };
+    let prefix = format!("<{tag}");
+    let start_tag = Regex::new(r"^<([a-zA-Z0-9-]+)").expect("valid tag regex");
+    let mut before = at;
+    let mut include_at = true;
+    let (start, end) = loop {
+        let candidate = if include_at && html[at..].starts_with(&prefix) {
+            Some(at)
+        } else {
+            html[..before].rfind(&prefix)
+        };
+        include_at = false;
+        let Some(start) = candidate else {
+            return Err(format!("compose: no <{tag}> around {anchor}"));
+        };
+        let slice = &html[start..];
+        let Some(captures) = start_tag.captures(slice) else {
+            if start == 0 {
+                return Err(format!("compose: no <{tag}> around {anchor}"));
+            }
+            before = start;
+            continue;
+        };
+        let actual = captures.get(1).expect("tag").as_str();
+        let valid = slice[1 + actual.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c == '>' || js_whitespace(c));
+        if valid && actual.len() <= tag.len() {
+            let pattern = Regex::new(&format!(r"<(/?){}(?-u:\b)", regex::escape(actual)))
+                .map_err(|error| error.to_string())?;
+            let mut depth = 0_i64;
+            let mut end = None;
+            for matched in pattern.captures_iter(slice) {
+                depth += if &matched[1] == "/" { -1 } else { 1 };
+                if depth == 0 {
+                    let offset = matched.get(0).expect("tag").start();
+                    end = slice[offset..].find('>').map(|n| start + offset + n + 1);
+                    break;
+                }
+            }
+            let end = end.ok_or_else(|| format!("unbalanced {actual}"))?;
+            if end > at {
+                break (start, end);
+            }
+        }
+        if start == 0 {
+            return Err(format!("compose: no <{tag}> around {anchor}"));
+        }
+        before = start;
+    };
+    let mut out = format!("{}{}{}", &html[..start], part, &html[end..]);
+    if !css.is_empty() && out.contains("</head>") {
+        static STYLE_END: OnceLock<Regex> = OnceLock::new();
+        let escaped = STYLE_END
+            .get_or_init(|| Regex::new(r"(?i)</style").expect("valid style regex"))
+            .replace_all(css, r"<\/style");
+        out = out.replacen(
+            "</head>",
+            &format!(r#"<style data-d1-compose="">{escaped}</style></head>"#),
+            1,
+        );
+    }
+    Ok(Some(out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +232,19 @@ mod tests {
                 .contains("@keyframes unused")
         );
         assert!(css_for(part, "<style>@keyframes{}</style>", "").is_err());
+    }
+
+    #[test]
+    fn replaces_containing_element_and_escapes_style_end() {
+        let html = "<head></head><body>😎<div><div>anchor</div></div></body>";
+        let result = compose(html, "anchor", "div", "<p>new</p>", "x{content:'</STYLE'}")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result,
+            "<head><style data-d1-compose=\"\">x{content:'<\\/style'}</style></head><body>😎<div><p>new</p></div></body>"
+        );
+        assert_eq!(compose(html, "missing", "div", "", "").unwrap(), None);
+        assert!(compose("<div>anchor", "anchor", "div", "", "").is_err());
     }
 }
