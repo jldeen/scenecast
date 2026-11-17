@@ -18,7 +18,7 @@ import { cpus, tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadDemo, readFlow, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, bundleFlow, arg } from '../kit/lib/demo.mjs';
 import { scan } from './secrets.mjs';
 import { comparePngs, luminance } from './compare.mjs';
 
@@ -47,13 +47,13 @@ mkdirSync(demo.out, { recursive: true });
 
 // The replica server: started here if it isn't running.
 let server = null;
-const up = async () => { if (fileBase) return true; try { return (await fetch(URL + 'flow.json')).ok; } catch (e) { return false; } };
+const up = async () => { if (fileBase) return true; try { return (await fetch(new globalThis.URL('__replica/status', URL))).ok; } catch (e) { return false; } };
 if (!(await up())) {
   server = spawn(process.execPath, [join(KIT, 'player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
   for (let i = 0; i < 50 && !(await up()); i++) await sleep(100);
 }
-// The flow as the server has it now (tweaks in flow.overrides.mjs included).
-const flow = fileBase ? readFlow(demo) : await (await fetch(URL + 'flow.json')).json().catch(() => readFlow(demo));
+// The flow the replica plays: its bundle, with the server's live overrides (tweaks in flow.overrides.mjs).
+const flow = await bundleFlow(URL);
 const S = flow.states;
 const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
 // Pages open at most JOBS at a time; a page's slot frees when its context closes.

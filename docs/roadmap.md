@@ -15,7 +15,10 @@ first-class. Phases:
   (closed shadow roots, cross-site frames, a real screenshot per state), the side-state sweep with quiet waits, stream
   detection, resume after the browser stops the extension, `scenecast preflight`, and the recorder as a Rust library
   for the desktop app. Next: Demo 1 and Seth's Alaska app recorded with it (docs/recorder.md).
-- **Phase 2: player and build** that read bundle v2 directly; Windows/Edge launcher polish; PII scrub report.
+- **Phase 2 (done): player and build.** The player and the checks read bundle v2 (`manifest.json`) directly, from a
+  server or a plain exported folder; presenter keys per platform (⌥ on the Mac, Ctrl+Alt on Windows, Edge and Chrome
+  tested); `scenecast present` opens an app window or prints the URL; an incremental, content-hashed Rust build; the
+  secret and PII scrub with `.out/scrub.json`, failing the build on any credential.
 - **Phase 3: fidelity loop and AI fixer.**
 - **Phase 4: script to focus points, and the editor.**
 - **Phase 5: ready for anyone**, then a desktop app (Tauri, macOS and Windows) on the same Rust core.

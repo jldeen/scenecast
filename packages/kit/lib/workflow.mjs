@@ -73,7 +73,7 @@ export async function status(args) {
   if (!q || Date.parse(q.at) < lastChange || !q.pass) next.push('scenecast quick');
   if (f && !f.pass) next.push('fix what .out/fidelity.md lists, then scenecast quick');
   // Running
-  const srv = await ping(demo.url + 'flow.json'), rx = await ping(`http://127.0.0.1:${process.env.REPLICA_RX_PORT || demo.cfg.receiverPort}/ping`);
+  const srv = await ping(demo.url + '__replica/status'), rx = await ping(`http://127.0.0.1:${process.env.REPLICA_RX_PORT || demo.cfg.receiverPort}/ping`);
   say('running', `replica ${srv ? demo.url : 'not served'}; receiver ${rx ? 'up' : 'down'}`);
   if (srv) { const st = await fetch(demo.url + '__replica/status').then(r => r.json()).catch(() => null); if (st && st.error) { say('', `flow error: ${st.error}`); next.unshift('fix flow.overrides.mjs (the replica serves the last good flow)'); } }
   console.log(out.join('\n'));

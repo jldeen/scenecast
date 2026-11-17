@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { comparePngs } from './compare.mjs';
-import { loadDemo, readFlow, arg as argOf } from '../kit/lib/demo.mjs';
+import { loadDemo, bundleFlow, arg as argOf } from '../kit/lib/demo.mjs';
 
 const demo = loadDemo(process.argv.slice(2));
 const arg = (k, d) => argOf(process.argv.slice(2), k, d);
@@ -22,7 +22,7 @@ const ONLY = arg('--only', null);
 const APPS = (arg('--apps', '') || '').split(',').filter(Boolean);
 // --speed: the replica's clock runs faster (hover delays too), so each hover is waited for that much less.
 const SPEED = +arg('--speed', 1);
-const flow = readFlow(demo);
+const flow = await bundleFlow(URL0);
 const stateOf = snap => (Object.entries(flow.states).find(([, s]) => s.snap === snap) || [snap])[0];
 const VPW = demo.cfg.viewport.width, VPH = demo.cfg.viewport.height;
 

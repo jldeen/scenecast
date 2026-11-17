@@ -6,7 +6,7 @@
 // runs on it, including two identical runs of the recorded path.
 //   node test/selftest.mjs [--keep]        (--keep leaves the temp demo folder and prints where it is)
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, unlinkSync, utimesSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, unlinkSync, utimesSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -428,8 +428,13 @@ export default flow => {
           await browser.close();
         }
         check('folder export: three identical offline cold starts', new Set(fileHashes).size === 1 && !fileErrors.length, JSON.stringify({ fileHashes, fileErrors }));
-        const offline = await run(['fidelity', '--url', fileUrl, '--only', 'two-run,composer,keys,focus,clicks,hovers,drags,zoom'], at);
-        check('folder export: offline interaction and two-run checks', offline.code === 0, offline.out.slice(-1000));
+        // The checks read the export's own bundle: the demo's authoring flow.json is moved away while they run.
+        const flowFile = join(DEMO, 'flow.json'), flowAside = join(tmp, 'flow.json.aside');
+        renameSync(flowFile, flowAside);
+        let offline;
+        try { offline = await run(['fidelity', '--url', fileUrl, '--only', 'two-run,composer,keys,focus,clicks,hovers,drags,zoom'], at); }
+        finally { renameSync(flowAside, flowFile); }
+        check('folder export: offline interaction and two-run checks, from the export\'s bundle alone', offline.code === 0, offline.out.slice(-1000));
         if (process.platform === 'win32' || process.platform === 'darwin') {
           const edge = await run(['fidelity', '--url', fileUrl, '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
           const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));

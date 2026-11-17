@@ -65,8 +65,10 @@ known apps and existing scenes and streams; focus beats within the beats; a focu
 page on a fallback scene; snapshot and reference paths portable (and, with files checked, present).
 
 `scenecast build` writes all of this from the recording and engine's `flow.json`
-(docs/engine/flow-format.md). The player reads the bundle manifest, not `flow.json`. During development, the
-server applies changes since the last build or sync as live overrides; release mode serves the bundle as built.
+(docs/engine/flow-format.md). The player reads the bundle manifest, not `flow.json`, and so do the checks: they load
+the `manifest.json` of the replica they test, so an exported folder is checked on its own. `flow.json` is a build
+intermediate; the server doesn't serve it. During development, the server applies changes since the last build or
+sync as live overrides; release mode serves the bundle as built.
 
 **v1 bundles still load.** A `scenecast.bundle.v1` manifest is migrated on read: a scene without `kind` (v1's
 default, a screenshot) becomes `screenshot`, a fallback scene; every v1 field is still in v2. Edits write v2.

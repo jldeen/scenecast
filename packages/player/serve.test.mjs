@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -54,11 +54,12 @@ test('a capture request immediately sees a changed live override', async t => {
   const base = `http://127.0.0.1:${port}`;
   let ready = false;
   for (let i = 0; i < 100 && !ready; i++) {
-    try { ready = (await fetch(base + '/flow.json')).ok; }
+    try { ready = (await fetch(base + '/__replica/status')).ok; }
     catch { await new Promise(resolve => setTimeout(resolve, 20)); }
   }
   assert.ok(ready, 'server did not start');
-  const baseline = await (await fetch(base + '/flow.json')).json();
+  assert.equal((await fetch(base + '/flow.json')).status, 404);
+  const baseline = JSON.parse(readFileSync(join(dir, 'flow.json'), 'utf8'));
   mkdirSync(join(dir, '.out'), { recursive: true });
   writeFileSync(join(dir, '.out', 'live-base.json'), JSON.stringify(baseline));
   writeFileSync(override, "export default function(flow) { flow.edits = [{ replace: ['before', 'after'] }]; flow.states.start.fill = [{ value: 'live' }]; }\n");

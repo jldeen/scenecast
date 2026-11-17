@@ -4,6 +4,7 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { flowFromBundle, applyFlowOverrides } from '../../player/app/bundle-flow.js';
 
 export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const KIT_VERSION = JSON.parse(readFileSync(join(KIT, 'kit', 'package.json'), 'utf8')).version;
@@ -51,3 +52,16 @@ export function loadDemo(dirOrArgs) {
 
 export function ensureDir(p) { mkdirSync(p, { recursive: true }); return p; }
 export function readFlow(demo) { return JSON.parse(readFileSync(demo.flowPath, 'utf8')); }
+// The flow a replica at url plays: its bundle (manifest.json, with the server's live overrides), read the way the player
+// reads it, so a check runs on what is served or exported rather than on the demo's authoring files.
+export async function bundleFlow(url) {
+  const at = new URL('manifest.json', new URL('.', url));
+  let manifest;
+  if (at.protocol === 'file:') manifest = JSON.parse(readFileSync(fileURLToPath(at), 'utf8'));
+  else {
+    const res = await fetch(at, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`${at.href}: ${res.status}`);
+    manifest = await res.json();
+  }
+  return applyFlowOverrides(flowFromBundle(manifest), manifest.development_overrides);
+}
