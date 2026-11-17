@@ -20,10 +20,16 @@ test('a capture request immediately sees a changed live override', async t => {
   writeFileSync(join(dir, 'data', 'snaps', 'start.html'), '<p>before</p>');
   writeFileSync(join(dir, 'custom', 'start.html'), '<p>custom</p>');
   writeFileSync(join(dir, 'custom', 'private.txt'), 'private');
+  writeFileSync(join(dir, 'custom', 'fallback.png'), 'fallback');
+  writeFileSync(join(dir, 'custom', 'frame.png'), 'frame');
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
     schema_version: 'scenecast.bundle.v2', title: 'Fixture',
     apps: [{ id: 'a', title: 'A', key: 'A' }],
-    graph: { start_scene: 'start', scenes: [{ id: 'start', title: 'Bundle Start', kind: 'live-page', live: { app: 'a', snapshot: 'custom/start.html' } }] },
+    graph: { start_scene: 'start', scenes: [
+      { id: 'start', title: 'Bundle Start', kind: 'live-page', live: { app: 'a', snapshot: 'custom/start.html' } },
+      { id: 'fallback', kind: 'screenshot', assets: { screenshot: 'custom/fallback.png' },
+        hotspots: [{ transition: { frames: [{ path: 'custom/frame.png' }] } }] },
+    ] },
     beats: [{ label: 'Reset', active: 'a', scenes: { a: 'start' } }],
   }));
   const override = join(dir, 'flow.overrides.mjs');
@@ -66,5 +72,7 @@ test('a capture request immediately sees a changed live override', async t => {
   assert.equal(flow.states.start.snapshot, 'custom/start.html');
   assert.equal(flow.states.start.title, 'Bundle Start');
   assert.equal(await (await fetch(base + '/bundle/custom/start.html')).text(), '<p>custom</p>');
+  assert.equal(await (await fetch(base + '/bundle/custom/fallback.png')).text(), 'fallback');
+  assert.equal(await (await fetch(base + '/bundle/custom/frame.png')).text(), 'frame');
   assert.equal((await fetch(base + '/bundle/custom/private.txt')).status, 404);
 });

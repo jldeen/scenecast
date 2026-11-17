@@ -89,8 +89,13 @@ function resolve(path) {
     try { rel = decodeURIComponent(path.slice('/bundle/'.length)); } catch { return null; }
     if (!rel || rel.includes('\\') || rel.split('/').some(part => !part || part.startsWith('.'))) return null;
     const manifest = JSON.parse(readFileSync(join(demo.dir, 'manifest.json'), 'utf8'));
-    const snapshots = (manifest.graph?.scenes || []).map(s => s.live?.snapshot).filter(Boolean);
-    const allowed = snapshots.some(snapshot => {
+    const scenes = manifest.graph?.scenes || [];
+    const snapshots = scenes.map(s => s.live?.snapshot).filter(Boolean);
+    const captures = scenes.flatMap(s => [
+      s.assets?.screenshot, s.assets?.video,
+      ...(s.hotspots || []).flatMap(h => (h.transition?.frames || []).map(f => f.path)),
+    ]).filter(Boolean);
+    const allowed = captures.includes(rel) || snapshots.some(snapshot => {
       if (rel === snapshot) return true;
       const base = snapshot.replace(/\.html$/i, '');
       if (rel === base + '.json') return true;
