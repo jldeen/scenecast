@@ -24,9 +24,10 @@ runs in a browser. The manifest's JSON Schema is generated from the Rust types, 
 `scenecast-build` is a library with structured results (`ProjectCreated`, `SyncReport`, and in `recorder`:
 `PreflightReport` item by item, `RecordStatus`, `RecordSummary` with `RecordTiming`) and line-by-line progress
 (`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
-`build::build` also reports build stages and per-file fingerprint progress. Capture processing still runs in the
-Node engine; moving that processing to Rust remains unfinished. The resolved raw folder is passed explicitly to
-that engine so it cannot process a different folder from the one Rust scanned.
+`build::build` also reports build stages and per-file fingerprint progress. Rust compiles the recorded base flow;
+JavaScript still applies flow overrides and focus hooks and processes the captures. Moving capture processing to
+Rust remains unfinished. The resolved raw folder is passed explicitly to that engine so it cannot process a
+different folder from the one Rust scanned.
 
 **The recorder** is one body of code (driver, recorder, side-state audits) that runs two ways: as an MV3 extension
 in the presenter's own Edge or Chrome, where a Playwright-shaped shim over `chrome.debugger` gives it pages, frames
@@ -36,7 +37,8 @@ See [recorder.md](recorder.md).
 **Cross-platform.** Everything works the same on macOS and Windows: paths are normalized to `/` in the bundle and
 the build's records, the launcher opens Chrome on the Mac and Edge on Windows as an app window (either can be
 chosen), presenter keys take ⌥ or Ctrl+Alt, projects carry `.gitattributes` so captures are served byte for byte
-on any OS, and CI runs Rust and the engine end to end on Ubuntu, macOS and Windows.
+on any OS, and CI runs Rust and the engine end to end on Ubuntu, macOS and Windows. Browser key tests run
+headlessly and do not verify native browser or operating-system shortcut interception.
 
 ### `scenecast-core`
 
