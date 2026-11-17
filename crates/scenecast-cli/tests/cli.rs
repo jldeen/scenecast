@@ -10,6 +10,16 @@ use scenecast_core::{
 use tempfile::tempdir;
 
 #[test]
+fn present_is_exposed_as_a_cli_command() {
+    Command::cargo_bin("scenecast")
+        .unwrap()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("present"));
+}
+
+#[test]
 fn new_creates_valid_starter_bundle() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");

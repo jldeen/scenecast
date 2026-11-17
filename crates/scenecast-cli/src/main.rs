@@ -63,6 +63,8 @@ enum Command {
     Sync(Passthrough),
     /// Serve the replica on localhost (--open: an app window in Chrome or Edge).
     Serve(Passthrough),
+    /// Serve the replica and open it in a browser app window.
+    Present(Passthrough),
     /// A wording or date tweak, live on reload: scenecast text "<old>" "<new>".
     Text(Passthrough),
     /// The full fidelity checklist (two runs, cold start ×3, clicks, hovers, drags, zoom, focus, …); flags every
@@ -322,6 +324,7 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Build(a) => return engine_cmds::build(&a),
         Command::Sync(a) => return engine_cmds::sync_cmd(&a),
         Command::Serve(a) => return engine_cmds::handover("serve", &a, true),
+        Command::Present(a) => return engine_cmds::present(&a),
         Command::Text(a) => return engine_cmds::handover("text", &a, true),
         Command::Check(a) | Command::Fidelity(a) => return engine_cmds::check(&a, false),
         Command::Quick(a) => return engine_cmds::check(&a, true),

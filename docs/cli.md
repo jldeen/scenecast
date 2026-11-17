@@ -45,6 +45,7 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 | `scenecast build [--from-raw] [--force]` | Flow, raw captures → `data/` (changed captures only, scrubbed), secret scan, then `manifest.json` (below). |
 | `scenecast sync` | `manifest.json` from what was built, on its own. |
 | `scenecast serve [--open] [--pace N] [--release]` | The replica on localhost. `--open`: an app window, Chrome on the Mac and Edge on Windows (`chrome.browser` and `chrome.profile` in `demo.json`). |
+| `scenecast present [--pace N] [--release]` | Serve the replica and open the same app window. The URL is printed if the browser cannot be opened. |
 | `scenecast text "<old>" "<new>"` | A wording or date tweak, live on reload. |
 | `scenecast check [--only a,b] [--skip a,b]` | The whole fidelity checklist (`fidelity` is an alias). Flags every fallback scene first. |
 | `scenecast quick` | The checks for only what changed. |

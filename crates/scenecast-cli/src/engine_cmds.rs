@@ -103,6 +103,12 @@ pub fn handover(sub: &str, args: &Passthrough, takes_project: bool) -> Result<i3
     run_engine(sub, args, takes_project, true)
 }
 
+pub fn present(args: &Passthrough) -> Result<i32> {
+    let mut args = args.clone();
+    args.args.push("--open".into());
+    handover("serve", &args, true)
+}
+
 fn run_engine(sub: &str, args: &Passthrough, takes_project: bool, last: bool) -> Result<i32> {
     let engine = engine()?;
     let argv = if takes_project {
