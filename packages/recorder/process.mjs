@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
-import { compose, cssFor, elementEnd, isolateClasses, ancestorsAt, around } from './compose.mjs';
+import { compose, cssFor as cssForJs, elementEnd, isolateClasses, ancestorsAt, around } from './compose.mjs';
 import { loadDemo, arg, KIT_VERSION } from '../kit/lib/demo.mjs';
 import { compileEdits, applyEdits } from '../kit/lib/edits.mjs';
 import { buildInputs, buildKey } from '../kit/lib/buildkey.mjs';
@@ -66,6 +66,9 @@ function rustAsset(op, value, inline) {
   for (const [url, reason] of result.missing) missing.set(url, reason);
   return result.value;
 }
+const cssFor = (part, source, target) => process.env.SCENECAST_RUST_ASSETS === '1'
+  ? rustAsset('css-for', JSON.stringify([part, source, target]))
+  : cssForJs(part, source, target);
 const EMPTY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 function asset(buf, ext) {
   const f = createHash('sha256').update(buf).digest('hex').slice(0, 24) + '.' + ext;

@@ -9,6 +9,7 @@
 //! - [`build`]: content-hashed build orchestration and scrub reporting with structured progress.
 
 pub mod build;
+pub mod compose;
 pub mod engine;
 pub mod export;
 pub mod fingerprint;

@@ -412,6 +412,13 @@ impl AssetResolver {
             )?),
             "frame" => Some(self.rewrite_fragment(value, true)?),
             "fragment" => Some(self.rewrite_fragment(value, false)?),
+            "css-for" => {
+                let [part, source, target]: [String; 3] = serde_json::from_str(value)?;
+                Some(
+                    crate::compose::css_for(&part, &source, &target)
+                        .map_err(AssetError::Invalid)?,
+                )
+            }
             _ => return Err(AssetError::Invalid("unknown asset operation")),
         };
         Ok(Resolution {

@@ -43,11 +43,16 @@ try {
     key: 'main', parent: null, frameUrl: '', urls: ['https://fixture.invalid/a.css', 'https://fixture.invalid/img.svg', 'https://fixture.invalid/missing.css'],
     inline: { canvas1: 'data:image/svg+xml,%3Csvg%3E' },
     meta: { title: 'Fixture', url: 'https://fixture.invalid/', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
-    html: '<!doctype html><html><head><style data-d1-fetch="d1res://0"></style><style data-d1-fetch="d1res://2"></style></head><body focusgroup="x" style="appearance:slider-vertical"><img src="d1res://1"><canvas data-d1-canvas="canvas1"></canvas><iframe sandbox="" csp="" src="d1frame://f1"></iframe><iframe src="d1frame://f9"></iframe></body></html>',
+    html: '<!doctype html><html><head><style data-d1-fetch="d1res://0"></style><style data-d1-fetch="d1res://2"></style></head><body focusgroup="x" style="appearance:slider-vertical"><div>replace this</div><img src="d1res://1"><canvas data-d1-canvas="canvas1"></canvas><iframe sandbox="" csp="" src="d1frame://f1"></iframe><iframe src="d1frame://f9"></iframe></body></html>',
   }, {
     key: 'f1', parent: 'main', frameUrl: 'https://fixture.invalid/frame', urls: [], inline: {},
     meta: { title: 'Frame', url: 'https://fixture.invalid/frame', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
     html: '<!doctype html><html><body>Frame</body></html>',
+  }] }));
+  writeFileSync(join(raw, 'snaps', 'part.json'), JSON.stringify({ docs: [{
+    key: 'main', parent: null, frameUrl: '', urls: [], inline: {},
+    meta: { title: 'Part', url: 'https://fixture.invalid/', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
+    html: '<!doctype html><html><head><style>.card{animation:spin 1s}@media screen{.card{color:red}.other{color:blue}}@keyframes spin{from{opacity:0}to{opacity:1}}</style></head><body><div class="card">source part</div></body></html>',
   }] }));
   mkdirSync(join(raw, 'streams', 's1'));
   for (const n of [0, 1]) writeFileSync(join(raw, 'streams', 's1', `${n}.json`), JSON.stringify({
@@ -55,16 +60,20 @@ try {
     html: '<body focusgroup="x" style="appearance:slider-vertical"><img src="d1res://0"><canvas data-d1-canvas="canvas1"></canvas></body>',
   }));
   writeFileSync(join(demo, 'recording.json'), JSON.stringify({
-    states: { start: { app: 'app', snap: 'start' } },
+    states: { start: { app: 'app', snap: 'start' }, part: { app: 'app', snap: 'part' } },
     streams: { s1: { to: 'start', frames: [0, 1] } },
     beats: [{ label: 'Start', active: 'app', states: { app: 'start' } }],
   }));
+  writeFileSync(join(demo, 'flow.overrides.mjs'), `export default flow => {
+    flow.compose = [{ from: 'part', marker: 'source part', tag: 'div', anchor: 'replace this' }];
+  };\n`);
   run(process.execPath, ['packages/kit/compile/flow.mjs', '--demo', demo]);
   run(process.execPath, ['packages/recorder/process.mjs', '--demo', demo, '--force']);
   const before = Object.fromEntries(['snaps', 'streams', 'assets'].map(dir => [dir, files(join(demo, 'data', dir))]));
   run(binary, ['build', '--demo', demo, '--force']);
   const after = Object.fromEntries(['snaps', 'streams', 'assets'].map(dir => [dir, files(join(demo, 'data', dir))]));
   assert.deepEqual(after, before);
+  assert.match(readFileSync(join(demo, 'data', 'snaps', 'start.html'), 'utf8'), /data-d1-compose=""[^]*@keyframes spin/);
   console.log('Rust asset and CSS resolution matches the JavaScript capture processor');
 } finally {
   rmSync(temp, { recursive: true, force: true });
