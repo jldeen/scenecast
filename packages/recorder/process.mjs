@@ -21,7 +21,8 @@ const demo = loadDemo(args);
 const RAW = arg(args, '--raw', demo.raw);
 const DATA = demo.data;
 const OUT = join(DATA, '.next');
-const ASSETS = join(DATA, 'assets');
+const FINAL_ASSETS = join(DATA, 'assets');
+let ASSETS = process.env.SCENECAST_RUST_PUBLISH === '1' ? join(OUT, 'assets') : FINAL_ASSETS;
 const flow = JSON.parse(readFileSync(demo.flowPath, 'utf8'));
 const T0 = Date.now();
 const INPUTS = buildInputs({ ...demo, raw: RAW }, flow), KEY = buildKey(INPUTS);
@@ -677,7 +678,7 @@ if (process.env.SCENECAST_RUST_PUBLISH === '1') {
     });
     input.once('close', () => { if (!received) reject(new Error('capture publisher closed without a response')); });
     input.once('error', reject);
-    console.log('SCENECAST_PUBLISH_V1');
+    console.log('SCENECAST_PUBLISH_V2');
   });
   if (result.error) throw new Error(result.error);
   if (!Array.isArray(result.changed) || !result.files || typeof result.files !== 'object') throw new Error('invalid capture publisher response');
@@ -705,6 +706,7 @@ if (process.env.SCENECAST_RUST_PUBLISH === '1') {
   rmSync(OUT, { recursive: true, force: true });
   report.changed = changed.length;
 }
+ASSETS = FINAL_ASSETS;
 // Assets nothing refers to any more (the hover audit's full-page snapshots are read only for their CSS) go.
 {
   const refs = new Set();

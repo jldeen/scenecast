@@ -267,16 +267,18 @@ fn build_with_raw(
     let mut publication_error = None;
     let mut published = false;
     let mut control = |line: &str| {
-        if line != "SCENECAST_PUBLISH_V1" {
-            return None;
-        }
+        let staged_assets = match line {
+            "SCENECAST_PUBLISH_V1" => false,
+            "SCENECAST_PUBLISH_V2" => true,
+            _ => return None,
+        };
         if published {
             return Some(
                 serde_json::json!({"error": "capture output already published"}).to_string(),
             );
         }
         published = true;
-        Some(match publish(&data) {
+        Some(match publish(&data, staged_assets) {
             Ok(result) => {
                 serde_json::json!({"changed": result.changed, "files": result.files}).to_string()
             }
