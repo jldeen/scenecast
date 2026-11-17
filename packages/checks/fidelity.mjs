@@ -900,7 +900,7 @@ try {
           // show; they're listed, and the share is of the ones whose control is there.
           const absent = Object.values(rep.pages || {}).flatMap(p => p.missing || []);
           const share = rep.total - absent.length ? rep.shown / (rep.total - absent.length) : 1;
-          add('hovers', 'Hover states', share >= 0.9 && !rep.errors.length ? (rep.failed.length || absent.length ? 'warn' : 'pass') : 'fail', `${rep.shown}/${rep.total - absent.length} shown` + (rep.failed.length ? '\n' + rep.failed.slice(0, 20).map(f => `${f.id}: ${f.text}`).join('\n') : '') + (absent.length ? `\n${absent.length} captured hovers have no control on the replica's screens:\n` + absent.slice(0, 30).join('\n') : ''));
+          add('hovers', 'Hover states', share >= 0.9 && !rep.errors.length ? (rep.failed.length || absent.length ? 'warn' : 'pass') : 'fail', `${rep.shown}/${rep.total - absent.length} shown` + (rep.failed.length ? '\n' + rep.failed.slice(0, 20).map(f => `${f.id}: ${f.text}${f.at ? ` (${JSON.stringify(f.at)})` : ''}`).join('\n') : '') + (absent.length ? `\n${absent.length} captured hovers have no control on the replica's screens:\n` + absent.slice(0, 30).join('\n') : ''));
         }
       }
     }
