@@ -232,7 +232,7 @@ export default flow => {
   times.release2 = Math.round((Date.now() - t1) / 1000);
   fid = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
   const built = readFileSync(join(DEMO, 'data', 'snaps', 'chat-01-message.html'), 'utf8');
-  check('release: the tweak baked in, checklist passes', r.code === 0 && fid.pass && /by a week/.test(built), r.out.slice(-600));
+  check('release: the tweak baked in, checklist passes', r.code === 0 && fid.pass && /by a week/.test(built), fid.items.filter(i => i.status === 'fail').map(i => `${i.id}: ${i.detail}`).join('\n') || r.out.slice(-600));
   // A file only on this machine (kept out of git): the warm runs still pass, a fresh clone doesn't.
   {
     const img = (readFileSync(join(DEMO, 'data', 'snaps', 'chat-start.html'), 'utf8').match(/<img[^>]*src="\/assets\/([^"]+)"/) || [])[1];
