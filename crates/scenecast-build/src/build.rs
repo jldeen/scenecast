@@ -28,6 +28,8 @@ pub enum BuildError {
     Sync(#[from] SyncError),
     #[error("cannot resolve raw capture folder: HOME and USERPROFILE are unset")]
     MissingHome,
+    #[error("raw capture folder is not UTF-8")]
+    NonUtf8Raw,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +94,7 @@ fn build_with_raw(
     raw_override: Option<PathBuf>,
     mut on: impl FnMut(BuildProgress),
 ) -> Result<BuildResult, BuildError> {
+    let dir = &crate::engine::dunce(fs::canonicalize(dir)?);
     let config: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("demo.json"))?)?;
     let raw = raw_override
         .or_else(|| config["raw"].as_str().map(PathBuf::from))
@@ -101,10 +104,15 @@ fn build_with_raw(
                 config["name"].as_str().unwrap_or("demo")
             ))
         });
-    let raw = if let Ok(rest) = raw.strip_prefix("~") {
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .ok_or(BuildError::MissingHome)?;
+    let raw_text = raw.to_str().ok_or(BuildError::NonUtf8Raw)?;
+    let raw = if raw_text.starts_with("~/") {
+        let rest = raw.strip_prefix("~").expect("checked raw path prefix");
+        let home = if cfg!(windows) {
+            std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
+        } else {
+            std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+        }
+        .ok_or(BuildError::MissingHome)?;
         PathBuf::from(home).join(rest)
     } else if raw.is_absolute() {
         raw
@@ -167,9 +175,11 @@ fn build_with_raw(
     }
     on(BuildProgress::Stage("process"));
     let engine = Engine::locate()?;
-    let code = engine.run_with_progress(with_demo("build", &args, dir), |p| {
-        on(BuildProgress::Engine(p))
-    })?;
+    let code = engine.run_with_progress_env(
+        with_demo("build", &args, dir),
+        [("REPLICA_RAW", raw.as_os_str())],
+        |p| on(BuildProgress::Engine(p)),
+    )?;
     on(BuildProgress::Stage("scrub-built"));
     for path in [
         dir.join("data"),

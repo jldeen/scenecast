@@ -153,15 +153,33 @@ impl Engine {
     pub fn run_with_progress<I, S>(
         &self,
         args: I,
-        mut on: impl FnMut(Progress),
+        on: impl FnMut(Progress),
     ) -> Result<i32, EngineError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.run_with_progress_env(args, std::iter::empty::<(&OsStr, &OsStr)>(), on)
+    }
+
+    /// Runs a subcommand with explicit environment values and reports its output.
+    pub fn run_with_progress_env<I, S, E, K, V>(
+        &self,
+        args: I,
+        env: E,
+        mut on: impl FnMut(Progress),
+    ) -> Result<i32, EngineError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+        E: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
         self.check_node()?;
         let mut child = self
             .command(args)
+            .envs(env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -227,7 +245,7 @@ pub fn with_demo(sub: &str, rest: &[OsString], dir: &Path) -> Vec<OsString> {
 }
 
 // Canonical, without Windows' `\\?\` prefix (Node's path functions don't take it).
-fn dunce(path: PathBuf) -> PathBuf {
+pub(crate) fn dunce(path: PathBuf) -> PathBuf {
     match path.canonicalize() {
         Ok(p) => {
             let s = p.to_string_lossy();
