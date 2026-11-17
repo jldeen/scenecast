@@ -158,12 +158,7 @@ fn scrub_json_strings(
     match value {
         serde_json::Value::String(text) => {
             let prefix = key
-                .filter(|key| {
-                    scrub_text(&format!("{key}=x"), &[])
-                        .1
-                        .iter()
-                        .any(|finding| finding.credential)
-                })
+                .filter(|key| credential_key(key))
                 .map(|key| format!("{key}="))
                 .unwrap_or_default();
             let input = format!("{prefix}{text}");
@@ -187,7 +182,7 @@ fn scrub_json_strings(
             }
         }
         serde_json::Value::Number(_) | serde_json::Value::Bool(_) => {
-            if let Some(key) = key {
+            if let Some(key) = key.filter(|key| credential_key(key)) {
                 let (_, mut found) = scrub_text(&format!("{key}={value}"), allowlist);
                 if found.iter().any(|finding| finding.credential) {
                     for finding in &mut found {
@@ -200,6 +195,18 @@ fn scrub_json_strings(
         }
         _ => {}
     }
+}
+
+fn credential_key(key: &str) -> bool {
+    let input = format!("{key}=x");
+    let pattern = &rules()
+        .iter()
+        .find(|rule| rule.kind == "credential")
+        .expect("credential rule exists")
+        .pattern;
+    pattern
+        .find(&input)
+        .is_some_and(|matched| matched.start() == 0 && matched.end() == input.len())
 }
 
 fn contains_script(ext: &str, text: &str) -> bool {
@@ -462,6 +469,8 @@ mod tests {
         let mut report = ScrubReport::default();
         scrub_tree(dir.path(), "raw", &[], false, &mut report).unwrap();
         assert!(report.has_credentials());
+        assert!(credential_key("client_secret"));
+        assert!(!credential_key("Bearer token"));
         assert!(report.findings.iter().any(|f| f.finding.kind == "email"));
         let mut report = ScrubReport::default();
         scrub_tree(dir.path(), "built", &[], true, &mut report).unwrap();
