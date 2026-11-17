@@ -71,6 +71,47 @@ pub struct StateTransition {
     /// Switches to another app after.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<String>,
+    /// Player-specific ordering and behavior not represented by the common transition fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback: Option<TransitionPlayback>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TransitionPlayback {
+    pub order: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_key: Option<String>,
+    #[serde(default)]
+    pub options: serde_json::Value,
+}
+
+/// Additional browser-player data. Scene, app, beat, stream and focus identities remain in the bundle model.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlaybackData {
+    #[serde(default)]
+    pub options: serde_json::Value,
+    #[serde(default)]
+    pub apps: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub scenes: BTreeMap<String, ScenePlayback>,
+    #[serde(default)]
+    pub streams: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub focus_points: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ScenePlayback {
+    #[serde(default)]
+    pub options: serde_json::Value,
+    #[serde(default)]
+    pub actions: Vec<PlaybackAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlaybackAction {
+    pub order: u32,
+    pub action: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

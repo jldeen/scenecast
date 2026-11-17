@@ -328,6 +328,52 @@
       ],
       "type": "object"
     },
+    "PlaybackAction": {
+      "properties": {
+        "action": true,
+        "order": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "order",
+        "action"
+      ],
+      "type": "object"
+    },
+    "PlaybackData": {
+      "description": "Additional browser-player data. Scene, app, beat, stream and focus identities remain in the bundle model.",
+      "properties": {
+        "apps": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "focus_points": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "options": {
+          "default": null
+        },
+        "scenes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ScenePlayback"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "streams": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "PresenterConfig": {
       "description": "Hidden presenter keys. The player accepts both modifiers on every OS; these are the ones the docs and cue\nsheets show.",
       "properties": {
@@ -541,6 +587,21 @@
         }
       ]
     },
+    "ScenePlayback": {
+      "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PlaybackAction"
+          },
+          "type": "array"
+        },
+        "options": {
+          "default": null
+        }
+      },
+      "type": "object"
+    },
     "SceneProvenance": {
       "properties": {
         "confidence": {
@@ -668,6 +729,17 @@
         },
         "matcher": {
           "description": "What the trigger acts on: a matcher (`sel`, `text`, `label`, `testid`, `in`, `nth`, `frame`, …). Never a\ngenerated class."
+        },
+        "playback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TransitionPlayback"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Player-specific ordering and behavior not represented by the common transition fields."
         },
         "stream": {
           "description": "A streamed answer that plays before the target settles.",
@@ -848,6 +920,28 @@
       ],
       "type": "string"
     },
+    "TransitionPlayback": {
+      "properties": {
+        "options": {
+          "default": null
+        },
+        "order": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "query_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "order"
+      ],
+      "type": "object"
+    },
     "Viewport": {
       "properties": {
         "dpr": {
@@ -906,6 +1000,17 @@
     },
     "graph": {
       "$ref": "#/$defs/SceneGraph"
+    },
+    "playback": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PlaybackData"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Browser-player options and behavior not covered by the portable graph fields."
     },
     "presenter": {
       "$ref": "#/$defs/PresenterConfig",

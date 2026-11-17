@@ -9,9 +9,9 @@ use std::fs;
 use std::path::Path;
 
 use scenecast_core::{
-    App, Beat, BundleManifest, FocusMark, FocusPoint, LivePage, Scene, SceneId, Section,
-    StateTransition, StateTrigger, Stream, StreamTiming, Viewport, manifest_path, read_manifest,
-    validate_referenced_files,
+    App, Beat, BundleManifest, FocusMark, FocusPoint, LivePage, PlaybackAction, PlaybackData,
+    Scene, SceneId, ScenePlayback, Section, StateTransition, StateTrigger, Stream, StreamTiming,
+    TransitionPlayback, Viewport, manifest_path, read_manifest, validate_referenced_files,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -125,8 +125,11 @@ pub fn sync_manifest(dir: &Path) -> Result<SyncReport, SyncError> {
         .and_then(Value::as_object)
         .ok_or_else(|| SyncError::Flow("no states".to_owned()))?;
     let mut live = Vec::new();
+    let mut scene_playback = BTreeMap::new();
     for (id, state) in states {
-        live.push(live_scene(dir, id, state, &flow)?);
+        let (scene, playback) = live_scene(dir, id, state, &flow)?;
+        live.push(scene);
+        scene_playback.insert(id.clone(), playback);
     }
 
     // Fallback scenes stay; the live ones are replaced by what was recorded.
@@ -217,6 +220,60 @@ pub fn sync_manifest(dir: &Path) -> Result<SyncReport, SyncError> {
         })
         .collect();
 
+    manifest.playback = Some(PlaybackData {
+        options: without(
+            &flow,
+            &["title", "apps", "states", "streams", "beats", "focus"],
+        ),
+        apps: arr(&flow, "apps")
+            .into_iter()
+            .filter_map(|app| {
+                let id = str_of(&app, "id")?.to_owned();
+                Some((id, without(&app, &["id", "key", "title"])))
+            })
+            .collect(),
+        scenes: scene_playback,
+        streams: flow
+            .get("streams")
+            .and_then(Value::as_object)
+            .map(|streams| {
+                streams
+                    .iter()
+                    .map(|(id, stream)| {
+                        let mut options =
+                            without(stream, &["frames", "to", "timing", "ms", "prompt"]);
+                        if let Some(first) = stream
+                            .get("frames")
+                            .and_then(Value::as_array)
+                            .and_then(|f| f.first())
+                        {
+                            options["first_frame"] = first.clone();
+                        }
+                        (id.clone(), options)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        focus_points: arr(&flow, "focus")
+            .into_iter()
+            .enumerate()
+            .map(|(i, point)| {
+                let id = str_of(&point, "id")
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("focus-{}", i + 1));
+                (
+                    id,
+                    without(
+                        &point,
+                        &[
+                            "id", "beat", "app", "states", "find", "union", "mark", "dir", "line",
+                        ],
+                    ),
+                )
+            })
+            .collect(),
+    });
+
     // Start: where reset (beat 0) puts the active app; else the first recorded scene.
     let start = manifest
         .beats
@@ -293,7 +350,12 @@ pub fn sync_manifest(dir: &Path) -> Result<SyncReport, SyncError> {
     Ok(report)
 }
 
-fn live_scene(dir: &Path, id: &str, state: &Value, flow: &Value) -> Result<Scene, SyncError> {
+fn live_scene(
+    dir: &Path,
+    id: &str,
+    state: &Value,
+    flow: &Value,
+) -> Result<(Scene, ScenePlayback), SyncError> {
     let bad = |what: &str| SyncError::Flow(format!("state `{id}`: {what}"));
     let sid = scene_id(id).map_err(|e| bad(&e))?;
     let app = str_of(state, "app").ok_or_else(|| bad("no app"))?;
@@ -303,7 +365,8 @@ fn live_scene(dir: &Path, id: &str, state: &Value, flow: &Value) -> Result<Scene
         .ok()
         .map(|bytes| format!("{:x}", Sha256::digest(bytes)));
     let mut transitions = Vec::new();
-    for t in arr(state, "on") {
+    let mut actions = Vec::new();
+    for (order, t) in arr(state, "on").into_iter().enumerate() {
         let Some((trigger, matcher)) = [
             ("click", StateTrigger::Click),
             ("enter", StateTrigger::Enter),
@@ -312,6 +375,10 @@ fn live_scene(dir: &Path, id: &str, state: &Value, flow: &Value) -> Result<Scene
         ]
         .into_iter()
         .find_map(|(k, trig)| t.get(k).map(|m| (trig, m.clone()))) else {
+            actions.push(PlaybackAction {
+                order: order as u32,
+                action: t,
+            });
             continue;
         };
         // A streamed answer lands where its stream ends; a search box's Enter can go to several states, by what
@@ -319,21 +386,43 @@ fn live_scene(dir: &Path, id: &str, state: &Value, flow: &Value) -> Result<Scene
         let stream_end = str_of(&t, "stream")
             .and_then(|name| flow.get("streams")?.get(name))
             .and_then(|st| str_of(st, "to"));
-        let targets: Vec<&str> = match (
-            str_of(&t, "to").or(stream_end),
+        let targets: Vec<(Option<String>, &str)> = match (
+            stream_end,
             t.get("query").and_then(Value::as_object),
+            str_of(&t, "to"),
         ) {
-            (Some(to), _) => vec![to],
-            (None, Some(q)) => q.values().filter_map(Value::as_str).collect(),
+            (Some(to), _, _) => vec![(None, to)],
+            (None, Some(q), _) => q
+                .iter()
+                .filter_map(|(k, v)| Some((Some(k.clone()), v.as_str()?)))
+                .collect(),
+            (None, None, Some(to)) => vec![(None, to)],
             _ => Vec::new(),
         };
-        for target in targets {
+        if targets.is_empty() {
+            actions.push(PlaybackAction {
+                order: order as u32,
+                action: t,
+            });
+            continue;
+        }
+        for (query_key, target) in targets {
             transitions.push(StateTransition {
                 trigger,
                 target: scene_id(target).map_err(|e| bad(&e))?,
                 matcher: Some(matcher.clone()),
                 stream: str_of(&t, "stream").map(str::to_owned),
                 app: str_of(&t, "app").map(str::to_owned),
+                playback: Some(TransitionPlayback {
+                    order: order as u32,
+                    query_key,
+                    options: without(
+                        &t,
+                        &[
+                            "click", "enter", "type", "hover", "to", "stream", "app", "query",
+                        ],
+                    ),
+                }),
             });
         }
     }
@@ -344,10 +433,11 @@ fn live_scene(dir: &Path, id: &str, state: &Value, flow: &Value) -> Result<Scene
             matcher: None,
             stream: None,
             app: None,
+            playback: None,
         });
     }
     let title = str_of(state, "title").unwrap_or(id).to_owned();
-    Ok(Scene {
+    let scene = Scene {
         transitions,
         ..Scene::live_page(
             sid,
@@ -360,7 +450,14 @@ fn live_scene(dir: &Path, id: &str, state: &Value, flow: &Value) -> Result<Scene
                 sha256,
             }),
         )
-    })
+    };
+    Ok((
+        scene,
+        ScenePlayback {
+            options: without(state, &["app", "snap", "title", "on", "esc"]),
+            actions,
+        },
+    ))
 }
 
 fn scene_id(id: &str) -> Result<SceneId, String> {
@@ -387,6 +484,14 @@ fn arr(v: &Value, key: &str) -> Vec<Value> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+fn without(value: &Value, keys: &[&str]) -> Value {
+    let mut map = value.as_object().cloned().unwrap_or_default();
+    for key in keys {
+        map.remove(*key);
+    }
+    Value::Object(map)
 }
 
 #[cfg(test)]
@@ -476,6 +581,67 @@ mod tests {
                 .any(|e| e.contains("data/snaps/chat-01.html")),
             "{:?}",
             r.errors
+        );
+    }
+
+    #[test]
+    fn playback_keeps_runtime_options_and_query_targets() {
+        let temp = project();
+        let path = temp.path().join("flow.json");
+        let mut flow: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        flow["pace"] = 7.into();
+        flow["apps"][0]["layout"] = serde_json::json!({"chips": [{"rows": 2}]});
+        flow["states"]["chat-start"]["fill"] =
+            serde_json::json!([{"sel":"input", "value":"hello"}]);
+        flow["states"]["chat-start"]["on"] = serde_json::json!([
+            {"enter":{"sel":"input"},"query":{"one":"chat-start","two":"chat-01"},"scroll":"keep"},
+            {"click":{"sel":"button"},"flag":"open"}
+        ]);
+        flow["streams"]["s001"]["frames"] = serde_json::json!([5, 14]);
+        flow["streams"]["s001"]["raw"] = "raw-answer".into();
+        fs::write(&path, serde_json::to_vec(&flow).unwrap()).unwrap();
+        assert!(sync_manifest(temp.path()).unwrap().is_valid());
+        let manifest = read_manifest(temp.path()).unwrap();
+        let playback = manifest.playback.as_ref().unwrap();
+        assert_eq!(playback.options["pace"], 7);
+        assert_eq!(playback.apps["chat"]["layout"]["chips"][0]["rows"], 2);
+        assert_eq!(
+            playback.scenes["chat-start"].options["fill"][0]["value"],
+            "hello"
+        );
+        assert_eq!(
+            playback.scenes["chat-start"].actions[0].action["flag"],
+            "open"
+        );
+        assert_eq!(playback.streams["s001"]["first_frame"], 5);
+        assert_eq!(playback.streams["s001"]["raw"], "raw-answer");
+        let transitions = &manifest
+            .graph
+            .scene(&SceneId::new("chat-start").unwrap())
+            .unwrap()
+            .transitions;
+        assert_eq!(transitions.len(), 2);
+        assert_eq!(
+            transitions[0]
+                .playback
+                .as_ref()
+                .unwrap()
+                .query_key
+                .as_deref(),
+            Some("one")
+        );
+        assert_eq!(
+            transitions[0].playback.as_ref().unwrap().options["scroll"],
+            "keep"
+        );
+        assert_eq!(
+            transitions[1]
+                .playback
+                .as_ref()
+                .unwrap()
+                .query_key
+                .as_deref(),
+            Some("two")
         );
     }
 }

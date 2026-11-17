@@ -11,8 +11,9 @@ use thiserror::Error;
 
 mod live;
 pub use live::{
-    App, Beat, FocusMark, FocusPoint, LiveError, LivePage, PresenterConfig, PresenterModifier,
-    StateTransition, StateTrigger, Stream, StreamTiming, Viewport,
+    App, Beat, FocusMark, FocusPoint, LiveError, LivePage, PlaybackAction, PlaybackData,
+    PresenterConfig, PresenterModifier, ScenePlayback, StateTransition, StateTrigger, Stream,
+    StreamTiming, TransitionPlayback, Viewport,
 };
 
 pub const MANIFEST_FILE_NAME: &str = "manifest.json";
@@ -215,6 +216,9 @@ pub struct BundleManifest {
     /// ZoomIt-style focus points, in script order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub focus_points: Vec<FocusPoint>,
+    /// Browser-player options and behavior not covered by the portable graph fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback: Option<PlaybackData>,
     #[serde(default)]
     pub presenter: PresenterConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -236,6 +240,7 @@ impl BundleManifest {
             streams: Vec::new(),
             beats: Vec::new(),
             focus_points: Vec::new(),
+            playback: None,
             presenter: PresenterConfig::default(),
             sections: vec![Section {
                 id: "main".to_owned(),
@@ -2348,6 +2353,7 @@ mod tests {
             matcher: None,
             stream: Some("s001".to_owned()),
             app: None,
+            playback: None,
         });
         manifest.focus_points.push(FocusPoint {
             id: "cost".to_owned(),

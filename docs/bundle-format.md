@@ -57,6 +57,7 @@ and `composite` are **fallbacks**, for a screen that can't be captured live or a
 | `streams` | Streamed answers: the scene they end on, frame count, `timing` (`real` or `even`), replay length, prompt. |
 | `beats` | Presenter beats: beats[0] is reset (modifier+0), then modifier+1…9. Each says the active app and each app's scene. |
 | `focus_points` | ZoomIt-style points: `beat`, `app`, `scenes`, a target (`find` text or a `union` of matchers), `mark` (`box`, `arrow` with `dir`, `zoom`), the script `line`. |
+| `playback` | Additional browser-player options for layouts, actions, stream frames and other captured behavior. Core scene, app, beat, stream and focus identities remain in the fields above. |
 | `presenter` | The modifier per OS (⌥ on the Mac, Ctrl+Alt on Windows) and the focus, fill and next keys. |
 
 v2 validation adds: app ids and keys valid and unique; every scene, transition, beat and focus point refers to
