@@ -13,8 +13,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
+import { compileFlow } from '../kit/compile/flow.mjs';
+import { loadDemo } from '../kit/lib/demo.mjs';
+import { flowParts } from '../kit/lib/buildkey.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -226,11 +230,14 @@ export default flow => {
   if (process.argv.includes('--record-only')) throw RECORD_ONLY;
 
   // 4 · Build: flow.json from the recording, raw captures → data/, secret scan.
+  const expectedFlow = JSON.parse(JSON.stringify((await compileFlow(loadDemo(DEMO), { fromRaw: true })).flow));
   let t1 = Date.now();
   r = await run(['build', '--from-raw'], at);
   times.build = +((Date.now() - t1) / 1000).toFixed(1);
   check('build', r.code === 0, r.out.slice(-1500));
   const flow = JSON.parse(readFileSync(join(DEMO, 'flow.json'), 'utf8'));
+  check('Rust flow compiler: recording and build inputs match the reference',
+    isDeepStrictEqual(flow, expectedFlow) && JSON.stringify(flowParts(flow)) === JSON.stringify(flowParts(expectedFlow)));
   const S = flow.states;
   const ids = Object.keys(S);
   const byApp = a => ids.filter(i => S[i].app === a);

@@ -407,6 +407,7 @@ pub fn bundle_json_schema() -> serde_json::Value {
         .expect("the bundle schema serializes");
     schema["$id"] = serde_json::Value::from("https://scenecast.dev/schema/bundle.v2.json");
     schema["title"] = serde_json::Value::from("Scenecast bundle manifest (scenecast.bundle.v2)");
+    schema.sort_all_objects();
     schema
 }
 

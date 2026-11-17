@@ -9,6 +9,7 @@ use thiserror::Error;
 
 use crate::engine::{Engine, EngineError, Progress, with_demo};
 use crate::fingerprint::{FingerprintError, fingerprint_tree};
+use crate::flow::{FlowError, compile_recording};
 use crate::scrub::{ScrubError, ScrubReport, scrub_tree};
 use crate::sync::{SyncError, SyncReport, sync_manifest};
 
@@ -26,10 +27,16 @@ pub enum BuildError {
     Engine(#[from] EngineError),
     #[error(transparent)]
     Sync(#[from] SyncError),
+    #[error(transparent)]
+    Flow(#[from] FlowError),
     #[error("cannot resolve raw capture folder: HOME and USERPROFILE are unset")]
     MissingHome,
     #[error("raw capture folder is not UTF-8")]
     NonUtf8Raw,
+    #[error("no recording: {} (record the demo first: scenecast record start)", .0.display())]
+    MissingRecording(PathBuf),
+    #[error("the --compiled-flow flag is reserved for the build")]
+    ReservedFlag,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +58,52 @@ pub struct BuildResult {
 struct BuildFingerprint {
     raw: String,
     output: String,
+}
+
+fn compile_base(
+    dir: &Path,
+    raw: &Path,
+    config: &serde_json::Value,
+    from_raw: bool,
+    kit_version: &str,
+) -> Result<Option<tempfile::TempPath>, BuildError> {
+    let recording_file = dir.join("recording.json");
+    let raw_recording = raw.join("recording.json");
+    if !from_raw
+        && !recording_file.exists()
+        && !raw_recording.exists()
+        && dir.join("flow.json").exists()
+    {
+        return Ok(None);
+    }
+    if from_raw || !recording_file.exists() {
+        if !raw_recording.is_file() {
+            return Err(BuildError::MissingRecording(raw_recording));
+        }
+        let mut recording: serde_json::Value = serde_json::from_slice(&fs::read(&raw_recording)?)?;
+        if let Some(fields) = recording.as_object_mut() {
+            fields.remove("log");
+        }
+        if let Some(apps) = recording
+            .get_mut("apps")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for app in apps {
+                if let Some(fields) = app.as_object_mut() {
+                    fields.remove("url");
+                }
+            }
+        }
+        fs::write(
+            &recording_file,
+            format!("{}\n", serde_json::to_string_pretty(&recording)?),
+        )?;
+    }
+    let recording = serde_json::from_slice(&fs::read(&recording_file)?)?;
+    let flow = compile_recording(config, &recording, kit_version)?;
+    let path = tempfile::NamedTempFile::new()?.into_temp_path();
+    fs::write(&path, serde_json::to_vec(&flow)?)?;
+    Ok(Some(path))
 }
 
 fn write_report(dir: &Path, report: &ScrubReport) -> Result<(), BuildError> {
@@ -170,16 +223,42 @@ fn build_with_raw(
         raw_hash.as_ref() == Some(&p.raw) && output_hash.as_ref() == Some(&p.output)
     });
     let mut args = args.to_vec();
+    if args.iter().any(|a| a == "--compiled-flow") {
+        return Err(BuildError::ReservedFlag);
+    }
     if !unchanged && !args.iter().any(|a| a == "--force") {
         args.push("--force".into());
     }
-    on(BuildProgress::Stage("process"));
+    on(BuildProgress::Stage("compile-flow"));
     let engine = Engine::locate()?;
-    let code = engine.run_with_progress_env(
-        with_demo("build", &args, dir),
-        [("REPLICA_RAW", raw.as_os_str())],
-        |p| on(BuildProgress::Engine(p)),
+    let kit: serde_json::Value =
+        serde_json::from_slice(&fs::read(engine.packages.join("kit/package.json"))?)?;
+    let kit_version = kit
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| FlowError::Invalid("kit version must be a string".into()))?;
+    let base = compile_base(
+        dir,
+        &raw,
+        &config,
+        args.iter().any(|a| a == "--from-raw"),
+        kit_version,
     )?;
+    if base.is_some() {
+        args.push("--compiled-flow".into());
+    }
+    on(BuildProgress::Stage("process"));
+    let mut env = vec![(OsString::from("REPLICA_RAW"), raw.as_os_str().to_owned())];
+    if let Some(path) = &base {
+        env.push((
+            OsString::from("SCENECAST_FLOW_BASE"),
+            path.as_os_str().to_owned(),
+        ));
+    }
+    let code = engine.run_with_progress_env(with_demo("build", &args, dir), env, |p| {
+        on(BuildProgress::Engine(p))
+    })?;
+    drop(base);
     on(BuildProgress::Stage("scrub-built"));
     for path in [
         dir.join("data"),

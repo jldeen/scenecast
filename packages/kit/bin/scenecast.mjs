@@ -69,7 +69,7 @@ async function main() {
     case 'flow': return node('kit/compile/flow.mjs', rest);
     case 'build': {
       const demo = loadDemo(rest);
-      let code = await node('kit/compile/flow.mjs', ['--demo', demo.dir, ...(rest.includes('--from-raw') ? ['--from-raw'] : [])]);
+      let code = await node('kit/compile/flow.mjs', ['--demo', demo.dir, ...(rest.includes('--compiled-flow') ? ['--compiled-flow'] : rest.includes('--from-raw') ? ['--from-raw'] : [])]);
       if (code) return code;
       code = await node('recorder/process.mjs', ['--demo', demo.dir, ...(rest.includes('--force') ? ['--force'] : [])]);
       if (code) return code;
