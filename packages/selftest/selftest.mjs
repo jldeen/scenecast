@@ -391,9 +391,11 @@ export default flow => {
         check('folder export: three identical offline cold starts', new Set(fileHashes).size === 1 && !fileErrors.length, JSON.stringify({ fileHashes, fileErrors }));
         const offline = await run(['fidelity', '--url', fileUrl, '--only', 'two-run,composer,keys,focus,clicks,hovers,drags,zoom'], at);
         check('folder export: offline interaction and two-run checks', offline.code === 0, offline.out.slice(-1000));
-        if (process.platform === 'win32') {
+        if (process.platform === 'win32' || process.platform === 'darwin') {
           const edge = await run(['fidelity', '--url', fileUrl, '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
-          check('folder export: Windows Edge presenter keys', edge.code === 0, edge.out.slice(-1000));
+          const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
+          check('folder export: Edge presenter keys and focus',
+            edge.code === 0 && ['composer', 'keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-1000));
         }
         const dataFile = join(output, 'offline-data.js');
         const data = JSON.parse(readFileSync(dataFile, 'utf8').replace(/^globalThis\.__scenecastFiles=/, '').replace(/;\s*$/, ''));
@@ -418,10 +420,10 @@ export default flow => {
       } finally { await new Promise(resolve => server.close(resolve)); }
     }
   }
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || process.platform === 'darwin') {
     const edge = await run(['fidelity', '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
     const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
-    check('Windows Edge: presenter keys and focus', edge.code === 0 && ['composer', 'keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-800));
+    check('Edge: presenter keys and focus', edge.code === 0 && ['composer', 'keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-800));
   }
   // 7 · A tweak: one line, shown on reload with no build; the quick check covers only the screens it touched.
   t1 = Date.now();
