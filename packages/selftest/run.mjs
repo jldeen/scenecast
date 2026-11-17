@@ -12,6 +12,7 @@ const step = (name, cmd, args) => {
 };
 if (!process.env.SCENECAST_BIN) step('cargo build', 'cargo', ['build', '-q', '-p', 'scenecast-cli']);
 step('unit', process.execPath, ['--test', 'packages/player/bundle-flow.test.mjs', 'packages/player/launch.test.mjs', 'packages/player/presenter-key.test.mjs', 'packages/player/serve.test.mjs', 'packages/checks/path.test.mjs', 'packages/kit/compile/flow.test.mjs', 'packages/kit/lib/preflight.test.mjs']);
+step('asset build', process.execPath, ['packages/selftest/asset-build.mjs']);
 step('mixed fallback', process.execPath, ['packages/selftest/mixed-fallback.mjs']);
 step('browsers', process.execPath, ['packages/selftest/extension-browsers.mjs']);
 step('capture', process.execPath, ['packages/selftest/capture-fixture.mjs']);
