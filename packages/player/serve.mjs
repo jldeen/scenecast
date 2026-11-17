@@ -1,0 +1,123 @@
+// Replica server. No dependencies, no network: it serves the kit's shell (engine/app/), the demo's flow (flow.json)
+// and its captured pages and assets (data/) on localhost.
+//   node engine/serve.mjs --demo <dir> [--port 4620] [--open] [--pace N] [--release]
+// --open opens it in Chrome as an app window (no tabs or address bar), on the profile named in demo.json; then
+// ⌃⌘F for full screen. REPLICA_NO_OPEN=1 serves without opening Chrome (checks while her window is in use).
+//
+// Tweaks show on reload, without a build: when recording.json, flow.overrides.mjs or demo.json changes, the flow is
+// compiled again (and flow.json written); text edits the last build hasn't baked in (data/build.json) are applied to
+// each page, frame and hover as it's served. What only a build can do is listed at /__replica/status and in the log.
+// --release serves data/ and flow.json exactly as built (what a pushed replica runs).
+import { createServer } from 'node:http';
+import { createReadStream, existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
+import { join, normalize, extname, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { loadDemo, arg } from '../lib/demo.mjs';
+import { compileFlow } from '../compile/flow.mjs';
+import { buildInputs, buildDiff } from '../lib/buildkey.mjs';
+import { compileEdits, applyEdits, applyEditsJson } from '../lib/edits.mjs';
+
+const APP = join(dirname(fileURLToPath(import.meta.url)), 'app');
+const args = process.argv.slice(2);
+const demo = loadDemo(args);
+const PORT = +arg(args, '--port', 0) || demo.port;
+// --pace N opens the replica at N seconds per streamed answer (flow.json's pace otherwise).
+const PACE = +arg(args, '--pace', 0);
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.bin': 'application/octet-stream' };
+const MAP = [['/app/', APP], ['/snaps/', join(demo.data, 'snaps')], ['/streams/', join(demo.data, 'streams')], ['/assets/', join(demo.data, 'assets')]];
+// demo.json engine: { dir, modules }: the demo's own engine modules (flow.modules), served from its dir as /demo/.
+const ENGINE = demo.cfg.engine || null;
+if (ENGINE) MAP.push(['/demo/', join(demo.dir, ENGINE.dir || 'app')]);
+
+// ---- the live flow and the edits not built in yet --------------------------------------------------------------
+const RELEASE = args.includes('--release');
+const live = { key: null, flow: null, json: null, error: null, needsBuild: [], pending: [], at: null };
+const watched = () => {
+  const parts = [];
+  for (const f of readdirSync(demo.dir)) if (/\.(mjs|json)$/.test(f) && f !== 'flow.json') { try { parts.push(f + ':' + statSync(join(demo.dir, f)).mtimeMs); } catch (e) {} }
+  for (const f of [join(demo.data, 'build.json'), join(demo.raw, 'recording.json')]) { try { parts.push(f + ':' + statSync(f).mtimeMs); } catch (e) {} }
+  return parts.join('|');
+};
+let lastNote = '';
+let checked = 0;
+async function refresh(force) {
+  if (RELEASE) { if (!live.json) live.json = readFileSync(demo.flowPath, 'utf8'); return; }
+  // Pages ask too (they can come before the flow); a check costs a directory listing, at most every 250 ms.
+  if (!force && Date.now() - checked < 250) return;
+  checked = Date.now();
+  const key = watched();
+  if (key === live.key) return;
+  live.key = key;
+  try {
+    const { flow, problems } = await compileFlow(demo);
+    live.flow = flow; live.json = JSON.stringify(flow); live.error = problems.length ? problems.join('; ') : null; live.at = new Date().toISOString();
+    let manifest = null; try { manifest = JSON.parse(readFileSync(join(demo.data, 'build.json'), 'utf8')); } catch (e) {}
+    const d = buildDiff(manifest, buildInputs(demo, flow));
+    live.needsBuild = d.needsBuild;
+    live.pending = compileEdits(d.serveEdits);
+  } catch (e) {
+    live.error = String(e.message || e);
+    if (!live.json && existsSync(demo.flowPath)) live.json = readFileSync(demo.flowPath, 'utf8');
+  }
+  const note = [live.error && `flow: ${live.error}`, live.pending.length && `${live.pending.length} text edit(s) applied as served (not built in yet)`, live.needsBuild.length && `needs replica build: ${live.needsBuild.join(', ')}`].filter(Boolean).join(' · ');
+  if (note !== lastNote) { lastNote = note; console.log(`${new Date().toISOString().slice(11, 19)} ${note || 'flow and data up to date'}`); }
+}
+// Pending edits on a text response: pages (and in-capture edits on their main document), stream frames, hover data.
+function edited(path, f) {
+  if (RELEASE || !live.pending.length) return null;
+  const ext = extname(f);
+  if (path.startsWith('/snaps/hovers-') && ext === '.json') {
+    const v = applyEditsJson(JSON.parse(readFileSync(f, 'utf8')), live.pending.filter(e => !e.in));
+    return JSON.stringify(v);
+  }
+  if (ext !== '.html' || !(path.startsWith('/snaps/') || path.startsWith('/streams/'))) return null;
+  const m = /^\/snaps\/([^/.]+)\.html$/.exec(path);
+  return applyEdits(readFileSync(f, 'utf8'), live.pending, m ? decodeURIComponent(m[1]) : null);
+}
+
+function resolve(path) {
+  if (path === '/' || path === '/index.html') return join(APP, 'index.html');
+  if (path === '/flow.json') return demo.flowPath;
+  if (path === '/favicon.ico') return null;
+  for (const [pre, dir] of MAP) if (path.startsWith(pre)) {
+    const f = normalize(join(dir, decodeURIComponent(path.slice(pre.length))));
+    if (!f.startsWith(dir)) return null;
+    if (pre === '/demo/' && !/\.(m?js|css|json)$/.test(f)) return null;
+    return f;
+  }
+  return null;
+}
+
+createServer(async (req, res) => {
+  const path = new URL(req.url, 'http://x').pathname;
+  // Every font file the replica has, so the shell can load them before the first screen.
+  if (path === '/__replica/fonts') {
+    const dir = join(demo.data, 'assets');
+    const list = existsSync(dir) ? readdirSync(dir).filter(f => /\.(woff2?|ttf|otf)$/.test(f) && statSync(join(dir, f)).size > 0).sort().map(f => '/assets/' + f) : [];
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' }); return res.end(JSON.stringify(list));
+  }
+  if (path === '/flow.json' || path === '/__replica/status') {
+    await refresh(true);
+    if (path === '/__replica/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' }); return res.end(JSON.stringify({ release: RELEASE, error: live.error, needsBuild: live.needsBuild, pendingEdits: live.pending.map(e => e.what), compiledAt: live.at })); }
+    if (live.json) { res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' }); return res.end(live.json); }
+  }
+  const f = resolve(path);
+  if (path.startsWith('/snaps/') || path.startsWith('/streams/')) await refresh();
+  if (!f || !existsSync(f) || !statSync(f).isFile()) {
+    // Unknown assets answer with an empty 204 rather than a 404, so nothing shows in the console.
+    res.writeHead(path.startsWith('/assets/') || path === '/favicon.ico' ? 204 : 404); return res.end();
+  }
+  const immutable = path.startsWith('/assets/');
+  res.writeHead(200, { 'content-type': TYPES[extname(f)] || 'application/octet-stream', 'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache', 'access-control-allow-origin': '*' });
+  const body = edited(path, f);
+  if (body !== null) return res.end(body);
+  createReadStream(f).pipe(res);
+}).on('error', e => { console.error(`replica: ${e.code === 'EADDRINUSE' ? `port ${PORT} is in use` : e.message}`); process.exit(1); }).listen(PORT, '127.0.0.1', () => {
+  const url = `http://127.0.0.1:${PORT}/${PACE > 0 ? `?pace=${PACE}` : ''}`;
+  console.log(`${demo.cfg.title || demo.name} replica: ${url}${RELEASE ? ' (release: as built)' : ''}`);
+  refresh();
+  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) {
+    execFile('open', ['-na', 'Google Chrome', '--args', `--profile-directory=${demo.cfg.chrome.profile}`, `--app=${url}`], err => { if (err) console.log('open Chrome yourself: ' + url); });
+  }
+});

@@ -1,0 +1,20 @@
+{
+  "kit": 1,
+  "name": "__NAME__",
+  "title": "__TITLE__",
+  "port": __PORT__,
+  "viewport": { "width": 1920, "height": 1080, "dpr": 2 },
+  "chrome": { "profile": "Profile 10" },
+  "raw": "~/.replica-kit/__NAME__/raw",
+  "apps": __APPS__,
+  "record": {
+    "ignore": [],
+    "busy": [{ "text": "Working on it" }, { "sel": "[aria-label=\"Stop\"]" }, { "sel": "[aria-label*=\"Stop generating\"]" }],
+    "settleMs": 2500,
+    "typeIdleMs": 1200,
+    "streamMinMs": 1500,
+    "streamMaxMs": 10000,
+    "auto": { "maxS": 240, "hoverMax": 40, "clickMax": 25 }
+  },
+  "zooms": [50, 67, 75, 90, 110, 125, 150, 175, 200]
+}
