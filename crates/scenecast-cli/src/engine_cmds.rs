@@ -2,11 +2,13 @@
 //! checks) on a project folder, with the bundle manifest kept in step by Rust.
 
 use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use scenecast_build::engine::with_demo;
+use scenecast_build::scrub::{ScrubReport, scrub_tree};
 use scenecast_build::{Engine, NewProject, SyncReport, create_project, fallback_scenes};
 
 /// Arguments passed through to the engine as they are (`--demo <dir>` picks the project; else the folder you're in).
@@ -127,11 +129,70 @@ fn run_engine(sub: &str, args: &Passthrough, takes_project: bool, last: bool) ->
 
 /// `scenecast build`: the engine's build (flow, captures → data/, secret scan), then the manifest from it.
 pub fn build(args: &Passthrough) -> Result<i32> {
+    let dir = project_dir(&args.args)?;
+    let config: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("demo.json"))?)?;
+    let raw = std::env::var_os("REPLICA_RAW")
+        .map(PathBuf::from)
+        .or_else(|| config["raw"].as_str().map(PathBuf::from))
+        .unwrap_or_else(|| {
+            PathBuf::from(format!(
+                "~/.scenecast/{}/raw",
+                config["name"].as_str().unwrap_or("demo")
+            ))
+        });
+    let raw = if let Ok(rest) = raw.strip_prefix("~") {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .context("cannot resolve raw capture folder: HOME and USERPROFILE are unset")?;
+        PathBuf::from(home).join(rest)
+    } else if raw.is_absolute() {
+        raw
+    } else {
+        dir.join(raw)
+    };
+    let allowlist = match config.pointer("/scrub/allowlist") {
+        Some(value) => serde_json::from_value::<Vec<String>>(value.clone())
+            .context("demo.json scrub.allowlist must be an array of strings")?,
+        None => Vec::new(),
+    };
+    let mut report = ScrubReport::default();
+    if raw.exists() {
+        scrub_tree(&raw, "raw", &allowlist, false, &mut report)?;
+    }
+    if report.has_credentials() {
+        write_scrub_report(&dir, &report)?;
+        eprintln!("build stopped: credentials found in raw captures (see .out/scrub.json)");
+        return Ok(1);
+    }
     let code = passthrough("build", args, true)?;
+    for path in [
+        dir.join("data"),
+        dir.join("recording.json"),
+        dir.join("flow.json"),
+    ] {
+        if path.exists() {
+            scrub_tree(&path, "built", &allowlist, true, &mut report)?;
+        }
+    }
+    write_scrub_report(&dir, &report)?;
+    if report.has_credentials() {
+        eprintln!("build stopped: credentials or scripts found (see .out/scrub.json)");
+        return Ok(1);
+    }
     if code != 0 {
         return Ok(code);
     }
-    sync(&project_dir(&args.args)?)
+    sync(&dir)
+}
+
+fn write_scrub_report(dir: &Path, report: &ScrubReport) -> Result<()> {
+    let out = dir.join(".out");
+    fs::create_dir_all(&out)?;
+    fs::write(
+        out.join("scrub.json"),
+        format!("{}\n", serde_json::to_string_pretty(report)?),
+    )?;
+    Ok(())
 }
 
 /// `scenecast sync`: the manifest from what was built.

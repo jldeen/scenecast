@@ -20,6 +20,38 @@ fn present_is_exposed_as_a_cli_command() {
 }
 
 #[test]
+fn build_rejects_a_credential_in_raw_capture_and_writes_report() {
+    let temp = tempdir().unwrap();
+    let bundle = temp.path().join("demo.scenecast");
+    Command::cargo_bin("scenecast")
+        .unwrap()
+        .args(["new", bundle.to_str().unwrap()])
+        .assert()
+        .success();
+    let config_path = bundle.join("demo.json");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["raw"] = serde_json::json!("raw");
+    fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+    fs::create_dir(bundle.join("raw")).unwrap();
+    fs::write(
+        bundle.join("raw/capture.json"),
+        r#"{"client_secret":"abcdefghijklmnop12345"}"#,
+    )
+    .unwrap();
+    Command::cargo_bin("scenecast")
+        .unwrap()
+        .args(["build", "--from-raw", "--demo", bundle.to_str().unwrap()])
+        .env_remove("REPLICA_RAW")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("credentials found"));
+    let report = fs::read_to_string(bundle.join(".out/scrub.json")).unwrap();
+    assert!(report.contains("credential"));
+    assert!(!report.contains("abcdefghijklmnop12345"));
+}
+
+#[test]
 fn new_creates_valid_starter_bundle() {
     let temp = tempdir().unwrap();
     let bundle = temp.path().join("demo.scenecast");

@@ -54,6 +54,11 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 | `scenecast sheet`, `scenecast hovers`, `scenecast scan [<dir>]` | Contact sheet, hover sheet, secret scan. |
 | `scenecast schema [--out <file>]` | The manifest's JSON Schema (v2), generated from the Rust types. |
 
+Builds inspect raw captures before processing and write `.out/scrub.json` without including matched values.
+Detected credentials stop the build; email addresses and labeled tenant IDs in built text are redacted unless
+their exact values appear in `demo.json` as `"scrub": { "allowlist": ["value"] }`. Credentials cannot be
+allowlisted. Treat the raw capture folder as sensitive even after building.
+
 `build` writes `manifest.json`: every state in `flow.json` becomes a `live-page` scene (`data/snaps/<id>.html`,
 its SHA-256, its transitions), with the streams, beats, focus points and apps. Fallback scenes already in the
 manifest are kept and listed. The build fails if the manifest doesn't validate or a page is missing. The file is
