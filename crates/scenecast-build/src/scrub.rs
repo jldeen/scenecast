@@ -170,8 +170,8 @@ fn rules() -> &'static [Rule] {
         [
             ("jwt", r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b", true),
             ("bearer-token", r"(?i)\bbearer\s+[a-z0-9._~+/\-]{16,}", true),
-            ("credential", r#"(?i)\b(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|accountkey|sharedaccesssignature|authorization|set-cookie|cookie)\b["'\\]*\s*[:=]\s*["'\\]*(?P<value>[a-z0-9%._~+/\-=]{8,})"#, true),
-            ("sas-signature", r"(?i)[?&;](?:sig|signature|se|sp|sv)=(?P<value>[a-z0-9%._~+/\-=]{12,})", true),
+            ("credential", r#"(?i)\b(?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|password|accountkey|sharedaccesssignature|authorization|set-cookie|cookie)\b["'\\]*\s*[:=]\s*["'\\]*(?P<value>[a-z0-9%._~+/\-=]+)"#, true),
+            ("sas-signature", r"(?i)[?&;](?:sig|signature)=(?P<value>[a-z0-9%._~+/\-=]+)", true),
             ("private-key", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----", true),
             ("github-token", r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})\b", true),
             ("aws-access-key", r"\bAKIA[0-9A-Z]{16}\b", true),
@@ -273,6 +273,9 @@ mod tests {
         assert!(prose.is_empty());
         for value in [
             "Cookie: session=abcdefghijklmnop".to_owned(),
+            "Cookie: a=1".to_owned(),
+            "client_secret=x".to_owned(),
+            "Authorization: Basic eA==".to_owned(),
             format!("https://example.test/?{}={}", "sig", "abcdefghijklmnop"),
             "AccountKey=abcdefghijklmnop12345".to_owned(),
         ] {
