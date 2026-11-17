@@ -81,6 +81,7 @@ pub struct AssetResolver {
     used: Vec<String>,
     used_set: HashSet<String>,
     missing: Vec<(String, String)>,
+    stream: Option<crate::streams::StreamWriter>,
 }
 
 impl AssetResolver {
@@ -95,6 +96,7 @@ impl AssetResolver {
             used: Vec::new(),
             used_set: HashSet::new(),
             missing: Vec::new(),
+            stream: None,
         })
     }
 
@@ -439,6 +441,52 @@ impl AssetResolver {
                 Some(serde_json::to_string(
                     &crate::interactions::filter_ops(&ops, hover).map_err(AssetError::Invalid)?,
                 )?)
+            }
+            "stream-begin" => {
+                if self.stream.is_some() {
+                    return Err(AssetError::Invalid("stream already open"));
+                }
+                let root = self
+                    .assets
+                    .parent()
+                    .expect("staging asset parent")
+                    .join("streams");
+                self.stream = Some(
+                    crate::streams::StreamWriter::new(&root, value.to_owned())
+                        .map_err(AssetError::Compose)?,
+                );
+                None
+            }
+            "stream-frame" => {
+                let frame: Value = serde_json::from_str(value)?;
+                let root = self
+                    .assets
+                    .parent()
+                    .expect("staging asset parent")
+                    .join("streams");
+                self.stream
+                    .as_mut()
+                    .ok_or(AssetError::Invalid("no stream open"))?
+                    .push(&root, &frame)
+                    .map_err(AssetError::Compose)?;
+                None
+            }
+            "stream-end" => {
+                let root = self
+                    .assets
+                    .parent()
+                    .expect("staging asset parent")
+                    .join("streams");
+                let stream = self
+                    .stream
+                    .take()
+                    .ok_or(AssetError::Invalid("no stream open"))?;
+                Some(
+                    stream
+                        .finish(&root)
+                        .map_err(AssetError::Compose)?
+                        .to_string(),
+                )
             }
             _ => return Err(AssetError::Invalid("unknown asset operation")),
         };

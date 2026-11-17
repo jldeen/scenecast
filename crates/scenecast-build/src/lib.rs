@@ -19,6 +19,7 @@ pub mod project;
 pub mod publish;
 pub mod recorder;
 pub mod scrub;
+pub mod streams;
 pub mod sync;
 
 use std::path::{Path, PathBuf};

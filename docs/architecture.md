@@ -25,7 +25,7 @@ runs in a browser. The manifest's JSON Schema is generated from the Rust types, 
 `PreflightReport` item by item, `RecordStatus`, `RecordSummary` with `RecordTiming`) and line-by-line progress
 (`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
 `build::build` also reports build stages and per-file fingerprint progress. Rust compiles the recorded base flow
-and rewrites captured pages, stream frames, interaction fragments, assets and CSS, composes captured parts, isolates generated classes and filters non-visual interaction operations, publishes staged outputs by
+and rewrites captured pages, stream frames, interaction fragments, assets and CSS, deduplicates and indexes streams, composes captured parts, isolates generated classes and filters non-visual interaction operations, publishes staged outputs by
 content hash, and prunes unreferenced assets. JavaScript still applies flow overrides and focus hooks and orchestrates
 composition and interaction processing; moving that processing to Rust remains unfinished. The resolved raw folder is passed explicitly
 to the engine so it cannot process a different folder from the one Rust scanned.

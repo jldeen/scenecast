@@ -210,21 +210,29 @@ for (const [name, def] of Object.entries(flow.streams || {})) {
   const all = readdirSync(dir).sort().map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')));
   const [first, last] = def.frames || [0, all.length - 1];
   const frames = all.filter(fr => fr.n >= first && fr.n <= last);
-  mkdirSync(join(OUT, 'streams', name), { recursive: true });
+  if (process.env.SCENECAST_RUST_ASSETS === '1') rustAsset('stream-begin', name);
+  else mkdirSync(join(OUT, 'streams', name), { recursive: true });
   const index = []; let prev = '';
   for (const fr of frames) {
     const rawHtml = process.env.SCENECAST_RUST_ASSETS === '1' ? rustAsset('frame', JSON.stringify(fr))
       : scrub(quiet(fr.html.replace(/d1res:\/\/(\d+)/g, (m, n) => local(fr.urls[+n], fr.inline))
         .replace(/data-d1-canvas="(canvas\d+)"/g, (m, k) => `data-d1-canvas="${fr.inline && fr.inline[k] ? fromData(fr.inline[k]) : ''}"`)));
     const html = edit(rawHtml, 'stream:' + name, { partial: true });
+    if (process.env.SCENECAST_RUST_ASSETS === '1') {
+      rustAsset('stream-frame', JSON.stringify({ html, t: fr.t, raw: fr.n }));
+      continue;
+    }
     if (html === prev) continue;
     prev = html;
     const file = String(index.length).padStart(3, '0') + '.html';
     writeFileSync(join(OUT, 'streams', name, file), html);
     index.push({ file, t: fr.t, raw: fr.n });
   }
-  writeFileSync(join(OUT, 'streams', `${name}.json`), JSON.stringify({ name, frames: index }, null, 1));
-  report.streams.push(`${name} ${index.length} frames`);
+  if (process.env.SCENECAST_RUST_ASSETS === '1') report.streams.push(`${name} ${rustAsset('stream-end', '')} frames`);
+  else {
+    writeFileSync(join(OUT, 'streams', `${name}.json`), JSON.stringify({ name, frames: index }, null, 1));
+    report.streams.push(`${name} ${index.length} frames`);
+  }
 }
 // Edits limited to some captures: a tooltip that came along, or a text that differs only by when it was captured.
 for (const e of (flow.edits || []).filter(e => e.in)) for (const id of e.in) {
