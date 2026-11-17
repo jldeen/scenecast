@@ -126,7 +126,7 @@ pub fn sync_manifest(dir: &Path) -> Result<SyncReport, SyncError> {
         .ok_or_else(|| SyncError::Flow("no states".to_owned()))?;
     let mut live = Vec::new();
     for (id, state) in states {
-        live.push(live_scene(dir, id, state)?);
+        live.push(live_scene(dir, id, state, &flow)?);
     }
 
     // Fallback scenes stay; the live ones are replaced by what was recorded.
@@ -293,7 +293,7 @@ pub fn sync_manifest(dir: &Path) -> Result<SyncReport, SyncError> {
     Ok(report)
 }
 
-fn live_scene(dir: &Path, id: &str, state: &Value) -> Result<Scene, SyncError> {
+fn live_scene(dir: &Path, id: &str, state: &Value, flow: &Value) -> Result<Scene, SyncError> {
     let bad = |what: &str| SyncError::Flow(format!("state `{id}`: {what}"));
     let sid = scene_id(id).map_err(|e| bad(&e))?;
     let app = str_of(state, "app").ok_or_else(|| bad("no app"))?;
@@ -314,9 +314,15 @@ fn live_scene(dir: &Path, id: &str, state: &Value) -> Result<Scene, SyncError> {
         .find_map(|(k, trig)| t.get(k).map(|m| (trig, m.clone()))) else {
             continue;
         };
-        // A search box's Enter can go to several states, by what was typed.
-        let targets: Vec<&str> = match (str_of(&t, "to"), t.get("query").and_then(Value::as_object))
-        {
+        // A streamed answer lands where its stream ends; a search box's Enter can go to several states, by what
+        // was typed.
+        let stream_end = str_of(&t, "stream")
+            .and_then(|name| flow.get("streams")?.get(name))
+            .and_then(|st| str_of(st, "to"));
+        let targets: Vec<&str> = match (
+            str_of(&t, "to").or(stream_end),
+            t.get("query").and_then(Value::as_object),
+        ) {
             (Some(to), _) => vec![to],
             (None, Some(q)) => q.values().filter_map(Value::as_str).collect(),
             _ => Vec::new(),
@@ -409,7 +415,7 @@ mod tests {
             d.join("flow.json"),
             r#"{"title":"Fixture","apps":[{"id":"chat","key":"C","title":"Chat"}],
                 "states":{
-                  "chat-start":{"app":"chat","snap":"chat-start","on":[{"enter":{"sel":"[aria-label=\"Message\"]"},"to":"chat-01","stream":"s001"}]},
+                  "chat-start":{"app":"chat","snap":"chat-start","on":[{"enter":{"sel":"[aria-label=\"Message\"]"},"stream":"s001"}]},
                   "chat-01":{"app":"chat","snap":"chat-01","esc":"chat-start"}},
                 "streams":{"s001":{"frames":[0,14],"to":"chat-01","timing":"real","ms":4211,"prompt":"Hi"}},
                 "beats":[{"label":"0 Reset","active":"chat","states":{"chat":"chat-start"}}],
@@ -443,6 +449,7 @@ mod tests {
         let start = m.graph.scene(&SceneId::new("chat-start").unwrap()).unwrap();
         assert_eq!(start.kind, SceneKind::LivePage);
         assert_eq!(start.transitions[0].stream.as_deref(), Some("s001"));
+        assert_eq!(start.transitions[0].target.as_str(), "chat-01");
         assert_eq!(
             start.live.as_ref().unwrap().sha256.as_ref().unwrap().len(),
             64

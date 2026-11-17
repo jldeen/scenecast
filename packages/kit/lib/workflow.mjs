@@ -105,9 +105,12 @@ export function save(args) {
 export async function release(args, node) {
   const demo = loadDemo(args);
   const t0 = Date.now(), step = (n, t) => console.log(`\n== ${n} (${Math.round((Date.now() - t0) / 1000)} s)`);
-  step('build');
-  if (await node('kit/compile/flow.mjs', ['--demo', demo.dir])) return 1;
-  if (await node('recorder/process.mjs', ['--demo', demo.dir])) return 1;
+  // --skip-build: the scenecast binary has just built it (and written manifest.json from it).
+  if (!args.includes('--skip-build')) {
+    step('build');
+    if (await node('kit/compile/flow.mjs', ['--demo', demo.dir])) return 1;
+    if (await node('recorder/process.mjs', ['--demo', demo.dir])) return 1;
+  }
   step('full checklist');
   const fid = await node('checks/fidelity.mjs', ['--demo', demo.dir, ...(arg(args, '--jobs') ? ['--jobs', arg(args, '--jobs')] : [])]);
   if (fid) { console.log('release stopped: the checklist failed (.out/fidelity.md)'); return 1; }

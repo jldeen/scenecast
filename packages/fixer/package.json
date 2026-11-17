@@ -1,0 +1,7 @@
+{
+  "name": "@scenecast/fixer",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Placeholder (Phase 3): AI fidelity fixer: diagnose a real-vs-replica difference, write a per-demo patch, re-check."
+}

@@ -128,6 +128,27 @@ impl Engine {
         Ok(status.code().unwrap_or(1))
     }
 
+    /// Hands the terminal over to a subcommand for good (a server, the receiver): on macOS and Linux this process
+    /// becomes Node (so a signal to it reaches the engine); on Windows it waits and returns the exit code (Ctrl+C
+    /// reaches the whole console group there).
+    pub fn exec_attached<I, S>(&self, args: I) -> Result<i32, EngineError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            self.check_node()?;
+            let source = self.command(args).exec();
+            Err(self.spawn_err(source))
+        }
+        #[cfg(not(unix))]
+        {
+            self.run_attached(args)
+        }
+    }
+
     /// Runs a subcommand and reports each line of its output as it comes. Returns its exit code.
     pub fn run_with_progress<I, S>(
         &self,

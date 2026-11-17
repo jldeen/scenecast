@@ -1,4 +1,5 @@
-// The kit's own end-to-end test, offline and headless: a fixture product (test/fixture/server.mjs) is recorded by
+// scenecast's end-to-end test, offline and headless, through the scenecast binary (SCENECAST_BIN, else
+// target/debug/scenecast from cargo build -p scenecast-cli), on macOS, Windows and Linux: a fixture product (test/fixture/server.mjs) is recorded by
 // the recorder exactly the way a demo is (a "person" clicks, types and presses Enter in two app tabs while the
 // agent watches), side paths are captured (hovers, clicks with a menu whose styles load on open, a resize handle,
 // step groups, a "+N" chip list, zoom, a virtualized grid), the replica is built, served, and the fidelity checklist
@@ -7,13 +8,15 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
+if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 const keep = process.argv.includes('--keep');
 const RX_PORT = 47691, REPLICA_PORT = 4699;
 const tmp = mkdtempSync(join(tmpdir(), 'replica-selftest-'));
@@ -24,12 +27,12 @@ const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + nam
 // A fresh clone has no git identity of its own: the test demo's commits get this one.
 const GIT_ID = { GIT_AUTHOR_NAME: 'replica selftest', GIT_AUTHOR_EMAIL: 'selftest@localhost', GIT_COMMITTER_NAME: 'replica selftest', GIT_COMMITTER_EMAIL: 'selftest@localhost' };
 const run = (args, opts = {}) => new Promise(res => {
-  const p = spawn(process.execPath, [join(KIT, 'kit/bin/scenecast.mjs'), ...args], { cwd: opts.cwd || tmp, env: { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const p = spawn(BIN, args, { cwd: opts.cwd || tmp, env: { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; p.stdout.on('data', d => { out += d; if (opts.echo) process.stdout.write(d); }); p.stderr.on('data', d => { out += d; process.stderr.write(d); });
   p.on('close', code => res({ code, out }));
 });
 const procs = [];
-const bg = (args) => { const p = spawn(process.execPath, [join(KIT, 'kit/bin/scenecast.mjs'), ...args], { cwd: tmp, env: { ...process.env, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: 'ignore' }); procs.push(p); return p; };
+const bg = (args) => { const p = spawn(BIN, args, { cwd: tmp, env: { ...process.env, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1' }, stdio: 'ignore' }); procs.push(p); return p; };
 const json = s => { const i = s.indexOf('{'); return JSON.parse(s.slice(i)); };
 
 // Ports in use mean a server from another run is still up: its data would be read instead of this run's.
@@ -44,6 +47,11 @@ try {
   let r = await run(['new', 'fixture-demo', '--dir', tmp, '--title', 'Fixture', '--port', String(REPLICA_PORT), '--app', `chat=${fx.chat}`, '--app', `admin=${fx.admin}`]);
   check('scaffold', r.code === 0 && existsSync(join(tmp, 'fixture-demo', 'demo.json')), r.out);
   const DEMO = join(tmp, 'fixture-demo');
+  const manifestOf = () => JSON.parse(readFileSync(join(DEMO, 'manifest.json'), 'utf8'));
+  {
+    const m = manifestOf();
+    check('scaffold: bundle v2, live-page scenes only', m.schema_version === 'scenecast.bundle.v2' && m.graph.scenes.length === 2 && m.graph.scenes.every(sc => sc.kind === 'live-page') && m.apps.map(a => a.id).join() === 'chat,admin', JSON.stringify(m.graph.scenes));
+  }
   const cfg = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8'));
   Object.assign(cfg, { raw: join(tmp, 'raw'), receiverPort: RX_PORT, viewport: { width: 1600, height: 900, dpr: 1 }, zooms: [67, 150, 200] });
   Object.assign(cfg.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200 });
@@ -148,6 +156,14 @@ export default flow => {
   check('flow: beats', flow.beats.length >= 4 && flow.beats[0].states.admin === 'admin-start', JSON.stringify(flow.beats));
   check('data: no secrets, no scripts', /secret scan: clean/.test(r.out));
   {
+    // The bundle manifest, from the build: every recorded state a live-page scene, nothing else.
+    const m = manifestOf(), sc = m.graph.scenes;
+    check('manifest: live-page scenes only, one per state', sc.length === ids.length && sc.every(x => x.kind === 'live-page' && x.live && x.live.snapshot === `data/snaps/${S[x.id].snap}.html` && /^[0-9a-f]{64}$/.test(x.live.sha256)) && /0 fallback|manifest.json: \d+ live-page scene\(s\)/.test(r.out) && !/FALLBACK/.test(r.out), JSON.stringify(sc.map(x => [x.id, x.kind])) + r.out.slice(-400));
+    check('manifest: streams, beats, focus points, transitions', m.streams.length === 2 && m.beats.length === flow.beats.length && m.focus_points.length === 4 && sc.some(x => (x.transitions || []).some(t => t.stream)), JSON.stringify([m.streams, m.focus_points.map(f => f.id)]));
+    const v = await run(['validate', DEMO]);
+    check('manifest: validates', v.code === 0 && !/fallback/.test(v.out), v.out);
+  }
+  {
     const H = JSON.parse(readFileSync(join(DEMO, 'data', 'snaps', 'hovers-chat.json'), 'utf8'));
     const texts = H.defs.flatMap(d => (d.portals || []).map(q => q.text));
     check('hovers: a chip\'s card and the Projects section', texts.some(t => /Your work: mail/.test(t)) && H.defs.some(d => (d.ops || []).some(o => /New project/.test(o.html || ''))), JSON.stringify(texts).slice(0, 300));
@@ -236,7 +252,8 @@ export default flow => {
   check('selftest ran to the end', false, String(e.stack || e));
 } finally {
   if (browser) await browser.close().catch(() => {});
-  for (const p of procs) p.kill();
+  // On Windows the scenecast binary waits on Node rather than becoming it: stop the whole tree.
+  for (const p of procs) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' }); else p.kill(); }
   fx.close();
   if (keep || fails.length) console.log('demo folder: ' + tmp); else rmSync(tmp, { recursive: true, force: true });
 }

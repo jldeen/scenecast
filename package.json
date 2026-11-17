@@ -1,0 +1,18 @@
+{
+  "name": "scenecast-workspace",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Scenecast's JavaScript: everything that runs in the browser (recorder, player, checks). The scenecast binary (Rust) runs it.",
+  "engines": { "node": ">=20" },
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "node packages/selftest/run.mjs",
+    "test:unit": "node --test packages/player/launch.test.mjs",
+    "test:capture": "node packages/selftest/capture-fixture.mjs",
+    "test:e2e": "node packages/selftest/selftest.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0"
+  }
+}

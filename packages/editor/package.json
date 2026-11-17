@@ -1,0 +1,7 @@
+{
+  "name": "@scenecast/editor",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Placeholder (Phase 4): edit mode inside the player: focus dots, wording and date overrides, beat starts."
+}

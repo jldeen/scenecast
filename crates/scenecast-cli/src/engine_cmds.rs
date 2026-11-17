@@ -93,8 +93,17 @@ fn project_dir(args: &[OsString]) -> Result<PathBuf> {
     })
 }
 
-/// Runs an engine subcommand with the terminal attached, on the project (when it takes one).
+/// Runs an engine subcommand with the terminal attached, on the project (when it takes one), and comes back.
 pub fn passthrough(sub: &str, args: &Passthrough, takes_project: bool) -> Result<i32> {
+    run_engine(sub, args, takes_project, false)
+}
+
+/// The same, as the last thing this process does (servers, the receiver, the recorder): the engine takes over.
+pub fn handover(sub: &str, args: &Passthrough, takes_project: bool) -> Result<i32> {
+    run_engine(sub, args, takes_project, true)
+}
+
+fn run_engine(sub: &str, args: &Passthrough, takes_project: bool, last: bool) -> Result<i32> {
     let engine = engine()?;
     let argv = if takes_project {
         with_demo(sub, &args.args, &project_dir(&args.args)?)
@@ -103,7 +112,11 @@ pub fn passthrough(sub: &str, args: &Passthrough, takes_project: bool) -> Result
             .chain(args.args.iter().cloned())
             .collect()
     };
-    Ok(engine.run_attached(argv)?)
+    Ok(if last {
+        engine.exec_attached(argv)?
+    } else {
+        engine.run_attached(argv)?
+    })
 }
 
 /// `scenecast build`: the engine's build (flow, captures → data/, secret scan), then the manifest from it.
@@ -162,7 +175,7 @@ fn print_fallbacks(fallback: &[(String, String)]) {
 pub fn check(args: &Passthrough, quick: bool) -> Result<i32> {
     let dir = project_dir(&args.args)?;
     print_fallbacks(&fallback_scenes(&dir)?);
-    passthrough(if quick { "quick" } else { "fidelity" }, args, true)
+    handover(if quick { "quick" } else { "fidelity" }, args, true)
 }
 
 /// `scenecast release`: build, manifest, then the engine's full checklist, secret scan and commit (and push).
@@ -180,5 +193,5 @@ pub fn release(args: &Passthrough) -> Result<i32> {
     }
     let mut rest = args.args.clone();
     rest.push("--skip-build".into());
-    passthrough("release", &Passthrough { args: rest }, true)
+    handover("release", &Passthrough { args: rest }, true)
 }

@@ -2,3 +2,6 @@
 **/*.rs.bk
 **/node_modules/
 examples/playwright-scroll-capture/generated/
+node_modules/
+packages/recorder/dist/
+.out/
