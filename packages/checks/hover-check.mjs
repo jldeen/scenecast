@@ -3,6 +3,7 @@
 // which hovers find their element there.
 //   node checks/hover-check.mjs --demo <dir> [--url http://127.0.0.1:<port>/] [--only page] [--no-sheet]
 // Writes .out/hovers/report.json and hover-sheet-NN.png (real vs replica).
+import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { comparePngs } from './compare.mjs';
@@ -132,7 +133,7 @@ report.console = msgs;
 
 // The sheet: real (left) and replica (right) for each hover, 24 per page, pictures at most 760 px wide.
 if (rows.length && !process.argv.includes('--no-sheet')) {
-  const cell = (f, label) => `<div style="flex:1;min-width:0"><div style="font:12px -apple-system;color:#555;margin:2px 0">${label}</div><img src="file://${f}" style="max-width:100%;max-height:300px;border:1px solid #ddd;display:block"></div>`;
+  const cell = (f, label) => `<div style="flex:1;min-width:0"><div style="font:12px -apple-system;color:#555;margin:2px 0">${label}</div><img src="${pathToFileURL(f).href}" style="max-width:100%;max-height:300px;border:1px solid #ddd;display:block"></div>`;
   report.sheets = [];
   const sp = await (await b.newContext({ viewport: { width: 1640, height: 1000 }, deviceScaleFactor: 1 })).newPage();
   for (let i = 0; i < rows.length; i += 24) {
@@ -140,7 +141,7 @@ if (rows.length && !process.argv.includes('--no-sheet')) {
     const html = `<html><body style="margin:0;padding:16px;width:1600px;font-family:-apple-system,sans-serif;background:#fff"><div style="font:700 24px -apple-system">${demo.cfg.title || demo.name} replica · hovers ${i + 1}–${i + part.length} of ${rows.length}: real (left) vs replica (right)</div>` +
       part.map(r => `<div style="border-top:1px solid #ccc;margin-top:8px;padding-top:4px"><div style="font:600 13px -apple-system">${r.page} · ${r.id} · ${r.text.replace(/</g, '&lt;')} ${r.shown ? '' : '<span style="color:#c00">NOT SHOWN</span>'} ${r.pct !== null ? `· ${r.pct}% px` : ''}</div><div style="display:flex;gap:16px">${cell(r.real, 'real')}${cell(r.rep, 'replica')}</div></div>`).join('') + '</body></html>';
     const f = ROWS + `sheet-${i / 24 + 1}.html`; writeFileSync(f, html);
-    await sp.goto('file://' + f); await sp.waitForTimeout(400);
+    await sp.goto(pathToFileURL(f).href); await sp.waitForTimeout(400);
     const out = SHEET.replace(/\.png$/, `-${String(i / 24 + 1).padStart(2, '0')}.png`);
     writeFileSync(out, await sp.screenshot({ fullPage: true }));
     report.sheets.push(out);

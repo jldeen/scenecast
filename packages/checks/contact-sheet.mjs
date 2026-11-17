@@ -1,6 +1,7 @@
 // Contact sheet: every replica screen (run 1 of checks/check.mjs) next to the real capture of the same state, at the
 // demo's full pixel size. Writes pairs/NN-name.png, index.html, summary.json and an overview contact-sheet.png.
 //   node checks/contact-sheet.mjs --demo <dir> [--run <check run dir>] [--out <dir>]
+import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -43,10 +44,10 @@ for (const f of shots) {
   console.log(`${f.slice(0, 2)} ${name.padEnd(36)} ${d.pct}%`);
 }
 // Overview: three pairs per row.
-const cells = rows.map(r => `<div style="width:1272px;padding:6px"><div style="font:600 18px -apple-system,sans-serif;margin:4px 2px 6px">${r.n} · ${r.name} <span style="font-weight:400;color:#666">· real (left) vs replica (right) · ${r.pct}% differ</span></div><img src="file://${join(OUT, r.file)}" style="width:1272px;display:block;border:1px solid #ddd"></div>`).join('');
+const cells = rows.map(r => `<div style="width:1272px;padding:6px"><div style="font:600 18px -apple-system,sans-serif;margin:4px 2px 6px">${r.n} · ${r.name} <span style="font-weight:400;color:#666">· real (left) vs replica (right) · ${r.pct}% differ</span></div><img src="${pathToFileURL(join(OUT, r.file)).href}" style="width:1272px;display:block;border:1px solid #ddd"></div>`).join('');
 writeFileSync(join(OUT, 'overview.html'), `<html><body style="margin:0;background:#fff;width:3840px"><div style="font:700 34px -apple-system,sans-serif;padding:24px 12px 8px">${demo.cfg.title || demo.name} replica · real capture vs replica, every screen</div><div style="display:flex;flex-wrap:wrap;padding:0 3px">${cells}</div></body></html>`);
 const ov = await (await browser.newContext({ viewport: { width: 3840, height: 1000 }, deviceScaleFactor: 1 })).newPage();
-await ov.goto('file://' + join(OUT, 'overview.html'));
+await ov.goto(pathToFileURL(join(OUT, 'overview.html')).href);
 await ov.waitForTimeout(500);
 writeFileSync(join(OUT, 'contact-sheet.png'), await ov.screenshot({ fullPage: true }));
 writeFileSync(join(OUT, 'index.html'), `<!doctype html><meta charset="utf-8"><title>${demo.name} · contact sheet</title><body style="font:16px -apple-system,sans-serif;margin:24px;background:#fff"><h1>${demo.cfg.title || demo.name} · real vs replica</h1><p>Left: the real page as recorded. Right: the replica at the same step of the recorded path.</p>${rows.map(r => `<h3>${r.n} · ${r.name} <small style="font-weight:400">(${r.pct}% of pixels differ)</small></h3><a href="${r.file}"><img src="${r.file}" style="width:100%;max-width:1600px;border:1px solid #ccc"></a>`).join('')}</body>`);

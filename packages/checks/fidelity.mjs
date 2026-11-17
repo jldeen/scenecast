@@ -609,9 +609,9 @@ try {
           for (let i = 0; i < rows.length; i += 8) {
             const part = rows.slice(i, i + 8);
             const html = `<html><body style="margin:0;padding:16px;width:1568px;font-family:-apple-system,sans-serif;background:#fff"><div style="font:700 22px -apple-system,Helvetica,Arial,sans-serif">${demo.cfg.title || demo.name} replica · clicks ${i + 1}–${i + part.length} of ${rows.length}: the real page (left) and the replica (right) right after the click</div>` +
-              part.map(r => `<div style="border-top:1px solid #ccc;margin-top:8px;padding-top:4px"><div style="font:600 13px -apple-system">${r.cp.page} · ${r.d.name.replace(/</g, '&lt;')} · closes by ${r.d.restore}${r.d.sticky ? ' · sticky' : ''} ${r.ok ? '' : '<span style="color:#c00">CHECK FAILED</span>'}</div><div style="display:flex;gap:16px">${r.real ? `<img src="file://${r.real}" style="width:760px;border:1px solid #ddd">` : '<div style="width:760px"></div>'}<img src="file://${r.file}" style="width:760px;border:1px solid #ddd"></div></div>`).join('') + '</body></html>';
+              part.map(r => `<div style="border-top:1px solid #ccc;margin-top:8px;padding-top:4px"><div style="font:600 13px -apple-system">${r.cp.page} · ${r.d.name.replace(/</g, '&lt;')} · closes by ${r.d.restore}${r.d.sticky ? ' · sticky' : ''} ${r.ok ? '' : '<span style="color:#c00">CHECK FAILED</span>'}</div><div style="display:flex;gap:16px">${r.real ? `<img src="${pathToFileURL(r.real).href}" style="width:760px;border:1px solid #ddd">` : '<div style="width:760px"></div>'}<img src="${pathToFileURL(r.file).href}" style="width:760px;border:1px solid #ddd"></div></div>`).join('') + '</body></html>';
             const f = join(outDir, 'rows', `sheet-${i / 8 + 1}.html`); writeFileSync(f, html);
-            await sp.goto('file://' + f); await sp.waitForTimeout(300);
+            await sp.goto(pathToFileURL(f).href); await sp.waitForTimeout(300);
             writeFileSync(join(outDir, `click-sheet-${String(i / 8 + 1).padStart(2, '0')}.png`), await sp.screenshot({ fullPage: true }));
           }
           await sp.context().close();
