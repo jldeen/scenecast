@@ -138,7 +138,12 @@ pub fn scrub_tree(
 
 fn contains_script(ext: &str, text: &str) -> bool {
     static SCRIPT: OnceLock<Regex> = OnceLock::new();
-    let pattern = SCRIPT.get_or_init(|| Regex::new(r"(?i)<script(?:\s|/|>)").unwrap());
+    let pattern = SCRIPT.get_or_init(|| {
+        Regex::new(
+            r#"(?i)<script(?:\s|/|>)|<[a-z][^>]*\s+on[a-z0-9_-]+\s*=|<[a-z][^>]*\s+(?:href|src|action|formaction|xlink:href)\s*=\s*['"]?\s*javascript\s*:"#,
+        )
+        .unwrap()
+    });
     if ext.eq_ignore_ascii_case("js") || ext.eq_ignore_ascii_case("mjs") || pattern.is_match(text) {
         return true;
     }
@@ -363,5 +368,19 @@ mod tests {
             scrub_tree(dir.path(), "built", &[], false, &mut report),
             Err(ScrubError::InvalidText(_))
         ));
+    }
+
+    #[test]
+    fn detects_inline_event_handlers_and_script_urls_in_captures() {
+        for html in [
+            r#"<img src="local.png" onerror="run()">"#,
+            r#"<a href="javascript:run()">link</a>"#,
+            r#"<svg><a xlink:href='JaVaScRiPt:run()'></a></svg>"#,
+        ] {
+            assert!(contains_script("html", html), "{html}");
+            let json = serde_json::json!({ "html": html }).to_string();
+            assert!(contains_script("json", &json), "{json}");
+        }
+        assert!(!contains_script("html", "<p>Use the onclick event.</p>"));
     }
 }

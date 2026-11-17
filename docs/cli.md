@@ -57,7 +57,8 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 Builds inspect raw captures before processing and write `.out/scrub.json` without including matched values.
 Detected credentials stop the build; email addresses and labeled tenant IDs in built text are redacted unless
 their exact values appear in `demo.json` as `"scrub": { "allowlist": ["value"] }`. Credentials cannot be
-allowlisted. Scripts in built captures, including SVG and JSON-embedded markup, fail the build; malformed
+allowlisted. Scripts, inline event handlers and JavaScript URLs in built captures, including SVG and JSON-embedded
+markup, fail the build; malformed
 UTF-8 in text capture files is rejected rather than skipped. Binary files are not inspected for PII.
 Treat the raw capture folder as sensitive even after building.
 
