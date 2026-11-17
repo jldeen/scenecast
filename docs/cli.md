@@ -1,32 +1,74 @@
 # CLI
 
-The Scenecast CLI is the first authoring interface for `.scenecast` bundles.
+`scenecast` is one binary for macOS and Windows (and Linux). It creates projects, runs the replica engine (the
+JavaScript in `packages/`, under Node) and keeps the bundle manifest in step, and it edits and validates bundles.
 
-## Create a bundle
+## Create a project
 
-```powershell
-cargo run -p scenecast-cli -- new demos\hello.scenecast --title "Hello Scenecast"
+```bash
+scenecast new demos/hello --title "Hello" --app chat=https://chat.example.com/ --app admin=https://admin.example.com/
 ```
 
-`init` is an alias for `new`:
+`init` is an alias. `--dir <parent>` creates it inside another folder; `--port` sets the replica's localhost port.
+Each `--app id=url` is a browser tab of the demo; its presenter key is a letter of its id (never F, N or P).
 
-```powershell
-cargo run -p scenecast-cli -- init demos\hello.scenecast --title "Hello Scenecast"
-```
-
-The command creates:
+A project is a demo folder that is also a `.scenecast` bundle:
 
 ```text
-hello.scenecast\
-  manifest.json
-  assets\
-  captures\
+hello/
+  manifest.json        bundle v2: one live-page start scene per app, waiting to be recorded
+  demo.json            apps, viewport, browser profile, recorder settings
+  focus.mjs            focus points (⌥F / Ctrl+Alt+F)
+  flow.overrides.mjs   hand edits to the recorded flow
+  capture/             the demo's own capture scripts (prep.js)
+  data/                what the build writes (pages, streams, assets)
+  captures/ assets/    images for fallback scenes, if one is ever needed
+  .gitattributes       no line-ending conversion: a fresh clone on any OS serves the same bytes
 ```
+
+Scenes are **live pages** by default. `new` never makes a screenshot or video-frame scene.
+
+## Engine commands
+
+Each runs on the project you're in (or `--demo <dir>`) and passes its other arguments to the engine.
+
+| Command | What |
+|---|---|
+| `scenecast receiver` | The local receiver the capture agent posts to. Keep it running while recording. |
+| `scenecast agent [<dir>]` | Builds `agent.js`, the recorder that runs in the browser. |
+| `scenecast record start [--resume] [--no-auto]` / `status` / `stop` | Records the demo once; each new screen's side states (hovers, clicks, step groups, "+N", drags, zoom, long lists) are captured on the way. |
+| `scenecast record side hovers\|clicks\|drags\|groups\|chips\|zoom\|list [--app id]` | One side path by hand. |
+| `scenecast cmd <op> ['{json}']`, `scenecast run <script.js>` | One command or script on the agent. |
+| `scenecast flow [--from-raw]` | `recording.json` + `flow.overrides.mjs` → `flow.json`. |
+| `scenecast build [--from-raw] [--force]` | Flow, raw captures → `data/` (changed captures only, scrubbed), secret scan, then `manifest.json` (below). |
+| `scenecast sync` | `manifest.json` from what was built, on its own. |
+| `scenecast serve [--open] [--pace N] [--release]` | The replica on localhost. `--open`: an app window, Chrome on the Mac and Edge on Windows (`chrome.browser` and `chrome.profile` in `demo.json`). |
+| `scenecast text "<old>" "<new>"` | A wording or date tweak, live on reload. |
+| `scenecast check [--only a,b] [--skip a,b]` | The whole fidelity checklist (`fidelity` is an alias). Flags every fallback scene first. |
+| `scenecast quick` | The checks for only what changed. |
+| `scenecast status`, `scenecast save "<msg>"` | Where things stand; secret scan and commit. |
+| `scenecast release [--push]` | Build, manifest, full checklist, secret scan, commit (and push). |
+| `scenecast sheet`, `scenecast hovers`, `scenecast scan [<dir>]` | Contact sheet, hover sheet, secret scan. |
+| `scenecast schema [--out <file>]` | The manifest's JSON Schema (v2), generated from the Rust types. |
+
+`build` writes `manifest.json`: every state in `flow.json` becomes a `live-page` scene (`data/snaps/<id>.html`,
+its SHA-256, its transitions), with the streams, beats, focus points and apps. Fallback scenes already in the
+manifest are kept and listed. The build fails if the manifest doesn't validate or a page is missing. The file is
+only rewritten when it changes.
+
+Environment: `SCENECAST_JS` (the `packages` folder), `SCENECAST_NODE` (the Node binary), and the engine's
+`REPLICA_RAW`, `REPLICA_PORT`, `REPLICA_RX_PORT`, `REPLICA_NO_OPEN=1`, `REPLICA_CHROME_CHANNEL` (`chrome`, or
+`msedge` for Edge).
+
+## Bundle commands
+
+These edit and validate any bundle, v1 or v2. A v1 bundle is migrated on read: its scenes are fallback scenes.
+Edits write v2.
 
 ## Inspect a bundle
 
 ```powershell
-cargo run -p scenecast-cli -- inspect demos\hello.scenecast
+scenecast inspect demos\hello.scenecast
 ```
 
 The summary includes title, schema version, start scene, section count, scene count, asset count, warning count, and error count.
@@ -34,15 +76,18 @@ The summary includes title, schema version, start scene, section count, scene co
 ## Add a scene
 
 ```powershell
-cargo run -p scenecast-cli -- add-scene demos\hello.scenecast pricing "Pricing" --screenshot captures\pricing.png --description "Pricing page overview" --notes "Mention annual plan"
+scenecast add-scene demos\hello.scenecast pricing "Pricing" --description "Pricing page overview"
+scenecast add-scene demos\hello.scenecast native "Native dialog" --screenshot captures\native.png --notes "Can't be captured live"
 ```
 
-The screenshot path is stored relative to the bundle root. Paths must be portable and use `/` in the manifest; PowerShell accepts the command argument shown above, and the manifest examples use `/`. `--description` stores authored text for search, accessibility, narration, and review. `--notes` stores presenter or authoring notes.
+Without `--screenshot` the scene is a `live-page` scene, recorded later. With `--screenshot` it's a **fallback**
+screenshot scene: use one only for a screen that can't be captured live (a native window, protected content).
+`validate` and `check` flag every fallback scene. The screenshot path is stored relative to the bundle root. Paths must be portable and use `/` in the manifest; PowerShell accepts the command argument shown above, and the manifest examples use `/`. `--description` stores authored text for search, accessibility, narration, and review. `--notes` stores presenter or authoring notes.
 
 ## Add a hotspot
 
 ```powershell
-cargo run -p scenecast-cli -- add-hotspot demos\hello.scenecast start pricing-link "View pricing" pricing --x 420 --y 240 --width 160 --height 48 --trigger scroll --scroll-direction down
+scenecast add-hotspot demos\hello.scenecast start pricing-link "View pricing" pricing --x 420 --y 240 --width 160 --height 48 --trigger scroll --scroll-direction down
 ```
 
 Hotspots belong to a source scene and target another scene by ID. Coordinates are capture-pixel values. Width and height must be positive. Trigger defaults to `click`; use `scroll` for wheel-style interactions. Scroll hotspots can use `--scroll-direction down`, `--scroll-direction up`, or the default `any`.
@@ -50,7 +95,7 @@ Hotspots belong to a source scene and target another scene by ID. Coordinates ar
 ## Add a guide mark
 
 ```powershell
-cargo run -p scenecast-cli -- add-guide-mark demos\hello.scenecast pricing price-callout "Plan selector" --x 320 --y 220 --width 240 --height 72 --style highlight
+scenecast add-guide-mark demos\hello.scenecast pricing price-callout "Plan selector" --x 320 --y 220 --width 240 --height 72 --style highlight
 ```
 
 Guide marks are visible overlays that draw attention without changing navigation. Coordinates are capture-pixel values. Styles are `pulse`, `ring`, and `highlight`.
@@ -58,7 +103,7 @@ Guide marks are visible overlays that draw attention without changing navigation
 ## Add a table-of-contents section
 
 ```powershell
-cargo run -p scenecast-cli -- add-section demos\hello.scenecast overview "Overview" --scenes start,pricing
+scenecast add-section demos\hello.scenecast overview "Overview" --scenes start,pricing
 ```
 
 Sections group scenes for the exported player's table of contents and hash deep links. Scene IDs are comma-separated and stored in playback order.
@@ -66,7 +111,7 @@ Sections group scenes for the exported player's table of contents and hash deep 
 ## Add a transition frame sequence
 
 ```powershell
-cargo run -p scenecast-cli -- add-transition demos\hello.scenecast start pricing-link --frames captures\scroll-0001.png,captures\scroll-0002.png --frame-duration-ms 90
+scenecast add-transition demos\hello.scenecast start pricing-link --frames captures\scroll-0001.png,captures\scroll-0002.png --frame-duration-ms 90
 ```
 
 `add-transition` attaches a frame-sequence transition to an existing hotspot. Frames are stored as portable bundle-relative paths and replay before the hotspot lands on the target scene.
@@ -74,7 +119,7 @@ cargo run -p scenecast-cli -- add-transition demos\hello.scenecast start pricing
 ## Import video frames
 
 ```powershell
-cargo run -p scenecast-cli -- import-video demos\hello.scenecast demo.mp4 --scene-prefix demo --every-seconds 5 --crop 0,120,1920,960
+scenecast import-video demos\hello.scenecast demo.mp4 --scene-prefix demo --every-seconds 5 --crop 0,120,1920,960
 ```
 
 `import-video` shells out to an existing `ffmpeg` executable on the OS. By default it runs `ffmpeg` from `PATH`; use `--ffmpeg <path>` or the `SCENECAST_FFMPEG` environment variable when the binary lives somewhere else.
@@ -92,7 +137,7 @@ Use `--crop x,y,width,height` to remove browser chrome or other recording matte 
 If a same-basename `.srt` or `.vtt` exists beside the video, `import-video` detects it automatically. Pass `--transcript path\to\captions.vtt` to select a different sidecar explicitly:
 
 ```powershell
-cargo run -p scenecast-cli -- import-video demos\hello.scenecast recordings\demo.mp4 --scene-prefix demo --transcript recordings\demo.vtt
+scenecast import-video demos\hello.scenecast recordings\demo.mp4 --scene-prefix demo --transcript recordings\demo.vtt
 ```
 
 Scenecast parses timed cues into stable transcript segment evidence and groups them deterministically into draft scenes. It starts a new candidate at substantial pauses, topic-cue boundaries, maximum duration, or maximum text length, then samples a representative frame timestamp for each candidate. The bundle records both video-frame and transcript evidence, transcript segment IDs, and the draft text in the scene description and notes.
@@ -102,7 +147,7 @@ Transcript imports are drafts, not inferred UI maps. Scenecast does not create c
 ## Export an editorial draft
 
 ```powershell
-cargo run -p scenecast-cli -- export-draft demos\hello.scenecast demos\hello-editorial-draft
+scenecast export-draft demos\hello.scenecast demos\hello-editorial-draft
 ```
 
 `export-draft` writes `draft.json` in the requested output directory using the generic `editorial-draft` schema version `1`. It copies each candidate screenshot beneath `assets/`, records a SHA-256 checksum, and rewrites paths so they resolve without the original bundle. Each scene includes its stable ID, transcript start/end range, verbatim transcript, empty `actions`, source-qualified transcript evidence, and notes. The empty action list is intentional: editorial tools must not mistake transcript text for inferred clickable UI.
@@ -110,7 +155,7 @@ cargo run -p scenecast-cli -- export-draft demos\hello.scenecast demos\hello-edi
 ## Export a local HTML player
 
 ```powershell
-cargo run -p scenecast-cli -- export-html demos\hello.scenecast demos\hello-player
+scenecast export-html demos\hello.scenecast demos\hello-player
 ```
 
 The command writes `index.html` and copies referenced captures/assets into the output directory. Open the generated `index.html` in a browser to test the click-through locally.
@@ -120,13 +165,13 @@ Exported HTML is intentionally static-host friendly: the output folder contains 
 The repository includes `examples\scroll.scenecast` as a complete static scroll sample. Export it with:
 
 ```powershell
-cargo run -p scenecast-cli -- export-html examples\scroll.scenecast demos\scroll-player
+scenecast export-html examples\scroll.scenecast demos\scroll-player
 ```
 
 ## Validate a bundle
 
 ```powershell
-cargo run -p scenecast-cli -- validate demos\hello.scenecast
+scenecast validate demos\hello.scenecast
 ```
 
 Validation checks both manifest structure and referenced files:

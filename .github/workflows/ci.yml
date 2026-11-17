@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Test
+        run: cargo test --workspace
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  engine:
+    # The JS engine end to end, headless, through the scenecast binary: the fixture app recorded, built, served,
+    # and checked (two runs, three cold starts, focus points, the whole checklist), with only live-page scenes.
+    name: Engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      # Google Chrome comes with the GitHub runners (Playwright's "chrome" channel uses it).
+      - name: Build the scenecast binary
+        run: cargo build -p scenecast-cli
+      - name: Git identity for the test demo's commits
+        run: |
+          git config --global user.name "scenecast ci"
+          git config --global user.email "ci@localhost"
+      - name: Engine tests (unit, capture, selftest)
+        run: npm test
+        env:
+          SCENECAST_BIN: ${{ runner.os == 'Windows' && 'target/debug/scenecast.exe' || 'target/debug/scenecast' }}

@@ -2,17 +2,35 @@
 
 Scenecast starts with a Rust-first foundation for authoring and validating portable interactive demos. The current implementation intentionally focuses on the core bundle model and CLI workflows before adding capture, web authoring, playback, publishing, or analytics.
 
-## Crates
+## Layout
 
 ```text
-crates\
-  scenecast-core\
-  scenecast-cli\
+crates/
+  scenecast-core     bundle model (v2) + validation, v1 migration, JSON Schema
+  scenecast-build    library: new projects, the JS engine, manifest.json from a build
+  scenecast-cli      the scenecast binary
+packages/            npm workspaces: everything that runs in the browser
+  kit                the engine's CLI entry, demo settings, flow compiler, workflow, template
+  recorder           capture (DOM, CSSOM, fonts, shadow DOM, iframes) and side-state audits
+  player             server, morph engine, streams, presenter keys, focus points, launcher
+  checks             the fidelity checklist
+  editor, fixer      placeholders (later phases)
+  selftest           end-to-end tests against examples/fixture-app
 ```
+
+**The split.** Rust owns the bundle format, validation, build orchestration and the CLI; JavaScript owns what
+runs in a browser. The manifest's JSON Schema is generated from the Rust types, so the two can't drift.
+`scenecast-build` is a library with structured results (`ProjectCreated`, `SyncReport`) and line-by-line
+progress (`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
+
+**Cross-platform.** Everything works the same on macOS and Windows: paths are normalized to `/` in the bundle and
+the build's records, the launcher opens Chrome on the Mac and Edge on Windows as an app window (either can be
+chosen), presenter keys take ⌥ or Ctrl+Alt, projects carry `.gitattributes` so captures are served byte for byte
+on any OS, and CI runs Rust and the engine end to end on Ubuntu, macOS and Windows.
 
 ### `scenecast-core`
 
-`scenecast-core` owns the data model and validation rules that every future surface should share:
+`scenecast-core` owns the data model and validation rules that every surface shares (v2 adds live-page scenes, apps, transitions, streams, beats, focus points and presenter config; see bundle-format.md):
 
 - typed `SceneId` and `HotspotId` values with validated serialization and deserialization;
 - `BundleManifest`, `Section`, `SceneGraph`, `Scene`, `Hotspot`, `GuideMark`, `Rect`, source/provenance, and asset primitives;

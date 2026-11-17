@@ -1,55 +1,79 @@
 # Scenecast
 
-Scenecast is a high-fidelity interactive click-through demo platform. This repository currently contains the Rust foundation for authoring and validating portable `.scenecast` bundles.
+Record a live web demo once, then present it offline, the same way every time.
 
-## Workspace
+Every screen is the **real page, captured**: its DOM with the live CSS, fonts, shadow DOM, iframes and form, scroll
+and popover state, with no scripts and no sign-in tokens. Clicks, typing, Enter and Escape move between captured
+screens by morphing the page, the way a single-page app re-renders. AI answers replay from their real streamed
+frames. Hidden presenter keys jump between beats, and ZoomIt-style focus points zoom to what each line of the
+script points at. Nothing touches the network, and a determinism checklist (two runs, three cold starts, clicks,
+hovers, drags, zoom 50–200%, focus) proves two runs come out identical.
 
-- `crates/scenecast-core`: scene graph model, validation, bundle manifest primitives, and manifest IO.
-- `crates/scenecast-cli`: command-line authoring tools for creating, inspecting, validating, and extending bundles.
-- `docs/architecture.md`: the current Rust-first foundation and design boundaries.
-- `docs/bundle-format.md`: the initial `.scenecast` bundle structure.
-- `docs/cli.md`: command reference and authoring workflow.
-- `docs/roadmap.md`: near-term product and technical direction.
+Scenecast started as Seth Juarez's `.scenecast` bundle format and CLI. It is being rebuilt around the replica engine
+from Ignite '26 Demo 1 (replica-kit 1.4.0). **`live-page` scenes (captured pages) are the default.** Screenshot and
+video-frame scenes are kept only as a fallback, for a screen that truly can't be captured live or an explicit video
+import; checks flag every fallback scene.
 
-## CLI quick start
+**macOS and Windows are both first-class.** The CLI, the recorder, the player, the launcher (Chrome or Edge as an app
+window) and the checks run on both, and CI tests both (and Linux).
 
-```powershell
-cargo run -p scenecast-cli -- new demos\hello.scenecast --title "Hello Scenecast"
-cargo run -p scenecast-cli -- inspect demos\hello.scenecast
-cargo run -p scenecast-cli -- add-scene demos\hello.scenecast pricing "Pricing" --screenshot captures\pricing.png
-cargo run -p scenecast-cli -- add-hotspot demos\hello.scenecast start pricing-link "View pricing" pricing --x 420 --y 240 --width 160 --height 48
-cargo run -p scenecast-cli -- add-guide-mark demos\hello.scenecast pricing price-callout "Plan selector" --x 320 --y 220 --width 240 --height 72
-cargo run -p scenecast-cli -- add-section demos\hello.scenecast overview "Overview" --scenes start,pricing
-cargo run -p scenecast-cli -- import-video demos\hello.scenecast demo.mp4 --scene-prefix demo --every-seconds 5 --crop 0,120,1920,960
-cargo run -p scenecast-cli -- export-html demos\hello.scenecast demos\hello-player
-cargo run -p scenecast-cli -- validate demos\hello.scenecast
+## Layout
+
+| Path | What |
+|---|---|
+| `crates/scenecast-core` | Bundle model (schema v2) and validation; v1 bundles migrate on read. JSON Schema export. |
+| `crates/scenecast-build` | Library: new projects, running the JS engine with progress, `manifest.json` from a build. |
+| `crates/scenecast-cli` | The `scenecast` binary. |
+| `packages/kit` | The engine's CLI entry (run by `scenecast`), demo settings, flow compiler, workflow, project template. |
+| `packages/recorder` | Capture: serializer, driver, recorder, side-state audits (hovers, clicks, drags, lists), receiver, build of raw captures. |
+| `packages/player` | The replica: server, morph engine, streams, presenter keys, focus points, app-window launcher. |
+| `packages/checks` | The fidelity checklist. |
+| `packages/editor`, `packages/fixer` | Placeholders for later phases. |
+| `packages/selftest` | End-to-end tests against `examples/fixture-app` (a local fake product). |
+| `schema/bundle.v2.schema.json` | The manifest schema, generated from the Rust types (`scenecast schema`). |
+| `docs/` | [CLI](docs/cli.md), [bundle format](docs/bundle-format.md), [architecture](docs/architecture.md), [engine flow format](docs/engine/flow-format.md), [checklist](docs/engine/checklist.md), [lessons](docs/engine/lessons.md). |
+
+## Setup (macOS or Windows)
+
+Rust (stable), Node 20 or later, and Google Chrome or Microsoft Edge.
+
+```bash
+git clone https://github.com/jldeen/scenecast && cd scenecast
+npm install                      # playwright-core, for capture and the checks (the replica itself needs nothing)
+cargo build --release -p scenecast-cli   # target/release/scenecast (scenecast.exe on Windows)
 ```
 
-The HTML export is a static site: copy the generated folder to GitHub Pages, open
-`index.html`, and use hash routes such as `#/0/0` to deep-link into a section and
-scene.
+`scenecast` finds the JS packages next to it (or set `SCENECAST_JS` to the `packages` folder) and runs them with
+`node` (or `SCENECAST_NODE`).
 
-## Examples
+## Make a replica
 
-- `examples\scroll.scenecast` demonstrates a wheel-triggered hotspot, frame-sequence transition, guide mark, and click hotspot in a fully static bundle.
-- `examples\playwright-scroll-capture` is a Playwright starter that captures a scrollable HTML page into a generated `.scenecast` bundle.
-
-## Ingestion proof loop
-
-New importers should prove the same path before they become part of the reusable contract:
-
-```text
-source artifact -> .scenecast bundle -> validate -> export-html -> static player smoke check
+```bash
+scenecast new ignite-demo2 --title "Ignite Demo 2" --app teams=https://teams.cloud.microsoft/ --app copilot=https://copilot.cloud.microsoft/
+cd ignite-demo2
+scenecast receiver               # keep running; raw captures go outside the folder (~/.scenecast/<demo>/raw)
+scenecast agent <dir>            # builds agent.js for the browser the demo runs in
+scenecast record start           # run the demo once; side states are captured on the way
+scenecast record stop
+scenecast build --from-raw       # data/ (scrubbed) and manifest.json (live-page scenes)
+scenecast serve --open           # an app window: Chrome on the Mac, Edge on Windows
+scenecast check                  # the whole checklist; quick for only what changed
+scenecast release --push
 ```
 
-The checked-in CLI tests exercise this for ffmpeg-backed frame extraction and the scroll sample fixture, so new adapters can add real-world fixtures without changing the player contract first.
+Presenter keys: ⌥ on the Mac; **Ctrl+Alt** on Windows and in Edge (which keeps Alt for its menus). Both work
+everywhere. ⌥0 reset, ⌥1–⌥9 beats, ⌥ + an app's key to switch, ⌥P type the scripted text, ⌥N next step, ⌥F next
+focus point.
+
+Full command reference: [docs/cli.md](docs/cli.md).
 
 ## Development
 
-```powershell
+```bash
 cargo fmt --all
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+npm test                         # builds the binary, then the JS unit, capture and end-to-end tests (headless)
 ```
 
-Pull requests run the same checks through `.github\workflows\rust.yml`.
+CI (`.github/workflows/ci.yml`) runs all of it on Ubuntu, macOS and Windows.
