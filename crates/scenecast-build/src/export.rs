@@ -113,13 +113,36 @@ pub fn export_live(
     let modules = value
         .pointer("/playback/options/modules")
         .and_then(|v| v.as_array());
-    if modules.is_some_and(|list| {
-        list.iter()
-            .any(|m| !m.as_str().is_some_and(|s| s.starts_with("/app/")))
-    }) {
-        return Err(ExportError::Invalid(
-            "custom player modules are not supported by static export".into(),
-        ));
+    let modules = modules.cloned().unwrap_or_default();
+    for module in &modules {
+        let module = module
+            .as_str()
+            .ok_or_else(|| ExportError::Invalid("invalid player module".into()))?;
+        if ![
+            "/app/focus-module.js",
+            "/app/focus.js",
+            "/app/morph.js",
+            "/app/presenter-key.js",
+            "/app/bundle-flow.js",
+        ]
+        .contains(&module)
+            && !module.starts_with("/demo/")
+        {
+            return Err(ExportError::Invalid(format!(
+                "unsupported player module: {module}"
+            )));
+        }
+        if module.contains('\\')
+            || module.contains(':')
+            || module
+                .split('/')
+                .skip(1)
+                .any(|p| p.is_empty() || p == "." || p == "..")
+        {
+            return Err(ExportError::Invalid(format!(
+                "invalid player module: {module}"
+            )));
+        }
     }
     if output.exists()
         && fs::read_dir(output)
@@ -141,9 +164,14 @@ pub fn export_live(
         ));
     }
     let config = bundle.join("demo.json");
-    let allowlist = if config.is_file() {
-        let value: serde_json::Value =
-            serde_json::from_slice(&fs::read(&config).map_err(|e| io(&config, e))?)?;
+    let config_value: Option<serde_json::Value> = if config.is_file() {
+        Some(serde_json::from_slice(
+            &fs::read(&config).map_err(|e| io(&config, e))?,
+        )?)
+    } else {
+        None
+    };
+    let allowlist = if let Some(value) = &config_value {
         value
             .pointer("/scrub/allowlist")
             .map(|v| serde_json::from_value(v.clone()))
@@ -194,6 +222,51 @@ pub fn export_live(
     }
     for dir in ["snaps", "streams", "assets"] {
         copy_tree(&bundle.join("data").join(dir), &output.join(dir))?;
+    }
+    if modules
+        .iter()
+        .any(|m| m.as_str().is_some_and(|s| s.starts_with("/demo/")))
+    {
+        let dir = config_value
+            .as_ref()
+            .and_then(|v| v.pointer("/engine/dir"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("app");
+        if dir.is_empty()
+            || dir.contains('\\')
+            || dir.contains(':')
+            || dir
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+        {
+            return Err(ExportError::Invalid(
+                "invalid custom engine directory".into(),
+            ));
+        }
+        let source = bundle.join(dir);
+        let real = fs::canonicalize(&source).map_err(|e| io(&source, e))?;
+        if !real.starts_with(&bundle_root) || !real.is_dir() {
+            return Err(ExportError::Invalid(
+                "custom engine directory leaves bundle".into(),
+            ));
+        }
+        for module in &modules {
+            if let Some(path) = module.as_str().and_then(|m| m.strip_prefix("/demo/"))
+                && !source.join(path).is_file()
+            {
+                return Err(ExportError::Invalid(format!(
+                    "missing player module: /demo/{path}"
+                )));
+            }
+        }
+        let mut report = ScrubReport::default();
+        scrub_tree(&source, "raw", &allowlist, false, &mut report)?;
+        if !report.findings.is_empty() {
+            return Err(ExportError::Invalid(
+                "custom engine contains sensitive text".into(),
+            ));
+        }
+        copy_tree(&source, &output.join("demo"))?;
     }
     let mut exported = manifest.clone();
     for (index, scene) in exported.graph.scenes.iter_mut().enumerate() {
@@ -356,7 +429,7 @@ pub fn export_live(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scenecast_core::{LivePage, read_manifest};
+    use scenecast_core::{LivePage, PlaybackData, read_manifest};
 
     #[test]
     fn exports_valid_references_and_rehashes_rewritten_snapshots() {
@@ -456,5 +529,46 @@ mod tests {
         assert!(output.join("snaps/scenecast-export-0.f1.html").exists());
         assert!(output.join("snaps/scenecast-export-0.json").exists());
         assert!(validate_referenced_files(&output, &exported).is_valid());
+    }
+
+    #[test]
+    fn exports_custom_engine_modules_and_dependencies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("bundle");
+        let output = tmp.path().join("output");
+        fs::create_dir_all(bundle.join("data/snaps")).unwrap();
+        fs::create_dir_all(bundle.join("engine")).unwrap();
+        fs::write(bundle.join("data/snaps/start.html"), "<p>clean</p>").unwrap();
+        fs::write(bundle.join("demo.json"), r#"{"engine":{"dir":"engine"}}"#).unwrap();
+        fs::write(
+            bundle.join("engine/main.js"),
+            "import './helper.js'; export default () => {};",
+        )
+        .unwrap();
+        fs::write(
+            bundle.join("engine/helper.js"),
+            "export const helper = true;",
+        )
+        .unwrap();
+        let mut manifest = BundleManifest::starter("Fixture");
+        manifest.graph.scenes[0].live = Some(LivePage {
+            app: "fixture".into(),
+            snapshot: "data/snaps/start.html".into(),
+            title: None,
+            reference: None,
+            sha256: None,
+        });
+        manifest.playback = Some(PlaybackData {
+            options: serde_json::json!({"modules": ["/demo/main.js"]}),
+            ..Default::default()
+        });
+        export_live(&bundle, &output, &manifest).unwrap();
+        assert!(output.join("demo/main.js").is_file());
+        assert!(output.join("demo/helper.js").is_file());
+        fs::remove_file(bundle.join("engine/main.js")).unwrap();
+        assert!(matches!(
+            export_live(&bundle, &tmp.path().join("missing"), &manifest),
+            Err(ExportError::Invalid(_))
+        ));
     }
 }
