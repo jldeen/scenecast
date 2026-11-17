@@ -8,15 +8,16 @@ import { flowFromBundle, applyFlowOverrides } from './bundle-flow.js';
 
 const baseUrl = new URL('.', location.href);
 const local = path => new URL(path.replace(/^\//, ''), baseUrl).href;
-const manifestResponse = await fetch(local('/manifest.json'), { cache: 'no-store' });
-if (!manifestResponse.ok) throw new Error(`manifest.json ${manifestResponse.status}`);
-const manifest = await manifestResponse.json();
+const offline = globalThis.__scenecastOffline;
+const manifestResponse = offline ? null : await fetch(local('/manifest.json'), { cache: 'no-store' });
+if (manifestResponse && !manifestResponse.ok) throw new Error(`manifest.json ${manifestResponse.status}`);
+const manifest = offline ? JSON.parse(offline.text(local('/manifest.json'))) : await manifestResponse.json();
 const flow = applyFlowOverrides(flowFromBundle(manifest), manifest.development_overrides);
 const stage = document.getElementById('stage');
 const fav = document.getElementById('d1-fav');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const texts = new Map();
-const getText = url => { if (!texts.has(url)) texts.set(url, fetch(url).then(r => { if (!r.ok) throw new Error(url + ' ' + r.status); return r.text(); })); return texts.get(url); };
+const getText = url => { if (!texts.has(url)) texts.set(url, offline ? Promise.resolve().then(() => url.includes('/snaps/') && url.endsWith('.html') ? offline.document(url) : offline.text(url)) : fetch(url).then(r => { if (!r.ok) throw new Error(url + ' ' + r.status); return r.text(); })); return texts.get(url); };
 const getJson = url => getText(url).then(t => JSON.parse(t));
 const parse = html => (Document.parseHTMLUnsafe ? Document.parseHTMLUnsafe(html) : new DOMParser().parseFromString(html, 'text/html'));
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\u00a0/g, '&nbsp;');
@@ -47,10 +48,12 @@ const note = e => { errors.push(String(e && e.stack || e)); };
 
 // ---- loading and preparing documents -------------------------------------------------------------------------
 let loads = 0;
-function loadFrame(iframe, url) {
+async function loadFrame(iframe, url) {
+  const srcdoc = offline ? await getText(url) : null;
   return new Promise(res => {
     iframe.addEventListener('load', () => res(), { once: true });
-    iframe.src = url + (url.includes('?') ? '&' : '?') + 'v=' + (++loads);
+    if (offline) iframe.srcdoc = srcdoc;
+    else iframe.src = url + (url.includes('?') ? '&' : '?') + 'v=' + (++loads);
   });
 }
 function docsOf(doc, out = []) {
@@ -120,7 +123,7 @@ function post(doc, scroll, before) {
   if (scroll === 'target') for (const el of before) if (el.isConnected && !el.hasAttribute('data-d1-scroll')) { el.scrollTop = 0; el.scrollLeft = 0; }
   for (const c of doc.querySelectorAll('canvas[data-d1-canvas]')) {
     const src = c.getAttribute('data-d1-canvas');
-    if (!src || !/^(?:\/|\.\.\/)assets\//.test(src) || c.__d1drawn === src) continue;
+    if (!src || !/^(?:(?:\/|\.\.\/)assets\/|data:image\/)/.test(src) || c.__d1drawn === src) continue;
     c.__d1drawn = src;
     const img = new doc.defaultView.Image();
     img.onload = () => { const g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0); };
@@ -1368,13 +1371,13 @@ const moduleApi = {
   on: (kind, fn) => hooks[kind].push(fn),
   expose: (name, value) => { exposed[name] = value; },
 };
-for (const m of flow.modules || []) { try { (await import(m.startsWith('/') ? local(m) : m)).default(moduleApi); } catch (e) { note(e); } }
+for (const m of flow.modules || []) { try { (await import(offline ? offline.module(m) : m.startsWith('/') ? local(m) : m)).default(moduleApi); } catch (e) { note(e); } }
 // Fonts first. Chrome draws a fallback font while a web font is still loading whenever it judges the network slow
 // ("Slow network is detected"; it can on localhost, on a cold start or a second run in the same browser), and a page
 // then lays out, scrolls and swaps in front of her. A font that's already in memory is drawn at once, so every font
 // the replica has is loaded before the first screen (7.5 MB from localhost for Demo 1, a fraction of a second).
 const fontsKept = [];
-try { const list = await (await fetch(local('/__replica/fonts'), { cache: 'no-store' })).json(); await Promise.all(list.map(u => { const f = new FontFace('d1-font', `url("${local(u)}")`, { display: 'block' }); fontsKept.push(f); return f.load().catch(() => {}); })); } catch (e) {}
+try { const list = offline ? JSON.parse(offline.text(local('/__replica/fonts'))) : await (await fetch(local('/__replica/fonts'), { cache: 'no-store' })).json(); await Promise.all(list.map(u => { const f = new FontFace('d1-font', `url("${offline ? offline.asset(local(u)) : local(u)}")`, { display: 'block' }); fontsKept.push(f); return f.load().catch(() => {}); })); } catch (e) {}
 document.addEventListener('keydown', e => onKey(e, apps[active], document), true);
 await jump(0);
 

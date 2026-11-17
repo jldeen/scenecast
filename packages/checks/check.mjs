@@ -21,6 +21,7 @@ const ZOOM = +arg(args, '--zoom', 100) / 100;
 const OUT = arg(args, '--out', join(demo.out, ZOOM === 1 ? 'check' : `check-z${Math.round(ZOOM * 100)}`));
 const SPEED = +arg(args, '--speed', 10);
 const URL0 = arg(args, '--url', demo.url);
+const fileBase = new globalThis.URL(URL0).protocol === 'file:' ? new globalThis.URL('.', URL0).href : null;
 const URL = (u => { u.searchParams.set('speed', String(SPEED)); return u.href; })(new globalThis.URL(URL0));
 const VP = demo.cfg.viewport;
 const runPath = new Function(readFileSync(join(here, 'path.js'), 'utf8') + '\nreturn runPath;')();
@@ -36,7 +37,7 @@ async function oneRun(n) {
   page.on('pageerror', e => noise.push('pageerror: ' + e.message.slice(0, 200)));
   page.on('requestfailed', r => noise.push('failed: ' + r.url().slice(0, 120)));
   page.on('response', r => { if (r.status() >= 400) noise.push(r.status() + ' ' + r.url().slice(0, 120)); });
-  page.on('request', r => { if (!/^(http:\/\/127\.0\.0\.1|data:|blob:|about:)/.test(r.url())) noise.push('offsite request: ' + r.url().slice(0, 120)); });
+  page.on('request', r => { if (!/^(http:\/\/127\.0\.0\.1|data:|blob:|about:)/.test(r.url()) && !(fileBase && r.url().startsWith(fileBase))) noise.push('offsite request: ' + r.url().slice(0, 120)); });
   const shots = {}; const timings = {};
   let k = 0; const t0 = Date.now(); let last = t0;
   await page.goto(URL);

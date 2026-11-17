@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use scenecast_core::{BundleManifest, SceneKind, validate_referenced_files};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -78,6 +79,80 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), ExportError> {
     }
     Ok(())
 }
+
+fn offline_files(
+    root: &Path,
+    path: &Path,
+    files: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), ExportError> {
+    if path.is_dir() {
+        for entry in fs::read_dir(path).map_err(|e| io(path, e))? {
+            offline_files(root, &entry.map_err(|e| io(path, e))?.path(), files)?;
+        }
+        return Ok(());
+    }
+    let relative = path
+        .strip_prefix(root)
+        .expect("offline files stay under output")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let bytes = fs::read(path).map_err(|e| io(path, e))?;
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let value = if ["html", "css", "json", "js", "svg"].contains(&ext.as_str())
+        || relative == "__replica/fonts"
+    {
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| ExportError::Invalid(format!("invalid UTF-8: {}", path.display())))?;
+        serde_json::json!({"text": text})
+    } else {
+        let mime = match ext.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "avif" => "image/avif",
+            "ico" => "image/x-icon",
+            "woff" => "font/woff",
+            "woff2" => "font/woff2",
+            "ttf" => "font/ttf",
+            "otf" => "font/otf",
+            _ => "application/octet-stream",
+        };
+        serde_json::json!({"url": format!("data:{mime};base64,{}", STANDARD.encode(bytes))})
+    };
+    files.insert(relative, value);
+    Ok(())
+}
+
+const OFFLINE_BOOT: &str = r#"<script type="module">
+try {
+  if (location.protocol === 'file:') {
+    for (const src of ['./offline-data.js', './app/offline.js']) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = src; script.onload = resolve; script.onerror = () => reject(new Error(`Could not load ${src}`));
+        document.head.append(script);
+      });
+    }
+    const manifest = JSON.parse(window.__scenecastOffline.text(new URL('./manifest.json', location.href)));
+    const allowed = ['/app/focus-module.js', '/app/focus.js', '/app/morph.js', '/app/presenter-key.js', '/app/bundle-flow.js'];
+    const unsupported = (manifest.playback?.options?.modules || []).find(m => !allowed.includes(m));
+    if (unsupported) throw new Error(`Offline playback does not support custom module ${unsupported}`);
+    await import(window.__scenecastOffline.module('/app/shell.js'));
+  } else {
+    await import('./app/shell.js');
+  }
+} catch (error) {
+  console.error(error);
+  const message = document.createElement('p'); message.textContent = `Cannot open this export: ${error.message}`;
+  Object.assign(message.style, { position: 'fixed', inset: '0', zIndex: '2147483647', background: 'white', color: 'black', padding: '2rem' });
+  document.body.append(message);
+}
+</script>"#;
 
 /// Exports live-page captures. The destination must be empty.
 /// Static browsers need an HTTP host because module and fetch requests cannot use `file://`.
@@ -196,6 +271,10 @@ pub fn export_live(
         (
             "app/shell.js",
             include_bytes!("../../../packages/player/app/shell.js").as_slice(),
+        ),
+        (
+            "app/offline.js",
+            include_bytes!("../../../packages/player/app/offline.js").as_slice(),
         ),
         (
             "app/bundle-flow.js",
@@ -423,6 +502,33 @@ pub fn export_live(
         &output.join("__replica/fonts"),
         &serde_json::to_vec(&fonts)?,
     )?;
+    let mut files = serde_json::Map::new();
+    for name in [
+        "manifest.json",
+        "app",
+        "snaps",
+        "streams",
+        "assets",
+        "__replica",
+    ] {
+        let path = output.join(name);
+        if path.exists() {
+            offline_files(output, &path, &mut files)?;
+        }
+    }
+    write(
+        &output.join("offline-data.js"),
+        format!(
+            "globalThis.__scenecastFiles={};\n",
+            serde_json::to_string(&files)?
+        )
+        .as_bytes(),
+    )?;
+    let index = include_str!("../../../packages/player/app/index.html").replace(
+        r#"<script type="module" src="./app/shell.js"></script>"#,
+        OFFLINE_BOOT,
+    );
+    write(&output.join("index.html"), index.as_bytes())?;
     Ok(())
 }
 

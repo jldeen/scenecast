@@ -175,9 +175,9 @@ The command writes `index.html` and copies referenced captures/assets into the o
 
 Exported HTML is intentionally static-host friendly: the output folder contains `index.html` plus copied relative assets and can be published from `docs/`, a `gh-pages` branch, or any static file host. The player stretches screenshot or video scenes to the viewport, renders guide marks, provides a table of contents, supports keyboard navigation, and replays transition frames before landing on the destination scene. Hash routes such as `#/0/0` deep-link to section and scene positions without server rewrites. Add `?debug=1` to the URL for a minimal hotspot overlay while tuning bounds.
 
-Recorded live-page bundles export the morph player and built captures instead. The live export currently requires
-bundles without mixed fallback scenes. Serve the exported
-folder over HTTP; opening it directly with `file://` does not work because browsers restrict module and fetch access.
+Recorded live-page bundles export the morph player and built captures instead. Open `index.html` directly or serve
+the folder on a static host. Direct file playback currently excludes custom player modules; HTTP playback supports
+them. Mixed live and fallback scenes are not yet supported by this export.
 
 The repository includes `examples\scroll.scenecast` as a complete static scroll sample. Export it with:
 

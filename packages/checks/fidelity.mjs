@@ -27,6 +27,7 @@ const KIT = join(here, '..');
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
 const URL = arg(args, '--url', demo.url);
+const fileBase = new globalThis.URL(URL).protocol === 'file:' ? new globalThis.URL('.', URL).href : null;
 const QUICK = args.includes('--quick');
 const SPEED = +arg(args, '--speed', 10);
 const MOD = process.platform === 'win32' ? 'Control+Alt+' : 'Alt+';
@@ -46,13 +47,13 @@ mkdirSync(demo.out, { recursive: true });
 
 // The replica server: started here if it isn't running.
 let server = null;
-const up = async () => { try { return (await fetch(URL + 'flow.json')).ok; } catch (e) { return false; } };
+const up = async () => { if (fileBase) return true; try { return (await fetch(URL + 'flow.json')).ok; } catch (e) { return false; } };
 if (!(await up())) {
   server = spawn(process.execPath, [join(KIT, 'player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
   for (let i = 0; i < 50 && !(await up()); i++) await sleep(100);
 }
 // The flow as the server has it now (tweaks in flow.overrides.mjs included).
-const flow = await (await fetch(URL + 'flow.json')).json().catch(() => readFlow(demo));
+const flow = fileBase ? readFlow(demo) : await (await fetch(URL + 'flow.json')).json().catch(() => readFlow(demo));
 const S = flow.states;
 const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
 // Pages open at most JOBS at a time; a page's slot frees when its context closes.
@@ -75,7 +76,7 @@ async function open(z = 1, speed = SPEED) {
   page.noise = [];
   page.on('pageerror', e => page.noise.push('pageerror: ' + e.message.slice(0, 160)));
   page.on('console', m => page.noise.push(m.type() + ': ' + m.text().slice(0, 160)));
-  page.on('request', r => { if (!/^(http:\/\/127\.0\.0\.1|data:|blob:|about:)/.test(r.url())) page.noise.push('offsite: ' + r.url().slice(0, 100)); });
+  page.on('request', r => { if (!/^(http:\/\/127\.0\.0\.1|data:|blob:|about:)/.test(r.url()) && !(fileBase && r.url().startsWith(fileBase))) page.noise.push('offsite: ' + r.url().slice(0, 100)); });
   await page.goto(withSpeed(URL, speed));
   await page.waitForFunction(() => window.d1 && window.d1.state.active);
   return page;
@@ -416,15 +417,29 @@ try {
         await page.keyboard.press(MOD + 'ArrowLeft'); await sleep(150);
         if ((await page.evaluate(() => window.d1.state)).active !== before) bad.push('modifier+left did not switch apps');
         const reset = flow.beats[0], target = order.find(id => id !== reset.active);
-        await page.route('**/manifest.json', async route => {
-          const response = await route.fetch(), bundle = await response.json();
-          const scene = reset.states[reset.active];
-          bundle.playback ||= {}; bundle.playback.scenes ||= {};
-          bundle.playback.scenes[scene] ||= {}; bundle.playback.scenes[scene].options ||= {};
-          bundle.playback.scenes[scene].options.next = { app: target };
-          while (bundle.beats.length < 10) bundle.beats.push(bundle.beats[0]);
-          await route.fulfill({ response, json: bundle });
-        });
+        const scene = reset.states[reset.active];
+        if (fileBase) {
+          await page.addInitScript(({ scene, target }) => {
+            Object.defineProperty(globalThis, '__scenecastFiles', { configurable: true, set(files) {
+              const bundle = JSON.parse(files['manifest.json'].text);
+              bundle.playback ||= {}; bundle.playback.scenes ||= {};
+              bundle.playback.scenes[scene] ||= {}; bundle.playback.scenes[scene].options ||= {};
+              bundle.playback.scenes[scene].options.next = { app: target };
+              while (bundle.beats.length < 10) bundle.beats.push(bundle.beats[0]);
+              files['manifest.json'].text = JSON.stringify(bundle);
+              Object.defineProperty(globalThis, '__scenecastFiles', { value: files, writable: true, configurable: true });
+            } });
+          }, { scene, target });
+        } else {
+          await page.route('**/manifest.json', async route => {
+            const response = await route.fetch(), bundle = await response.json();
+            bundle.playback ||= {}; bundle.playback.scenes ||= {};
+            bundle.playback.scenes[scene] ||= {}; bundle.playback.scenes[scene].options ||= {};
+            bundle.playback.scenes[scene].options.next = { app: target };
+            while (bundle.beats.length < 10) bundle.beats.push(bundle.beats[0]);
+            await route.fulfill({ response, json: bundle });
+          });
+        }
         await page.reload(); await page.waitForFunction(() => window.d1 && window.d1.state.active);
         await page.keyboard.press(MOD + 'KeyN'); await sleep(150);
         if ((await page.evaluate(() => window.d1.state)).active !== target) bad.push('modifier+N did not run the next step');

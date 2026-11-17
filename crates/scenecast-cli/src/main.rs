@@ -1345,7 +1345,7 @@ fn export_html(bundle: &Path, output: &Path) -> Result<()> {
     {
         scenecast_build::export::export_live(bundle, output, &manifest)?;
         println!(
-            "Exported {} (serve this folder with a static HTTP server)",
+            "Exported {} (open it directly or use a static HTTP server)",
             output.join("index.html").display()
         );
         return Ok(());

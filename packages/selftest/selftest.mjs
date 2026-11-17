@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, unlinkSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve as resolvePath } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -369,6 +369,45 @@ export default flow => {
         check('static export: three identical cold starts', new Set(hashes).size === 1 && !failures.length, JSON.stringify({ hashes, failures }));
         const fidelity = await run(['fidelity', '--url', url, '--only', 'two-run,keys,focus,clicks,hovers,drags,zoom'], at);
         check('static export: interaction and two-run checks', fidelity.code === 0, fidelity.out.slice(-1000));
+        const fileUrl = pathToFileURL(join(output, 'index.html')).href, fileHashes = [], fileErrors = [];
+        for (let i = 0; i < 3; i++) {
+          const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+          const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+          page.on('request', request => { if (/^https?:/.test(request.url())) fileErrors.push(request.url()); });
+          page.on('pageerror', error => fileErrors.push(error.message));
+          await page.goto(fileUrl); await page.waitForFunction(() => window.d1 && window.d1.state.active);
+          await page.evaluate(() => window.d1.idle());
+          fileErrors.push(...await page.evaluate(() => window.d1.errors));
+          fileHashes.push(createHash('sha256').update(await page.screenshot()).digest('hex'));
+          await browser.close();
+        }
+        check('folder export: three identical offline cold starts', new Set(fileHashes).size === 1 && !fileErrors.length, JSON.stringify({ fileHashes, fileErrors }));
+        const offline = await run(['fidelity', '--url', fileUrl, '--only', 'two-run,composer,keys,focus,clicks,hovers,drags,zoom'], at);
+        check('folder export: offline interaction and two-run checks', offline.code === 0, offline.out.slice(-1000));
+        if (process.platform === 'win32') {
+          const edge = await run(['fidelity', '--url', fileUrl, '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
+          check('folder export: Windows Edge presenter keys', edge.code === 0, edge.out.slice(-1000));
+        }
+        const dataFile = join(output, 'offline-data.js');
+        const data = JSON.parse(readFileSync(dataFile, 'utf8').replace(/^globalThis\.__scenecastFiles=/, '').replace(/;\s*$/, ''));
+        for (const [id, text] of [['chat-start', 'first frame'], ['chat-01-message', 'second frame']]) {
+          const html = data[`snaps/${id}.html`], meta = data[`snaps/${id}.json`];
+          html.text = html.text.replace('</body>', `<iframe data-d1-frame="f99" src="../snaps/${id}.f99.html"></iframe></body>`);
+          const info = JSON.parse(meta.text); info.frames.push({ key: 'f99' }); meta.text = JSON.stringify(info);
+          data[`snaps/${id}.f99.html`] = { text: `<!doctype html><html><body><p>${text}</p></body></html>` };
+        }
+        writeFileSync(dataFile, `globalThis.__scenecastFiles=${JSON.stringify(data)};\n`);
+        const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+        const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+        await page.goto(fileUrl); await page.waitForFunction(() => window.d1 && window.d1.state.active);
+        await page.waitForFunction(() => window.d1.doc('chat').querySelector('iframe[data-d1-frame="f99"]')?.contentDocument?.body?.innerText === 'first frame');
+        const frame = await page.evaluate(async () => {
+          const before = window.d1.doc('chat').querySelector('iframe[data-d1-frame="f99"]');
+          await window.d1.morph('chat', 'chat-01-message'); await window.d1.idle();
+          return { same: before === window.d1.doc('chat').querySelector('iframe[data-d1-frame="f99"]'), text: before.contentDocument?.body?.innerText, errors: window.d1.errors };
+        });
+        check('folder export: captured frames morph in place', frame.same && frame.text === 'second frame' && !frame.errors.length, JSON.stringify(frame));
+        await browser.close();
       } finally { await new Promise(resolve => server.close(resolve)); }
     }
   }

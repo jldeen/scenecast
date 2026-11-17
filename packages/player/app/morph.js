@@ -7,13 +7,14 @@ export const wasInserted = n => inserted.has(n);
 
 function syncAttrs(from, to) {
   const fa = from.attributes, ta = to.attributes;
+  const frameSource = n => from.localName === 'iframe' && (n === 'src' || (n === 'srcdoc' && globalThis.__scenecastOffline));
   for (let i = fa.length - 1; i >= 0; i--) {
     const n = fa[i].name;
-    if (!to.hasAttribute(n) && !(from.localName === 'iframe' && n === 'src')) from.removeAttribute(n);
+    if (!to.hasAttribute(n) && !frameSource(n)) from.removeAttribute(n);
   }
   for (let i = 0; i < ta.length; i++) {
     const { name, value } = ta[i];
-    if (from.localName === 'iframe' && name === 'src') continue;
+    if (frameSource(name)) continue;
     if (from.getAttribute(name) !== value) {
       try { from.setAttribute(name, value); } catch (e) { /* attribute names the HTML parser accepts but setAttribute doesn't */ }
     }
