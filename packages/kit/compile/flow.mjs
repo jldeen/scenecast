@@ -121,6 +121,11 @@ export async function compileFlow(demo, { fromRaw = false } = {}) {
   for (const d of rec.drags || []) flow.notes.push(`${d.state}: a drag on ${JSON.stringify(d.spec)} by ${d.dx} px; add a drags rule if the pane should resize`);
   // The demo's own engine modules (demo.json engine.modules), loaded by the shell.
   if (cfg.engine && cfg.engine.modules) flow.modules = cfg.engine.modules.map(m => '/demo/' + m);
+  return finishFlow(demo, flow, rec);
+}
+
+export async function finishFlow(demo, flow, rec) {
+  const cfg = demo.cfg;
   // Hand edits last.
   const over = join(demo.dir, 'flow.overrides.mjs');
   if (existsSync(over)) {
