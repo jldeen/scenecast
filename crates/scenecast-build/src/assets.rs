@@ -326,7 +326,7 @@ impl AssetResolver {
         let html = replace(&html, imports, |c| {
             Ok(self.css_file(url(&c[1])?, 0)?.unwrap_or_default())
         })?;
-        let html = self.rewrite_resources(&html, urls, inline)?;
+        let html = self.rewrite_resources(&html, urls, inline, true)?;
         let iframe = re!(r#"(<iframe\b[^>]*?)\s(?:sandbox|csp)="[^"]*""#);
         let html = iframe.replace_all(&html, "$1");
         let html = iframe.replace_all(&html, "$1");
@@ -346,6 +346,7 @@ impl AssetResolver {
         html: &str,
         urls: &[Value],
         inline: Option<&Map<String, Value>>,
+        canvases: bool,
     ) -> Result<String, AssetError> {
         let resources = re!(r"d1res://(\d+)");
         let html = replace(html, resources, |c| {
@@ -360,8 +361,11 @@ impl AssetResolver {
                 .and_then(Value::as_str);
             self.local(url, data)
         })?;
-        let canvases = re!(r#"data-d1-canvas="(canvas\d+)""#);
-        replace(&html, canvases, |c| {
+        if !canvases {
+            return Ok(html);
+        }
+        let pattern = re!(r#"data-d1-canvas="(canvas\d+)""#);
+        replace(&html, pattern, |c| {
             let data = inline
                 .and_then(|values| values.get(&c[1]))
                 .and_then(Value::as_str);
@@ -373,7 +377,7 @@ impl AssetResolver {
         })
     }
 
-    fn rewrite_frame(&mut self, input: &str) -> Result<String, AssetError> {
+    fn rewrite_fragment(&mut self, input: &str, canvases: bool) -> Result<String, AssetError> {
         let frame: Value = serde_json::from_str(input)?;
         let html = frame
             .get("html")
@@ -385,7 +389,9 @@ impl AssetResolver {
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         let inline = frame.get("inline").and_then(Value::as_object);
-        Ok(scrub(quiet(&self.rewrite_resources(html, urls, inline)?)))
+        Ok(scrub(quiet(
+            &self.rewrite_resources(html, urls, inline, canvases)?,
+        )))
     }
 
     pub fn resolve(
@@ -404,7 +410,8 @@ impl AssetResolver {
                 value,
                 inline.ok_or(AssetError::Invalid("missing captured document input"))?,
             )?),
-            "frame" => Some(self.rewrite_frame(value)?),
+            "frame" => Some(self.rewrite_fragment(value, true)?),
+            "fragment" => Some(self.rewrite_fragment(value, false)?),
             _ => return Err(AssetError::Invalid("unknown asset operation")),
         };
         Ok(Resolution {
@@ -488,6 +495,27 @@ mod tests {
         let token = format!("?{}=value&x=1", "sig");
         let bearer = format!("Bearer {}", "a".repeat(20));
         assert_eq!(scrub(format!("{token} {bearer}")), "?sig=&x=1 Bearer");
+    }
+
+    #[test]
+    fn fragments_leave_canvas_markers_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let raw = temp.path().join("raw");
+        fs::create_dir_all(&raw).unwrap();
+        fs::write(raw.join("urls.json"), "{}").unwrap();
+        let mut resolver = AssetResolver::new(&raw, &temp.path().join("assets")).unwrap();
+        let input = serde_json::json!({
+            "html": "<canvas focusgroup=\"x\" data-d1-canvas=\"canvas1\"></canvas>",
+            "urls": [],
+            "inline": {"canvas1": "data:image/svg+xml,%3Csvg%3E"}
+        });
+        let result = resolver
+            .resolve("fragment", &input.to_string(), None)
+            .unwrap();
+        assert_eq!(
+            result.value.as_deref(),
+            Some("<canvas data-d1-canvas=\"canvas1\"></canvas>")
+        );
     }
 
     #[test]

@@ -160,6 +160,9 @@ function rewriteDoc(doc, snapId, docsByKey) {
 // Declarations Chrome warns about in the console (deprecated values the real apps still ship).
 // focusgroup (an experimental attribute): Chrome warns whenever a morph changes or removes it.
 const quiet = text => text.replace(/(-webkit-)?appearance:\s*slider-vertical\s*;?/g, '').replace(/\sfocusgroup="[^"]*"/g, '');
+const rewritePart = (html, rec) => process.env.SCENECAST_RUST_ASSETS === '1'
+  ? rustAsset('fragment', JSON.stringify({ html, urls: rec.urls, inline: rec.inline }))
+  : scrub(quiet(html.replace(/d1res:\/\/(\d+)/g, (m, n) => local(rec.urls[+n], rec.inline))));
 // @font-face sources that never loaded in the real page (404, dead host) are dropped, and a rule left with no
 // source goes too: the browser falls back the same way, without a failed request in the console.
 function dropMissingFonts(text) {
@@ -357,7 +360,7 @@ const appSeenOf = Object.fromEntries(flow.apps.map(a => [a.id, new Map()]));
     const d = snap.docs.find(x => (x.frameUrl || '').split('?')[0] === fu) || snap.docs.find(x => x.key === 'main');
     srcHtml = isolateHover(rewriteDoc(d, 'hov-' + hp.page, {}), prefix);
   }
-  const fixPart = (h, rec) => isolateHover(edit(scrub(quiet(h.replace(/d1res:\/\/(\d+)/g, (m, n) => local(rec.urls[+n], rec.inline)))), 'hover:' + hp.app).replace(/\sdata-d1-hpart="\d+"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, ''), prefix);
+  const fixPart = (h, rec) => isolateHover(edit(rewritePart(h, rec), 'hover:' + hp.app).replace(/\sdata-d1-hpart="\d+"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, ''), prefix);
   const seen = new Map(); const appSeen = appSeenOf[hp.app]; const used = []; let n = 0;
   // Old audits (Teams) didn't time the tooltip itself: use the page's usual tooltip delay (the median time of
   // hovers that showed only a tooltip).
@@ -484,7 +487,7 @@ report.clicks = {};
   const prefix = `d1c${k}-`;
   const recs = readdirSync(dir).filter(f => f.endsWith('.json')).sort().map(f => JSON.parse(readFileSync(join(dir, f), 'utf8'))).filter(r => r.kind === 'click');
   const out = hoverOut[cp.app]; out.clicks = out.clicks || []; out.css = out.css || {};
-  const fixPart = (h, rec) => isolateHover(edit(scrub(quiet(h.replace(/d1res:\/\/(\d+)/g, (m, n) => local(rec.urls[+n], rec.inline)))), 'click:' + cp.app).replace(/\sdata-d1-(hpart|ctl)="[^"]*"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, '').replace(/\sfocusgroup="[^"]*"/g, ''), prefix);
+  const fixPart = (h, rec) => isolateHover(edit(rewritePart(h, rec), 'click:' + cp.app).replace(/\sdata-d1-(hpart|ctl)="[^"]*"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, '').replace(/\sfocusgroup="[^"]*"/g, ''), prefix);
   const used = []; let n = 0; let lazy = '';
   for (const rec of recs) {
     const r = rec.res;
