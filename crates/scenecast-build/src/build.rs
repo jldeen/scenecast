@@ -10,6 +10,7 @@ use thiserror::Error;
 use crate::engine::{Engine, EngineError, Progress, with_demo};
 use crate::fingerprint::{FingerprintError, fingerprint_tree};
 use crate::flow::{FlowError, compile_recording};
+use crate::publish::{PublishError, publish};
 use crate::scrub::{ScrubError, ScrubReport, scrub_tree};
 use crate::sync::{SyncError, SyncReport, sync_manifest};
 
@@ -29,6 +30,8 @@ pub enum BuildError {
     Sync(#[from] SyncError),
     #[error(transparent)]
     Flow(#[from] FlowError),
+    #[error(transparent)]
+    Publish(#[from] PublishError),
     #[error("cannot resolve raw capture folder: HOME and USERPROFILE are unset")]
     MissingHome,
     #[error("raw capture folder is not UTF-8")]
@@ -248,16 +251,48 @@ fn build_with_raw(
         args.push("--compiled-flow".into());
     }
     on(BuildProgress::Stage("process"));
-    let mut env = vec![(OsString::from("REPLICA_RAW"), raw.as_os_str().to_owned())];
+    let mut env = vec![
+        (OsString::from("REPLICA_RAW"), raw.as_os_str().to_owned()),
+        (
+            OsString::from("SCENECAST_RUST_PUBLISH"),
+            OsString::from("1"),
+        ),
+    ];
     if let Some(path) = &base {
         env.push((
             OsString::from("SCENECAST_FLOW_BASE"),
             path.as_os_str().to_owned(),
         ));
     }
-    let code = engine.run_with_progress_env(with_demo("build", &args, dir), env, |p| {
-        on(BuildProgress::Engine(p))
-    })?;
+    let mut publication_error = None;
+    let mut published = false;
+    let mut control = |line: &str| {
+        if line != "SCENECAST_PUBLISH_V1" {
+            return None;
+        }
+        if published {
+            return Some(
+                serde_json::json!({"error": "capture output already published"}).to_string(),
+            );
+        }
+        published = true;
+        Some(match publish(&data) {
+            Ok(result) => {
+                serde_json::json!({"changed": result.changed, "files": result.files}).to_string()
+            }
+            Err(error) => {
+                let message = error.to_string();
+                publication_error = Some(error);
+                serde_json::json!({"error": message}).to_string()
+            }
+        })
+    };
+    let code = engine.run_with_progress_control(
+        with_demo("build", &args, dir),
+        env,
+        |p| on(BuildProgress::Engine(p)),
+        Some(&mut control),
+    );
     drop(base);
     on(BuildProgress::Stage("scrub-built"));
     for path in [
@@ -270,6 +305,10 @@ fn build_with_raw(
         }
     }
     write_report(dir, &report)?;
+    if let Some(error) = publication_error {
+        return Err(error.into());
+    }
+    let code = code?;
     if report.has_credentials() {
         return Ok(BuildResult {
             exit_code: 1,

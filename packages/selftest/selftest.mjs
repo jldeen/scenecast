@@ -279,6 +279,19 @@ export default flow => {
   }
 
   {
+    const unchanged = join(DEMO, 'data', 'snaps', 'chat-start.html');
+    const stale = join(DEMO, 'data', 'snaps', 'stale-publish-test.html');
+    const before = statSync(unchanged).mtimeMs;
+    writeFileSync(stale, 'stale');
+    const rebuilt = await run(['build', '--force'], at);
+    const built = JSON.parse(readFileSync(join(DEMO, 'data', 'build.json'), 'utf8'));
+    check('build: publication keeps unchanged files and removes stale files',
+      rebuilt.code === 0 && statSync(unchanged).mtimeMs === before && !existsSync(stale)
+        && built.changed.includes('snaps/stale-publish-test.html (removed)')
+        && /^[0-9a-f]{16}$/.test(built.files['snaps/chat-start.html']),
+      rebuilt.out.slice(-500));
+  }
+  {
     const marker = join(tmp, 'raw', 'fingerprint-probe.json');
     try {
       writeFileSync(marker, '{"value":"alpha"}');

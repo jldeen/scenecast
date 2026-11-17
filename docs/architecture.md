@@ -24,10 +24,10 @@ runs in a browser. The manifest's JSON Schema is generated from the Rust types, 
 `scenecast-build` is a library with structured results (`ProjectCreated`, `SyncReport`, and in `recorder`:
 `PreflightReport` item by item, `RecordStatus`, `RecordSummary` with `RecordTiming`) and line-by-line progress
 (`Engine::run_with_progress`), so the CLI and the planned desktop app (Tauri, macOS and Windows) share it.
-`build::build` also reports build stages and per-file fingerprint progress. Rust compiles the recorded base flow;
-JavaScript still applies flow overrides and focus hooks and processes the captures. Moving capture processing to
-Rust remains unfinished. The resolved raw folder is passed explicitly to that engine so it cannot process a
-different folder from the one Rust scanned.
+`build::build` also reports build stages and per-file fingerprint progress. Rust compiles the recorded base flow
+and publishes staged capture files by content hash; JavaScript still applies flow overrides and focus hooks and
+processes the captures. Moving capture processing to Rust remains unfinished. The resolved raw folder is passed
+explicitly to that engine so it cannot process a different folder from the one Rust scanned.
 
 **The recorder** is one body of code (driver, recorder, side-state audits) that runs two ways: as an MV3 extension
 in the presenter's own Edge or Chrome, where a Playwright-shaped shim over `chrome.debugger` gives it pages, frames

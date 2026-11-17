@@ -6,7 +6,7 @@
 //! and Windows.
 
 use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -17,6 +17,7 @@ use thiserror::Error;
 /// The engine's entry point, relative to the `packages` folder.
 pub const ENTRY: &str = "kit/bin/scenecast.mjs";
 const MIN_NODE_MAJOR: u32 = 20;
+type Control<'a> = dyn FnMut(&str) -> Option<String> + 'a;
 
 #[derive(Debug, Error)]
 pub enum EngineError {
@@ -32,6 +33,8 @@ pub enum EngineError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to communicate with the engine")]
+    Communication(#[source] std::io::Error),
 }
 
 /// One line of the engine's output, as it comes.
@@ -167,7 +170,25 @@ impl Engine {
         &self,
         args: I,
         env: E,
+        on: impl FnMut(Progress),
+    ) -> Result<i32, EngineError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+        E: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.run_with_progress_control(args, env, on, None)
+    }
+
+    /// Runs an engine command with an optional line-based request handler on standard input.
+    pub(crate) fn run_with_progress_control<I, S, E, K, V>(
+        &self,
+        args: I,
+        env: E,
         mut on: impl FnMut(Progress),
+        mut control: Option<&mut Control<'_>>,
     ) -> Result<i32, EngineError>
     where
         I: IntoIterator<Item = S>,
@@ -180,7 +201,11 @@ impl Engine {
         let mut child = self
             .command(args)
             .envs(env)
-            .stdin(Stdio::null())
+            .stdin(if control.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -216,6 +241,17 @@ impl Engine {
         .collect();
         drop(tx);
         for p in rx {
+            if let Progress::Stdout(line) = &p
+                && let Some(reply) = control.as_mut().and_then(|handler| handler(line))
+            {
+                let stdin = child.stdin.as_mut().expect("control uses piped stdin");
+                if let Err(error) = writeln!(stdin, "{reply}").and_then(|_| stdin.flush()) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(EngineError::Communication(error));
+                }
+                continue;
+            }
             on(p);
         }
         for r in readers {

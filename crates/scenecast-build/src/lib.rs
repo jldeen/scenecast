@@ -14,6 +14,7 @@ pub mod export;
 pub mod fingerprint;
 pub mod flow;
 pub mod project;
+pub mod publish;
 pub mod recorder;
 pub mod scrub;
 pub mod sync;

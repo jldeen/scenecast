@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, copyFi
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createInterface } from 'node:readline';
 import { compose, cssFor, elementEnd, isolateClasses, ancestorsAt, around } from './compose.mjs';
 import { loadDemo, arg, KIT_VERSION } from '../kit/lib/demo.mjs';
 import { compileEdits, applyEdits } from '../kit/lib/edits.mjs';
@@ -664,7 +665,26 @@ for (const [app, h] of Object.entries(hoverOut)) writeFileSync(join(OUT, 'snaps'
 
 // Into data/: only the files that changed are written, and the ones no longer made go.
 const changed = [], files0 = {};
-{
+if (process.env.SCENECAST_RUST_PUBLISH === '1') {
+  const result = await new Promise((resolve, reject) => {
+    const input = createInterface({ input: process.stdin });
+    let received = false;
+    input.once('line', line => {
+      received = true;
+      input.close();
+      process.stdin.destroy();
+      try { resolve(JSON.parse(line)); } catch (error) { reject(error); }
+    });
+    input.once('close', () => { if (!received) reject(new Error('capture publisher closed without a response')); });
+    input.once('error', reject);
+    console.log('SCENECAST_PUBLISH_V1');
+  });
+  if (result.error) throw new Error(result.error);
+  if (!Array.isArray(result.changed) || !result.files || typeof result.files !== 'object') throw new Error('invalid capture publisher response');
+  changed.push(...result.changed);
+  Object.assign(files0, result.files);
+  report.changed = changed.length;
+} else {
   const fileHash = buf => createHash('sha256').update(buf).digest('hex').slice(0, 16);
   const list = dir => existsSync(dir) ? readdirSync(dir, { recursive: true }).map(f => String(f).replace(/\\/g, '/')).filter(f => statSync(join(dir, f)).isFile()) : [];
   for (const d of ['snaps', 'streams']) {
