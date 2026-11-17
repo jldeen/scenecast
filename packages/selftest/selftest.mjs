@@ -343,6 +343,8 @@ export default flow => {
     const exported = await run(['export-html', DEMO, output], at);
     check('static export: created', exported.code === 0, exported.out);
     if (exported.code === 0) {
+      const validated = await run(['validate', output], at);
+      check('static export: bundle references resolve', validated.code === 0, validated.out);
       const failures = [];
       const server = createHttpServer((req, res) => {
         const path = new URL(req.url, 'http://localhost').pathname;

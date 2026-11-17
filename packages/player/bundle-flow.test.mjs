@@ -33,6 +33,8 @@ test('bundle graph drives scenes, queries, streams and focus', () => {
   assert.deepEqual(flow.focus[0].grow, [1, 2, 3, 4]);
   bundle.graph.scenes[0].transitions[1].target = 'start';
   assert.equal(flowFromBundle(bundle).states.start.on[0].query.answer, 'start');
+  bundle.graph.scenes[0].live.snapshot = 'snaps/home.html';
+  assert.equal(flowFromBundle(bundle).states.start.snap, 'home');
 });
 
 test('live override paths cannot mutate object prototypes', () => {

@@ -12,7 +12,7 @@ export function flowFromBundle(bundle) {
     if ((scene.kind || 'live-page') !== 'live-page' || !scene.live) continue;
     const data = (playback.scenes || {})[scene.id] || {};
     const snapshot = scene.live.snapshot;
-    const match = /^data\/snaps\/(.+)\.html$/.exec(snapshot);
+    const match = /^(?:data\/)?snaps\/(.+)\.html$/.exec(snapshot);
     const state = {
       ...(data.options || {}),
       app: scene.live.app, snap: match ? match[1] : `@scene:${scene.id}`,

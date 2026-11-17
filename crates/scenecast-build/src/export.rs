@@ -3,7 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use scenecast_core::{BundleManifest, SceneKind};
+use scenecast_core::{BundleManifest, SceneKind, validate_referenced_files};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::scrub::{ScrubError, ScrubReport, scrub_tree};
@@ -187,13 +188,33 @@ pub fn export_live(
     ] {
         write(&output.join(name), content)?;
     }
-    write(
-        &output.join("manifest.json"),
-        &serde_json::to_vec_pretty(manifest)?,
-    )?;
     for dir in ["snaps", "streams", "assets"] {
         copy_tree(&bundle.join("data").join(dir), &output.join(dir))?;
     }
+    let mut exported = manifest.clone();
+    for scene in &mut exported.graph.scenes {
+        let live = scene.live.as_mut().expect("live scenes checked above");
+        live.snapshot = live.snapshot.strip_prefix("data/").unwrap().to_owned();
+        let path = output.join(&live.snapshot);
+        let bytes = fs::read(&path).map_err(|e| io(&path, e))?;
+        live.sha256 = Some(format!("{:x}", Sha256::digest(&bytes)));
+    }
+    let files = validate_referenced_files(output, &exported);
+    if !files.is_valid() {
+        return Err(ExportError::Invalid(format!(
+            "exported bundle has missing references: {}",
+            files
+                .missing_files
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    write(
+        &output.join("manifest.json"),
+        &serde_json::to_vec_pretty(&exported)?,
+    )?;
     let assets = output.join("assets");
     let mut fonts = Vec::new();
     if assets.is_dir() {
