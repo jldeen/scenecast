@@ -691,6 +691,7 @@ if (process.env.SCENECAST_RUST_PUBLISH === '1') {
   const list = dir => existsSync(dir) ? readdirSync(dir, { recursive: true }).map(f => String(f).replace(/\\/g, '/')).filter(f => statSync(join(dir, f)).isFile()) : [];
   for (const d of ['snaps', 'streams']) {
     const from = join(OUT, d), to = join(DATA, d);
+    mkdirSync(to, { recursive: true });
     const next = new Set(list(from)), prev = new Set(list(to));
     for (const f of next) {
       const buf = readFileSync(join(from, f)), h = fileHash(buf);

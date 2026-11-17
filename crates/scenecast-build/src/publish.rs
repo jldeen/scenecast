@@ -179,6 +179,7 @@ pub fn publish(data: &Path, mode: PublishMode) -> Result<Published, PublishError
         let to = data.join(dir);
         let staged = files(&from)?;
         let previous = files(&to)?;
+        fs::create_dir_all(&to).map_err(|e| io(&to, e))?;
         for name in &staged {
             let src = from.join(name);
             let dst = to.join(name);
@@ -326,6 +327,20 @@ mod tests {
         assert!(data.join("assets").join(css).exists());
         assert!(data.join("assets").join(image).exists());
         assert!(!data.join("assets").join(unused).exists());
+    }
+
+    #[test]
+    fn publishes_without_streams() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path();
+        for dir in [".next/snaps", ".next/streams", ".next/assets"] {
+            fs::create_dir_all(data.join(dir)).unwrap();
+        }
+        fs::write(data.join(".next/snaps/main.html"), "<p>page</p>").unwrap();
+        fs::write(data.join(".next/assets/missing.woff2"), []).unwrap();
+        publish(data, PublishMode::AssetsAndPrune).unwrap();
+        assert!(data.join("streams").is_dir());
+        assert!(data.join("snaps/main.html").is_file());
     }
 
     #[cfg(unix)]

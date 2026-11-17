@@ -279,6 +279,18 @@ export default flow => {
   }
 
   {
+    const simple = join(tmp, 'no-stream');
+    const created = await run(['new', 'no-stream', '--dir', tmp, '--app', `chat=${fx.chat}`]);
+    if (created.code === 0) writeFileSync(join(simple, 'recording.json'), JSON.stringify({
+      states: { 'chat-start': { app: 'chat', snap: 'chat-start' } },
+      beats: [{ label: 'Start', active: 'chat', states: { chat: 'chat-start' } }],
+    }));
+    const built = created.code === 0
+      ? await run(['build'], { cwd: simple, env: { REPLICA_RAW: join(tmp, 'raw') } })
+      : created;
+    check('build: a first capture without streams', built.code === 0 && existsSync(join(simple, 'data', 'streams')), built.out.slice(-500));
+  }
+  {
     const unchanged = join(DEMO, 'data', 'snaps', 'chat-start.html');
     const stale = join(DEMO, 'data', 'snaps', 'stale-publish-test.html');
     const assetName = readdirSync(join(DEMO, 'data', 'assets')).find(name => name !== 'missing.woff2');
