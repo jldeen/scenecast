@@ -350,7 +350,7 @@ function onOver(e, app, doc) {
 }
 function onOut(e, app, doc) {
   hvTrace('out', hvName(e.target), '->', hvName(e.relatedTarget));
-  hvOut(app);
+  hvOut(app, e);
   const h = app.hover;
   if (!h) { if (hoverTimer && !(e.relatedTarget && findTransition(app, 'hover', e.relatedTarget, doc))) { clearTimeout(hoverTimer); hoverTimer = null; } return; }
   const to = e.relatedTarget;
@@ -464,14 +464,22 @@ function hvOver(e, app, doc, now) {
   const st = hvState(app);
   for (const { d, el } of hvDefsAt(app, doc, e.target)) {
     const k = d.id;
-    if ([...st.on].some(h => h.d === d && h.el === el) || st.timers.has(k)) { hvTrace('over-skip', k, st.timers.has(k) ? 'timer' : 'on'); continue; }
+    if ([...st.on].some(h => h.d === d && h.el === el)) continue;
+    // Still waiting on this element: the pointer only moved within it. A wait for another element is started over.
+    const was = st.timers.get(k);
+    if (was && was.el === el) continue;
+    if (was) clearTimeout(was.t);
     hvTrace('over', k, hvName(e.target));
     const show = () => { st.timers.delete(k); const ok = !busy && el.isConnected && (now || isHovered(el)); hvTrace('fire', k, 'busy=' + busy, 'conn=' + el.isConnected, 'hov=' + isHovered(el)); if (ok) hvApply(app, doc, d, el); };
-    if (now) show(); else st.timers.set(k, setTimeout(show, T(d.delay || 0)));
+    if (now) show(); else st.timers.set(k, { el, t: setTimeout(show, T(d.delay || 0)) });
   }
 }
-function hvOut(app) {
+function hvOut(app, e) {
   const st = hvState(app);
+  // A hover still waiting on its delay is off once the pointer has left its element, as on the real page: passing
+  // over a control on the way somewhere else never opens it, and coming back starts its delay again.
+  const to = e && e.relatedTarget;
+  for (const [k, w] of [...st.timers]) if (!(to && w.el.contains(to))) { clearTimeout(w.t); st.timers.delete(k); hvTrace('cancel', k); }
   clearTimeout(st.sweep);
   st.sweepPending = true;
   st.sweep = setTimeout(() => {
@@ -551,7 +559,7 @@ function hvUndo(app, h) {
 function hvClear(app) {
   const st = hvState(app);
   if (st.timers.size || st.on.size) hvTrace('clear', [...st.timers.keys(), ...[...st.on].map(h => h.d.id)].join(','), (new Error().stack.split('\n')[2] || '').trim().slice(0, 60));
-  for (const t of st.timers.values()) clearTimeout(t);
+  for (const w of st.timers.values()) clearTimeout(w.t);
   st.timers.clear();
   for (const h of [...st.on]) hvUndo(app, h);
 }
@@ -1574,6 +1582,7 @@ window.d1 = {
   flags: id => ({ ...(apps[id || active].flags || {}) }),
   sizes: id => ({ ...(apps[id || active].sizes || {}) }),
   hoverTrace: () => hvLog.slice(),
+  hoverPending: id => [...hvState(apps[id || active]).timers.keys()],
   hovers: id => [...hvState(apps[id || active]).on].map(h => ({ id: h.d.id, text: h.portals.map(p => norm(p.node.innerText)).join(' / '), ops: (h.d.ops || []).length })),
 };
 Object.assign(window.d1, exposed);

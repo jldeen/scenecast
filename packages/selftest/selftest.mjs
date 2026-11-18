@@ -363,6 +363,17 @@ export default flow => {
     await p2.mouse.click(pr.x, pr.y); await sleep(300);
     const collapsed = (await p2.evaluate(() => window.d1.clicks('chat'))).some(c => c.name === 'Projects');
     check('replica: a click after its hover', hovering > 0 && collapsed, JSON.stringify({ hovering, collapsed }));
+    // Passing over a chip on the way elsewhere leaves nothing waiting to open (as on the real page); resting on it opens its card.
+    await p2.evaluate(() => window.d1.go('chat', 'chat-start'));
+    const teams = await p2.evaluate(() => window.d1.locate({ sel: 'aside li[role="listitem"]', text: 'Teams' }));
+    await p2.mouse.move(teams.x, teams.y); await p2.mouse.move(1599, 450);
+    const frame = () => p2.evaluate(() => new Promise(r => requestAnimationFrame(() => setTimeout(r))));
+    await frame();
+    const waiting = await p2.evaluate(() => window.d1.hoverPending('chat'));
+    await p2.mouse.move(teams.x, teams.y); await frame(); await p2.evaluate(() => window.d1.idle());
+    const card = (await p2.evaluate(() => window.d1.hovers('chat'))).map(h => h.text).join(' / ');
+    check('replica: a hover passed over waits for nothing; rested on, it opens', !waiting.length && /^Teams Chats and channels/.test(card), JSON.stringify({ waiting, card }));
+    await p2.mouse.move(1599, 450); await frame(); await p2.evaluate(() => window.d1.idle());
     // Each answer's step group shows its own steps (both are "3 steps").
     await p2.evaluate(() => window.d1.go('chat', 'chat-05-send'));
     const own = async () => {
@@ -387,6 +398,13 @@ export default flow => {
   check('focus points: each lands on screen with its mark, the same twice; beat keys, ↑/↓, Esc and ⌥0', it('focus').status === 'pass' && /4 points/.test(it('focus').detail), JSON.stringify(it('focus')));
   check('cold start: three fresh clones, each first run identical to the warm runs', it('cold-start').status === 'pass' && /^3 clones/.test(it('cold-start').detail), JSON.stringify(it('cold-start')));
   times.focus = it('focus').secs; times.coldStart = it('cold-start').secs;
+  // The hover check reads the player, not the clock: with every page timer 300 ms late (a loaded runner; on Windows
+  // CI a 32 ms hover delay once fired 277 ms after the pointer arrived), every hover still shows.
+  {
+    const hc = spawnSync(process.execPath, [join(KIT, 'checks', 'hover-check.mjs'), '--demo', DEMO, '--url', `http://127.0.0.1:${REPLICA_PORT}/`, '--speed', '10', '--no-sheet'], { env: { ...process.env, SCENECAST_LATE_TIMERS: '300' }, encoding: 'utf8' });
+    let rep = null; try { rep = JSON.parse(readFileSync(join(DEMO, '.out', 'hovers', 'report.json'), 'utf8')); } catch (e) {}
+    check('hovers: every one shows with the page\'s timers running late', rep && rep.total > 0 && rep.shown === rep.total, rep ? JSON.stringify(rep.failed).slice(0, 1500) : (hc.stdout + hc.stderr).slice(-600));
+  }
   {
     const output = join(tmp, 'static-export');
     const exported = await run(['export-html', DEMO, output], at);

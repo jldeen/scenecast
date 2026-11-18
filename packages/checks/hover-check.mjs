@@ -29,9 +29,22 @@ const VPW = demo.cfg.viewport.width, VPH = demo.cfg.viewport.height;
 const b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
 const ctx = await b.newContext({ viewport: { width: VPW, height: VPH }, deviceScaleFactor: demo.cfg.viewport.dpr });
 const p = await ctx.newPage();
+// SCENECAST_LATE_TIMERS=ms: every timer in the page runs that much late, as on a loaded runner (on Windows CI a
+// hover's 32 ms delay fired 277 ms after the pointer arrived). Proves the check doesn't depend on the machine's speed.
+const LATE = +process.env.SCENECAST_LATE_TIMERS || 0;
+if (LATE) await ctx.addInitScript(ms => { const st = setTimeout; window.setTimeout = (f, d, ...a) => st(f, (+d || 0) + ms, ...a); }, LATE);
 const msgs = []; p.on('console', m => msgs.push(m.text())); p.on('pageerror', e => msgs.push('ERR ' + e.message));
 await p.goto(SPEED > 1 ? URL0 + (URL0.includes('?') ? '&' : '?') + 'speed=' + SPEED : URL0); await p.waitForFunction(() => window.d1 && window.d1.state.active);
 const cmp = await ctx.newPage();
+// Settled: the pointer's events delivered (the next frame), then nothing left waiting in the player (hover delays,
+// the sweep that takes a hover off, loads, fonts). Whether a hover shows is read then, never at a fixed time after
+// the move: on a loaded machine (the checks run side by side) the page's timers run hundreds of ms late, and a
+// fixed wait read a hover as missing before its delay was up, or moved on while the last card still covered the
+// next control. Gives up after 20 s (a player that never settles is a failure of its own).
+const settle = () => p.evaluate(() => Promise.race([
+  new Promise(r => requestAnimationFrame(() => setTimeout(r))).then(() => window.d1.idle()).then(() => true),
+  new Promise(r => setTimeout(() => r(false), 20000)),
+]));
 const rows = []; const report = { pages: {}, failed: [] };
 
 for (const hp of flow.hoverPages) {
@@ -45,7 +58,7 @@ for (const hp of flow.hoverPages) {
   const st = stateOf(hp.base);
   const r = report.pages[hp.page] = { defs: defs.length, shown: 0, missing: [] };
   for (const [k, d] of defs.entries()) {
-    if (k % 20 === 0) { await p.evaluate(([a, s]) => window.d1.go(a, s), [hp.app, st]); await p.waitForTimeout(500); }
+    if (k % 20 === 0) { await p.evaluate(([a, s]) => window.d1.go(a, s), [hp.app, st]); await settle(); }
     // The anchor's place in the replica, scrolled into view the way she would.
     const loc = await p.evaluate(([d, app]) => {
       const doc = window.d1.doc(app);
@@ -84,10 +97,12 @@ for (const hp of flow.hoverPages) {
     const cx = loc.x + Math.min(loc.w / 2, 40), cy = loc.y + loc.h / 2;
     // On the fast clock a hover delay is a few ms: a path over a neighbour opens its card on the way, so go straight there.
     if (SPEED > 1) { await p.mouse.move(cx, cy); await p.mouse.move(cx + 1, cy); } else { await p.mouse.move(cx - 30, cy - 30); await p.mouse.move(cx, cy, { steps: 3 }); }
-    await p.waitForTimeout((d.delay || 0) / SPEED + (SPEED > 1 ? 200 : 450));
+    const settled = await settle();
     const on = await p.evaluate(app => window.d1.hovers(app), hp.app);
     const shown = on.some(h => h.id === d.id);
-    if (shown) r.shown++; else { const why = await p.evaluate(([x, y, app]) => window.d1.hoverAt(x, y, app), [cx, cy, hp.app]); const trace = await p.evaluate(() => window.d1.hoverTrace ? window.d1.hoverTrace().slice(-40) : []); report.failed.push({ id: d.id, text: ((d.portals || [])[0] || {}).text || JSON.stringify(d.anchors[0]).slice(0, 90), at: why, trace }); }
+    // The picture: the card's own CSS transitions finish (they run on the page's clock too).
+    await p.waitForTimeout(SPEED > 1 ? 150 : 400);
+    if (shown) r.shown++; else { const why = await p.evaluate(([x, y, app]) => window.d1.hoverAt(x, y, app), [cx, cy, hp.app]); const trace = await p.evaluate(() => window.d1.hoverTrace ? window.d1.hoverTrace().slice(-40) : []); report.failed.push({ id: d.id, text: ((d.portals || [])[0] || {}).text || JSON.stringify(d.anchors[0]).slice(0, 90) + (settled ? '' : ' (the player never settled)'), at: why, trace }); }
     // Same picture area as the real one, moved by however far the element sits from where it was.
     const real = `${RAWH}${d.shot}`;
     if (d.shot && existsSync(real)) {
@@ -104,7 +119,7 @@ for (const hp of flow.hoverPages) {
       writeFileSync(ROWS + d.id + '-rep.png', png);
       rows.push({ page: hp.page, id: d.id, text: (d.portals || []).map(q => q.text).join(' / ').slice(0, 90) || (d.ops || []).map(o => o.kind + (o.set ? ':' + Object.keys(o.set).join(',') : '')).join(' ').slice(0, 90), real, rep: ROWS + d.id + '-rep.png', shown, pct });
     }
-    await p.mouse.move(VPW - 1, VPH / 2, { steps: 2 }); await p.waitForTimeout(250);
+    await p.mouse.move(VPW - 1, VPH / 2, { steps: 2 }); await settle();
   }
 }
 
@@ -115,7 +130,7 @@ for (const [st, s] of Object.entries(flow.states)) {
   if (!existsSync(`${ROOT}data/snaps/hovers-${app}.json`)) continue;
   const data = JSON.parse(readFileSync(`${ROOT}data/snaps/hovers-${app}.json`, 'utf8'));
   if (!data.defs.length) continue;
-  await p.evaluate(([a, s]) => window.d1.go(a, s), [app, st]); await p.waitForTimeout(300);
+  await p.evaluate(([a, s]) => window.d1.go(a, s), [app, st]); await settle();
   report.coverage[st] = await p.evaluate(([defs, app]) => {
     const doc = window.d1.doc(app);
     const docs = [doc, ...[...doc.querySelectorAll('iframe')].map(f => { try { return f.contentDocument; } catch (e) { return null; } }).filter(Boolean)];

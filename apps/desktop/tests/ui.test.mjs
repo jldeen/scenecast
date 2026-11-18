@@ -9,7 +9,7 @@
 // screen), SCENECAST_UI_KEEP=1 (keep the temp folder).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { createServer, connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +66,9 @@ async function session() {
   const t0 = Date.now();
   for (let i = 0; ; i++) {
     if (appExit !== null) throw new Error(`the app exited (${appExit}):\n${appLog.join('')}`);
+    // The app's WebDriver server starts with its window: wait for its port first (connecting earlier only logs errors).
+    const up = await new Promise(res => { const c = connect(WD_PORT, '127.0.0.1').once('connect', () => { c.destroy(); res(true); }).once('error', () => res(false)); });
+    if (!up) { if (Date.now() - t0 > 90000) throw new Error(`the app's WebDriver server isn't listening on ${WD_PORT} after 90 s`); await sleep(500); continue; }
     try {
       return await remote({ hostname: '127.0.0.1', port: WD_PORT, logLevel: 'error', connectionRetryCount: 0, capabilities: { browserName: 'tauri' } });
     } catch (e) {
