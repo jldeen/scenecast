@@ -13,9 +13,9 @@ const manifestResponse = offline ? null : await fetch(local('/manifest.json'), {
 if (manifestResponse && !manifestResponse.ok) throw new Error(`manifest.json ${manifestResponse.status}`);
 const manifest = offline ? JSON.parse(offline.text(local('/manifest.json'))) : await manifestResponse.json();
 const flow = applyFlowOverrides(flowFromBundle(manifest), manifest.development_overrides);
-// The presenter guide (⌥G; packages/player/presenter/): on every served replica. It reads presenter/notes.json
-// (scenecast notes) when there is one.
-if (!offline && !(flow.modules || []).includes('/app/presenter-module.js')) flow.modules = [...(flow.modules || []), '/app/presenter-module.js'];
+// The presenter guide (⌥G; packages/player/presenter/): on every replica the scenecast server serves. It reads
+// presenter/notes.json (scenecast notes) when there is one. An exported folder has no guide, even served.
+if (!offline && !globalThis.__scenecastExport && !(flow.modules || []).includes('/app/presenter-module.js')) flow.modules = [...(flow.modules || []), '/app/presenter-module.js'];
 const stage = document.getElementById('stage');
 const fav = document.getElementById('d1-fav');
 const sleep = ms => new Promise(r => setTimeout(r, ms));

@@ -135,6 +135,8 @@ fn offline_files(
 }
 
 const OFFLINE_BOOT: &str = r#"<script type="module">
+// An export has no presenter guide (docs/presenter.md): the shell doesn't load its module.
+globalThis.__scenecastExport = true;
 try {
   if (location.protocol === 'file:') {
     for (const src of ['./offline-data.js', './app/offline.js']) {
