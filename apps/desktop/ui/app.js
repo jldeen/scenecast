@@ -774,7 +774,8 @@ document.addEventListener('keydown', e => {
   tabs[(next + tabs.length) % tabs.length].click();
 });
 $('#new-demo').onclick = renderNew;
-$('#nav-library').onclick = async () => { await loadDemos(); renderLibrary(); };
+// Busy while the list loads: the table is drawn again when it's in (screen readers wait; so does the UI test).
+$('#nav-library').onclick = async () => { const m = $('#main'); m.setAttribute('aria-busy', 'true'); try { await loadDemos(); renderLibrary(); } finally { m.removeAttribute('aria-busy'); } };
 $('#check-updates').onclick = async () => {
   const u = await call('check_updates');
   dialog({ title: 'Updates', body: `<p>${esc(u.message)}</p>`, cancel: null });

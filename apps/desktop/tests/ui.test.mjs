@@ -353,13 +353,20 @@ try {
   const row = await text('row-fixture-demo');
   check('the library: recorded, built, fidelity score, focus points, last checked', /screens/.test(row) && /pages/.test(row) && /%/.test(row) && !/Never/.test(row), row);
   await shot('13-library');
-  // Duplicate and delete, from the library.
+  // Duplicate and delete, from the library. The library is drawn again once its list is in: a button found before
+  // that is gone from the page, and a click on it does nothing. So: wait for it, and find the button afresh.
   await click('nav-library');
-  await (await b.$('[data-duplicate="fixture-demo"]')).click();
+  await waitFor('the library', () => b.execute(() => !document.querySelector('#main[aria-busy]') && !!document.querySelector('[data-test="row-fixture-demo"]')), 30000);
+  const open = () => b.execute(() => !!document.querySelector('#dialog[open]'));
+  const ask = async sel => waitFor(`the dialog from ${sel}`, async () => {
+    if (!(await open())) { const e = await b.$(sel); if (await e.isClickable()) await e.click(); await sleep(300); }
+    return open();
+  }, 30000);
+  await ask('[data-duplicate="fixture-demo"]');
   await click('dialog-ok');
   await waitFor('the copy', () => exists('row-fixture-demo-copy'), 60000);
   check('duplicates a demo', existsSync(join(LIB, 'fixture-demo-copy', 'demo.json')));
-  await (await b.$('[data-delete="fixture-demo-copy"]')).click();
+  await ask('[data-delete="fixture-demo-copy"]');
   await click('dialog-ok');
   await waitFor('the copy gone', async () => !(await exists('row-fixture-demo-copy')), 60000);
   check('deletes a demo', !existsSync(join(LIB, 'fixture-demo-copy')));
