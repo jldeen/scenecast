@@ -241,7 +241,7 @@ struct ScaffoldApp {
     host: String,
 }
 
-// Each app's presenter key is a letter of its id (not F, N or P: those are the focus, next and fill keys).
+// Each app's presenter key is a letter of its id (not F, G, N or P: the focus, presenter guide, next and fill keys).
 fn assign_apps(specs: &[AppSpec]) -> Result<Vec<ScaffoldApp>, ProjectError> {
     let defaults = [AppSpec {
         id: "app".to_owned(),
@@ -258,7 +258,7 @@ fn assign_apps(specs: &[AppSpec]) -> Result<Vec<ScaffoldApp>, ProjectError> {
         if apps.iter().any(|a| a.id == spec.id) {
             return Err(ProjectError::DuplicateApp(spec.id.clone()));
         }
-        let free = |c: &char| c.is_ascii_uppercase() && !used.contains(c) && !"FNP".contains(*c);
+        let free = |c: &char| c.is_ascii_uppercase() && !used.contains(c) && !"FGNP".contains(*c);
         let key = spec
             .id
             .to_ascii_uppercase()

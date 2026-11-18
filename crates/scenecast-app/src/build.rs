@@ -205,7 +205,8 @@ pub fn parse_check_line(line: &str) -> Option<(String, String, String)> {
     Some((status, id.to_owned(), detail.to_owned()))
 }
 
-/// The checklist on the built replica (`quick`: only what changed since the last passing check).
+/// The checklist on the built replica (`quick`: only what changed since the last passing check). The engine makes
+/// the presenter guide's notes again from the script first, when the demo has a guide.
 pub fn checks(
     dir: &Path,
     quick: bool,
@@ -254,6 +255,41 @@ pub fn checks(
         } else {
             ".out/fidelity.md"
         }),
+    })
+}
+
+/// What a check covers: changing any of these after the last full checklist means it has to run again.
+const CHECKED_INPUTS: [&str; 11] = [
+    "manifest.json",
+    "demo.json",
+    "flow.overrides.mjs",
+    "flow.fixes.json",
+    "flow.editor.json",
+    "focus.json",
+    "focus.mjs",
+    "data/build.json",
+    "presenter/notes.json",
+    "presenter/shots/shots.json",
+    "presenter/presenter.css",
+];
+
+/// Whether the whole checklist needs to run (before an export): it never passed, or something it covers changed since.
+pub fn needs_full_check(dir: &Path) -> bool {
+    let report = dir.join(".out/fidelity.json");
+    let passed = std::fs::read(&report)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| v["pass"] == true && v["quick"] != true);
+    let Some(at) = passed
+        .then(|| std::fs::metadata(&report).and_then(|m| m.modified()).ok())
+        .flatten()
+    else {
+        return true;
+    };
+    CHECKED_INPUTS.iter().any(|f| {
+        std::fs::metadata(dir.join(f))
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m > at)
     })
 }
 
@@ -315,6 +351,31 @@ mod tests {
             (s.redacted, s.findings[0].file.as_str()),
             (1, "data/x.json")
         );
+    }
+
+    #[test]
+    fn a_full_check_runs_again_only_after_a_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("manifest.json"), "{}").unwrap();
+        assert!(needs_full_check(dir));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::create_dir_all(dir.join(".out")).unwrap();
+        std::fs::write(
+            dir.join(".out/fidelity.json"),
+            r#"{"pass":false,"quick":false}"#,
+        )
+        .unwrap();
+        assert!(needs_full_check(dir));
+        std::fs::write(
+            dir.join(".out/fidelity.json"),
+            r#"{"pass":true,"quick":false}"#,
+        )
+        .unwrap();
+        assert!(!needs_full_check(dir));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(dir.join("focus.json"), "{}").unwrap();
+        assert!(needs_full_check(dir));
     }
 
     #[test]

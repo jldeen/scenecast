@@ -3,7 +3,8 @@
 //   node checks/fidelity.mjs --demo <dir> [--quick] [--states id,id] [--url …] [--skip id,id] [--only id,id]
 //                            [--speed 10] [--jobs N]
 // Items: secrets, render, two-run, light, transitions, composer, keys, lists, zoom, clicks, drags, groups, chips,
-// reset, hovers, contact-sheet, then the manual ones. The replica server is started for the run if it isn't up.
+// reset, hovers, notes (the presenter guide), contact-sheet, then the manual ones. The replica server is started for the
+// run on a free port if the demo's isn't up.
 // Fast: the items run at the same time (--jobs pages at once), on a clock --speed times faster (the replica's
 // ?speed=; every screen comes out the same as at speed 1).
 // --quick checks only what changed since the last passing check (.out/check-base.json): the screens whose served
@@ -26,7 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const KIT = join(here, '..');
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
-const URL = arg(args, '--url', demo.url);
+let URL = arg(args, '--url', demo.url);
 const fileBase = new globalThis.URL(URL).protocol === 'file:' ? new globalThis.URL('.', URL).href : null;
 const QUICK = args.includes('--quick');
 const SPEED = +arg(args, '--speed', 10);
@@ -49,6 +50,8 @@ mkdirSync(demo.out, { recursive: true });
 let server = null;
 const up = async () => { if (fileBase) return true; try { return (await fetch(new globalThis.URL('__replica/status', URL))).ok; } catch (e) { return false; } };
 if (!(await up())) {
+  // Not on the demo's own port unless asked for (--url): the editor or the stage may start there while this runs.
+  if (!arg(args, '--url')) URL = `http://127.0.0.1:${await new Promise(res => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); })}/`;
   server = spawn(process.execPath, [join(KIT, 'player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
   for (let i = 0; i < 50 && !(await up()); i++) await sleep(100);
 }
@@ -116,8 +119,18 @@ const grpApps = flow.apps.map(a => a.id).filter(a => hoversOf(a).groups);
 // served (tweaks applied), and the answers that end on it; an app's, its layout; hovers, the app's hover data.
 const sha = t => createHash('sha256').update(t).digest('hex').slice(0, 16);
 const served = async p => { try { const r = await fetch(URL + p.replace(/^\//, '')); return r.ok ? await r.text() : ''; } catch (e) { return ''; } };
+// The presenter guide's inputs: its notes, the script they came from, and its pictures (names and sizes).
+function notesPrint() {
+  const nf = join(demo.dir, 'presenter', 'notes.json');
+  if (!existsSync(nf)) return null;
+  const text = readFileSync(nf, 'utf8');
+  let script = ''; try { script = readFileSync(join(demo.dir, JSON.parse(text).script || 'script.md'), 'utf8'); } catch (e) {}
+  const shots = join(demo.dir, 'presenter', 'shots');
+  const pics = existsSync(shots) ? readdirSync(shots).sort().map(f => f + ':' + statSync(join(shots, f)).size).join() : '';
+  return sha(text + '\u0000' + script + '\u0000' + pics);
+}
 async function fingerprints() {
-  const fp = { states: {}, apps: {}, hovers: {}, beats: sha(JSON.stringify([flow.beats, flow.apps.map(a => a.key)])), focus: sha(JSON.stringify([flow.focus || [], flow.focusOptions || {}])) };
+  const fp = { states: {}, apps: {}, hovers: {}, beats: sha(JSON.stringify([flow.beats, flow.apps.map(a => a.key)])), focus: sha(JSON.stringify([flow.focus || [], flow.focusOptions || {}])), notes: notesPrint() };
   const snapFp = {};
   const snapOf = async snap => {
     if (snapFp[snap]) return snapFp[snap];
@@ -147,13 +160,14 @@ const base = existsSync(BASE) ? JSON.parse(readFileSync(BASE, 'utf8')) : null;
 const statesArg = (arg(args, '--states', '') || '').split(',').filter(Boolean);
 let SCOPE = statesArg.length ? new Set(statesArg) : null;
 const changedApps = new Set(), changedHovers = new Set();
-let beatsChanged = true, focusChanged = true;
+let beatsChanged = true, focusChanged = true, notesChanged = true;
 if (QUICK && !SCOPE) {
   SCOPE = new Set();
   for (const a of flow.apps) { if (!base || base.apps[a.id] !== FP.apps[a.id]) changedApps.add(a.id); if (!base || base.hovers[a.id] !== FP.hovers[a.id]) changedHovers.add(a.id); }
   for (const [id, st] of Object.entries(S)) if (!base || base.states[id] !== FP.states[id] || changedApps.has(st.app)) SCOPE.add(id);
   beatsChanged = !base || base.beats !== FP.beats;
   focusChanged = !base || base.focus !== FP.focus;
+  notesChanged = !base || base.notes !== FP.notes || beatsChanged || focusChanged;
 }
 const inScope = id => !SCOPE || SCOPE.has(id);
 const pathStates = [...new Set((flow.path || []).map(s => s.checkpoint).filter(Boolean))].filter(s => S[s]);
@@ -906,6 +920,18 @@ try {
     }
   } });
 
+  tasks.push({ id: 'notes', deps: [], run: async () => {
+    // ---- notes: the presenter guide (⌥G) and its notes agree with the script and the replica (checks/notes-check.mjs).
+    // Quick: only when the notes, the script, the pictures, the beats or the focus points changed.
+    if (!want('notes') || (QUICK && !notesChanged)) return;
+    if (!existsSync(join(demo.dir, 'presenter', 'notes.json'))) { if (!QUICK) add('notes', 'Presenter guide and notes', 'skip', 'no presenter/notes.json (scenecast notes)'); return; }
+    const r = await node('checks/notes-check.mjs', ['--demo', demo.dir, '--url', URL]);
+    let rep = null; try { rep = JSON.parse(readFileSync(join(demo.out, 'notes-check.json'), 'utf8')); } catch (e) {}
+    if (!rep) return add('notes', 'Presenter guide and notes', 'fail', r.out.slice(-800));
+    const bad = rep.items.filter(i => i.status === 'fail'), warn = rep.items.filter(i => i.status === 'warn');
+    add('notes', 'Presenter guide and notes', bad.length ? 'fail' : warn.length ? 'warn' : 'pass', bad.length ? bad.map(i => `${i.id}: ${i.detail}`).join('\n') : warn.length ? warn.map(i => `${i.id}: ${i.detail}`).join('\n') : `script, guide and replica agree (${rep.items.length} checks: ${rep.items.map(i => i.id).join(', ')})`);
+  } });
+
   tasks.push({ id: 'contact-sheet', deps: ['two-run'], run: async () => {
     // ---- contact sheet: real vs replica, every screen of the recorded path.
     if (want('contact-sheet') && !QUICK) {
@@ -942,7 +968,7 @@ try {
   if (server) server.kill();
 }
 const fails = items.filter(i => i.status === 'fail');
-const ORDER = ['secrets', 'render', 'two-run', 'cold-start', 'light', 'transitions', 'composer', 'keys', 'focus', 'lists', 'zoom', 'clicks', 'drags', 'groups', 'chips', 'reset', 'hovers', 'contact-sheet'];
+const ORDER = ['secrets', 'render', 'two-run', 'cold-start', 'light', 'transitions', 'composer', 'keys', 'focus', 'lists', 'zoom', 'clicks', 'drags', 'groups', 'chips', 'reset', 'hovers', 'notes', 'contact-sheet'];
 items.sort((a, b) => ((ORDER.indexOf(a.id) + 1) || 99) - ((ORDER.indexOf(b.id) + 1) || 99));
 const secs = Math.round((Date.now() - T_START) / 1000);
 const report = { demo: demo.name, at: new Date().toISOString(), quick: QUICK, scope: SCOPE ? [...SCOPE] : null, secs, pass: !fails.length, items };
@@ -955,6 +981,8 @@ if (!fails.length && !only.size && !skip.size) {
     for (const a of changedApps) next.apps[a] = FP.apps[a];
     for (const a of changedHovers) next.hovers[a] = FP.hovers[a];
     if (beatsChanged) next.beats = FP.beats;
+    if (focusChanged) next.focus = FP.focus;
+    if (notesChanged) next.notes = FP.notes;
     for (const id of Object.keys(next.states)) if (!S[id]) delete next.states[id];
   }
   writeFileSync(BASE, JSON.stringify(next, null, 1));

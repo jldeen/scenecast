@@ -10,6 +10,7 @@ import { loadDemo, KIT_VERSION, FLOW_VERSION } from '../lib/demo.mjs';
 import { applyFixesToFlow, readFixes } from '../../fixer/patches.mjs';
 import { mergeFocus } from '../../player/app/focus-order.js';
 import { readEditorOverrides, applyEditorOverrides, readFocusJson } from '../lib/overrides.mjs';
+import { compileEdits } from '../lib/edits.mjs';
 
 export async function compileFlow(demo, { fromRaw = false } = {}) {
   // A demo without a recording (a flow written by hand) is its own flow.json.
@@ -153,10 +154,25 @@ export async function finishFlow(demo, flow, rec) {
   }
   const generated = readFocusJson(demo.dir).points;
   if (existsSync(fp) || generated.length) flow.focus = mergeFocus(generated, hand, flow);
+  // A wording or date change (flow.edits: the editor's, scenecast text) changes the words a focus point looks for
+  // too: a point made from the script still finds its sentence after "Friday" becomes "Monday".
+  if ((flow.focus || []).length && (flow.edits || []).length) flow.focus = focusAfterEdits(flow.focus, flow.edits, flow.states || {});
   if ((flow.focus || []).length) flow.modules = ['/app/focus-module.js', ...(flow.modules || [])];
   const problems = validate(flow);
   writeFileSync(demo.flowPath, JSON.stringify(flow, null, 1) + '\n');
   return { flow, problems };
+}
+
+export function focusAfterEdits(points, edits, states) {
+  const compiled = compileEdits(edits);
+  return points.map(p => {
+    const snaps = (p.states || []).map(id => states[id] && states[id].snap).filter(Boolean);
+    const apply = t => { for (const e of compiled) { if (e.in && !snaps.some(id => e.in.includes(id))) continue; t = t.replace(e.re, e.to); } return t; };
+    const out = { ...p };
+    if (typeof p.find === 'string') out.find = apply(p.find);
+    if (Array.isArray(p.union)) out.union = p.union.map(u => typeof u === 'string' ? apply(u) : u && typeof u.text === 'string' ? { ...u, text: apply(u.text) } : u);
+    return out;
+  });
 }
 
 // Every state, stream and beat a flow names has to exist.
@@ -193,7 +209,7 @@ export function validate(flow) {
   for (const st of flow.apps || []) if (flow.beats && flow.beats[0] && !flow.beats[0].states[st.id]) out.push(`beat 0: no state for ${st.id}`);
   const keys = (flow.apps || []).map(a => a.key).filter(Boolean).map(k => k.toUpperCase());
   if (new Set(keys).size !== keys.length) out.push('two apps share a key');
-  for (const k of keys) if (!/^[A-Z]$/.test(k) || 'FPN'.includes(k)) out.push(`app key ${k} must be one letter A-Z, not F, N or P (presenter keys)`);
+  for (const k of keys) if (!/^[A-Z]$/.test(k) || 'FGPN'.includes(k)) out.push(`app key ${k} must be one letter A-Z, not F, G, N or P (presenter keys)`);
   return out;
 }
 

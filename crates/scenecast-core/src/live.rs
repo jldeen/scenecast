@@ -318,7 +318,7 @@ impl fmt::Display for LiveError {
             Self::DuplicateAppId { app } => write!(f, "app id `{app}` is duplicated"),
             Self::InvalidAppKey { app, key } => write!(
                 f,
-                "app `{app}` key `{key}` must be one letter A-Z, not F, N or P (those are presenter keys)"
+                "app `{app}` key `{key}` must be one letter A-Z, not F, G, N or P (those are presenter keys)"
             ),
             Self::DuplicateAppKey { key } => write!(f, "presenter key `{key}` is used by two apps"),
             Self::UnknownApp { context, app } => {
@@ -394,7 +394,7 @@ pub(crate) fn validate_live(manifest: &BundleManifest) -> ValidationReport {
             });
         }
         if let Some(key) = &app.key {
-            if !one_letter(key) || matches!(key.as_str(), "F" | "N" | "P") {
+            if !one_letter(key) || matches!(key.as_str(), "F" | "G" | "N" | "P") {
                 errors.push(LiveError::InvalidAppKey {
                     app: app.id.clone(),
                     key: key.clone(),

@@ -507,9 +507,58 @@ async fn key_reference(
     .await
 }
 
-/// Serves the replica for presenting and opens it full screen; this window steps out of the way.
+/// Where the presenter guide goes: the screen this window is on (the laptop's), in the screen points browsers use.
+fn laptop_screen(app: &AppHandle) -> Option<scenecast_app::guide::Place> {
+    let w = app.get_webview_window("main")?;
+    let m = w.current_monitor().ok().flatten()?;
+    let area = m.work_area();
+    let scale = m.scale_factor();
+    Some(scenecast_app::guide::Place {
+        x: (area.position.x as f64 / scale).round() as i32,
+        y: (area.position.y as f64 / scale).round() as i32,
+        width: (area.size.width as f64 / scale).round() as u32,
+        height: (area.size.height as f64 / scale).round() as u32,
+    })
+}
+
 #[tauri::command]
-async fn present_start(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+async fn guide_status(
+    state: State<'_, Shared>,
+    id: String,
+) -> Res<Option<scenecast_app::guide::GuideStatus>> {
+    let state = state.inner().clone();
+    blocking(move || Ok(scenecast_app::guide::status(&state.library.dir(&id)?))).await
+}
+
+/// Opens the presenter guide next to the stage, on this window's screen (the laptop's), in the stage's browser.
+#[tauri::command]
+async fn present_guide(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let dir = state.library.dir(&id)?;
+        let url = state
+            .presents
+            .lock()
+            .expect("presents lock")
+            .get_mut(&id)
+            .and_then(|s| s.running().then(|| s.url.clone()))
+            .ok_or_else(|| {
+                AppError::Invalid("start presenting first: the guide follows the stage".into())
+            })?;
+        scenecast_app::guide::open(&dir, &url, laptop_screen(&app))
+    })
+    .await
+}
+
+/// Serves the replica for presenting and opens it full screen, with the presenter guide on this window's screen when
+/// `guide` and the demo has one; this window steps out of the way.
+#[tauri::command]
+async fn present_start(
+    state: State<'_, Shared>,
+    app: AppHandle,
+    id: String,
+    guide: Option<bool>,
+) -> Res<Value> {
     let state = state.inner().clone();
     blocking(move || {
         let dir = state.library.dir(&id)?;
@@ -520,7 +569,16 @@ async fn present_start(state: State<'_, Shared>, app: AppHandle, id: String) -> 
         }
         stop_servers(&state, &id);
         let mut session = PresentSession::start(&dir, true)?;
-        let out = json!({ "url": session.url, "opened": session.opened });
+        let guide_url = if guide.unwrap_or(true) && scenecast_app::guide::status(&dir).is_some() {
+            Some(scenecast_app::guide::open(
+                &dir,
+                &session.url,
+                laptop_screen(&app),
+            )?)
+        } else {
+            None
+        };
+        let out = json!({ "url": session.url, "opened": session.opened, "guide": guide_url });
         let updates = session.updates();
         std::thread::spawn(move || for _ in updates {});
         if session.opened
@@ -587,15 +645,18 @@ async fn export_demo(
     id: String,
     kind: ExportKind,
     dest: Option<String>,
-) -> Res<scenecast_app::export::ExportOutcome> {
+    anyway: Option<bool>,
+) -> Res<scenecast_app::export::CheckedExport> {
     let root = state.library.root.clone();
     job(state, app, id, "export", move |dir, busy| {
-        busy.emit(Update::stage("export", "Exporting the replica"));
         let dest = dest
             .filter(|d| !d.trim().is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| scenecast_app::export::default_dest(&root));
-        scenecast_app::export::export(dir, &dest, kind)
+        // The whole checklist runs here, before the replica leaves (unless it passed and nothing changed since).
+        scenecast_app::export::export_checked(dir, &dest, kind, anyway.unwrap_or(false), |u| {
+            busy.emit(u)
+        })
     })
     .await
 }
@@ -790,6 +851,8 @@ fn main() {
             key_reference,
             present_start,
             present_stop,
+            present_guide,
+            guide_status,
             servers,
             default_export_dir,
             export_demo,

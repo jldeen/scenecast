@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Presenter guide</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/presenter/presenter.css">
+</head>
+<body>
+<div class="pn">
+  <header class="pn-top">
+    <span class="pn-status" data-pn="status"><i></i><span data-pn="status-text">Not connected</span></span>
+    <span class="pn-deck" data-pn="deck"></span>
+    <span class="pn-timer">
+      <span class="pn-window" data-pn="window" title="This beat's time in the script"></span>
+      <span class="pn-clock" data-pn="clock">0:00</span>
+      <button type="button" class="pn-ghost" data-pn="reset-timer" title="Back to this beat's start time in the script">Reset</button>
+    </span>
+  </header>
+  <div class="pn-preview" data-pn="preview" hidden>
+    <span data-pn="preview-text"></span>
+    <button type="button" class="pn-btn pn-small" data-pn="go-stage">Go to this beat on stage</button>
+    <button type="button" class="pn-btn pn-small pn-primary" data-pn="live">Back to live (Esc)</button>
+  </div>
+  <section class="pn-now">
+    <div class="pn-head"><span class="pn-count" data-pn="count"></span><span class="pn-part" data-pn="part"></span></div>
+    <h1 class="pn-title" data-pn="title"></h1>
+    <p class="pn-where" data-pn="where"></p>
+  </section>
+  <main class="pn-body">
+    <section class="pn-notes" data-pn="notes-col">
+      <h2>Talk track <span>word for word</span></h2>
+      <div class="pn-say" data-pn="say"></div>
+      <h2 data-pn="clicks-h">Clicks</h2>
+      <div class="pn-clicks" data-pn="clicks"></div>
+      <h2 data-pn="watch-h">Watch-outs</h2>
+      <ul class="pn-watch" data-pn="watch"></ul>
+    </section>
+    <aside class="pn-side">
+      <h2>On screen now <span data-pn="shot-label"></span></h2>
+      <div class="pn-shot"><img data-pn="shot" alt=""></div>
+      <h2>Up next</h2>
+      <p class="pn-do"><span class="pn-act" data-pn="next-act"></span> → <span data-pn="next-to"></span></p>
+      <div class="pn-up"><div class="pn-thumb"><img data-pn="next-shot" alt=""></div><p class="pn-next-title" data-pn="next-title"></p></div>
+    </aside>
+  </main>
+  <footer class="pn-foot">
+    <button type="button" class="pn-btn" data-pn="prev">← Back</button>
+    <nav class="pn-rail" data-pn="rail" aria-label="Beats"></nav>
+    <button type="button" class="pn-btn pn-primary" data-pn="next">Next →</button>
+  </footer>
+  <details class="pn-keys" data-pn="keys-box">
+    <summary>Keys</summary>
+    <dl data-pn="keys"></dl>
+  </details>
+</div>
+<script type="module" src="/presenter/presenter.js"></script>
+</body>
+</html>

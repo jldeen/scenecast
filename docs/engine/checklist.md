@@ -17,9 +17,14 @@ fixture the full checklist takes about 25 s (168 s before 1.3.0). Each item's ti
 it, its app's layout and hovers, the beats) against the last passing run (`.out/check-base.json`) and checks only
 the screens that changed: transitions, composer and render on those, lists, clicks, groups and chips that live
 there, hovers for an app whose hovers changed, keys if the beats did. It skips two-run, zoom, drags, reset and the
-contact sheet. Focus points run for screens that changed, or all of them if `focus.mjs` or the beats changed. A
-wording tweak on one screen: about 10 s. Nothing changed: about 2 s. `--states a,b` checks the
-named screens the same way.
+contact sheet. Focus points run for screens that changed, or all of them if the focus points or the beats changed.
+The presenter guide (`notes`) runs when its notes, script, pictures, the beats or the focus points changed; `quick`
+makes the notes again from the script first. A wording tweak on one screen: about 10–30 s on the fixture (the
+selftest fails over 3 minutes). Nothing changed: about 2 s. `--states a,b` checks the named screens the same way.
+
+In scenecast, `scenecast quick` is this, and the desktop app runs it on its own after a build, a script or an edit;
+the full checklist (`scenecast check`, `release`, and the app's Export) runs once, before a release. Without `--url`,
+the checks serve the replica on a free port of their own, so the editor or the stage can open while they run.
 
 | Id | Check | Fails when | Usual fix |
 |---|---|---|---|
@@ -31,7 +36,7 @@ named screens the same way.
 | `transitions` | Every recorded control, from its own screen | A click, Enter, typing or Escape lands on another state, or its element isn't on screen. On the recorded path: panes closing and reopening, the send arrow. | A matcher that finds a different element (`nth`, `in`), or a state recorded twice (merge in overrides). |
 | `composer` | Cursor, ⌥P, send | The cursor isn't in the field the real app focuses (`focus`), ⌥P doesn't reach the typed state, or the send arrow sends an empty box. | Add `focus` for screens that put the cursor in a field; check `fill` values. |
 | `keys` | Presenter keys | ⌥0–⌥9 don't land on their beats, or an app key doesn't switch. | Fix `beats` in overrides. |
-| `focus` | Focus points (`focus.mjs`), each reached with ⌥F on its first screen, twice; reverse focus is also checked | A point isn't found, its zoom passes the zoom factor, its mark isn't on screen with an 8% margin (or, where the page puts it against the screen's edge, at least on screen), Esc leaves it zoomed, or a second run lands differently. Then: a beat key and ⌥F don't start at that beat's first point on screen, ↑/↓ don't step the zoom, or ⌥0 leaves it zoomed. Skipped with no points. | A text that isn't on that screen (check `states`, or the wording after an edit); a target too big for the screen (point at part of it, or `union` of two smaller parts); `beat` (the key that lands just before it). |
+| `focus` | Focus points (`focus.mjs`, `focus.json`; script points follow wording and date edits), each reached with ⌥F on its first screen, twice; reverse focus is also checked | A point isn't found, its zoom passes the zoom factor, its mark isn't on screen with an 8% margin (or, where the page puts it against the screen's edge, at least on screen), Esc leaves it zoomed, or a second run lands differently. Then: a beat key and ⌥F don't start at that beat's first point on screen, ↑/↓ don't step the zoom, or ⌥0 leaves it zoomed. Skipped with no points. | A text that isn't on that screen (check `states`, or the wording after an edit); a target too big for the screen (point at part of it, or `union` of two smaller parts); `beat` (the key that lands just before it). |
 | `lists` | Virtualized lists in full | Fewer rows than captured, or the last row doesn't scroll into view. | `replica record side list` on that screen; pass `sel`/`row`/`index` if it picked the wrong list. If something resized the window after the list was placed (a headless run), the rows are lost: recapture. |
 | `zoom` | Every screen at each zoom in `demo.json` (50–200%) | Errors, or a screen's field off screen. Warns when the page scrolls sideways or differs from the real page at that zoom by more than 3%. Writes `zoom-sheet.png`. | `replica record side zoom` on screens whose layout changes by script; `layout` rules for what the app re-places (pin, set, gridfit). |
 | `clicks` | Panes, sections and menus (from `record side clicks`), resting on each control first (its hover showing) | A control doesn't open in the replica on its screen, doesn't close the real page's way (Escape, again, a click elsewhere, a control in its place, by itself), leaves the page different after closing, or (a sticky pane) doesn't stay through a morph. Warns if no clicks were captured. Writes `clicks/click-sheet-NN.png`. | An unstyled popup: its styles loaded late (see vendorCss in the flow format). A control that does nothing: its shape differs on that screen (`clickFit` in the console). Wrong close: `restore` in `clickPages`. |
@@ -39,6 +44,7 @@ named screens the same way.
 | `groups` | Step groups (from `record side groups`) | A collapsed group on a screen of the path doesn't open with its list, or the page differs after closing it; or a group opened while an answer is still coming in isn't open (with its list) when the answer ends. | No list: capture the group open (`record side groups` on that screen), or check `groups.button` / `label` in demo.json. A group that closes mid-answer: its button has no `aria-controls` (it's matched by label, which changes as it counts). |
 | `chips` | "+N" chips (from `record side chips`) | At a width where "+N" shows, it doesn't show every chip and become "Show less" (or the real label), doesn't stay so through a morph, or "Show less" doesn't put the page back. | A pane pinned at a fixed width doesn't narrow with the window: recapture the chips (and zoom) on a screen before any drag; check `rows` and `gap` in the rule. |
 | `reset` | ⌥0 and a beat jump | After opening panes, menus, a step group and "+N", and resizing, ⌥0 or ⌥1 leaves any of them changed, or ⌥0's page differs from a fresh start. | An engine bug: report it with the demo. |
+| `notes` | The presenter guide (⌥G; [presenter.md](../presenter.md)): script ↔ guide ↔ replica, in headless Chrome | `presenter/notes.json` isn't current with the script; the guide doesn't show a beat's words, clicks, focus points or watch-outs; a picture is missing or isn't its beat's screen; a focus point is on no script beat; the guide doesn't open with ⌥G, follow the stage through every beat key, browse without moving it, move it with "Go to this beat on stage", step over a beat with no screen of its own; or the timer doesn't start, run and reset. Skipped with no guide. | `scenecast notes` (the check runs it first anyway), `scenecast guide-shots`; demo.json `presenter.beats` for a beat that isn't on its key. |
 | `hovers` | Hover states | Fewer than 90% of the captured hovers show. Warns if any don't. Warns too if no hovers were captured. | The automatic pass covers every screen; a screen it capped (`record stop` says) gets `replica record side hovers`. |
 | `contact-sheet` | Real vs replica, every screen of the path | It can't be made. Warns over 5% of pixels different. | Look at the pair: a missing font, a stale capture, a state that didn't settle before capture. |
 | `manual-theme` 👤 | Theme set to Light, not System, in every app, before recording | | |
@@ -64,6 +70,7 @@ The checklist in one line each, for a run sheet:
 - [ ] two-run identical DOM
 - [ ] cold start: three fresh clones, each identical on its first run
 - [ ] focus points (⌥F) land on screen, the same every time
+- [ ] presenter guide (⌥G): follows the stage, browses, goes to a beat, times
 - [ ] real-vs-replica contact sheets
 - [ ] README: path, keys, differences
 - [ ] rehearsed on the venue display

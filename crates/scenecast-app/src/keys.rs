@@ -135,6 +135,10 @@ pub fn reference_for(m: &BundleManifest, os: &str, focus_points: usize) -> KeyRe
                     keys: "Click, type, Enter".into(),
                     what: "Work it like the real product".into(),
                 },
+                KeyRow {
+                    keys: k("G"),
+                    what: "Open the presenter guide (for the laptop screen)".into(),
+                },
             ],
         },
     ];
@@ -210,5 +214,11 @@ mod tests {
                 .any(|r| r.keys == "⌥F")
         );
         assert!(win.exit.contains("F11"));
+        assert!(
+            win.groups
+                .iter()
+                .flat_map(|g| &g.rows)
+                .any(|r| r.keys == "Ctrl+Alt+G" && r.what.contains("presenter guide"))
+        );
     }
 }

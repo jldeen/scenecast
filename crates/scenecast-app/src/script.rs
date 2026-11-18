@@ -18,6 +18,12 @@ pub struct ScriptView {
     pub sheet: PathBuf,
     pub sheet_pdf: Option<PathBuf>,
     pub cues: PathBuf,
+    /// The presenter guide made from the same script.
+    #[serde(default)]
+    pub guide: Option<crate::guide::GuideStatus>,
+    /// Why the guide couldn't be made, when it couldn't (the focus points are still there).
+    #[serde(default)]
+    pub guide_error: Option<String>,
 }
 
 /// The demo's script, if it has one.
@@ -91,6 +97,8 @@ pub fn last(dir: &Path) -> Option<ScriptView> {
         sheet: out.join("sheet.html"),
         sheet_pdf: pdf.is_file().then_some(pdf),
         cues: out.join("cues.html"),
+        guide: crate::guide::status(dir),
+        guide_error: None,
     })
 }
 
@@ -107,11 +115,18 @@ pub fn run(dir: &Path, mut on: impl FnMut(Update)) -> Result<ScriptView, AppErro
         }),
         ScriptProgress::Engine(line) => on(Update::line(&line)),
     })?;
+    // The presenter guide from the same script: its notes (with the focus points just made) and its pictures.
+    let (guide, guide_error) = match crate::guide::make(dir, &mut on) {
+        Ok(g) => (g, None),
+        Err(e) => (crate::guide::status(dir), Some(e.to_string())),
+    };
     Ok(ScriptView {
         report: outcome.report,
         sheet: outcome.sheet_html,
         sheet_pdf: outcome.sheet_pdf,
         cues: outcome.cues.with_extension("html"),
+        guide,
+        guide_error,
     })
 }
 

@@ -581,3 +581,89 @@ pub fn release(args: &Passthrough) -> Result<i32> {
     rest.push("--skip-build".into());
     handover("release", &Passthrough { args: rest }, true)
 }
+
+#[derive(Debug, Clone, Args)]
+pub struct InstallSkillArgs {
+    /// Where to put the skill (default: ~/.copilot/skills/scenecast-replicate-demo).
+    #[arg(long)]
+    pub dest: Option<PathBuf>,
+}
+
+/// The "replicate a demo" skill and its references, carried in the binary so it installs from anywhere.
+const SKILL_FILES: [(&str, &str); 7] = [
+    ("SKILL.md", include_str!("../../../skill/SKILL.md")),
+    (
+        "references/guide.md",
+        include_str!("../../../docs/guide.md"),
+    ),
+    ("references/cli.md", include_str!("../../../docs/cli.md")),
+    (
+        "references/presenter.md",
+        include_str!("../../../docs/presenter.md"),
+    ),
+    (
+        "references/checklist.md",
+        include_str!("../../../docs/engine/checklist.md"),
+    ),
+    (
+        "references/flow-format.md",
+        include_str!("../../../docs/engine/flow-format.md"),
+    ),
+    (
+        "references/lessons.md",
+        include_str!("../../../docs/engine/lessons.md"),
+    ),
+];
+
+/// `scenecast install-skill`: the skill for Copilot (and any agent that reads ~/.copilot/skills).
+pub fn install_skill(args: &InstallSkillArgs) -> Result<()> {
+    let dest = match &args.dest {
+        Some(d) => d.clone(),
+        None => {
+            let home = if cfg!(windows) {
+                std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
+            } else {
+                std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+            }
+            .context("HOME and USERPROFILE are unset: pass --dest <dir>")?;
+            PathBuf::from(home)
+                .join(".copilot")
+                .join("skills")
+                .join("scenecast-replicate-demo")
+        }
+    };
+    write_skill(&dest)?;
+    println!("installed the scenecast skill to {}", dest.display());
+    println!("ask Copilot to \"replicate a demo with scenecast\" (it runs the scenecast CLI)");
+    Ok(())
+}
+
+fn write_skill(dest: &Path) -> Result<()> {
+    for (name, text) in SKILL_FILES {
+        let path = dest.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_the_skill_and_its_references() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_skill(tmp.path()).unwrap();
+        let skill = std::fs::read_to_string(tmp.path().join("SKILL.md")).unwrap();
+        assert!(skill.starts_with("---\nname: scenecast-replicate-demo"));
+        assert!(tmp.path().join("references/presenter.md").is_file());
+        for (name, _) in SKILL_FILES.iter().skip(1) {
+            let link = format!("({name})");
+            assert!(skill.contains(&link), "SKILL.md links {name}");
+        }
+    }
+}

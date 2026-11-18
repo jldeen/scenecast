@@ -110,6 +110,10 @@ async function shot(name) {
   await sleep(400);
   await b.saveScreenshot(join(SHOTS, `${name}.png`));
 }
+// The app's own state: whether a demo's job (the quick checks it starts after a build, a script or an edit) runs.
+const checksAfter = (since, id = 'fixture-demo') => b.execute((since, id) => { const j = window.__scenecast?.jobs?.[id]?.checks; return j && j.startedAt > since && !window.__scenecast.jobs[id].running.checks ? (j.outcome || { error: j.error }) : null; }, since, id);
+// The checks the app starts on its own after a step that began at `since`: wait for them to start and end.
+const quickAfter = (what, since, timeout = 600000) => waitFor(`the checks after ${what}`, () => checksAfter(since), timeout, 500);
 async function type(t, value) {
   const e = await el(t);
   await e.waitForDisplayed({ timeout: 15000 });
@@ -231,10 +235,11 @@ try {
   await waitFor('the build', async () => (await exists('build-done')) || (await exists('build-failed')), 600000);
   check('builds the replica', await exists('build-done'), (await exists('build-failed')) && await text('build-failed'));
   check('shows the scrub report', (await exists('scrub-clean')) || (await exists('scrub-summary')));
-  await click('checks-quick');
+  // The checks for what changed run on their own after the build; never the whole checklist (that's Export).
   await waitFor('the checks', () => exists('checks-done'), 600000);
   const failing = await b.execute(() => [...document.querySelectorAll('[aria-label=Checks] [data-status=fail]')].map(li => li.innerText.replace(/\s+/g, ' ')).join('; '));
-  check('runs the checks', (await attr('checks-done', 'data-pass')) === 'true', `${await text('checks-done')} ${failing}`);
+  check('the build runs the quick checks on its own, and they pass', (await attr('checks-done', 'data-pass')) === 'true' && (await attr('checks-done', 'data-quick')) === 'true', `${await text('checks-done')} ${failing}`);
+  check('no "run every check" outside Export', !(await exists('checks-full')));
   await shot('07-build');
   lap('build');
 
@@ -258,14 +263,19 @@ try {
   // ---- 6 · Script ----------------------------------------------------------------------------------------------
   await click('tab-script');
   await type('script-text', readFileSync(join(ROOT, 'examples', 'fixture-app', 'script.md'), 'utf8'));
+  const tScript = await b.execute(() => Date.now());
   await click('script-run');
   await waitFor('script to focus', async () => (await exists('script-summary')) && !(await exists('script-running')), 600000, 1000);
   const points = +(await attr('script-summary', 'data-points'));
   check('script to focus points: lines on their screens, focus points made', points >= 1 && existsSync(join(DEMO, 'focus.json')), points);
   check('the line-to-screen sheet shows', await waitFor('the sheet', () => b.execute(() => { const f = document.querySelector('[data-test=sheet-frame]'); return !!f && /^(scenecast:|http:\/\/scenecast\.localhost)/.test(f.src); }), 20000));
+  const guideShots = existsSync(join(DEMO, 'presenter', 'notes.json')) ? JSON.parse(readFileSync(join(DEMO, 'presenter', 'notes.json'), 'utf8')).shots : [];
+  check('the presenter guide is made from the same script, with its pictures', +(await attr('script-guide', 'data-beats')) === 4 && guideShots.length > 0 && guideShots.every(x => existsSync(join(DEMO, 'presenter', 'shots', x.name + '.png'))), JSON.stringify([await attr('script-guide', 'data-beats'), guideShots.map(x => x.name)]));
   await shot('09-script');
   await click('cues-tab');
   check('the cue sheet shows', await waitFor('the cue sheet', () => b.execute(() => /cues\.html$/.test(document.querySelector('[data-test=sheet-frame]')?.src || '')), 20000));
+  const afterScript = await quickAfter('the script', tScript);
+  check('the script runs the quick checks on its own', afterScript.quick && afterScript.pass, JSON.stringify(afterScript.items?.filter(i => i.status === 'fail')));
   lap('script');
 
   // ---- 7 · Edit: a dot and a date ------------------------------------------------------------------------------
@@ -316,22 +326,48 @@ try {
   check('edit: the app lists the dot and the date as they are saved', fj.points.some(p => p.source === 'dot') && JSON.stringify(ej.edits).includes('Monday'), JSON.stringify(ej));
   await page.close();
   await shot('10-edit');
+  const tEdit = await b.execute(() => Date.now());
   await click('edit-stop');
+  // Stopping the editor checks what the edits touched (the dot's screen, the date's), quickly; the focus points the
+  // script made still find their words after "Friday" became "Monday".
+  const tq = Date.now();
+  const afterEdit = await quickAfter('the edits', tEdit);
+  times.quickAfterEdit = Math.round((Date.now() - tq) / 1000);
+  check('edits: the quick checks run on their own, pass, and take under 3 minutes', afterEdit.quick && afterEdit.pass && times.quickAfterEdit < 180, JSON.stringify([times.quickAfterEdit, afterEdit.items?.filter(i => i.status === 'fail')]));
   lap('edit');
 
   // ---- 8 · Present ---------------------------------------------------------------------------------------------
   await click('tab-present');
   await waitFor('the key reference', () => exists('key-reference'), 30000);
-  check('the key reference before presenting', /presenter keys/.test(await text('key-reference')));
+  check('the key reference before presenting', /presenter keys/.test(await text('key-reference')) && /presenter guide/.test(await text('key-reference')));
+  check('the presenter guide, ready, with its keys', +(await attr('guide-status', 'data-beats')) === 4 && (await b.$('#with-guide').isSelected()), await text('guide-card'));
   await shot('11-present');
   await click('present-start');
   const presentUrl = await waitFor('presenting', () => attr('presenting', 'data-url'), 120000);
-  const replica = await viewer.newPage({ viewport: { width: 1600, height: 900 } });
+  const guideUrl = await waitFor('the presenter guide', () => attr('guide-open', 'data-url'), 30000);
+  check('Start presenting opens the presenter guide on this screen too', /\/presenter\.html(#place=-?\d+,-?\d+,\d+,\d+)?$/.test(guideUrl) && guideUrl.startsWith(new URL(presentUrl).origin), guideUrl);
+  await shot('11b-presenting');
+  // The stage and the guide in one browser (they talk over a BroadcastChannel, as in her Edge or Chrome).
+  const stageBrowser = await viewer.newContext({ viewport: { width: 1600, height: 900 } });
+  const replica = await stageBrowser.newPage();
   await replica.goto(presentUrl);
   await replica.waitForFunction(() => window.d1 && window.d1.state.active, null, { timeout: 60000 });
   check('presents the replica, with no editor in the page', !(await replica.evaluate(() => !!window.d1.editor || !!document.querySelector('[data-scenecast-editor]'))));
   check('the key reference is off screen while presenting', !(await exists('key-reference')));
-  await replica.close();
+  // The guide, next to the stage in the same browser: in sync, it follows a beat key, and moves the stage.
+  const guide = await stageBrowser.newPage();
+  await guide.setViewportSize({ width: 1440, height: 900 });
+  await guide.goto(guideUrl);
+  const synced = n => guide.waitForFunction(n => window.presenter && window.presenter.connected && window.presenter.live === n, n, { timeout: 15000 }).then(() => true, () => false);
+  const inSync = await synced(0);
+  await replica.bringToFront(); await replica.keyboard.press('Control+Alt+Digit2'); await replica.evaluate(() => window.d1.idle());
+  const follows = await synced(2);
+  await guide.bringToFront(); await guide.click('[data-goto="3"]'); await guide.click('[data-pn="go-stage"]');
+  const moved = await replica.waitForFunction(() => window.d1.presenter.beat === 3 && !window.d1.presenter.pending, null, { timeout: 15000 }).then(() => true, () => false);
+  check('the presenter guide: in sync with the stage, follows it, and "Go to this beat on stage" moves it', inSync && follows && moved, JSON.stringify({ inSync, follows, moved }));
+  await guide.click('[data-goto="2"]'); await sleep(300);
+  if (SHOTS) await guide.screenshot({ path: join(SHOTS, '11c-presenter-guide.png') });
+  await stageBrowser.close();
   await click('present-stop');
   await waitFor('stopped', () => exists('present-start'), 30000);
   lap('present');
@@ -339,12 +375,14 @@ try {
   // ---- 9 · Export ----------------------------------------------------------------------------------------------
   await click('tab-export');
   await click('export-folder');
-  const folder = await waitFor('the folder export', () => attr('export-done', 'data-path'), 300000);
-  check('exports a plain folder', existsSync(join(folder, 'index.html')) && existsSync(join(folder, 'manifest.json')), folder);
+  const folder = await waitFor('the folder export', async () => (await attr('export-done', 'data-path')) || ((await exists('export-checks-failed')) && 'failed'), 900000, 1000);
+  if (folder === 'failed') check('every check passes before the export', false, await text('export-checks-failed'));
+  check('Export runs every check first, then exports a plain folder', (await attr('export-done', 'data-checked')) === 'ran' && existsSync(join(folder, 'index.html')) && existsSync(join(folder, 'manifest.json')), folder);
+  check('the whole checklist ran (not quick)', JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8')).quick === false);
   await shot('12-export');
   await click('export-zip');
   const zip = await waitFor('the zip export', async () => (await attr('export-done', 'data-kind')) === 'zip' && attr('export-done', 'data-path'), 300000);
-  check('exports a zip', /\.zip$/.test(zip) && statSync(zip).size > 1000, zip);
+  check('exports a zip, without running every check again (nothing changed)', /\.zip$/.test(zip) && statSync(zip).size > 1000 && (await attr('export-done', 'data-checked')) === 'current', zip);
   lap('export');
 
   // ---- The library shows where it stands ----------------------------------------------------------------------

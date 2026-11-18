@@ -34,3 +34,20 @@ test('flow finishing applies overrides before focus points', async t => {
   assert.equal(result.flow.focus[0].id, 'edited');
   assert.deepEqual(result.flow.modules, ['/app/focus-module.js']);
 });
+
+test('focus points follow wording and date edits', async () => {
+  const { focusAfterEdits } = await import('./flow.mjs');
+  const states = { a: { snap: 'a' }, b: { snap: 'b' } };
+  const points = [
+    { id: 'p1', states: ['a'], find: 'The earliest is due Friday.' },
+    { id: 'p2', states: ['b'], union: ['due Friday', { text: 'Friday', up: 1 }, { sel: 'button' }] },
+  ];
+  const out = focusAfterEdits(points, [{ replace: ['Friday', 'Monday'] }], states);
+  assert.equal(out[0].find, 'The earliest is due Monday.');
+  assert.deepEqual(out[1].union, ['due Monday', { text: 'Monday', up: 1 }, { sel: 'button' }]);
+  // An edit for some captures only changes the points on them.
+  const only = focusAfterEdits(points, [{ replace: ['Friday', 'Monday'], in: ['b'] }], states);
+  assert.equal(only[0].find, 'The earliest is due Friday.');
+  assert.equal(only[1].union[0], 'due Monday');
+  assert.equal(points[0].find, 'The earliest is due Friday.');
+});

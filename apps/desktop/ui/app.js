@@ -68,7 +68,7 @@ async function call(cmd, args = {}) {
 async function step(job, cmd, args, after) {
   const id = S.id;
   J(id).running[job] = true;
-  J(id)[job] = { ...(J(id)[job] || {}), stages: [], lines: [], items: [], events: [], error: null, outcome: null };
+  J(id)[job] = { ...(J(id)[job] || {}), stages: [], lines: [], items: [], events: [], error: null, outcome: null, startedAt: Date.now() };
   rerender();
   try {
     const out = await call(cmd, { id, ...args });
@@ -476,7 +476,7 @@ Object.assign(REGIONS, {
     }
     const fails = items.filter(i => i.status === 'fail').length;
     return `${progressBar(on)}<ul class="status-list" aria-label="Checks">${items.map(i => `<li data-status="${esc(i.status)}">${icon(i.status)}<span class="id mono">${esc(i.id)}</span><span class="small">${esc(String(i.detail).split('\n')[0].slice(0, 220))}</span><span></span></li>`).join('')}</ul>
-      ${j.outcome ? `<div class="notice ${j.outcome.pass ? 'ok' : 'bad'}" data-test="checks-done" data-pass="${j.outcome.pass}">${j.outcome.pass ? 'Every automatic check passes.' : `${plural(fails, 'check')} failing.`}</div>` : ''}
+      ${j.outcome ? `<div class="notice ${j.outcome.pass ? 'ok' : 'bad'}" data-test="checks-done" data-pass="${j.outcome.pass}" data-quick="${j.outcome.quick}">${j.outcome.pass ? (j.outcome.quick ? 'What changed passes its checks.' : 'Every automatic check passes.') : `${plural(fails, 'check')} failing.`}</div>` : ''}
       ${errorBox(j.error)}${logBox(j.lines)}`;
   },
 });
@@ -487,9 +487,8 @@ PANELS.build = async (panel, d) => {
         ${d.status.recorded ? '' : '<span class="muted small">Record the demo first.</span>'}</div>
       <div data-region="build" style="margin-top:12px"></div></div>
     <div class="card"><h2>Scrub report</h2><p class="muted">What was taken out of the replica before anyone sees it.</p><div data-region="scrub"></div></div>
-    <div class="card"><h2>Checks</h2><p class="muted">The replica in a headless browser: two identical runs, each step landing where the recording did, presenter keys, zoom, menus and lists, no errors and nothing fetched from outside.</p>
-      <div class="row"><button class="btn" data-action="checks-quick" data-test="checks-quick" ${d.status.built ? '' : 'disabled'}>Check what changed</button>
-        <button class="btn" data-action="checks-full" data-test="checks-full" ${d.status.built ? '' : 'disabled'}>Run every check</button></div>
+    <div class="card"><h2>Checks</h2><p class="muted">The replica in a headless browser: each step landing where the recording did, presenter keys, focus points, menus and lists, the presenter guide, no errors and nothing fetched from outside. After a build, an edit or a new script, the checks for what changed run on their own (a few minutes at most). Every check, two identical runs and every zoom included, runs once: when you export.</p>
+      <div class="row"><button class="btn" data-action="checks-quick" data-test="checks-quick" ${d.status.built ? '' : 'disabled'}>Check what changed</button></div>
       <div data-region="checks" style="margin-top:12px"></div></div>`;
   if (!J(d.id).scrub) J(d.id).scrub = await invoke('last_scrub', { id: d.id }).catch(() => null);
 };
@@ -586,6 +585,8 @@ PANELS.script = async (panel, d) => {
         <div class="stat"><div class="n">${s.backed}</div><div class="l">On their screen</div></div>
         <div class="stat"><div class="n">${s.unbacked}</div><div class="l">Not backed</div></div>
         <div class="stat"><div class="n">${s.points}</div><div class="l">Focus points</div></div></div>
+        ${v.guide ? `<div class="notice ok" data-test="script-guide" data-beats="${v.guide.beats}"><div><strong>Presenter guide ready:</strong> ${plural(v.guide.beats, 'beat')}, ${plural(v.guide.pictures, 'picture')}. Open it from Present.</div></div>` : ''}
+        ${v.guideError ? `<div class="notice warn"><div>The presenter guide wasn't made: ${esc(v.guideError)}</div></div>` : ''}
         <ul class="lines" aria-label="Script lines">${v.report.lines.map(l => `<li><span class="lid">${esc(l.id)}</span><div>${esc(l.text)}<div class="on">on <span class="mono">${esc(l.state)}</span>${l.points.length ? ` · ${plural(l.points.length, 'focus point')}` : ''}${l.missing.length ? ` · not on screen: ${esc(l.missing.join(', '))}` : ''}</div></div>
           <span class="pill ${LINE_STATUS[l.status]?.[0] || ''}">${LINE_STATUS[l.status]?.[1] || esc(l.status)}</span></li>`).join('')}</ul>`
         : '<p class="muted">Run it to see each line on the screen it plays over, and the focus points it gets.</p>'}</div></div>
@@ -638,16 +639,34 @@ PANELS.present = async (panel, d) => {
     return;
   }
   const keys = url ? null : await invoke('key_reference', { id: d.id }).catch(() => null);
+  const guide = await invoke('guide_status', { id: d.id }).catch(() => null);
+  const gk = isMac() ? '⌥G' : 'Ctrl+Alt+G';
   const f = d.status.fidelity;
+  const guideUrl = J(d.id).guideUrl;
   panel.innerHTML = `${url ? `<div class="card"><div class="notice ok" data-test="presenting" data-url="${esc(url)}"><div><strong>Presenting.</strong>
       ${S.info.noOpen ? 'Open it:' : 'The replica is full screen in its own window; this one is out of the way.'}
       <div class="path"><code>${esc(url)}</code><button class="btn small" data-open-url="${esc(url)}">Open again</button></div></div></div>
-      <button class="btn primary" data-action="present-stop" data-test="present-stop">Stop presenting</button></div>`
+      ${guide ? `<div class="notice info" data-test="guide-open" data-url="${esc(guideUrl || '')}"><div><strong>Presenter guide.</strong> ${guideUrl ? 'It opened on this screen, next to the stage. Its dot reads <strong>In sync</strong> once the stage is up.' : 'Open it on this screen; it follows the stage.'}
+        ${S.info.noOpen && guideUrl ? `<div class="path"><code>${esc(guideUrl)}</code></div>` : ''}</div></div>` : ''}
+      <div class="row"><button class="btn primary" data-action="present-stop" data-test="present-stop">Stop presenting</button>
+        ${guide ? `<button class="btn" data-action="present-guide" data-test="present-guide">Open presenter guide</button>` : ''}</div></div>`
     : `<div class="card"><div class="row"><div style="flex:1"><h2>Before you start</h2>
       <p class="muted">The keys, on one page. This page isn't on screen while you present: the replica opens full screen, and Scenecast steps aside.</p></div>
       <button class="btn primary" data-action="present-start" data-test="present-start">Start presenting</button></div>
+      ${guide ? `<label class="choice" style="margin-top:10px"><input type="checkbox" id="with-guide" data-test="with-guide" checked> Open the presenter guide on this screen too</label>` : ''}
       ${f && !f.pass ? `<div class="notice warn">Fidelity: ${f.within} of ${f.total} states match the real product. Fix them under Fidelity first, if you can.</div>` : ''}
       ${d.status.focusPoints ? '' : '<div class="notice info">No focus points yet: run your script under Script, or add them under Edit.</div>'}</div>`}
+    <div class="card" data-test="guide-card"><h2>Presenter guide</h2>
+      ${guide ? `<p>A second window for your laptop screen while the stage is on the projector: your talk track word for word, the clicks, the watch-outs, the time, what's on screen and what's next. It follows the stage as you go.</p>
+        <p class="muted small" data-test="guide-status" data-beats="${guide.beats}" data-pictures="${guide.pictures}">From <span class="mono">${esc(guide.script)}</span>: ${plural(guide.beats, 'beat')}, ${plural(guide.pictures, 'picture')}${guide.missingPictures ? ` (${guide.missingPictures} not made yet: find the focus points again under Script)` : ''}.</p>
+        <table class="data" aria-label="Presenter guide keys"><tbody>
+          <tr><td><kbd>${esc(gk)}</kbd> on the stage</td><td>Opens the guide (if it isn't open).</td></tr>
+          <tr><td><kbd>→</kbd> <kbd>Page Down</kbd>, <kbd>←</kbd> <kbd>Page Up</kbd> in the guide</td><td>Read the next or previous beat. The stage stays put.</td></tr>
+          <tr><td><kbd>Esc</kbd> in the guide</td><td>Back to the beat the stage is on.</td></tr>
+          <tr><td><strong>Go to this beat on stage</strong></td><td>Moves the stage to the beat you're reading.</td></tr>
+          <tr><td><strong>Reset</strong></td><td>The timer back to this beat's start time in the script.</td></tr></tbody></table>
+        <p class="muted small" style="margin-top:10px">If it opens on the projector instead, drag it to your laptop screen.</p>`
+        : '<p class="muted" data-test="guide-none">Your script becomes a presenter guide: a window for your laptop screen with the talk track, clicks and time, that follows the stage. Add your script under Script and press <strong>Find the focus points</strong>.</p>'}</div>
     ${keys && !url ? `<div class="card" data-test="key-reference"><h2>${esc(keys.title)}: presenter keys</h2>
       <p class="muted" style="margin-bottom:14px">Hold <kbd>${esc(keys.modifier)}</kbd> with the key.</p>
       <div class="keys">${keys.groups.map(g => `<div><h3>${esc(g.title)}</h3><table>${g.rows.map(r => `<tr><td><kbd>${esc(r.keys)}</kbd></td><td>${esc(r.what)}</td></tr>`).join('')}</table></div>`).join('')}</div>
@@ -659,11 +678,26 @@ PANELS.present = async (panel, d) => {
 Object.assign(REGIONS, {
   export(d) {
     const j = J(d.id).export || {};
-    if (running('export', d.id)) return progressBar(true) + '<p class="small">Exporting…</p>';
-    const o = j.outcome;
-    if (!o) return errorBox(j.error);
+    const items = j.items || [];
+    const list = items.length ? `<ul class="status-list" aria-label="Checks before the export">${items.map(i => `<li data-status="${esc(i.status)}">${icon(i.status)}<span class="id mono">${esc(i.id)}</span><span class="small">${esc(String(i.detail).split('\n')[0].slice(0, 220))}</span><span></span></li>`).join('')}</ul>` : '';
+    if (running('export', d.id)) {
+      const last = j.stages?.at(-1);
+      return progressBar(true) + `<p class="small" data-test="export-running">${esc(last?.label || 'Exporting…')}</p>${list}`;
+    }
+    const r = j.outcome;
+    if (!r) return errorBox(j.error);
+    if (!r.exported) {
+      const fails = (r.checks?.items || []).filter(i => i.status === 'fail');
+      return `<div class="notice bad" role="alert" data-test="export-checks-failed"><div><strong>Not exported yet:</strong> ${plural(fails.length, 'check')} failing.
+        <ul>${fails.map(i => `<li><span class="mono">${esc(i.id)}</span>: ${esc(String(i.detail).split('\n')[0].slice(0, 220))}</li>`).join('')}</ul>
+        <p class="small">Fix them (Fidelity, Edit, or ask whoever set up the demo), then export again. Or export it as it is.</p>
+        <div class="row" style="margin-top:8px"><button class="btn" data-action="export-anyway" data-test="export-anyway">Export anyway</button>
+        ${r.checks?.report ? `<button class="btn subtle" data-open-file="${esc(r.checks.report)}">Open the full report</button>` : ''}</div></div></div>`;
+    }
+    const o = r.exported;
     const mb = (o.bytes / 1048576).toFixed(1);
-    return `<div class="notice ok" data-test="export-done" data-path="${esc(o.path)}" data-kind="${esc(o.kind)}"><div><strong>Exported</strong> ${o.kind === 'zip' ? 'a zip' : 'a folder'}: ${plural(o.files, 'file')}, ${mb} MB.
+    const checked = { ran: 'Every check passed first.', current: 'Every check had already passed, and nothing has changed since.', skipped: 'Exported without the checks passing.' }[r.checked] || '';
+    return `<div class="notice ${r.checked === 'skipped' ? 'warn' : 'ok'}" data-test="export-done" data-path="${esc(o.path)}" data-kind="${esc(o.kind)}" data-checked="${esc(r.checked)}"><div><strong>Exported</strong> ${o.kind === 'zip' ? 'a zip' : 'a folder'}: ${plural(o.files, 'file')}, ${mb} MB. ${esc(checked)}
       <div class="path"><code>${esc(o.path)}</code><button class="btn small" data-reveal="${esc(o.path)}">Show in ${folderWord()}</button><button class="btn small" data-copy="${esc(o.path)}">Copy</button></div>
       <p class="small" style="margin-top:8px">Send it to the other presenter. They open <code>index.html</code> in Edge or Chrome: no install, nothing online.</p></div></div>`;
   },
@@ -672,13 +706,13 @@ PANELS.export = async (panel, d) => {
   const dest = J(d.id).dest || await invoke('default_export_dir');
   J(d.id).dest = dest;
   panel.innerHTML = `<div class="card"><h2>Export for another presenter</h2>
-      <p class="muted">The replica on its own: a plain folder, or the same folder zipped. Built pages only (scrubbed); no editor, no recording.</p>
+      <p class="muted">The replica on its own: a plain folder, or the same folder zipped. Built pages only (scrubbed); no editor, no recording. Every check runs first (two identical runs, cold starts, every zoom, focus points, the presenter guide), unless it already passed and nothing has changed since.</p>
       <label for="export-dest">Save in</label>
       <div class="row"><input id="export-dest" type="text" value="${esc(dest)}" style="flex:1" data-test="export-dest">
         <button class="btn" data-action="export-pick">Choose…</button></div>
       <div class="row" style="margin-top:14px">
-        <button class="btn primary" data-action="export-folder" data-test="export-folder" ${d.status.built ? '' : 'disabled'}>Export a folder</button>
-        <button class="btn" data-action="export-zip" data-test="export-zip" ${d.status.built ? '' : 'disabled'}>Export a zip</button>
+        <button class="btn primary" data-action="export-folder" data-test="export-folder" ${d.status.built && !running('checks') ? '' : 'disabled'}>Export a folder</button>
+        <button class="btn" data-action="export-zip" data-test="export-zip" ${d.status.built && !running('checks') ? '' : 'disabled'}>Export a zip</button>
         ${d.status.built ? '' : '<span class="muted small">Build the demo first.</span>'}</div>
       <div data-region="export" style="margin-top:12px"></div></div>`;
   $('#export-dest', panel).onchange = e => { J(d.id).dest = e.target.value; };
@@ -686,6 +720,17 @@ PANELS.export = async (panel, d) => {
 
 // ---- Actions -----------------------------------------------------------------------------------------------------
 
+// The checks for only what changed: after a build, an edit or a new script. Never the whole checklist (that's Export).
+async function quickChecks(id = S.id) {
+  if (!S.demos.find(x => x.id === id)?.status.built) return;
+  if (id !== S.id) return;
+  return step('checks', 'run_checks', { quick: true });
+}
+// Export: the whole checklist first (unless it passed and nothing changed since), then the folder or zip.
+async function exportDemo(kind, anyway) {
+  J(S.id).exportKind = kind;
+  return step('export', 'export_demo', { kind, dest: $('#export-dest').value, anyway });
+}
 async function refreshServers() {
   S.servers = await invoke('servers').catch(() => S.servers);
 }
@@ -701,9 +746,11 @@ const ACTIONS = {
     await step('record', 'record_start', { resume: false });
   },
   'record-stop': () => step('record-stop', 'record_stop', {}, () => { J(S.id).record = {}; }),
-  build: () => step('build', 'build', { force: false }, o => { J(S.id).scrub = o.scrub; }),
-  'checks-quick': () => step('checks', 'run_checks', { quick: true }),
-  'checks-full': () => step('checks', 'run_checks', { quick: false }),
+  build: async () => {
+    const o = await step('build', 'build', { force: false }, o => { J(S.id).scrub = o.scrub; });
+    if (o?.ok) await quickChecks();
+  },
+  'checks-quick': () => quickChecks(),
   'fidelity-check': () => step('fidelity', 'fidelity_run', { fix: false }),
   'fidelity-fix': () => step('fidelity', 'fidelity_run', { fix: true }),
   'script-open': async () => {
@@ -715,7 +762,8 @@ const ACTIONS = {
     const kind = $('#script-kind').value;
     J(S.id).scriptDraft = text;
     try { await call('script_save', { id: S.id, text, kind }); } catch { return; }
-    await step('script', 'script_run', {});
+    const o = await step('script', 'script_run', {});
+    if (o) await quickChecks();
   },
   'edit-start': async () => {
     J(S.id).edit = { saved: J(S.id).edit?.saved || [] };
@@ -725,11 +773,25 @@ const ACTIONS = {
     } catch (e) { J(S.id).edit.error = e.message; }
     rerender();
   },
-  'edit-stop': async () => { await call('edit_stop', { id: S.id }); await refreshServers(); rerender(); },
+  'edit-stop': async () => {
+    const id = S.id;
+    await call('edit_stop', { id });
+    await refreshServers();
+    rerender();
+    // What the edits touched gets its checks now, and only that.
+    if ((J(id).edit?.saved || []).some(x => !x.error)) await quickChecks();
+  },
   'present-start': async () => {
-    const r = await call('present_start', { id: S.id });
+    const guide = $('#with-guide')?.checked ?? true;
+    const r = await call('present_start', { id: S.id, guide });
     S.servers.present[S.id] = r.url;
-    announce('Presenting');
+    J(S.id).guideUrl = r.guide || null;
+    announce(r.guide ? 'Presenting, with the presenter guide' : 'Presenting');
+    rerender();
+  },
+  'present-guide': async () => {
+    J(S.id).guideUrl = await call('present_guide', { id: S.id });
+    toast('Opened the presenter guide on this screen');
     rerender();
   },
   'present-stop': async () => { await call('present_stop', { id: S.id }); await refreshServers(); rerender(); },
@@ -737,8 +799,9 @@ const ACTIONS = {
     const p = await call('pick_folder');
     if (p) { J(S.id).dest = p; $('#export-dest').value = p; }
   },
-  'export-folder': () => step('export', 'export_demo', { kind: 'folder', dest: $('#export-dest').value }),
-  'export-zip': () => step('export', 'export_demo', { kind: 'zip', dest: $('#export-dest').value }),
+  'export-folder': () => exportDemo('folder', false),
+  'export-zip': () => exportDemo('zip', false),
+  'export-anyway': () => exportDemo(J(S.id).exportKind || 'folder', true),
 };
 
 document.addEventListener('click', async e => {

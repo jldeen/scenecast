@@ -2,7 +2,8 @@
 // The engine side of the scenecast CLI (from replica-kit 1.4.0). The `scenecast` binary (Rust) runs this for every
 // engine command; run it directly only to debug the engine: node packages/kit/bin/scenecast.mjs help
 import { spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { KIT, KIT_VERSION, loadDemo, arg } from '../lib/demo.mjs';
 
@@ -17,6 +18,7 @@ const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary;
   preflight [--check] [--json|--ndjson]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release] [--no-editor]
   script <file> [--matcher text|<file.mjs>] [--no-write] [--no-pdf] [--strict]  edit [--no-open] [--port N]
+  notes [--script <file>] [--check [--as-windows]]  guide-shots
   text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
   check [--runs 2]  checklist [--skip a,b] [--only a,b]  fidelity-compare|fidelity-fix|fidelity-report  sheet  hovers  scan [<dir>]
 
@@ -32,6 +34,25 @@ async function send(op, args = {}, tmo = 900) {
   return r.ok && !(r.value && r.value.error) ? 0 : 1;
 }
 const jsonArg = () => { const j = rest.find(a => a.trim().startsWith('{')); return j ? JSON.parse(j) : {}; };
+
+// Before a check: the presenter guide's notes made again from the script as it is now (they also carry the focus
+// points and beats, which edits change), and its pictures when a beat now starts on another screen. Only for a demo
+// that has a guide.
+async function refreshGuide(demo) {
+  const nf = join(demo.dir, 'presenter', 'notes.json');
+  if (!existsSync(nf)) return 0;
+  const { compileFlow } = await import('../compile/flow.mjs');
+  const { writeNotes, scriptPath } = await import('../lib/notes.mjs');
+  const file = scriptPath(demo);
+  if (!existsSync(file)) return 0;
+  const before = readFileSync(nf, 'utf8');
+  const n = writeNotes(demo, (await compileFlow(demo)).flow, file);
+  if (readFileSync(nf, 'utf8') !== before) console.log('presenter/notes.json: made again from the script');
+  let made = null; try { made = readFileSync(join(demo.dir, 'presenter', 'shots', 'shots.json'), 'utf8').trim(); } catch (e) {}
+  const want = JSON.stringify(n.shots.map(x => [x.name, x.app, x.state]));
+  if (made !== want || n.shots.some(x => !existsSync(join(demo.dir, 'presenter', 'shots', x.name + '.png')))) return node('checks/guide-shots.mjs', ['--demo', demo.dir]);
+  return 0;
+}
 
 async function main() {
   switch (cmd) {
@@ -88,12 +109,33 @@ async function main() {
     case 'script': return node('script/cli.mjs', rest.includes('--demo') ? rest : [...rest, '--demo', loadDemo(rest).dir]);
     case 'check': return node('checks/check.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     // The checklist (scenecast check). `fidelity` is its old engine name.
-    case 'checklist': case 'fidelity': return node('checks/fidelity.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'checklist': case 'fidelity': { const demo = loadDemo(rest); if (!rest.includes('--url')) await refreshGuide(demo); return node('checks/fidelity.mjs', rest.includes('--demo') ? rest : ['--demo', demo.dir, ...rest]); }
     // The fidelity loop's steps (the scenecast binary runs the loop: compare, fix, build, compare again, report).
     case 'fidelity-compare': return node('checks/real-vs-replica.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'fidelity-fix': return node('fixer/fix.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'fidelity-report': return node('checks/fidelity-report.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
-    case 'quick': return node('checks/fidelity.mjs', ['--quick', ...(rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest])]);
+    // The presenter guide (⌥G): its notes from the script, its pictures, and the check that holds script, guide and
+    // replica to each other.
+    case 'notes': {
+      const demo = loadDemo(rest);
+      if (rest.includes('--check')) return node('checks/notes-check.mjs', ['--demo', demo.dir, ...rest.filter((a, i) => a !== '--check' && a !== '--demo' && rest[i - 1] !== '--demo')]);
+      const { compileFlow } = await import('../compile/flow.mjs');
+      const { writeNotes, scriptPath } = await import('../lib/notes.mjs');
+      const file = arg(rest, '--script') ? resolve(arg(rest, '--script')) : scriptPath(demo);
+      if (!existsSync(file)) { console.log(`no script at ${file}: write it there (Markdown, text or a RunLines .sk), set demo.json presenter.script, or pass --script <file>`); return 1; }
+      if (arg(rest, '--script')) {
+        const cfg = JSON.parse(readFileSync(join(demo.dir, 'demo.json'), 'utf8'));
+        const r0 = relative(realpathSync(demo.dir), realpathSync(file)), rel = r0.startsWith('..') || isAbsolute(r0) ? file : r0.split('\\').join('/');
+        if (!cfg.presenter || cfg.presenter.script !== rel) { cfg.presenter = { ...(cfg.presenter || {}), script: rel }; writeFileSync(join(demo.dir, 'demo.json'), JSON.stringify(cfg, null, 2) + '\n'); demo.cfg.presenter = cfg.presenter; console.log(`demo.json presenter.script: ${rel}`); }
+      }
+      const { flow } = await compileFlow(demo);
+      const n = writeNotes(demo, flow, file);
+      const share = n.stage.beats.filter(b => !b.own && b.n > 0 && b.n < n.beats.length - 1).map(b => b.n);
+      console.log(`presenter/notes.json: "${n.title}", ${n.beats.length - 2} beats, ${n.beats.reduce((k, b) => k + b.say.length, 0)} lines, ${n.parts.length} parts, ${n.shots.length} pictures (scenecast guide-shots)${share.length ? `\n  beats with no screen of their own (→ steps the guide): ${share.join(', ')}` : ''}`);
+      return 0;
+    }
+    case 'guide-shots': return node('checks/guide-shots.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'quick': { const demo = loadDemo(rest); await refreshGuide(demo); return node('checks/fidelity.mjs', ['--quick', ...(rest.includes('--demo') ? rest : ['--demo', demo.dir, ...rest])]); }
     case 'text': return (await import('../lib/workflow.mjs')).text(rest);
     case 'status': return (await import('../lib/workflow.mjs')).status(rest);
     case 'save': return (await import('../lib/workflow.mjs')).save(rest);

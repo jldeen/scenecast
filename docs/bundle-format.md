@@ -51,7 +51,7 @@ and `composite` are **fallbacks**, for a screen that can't be captured live or a
 
 | Field | What |
 |---|---|
-| `apps` | The web apps (browser tabs). `key`: one letter A–Z, not F, N or P; unique. |
+| `apps` | The web apps (browser tabs). `key`: one letter A–Z, not F, G, N or P; unique. |
 | `scene.live` | The captured page (`snapshot`), its window `title`, a real-page screenshot kept only as the fidelity `reference`, and the built page's `sha256`. Absent until recorded (a warning). Only on `live-page` scenes. |
 | `scene.transitions` | `trigger` (`click`, `enter`, `type`, `hover`, `escape`), `target` scene, `matcher` (the engine's: `sel`, `text`, `label`, `testid`, `in`, `nth`, `frame`, never a generated class), optional `stream` and `app`. |
 | `streams` | Streamed answers: the scene they end on, frame count, `timing` (`real` or `even`), replay length, prompt. |

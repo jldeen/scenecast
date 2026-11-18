@@ -39,7 +39,15 @@ first-class. Phases:
   sheets; the editor; present (the key reference first, then full screen); export as a folder or zip. A universal
   `.dmg` and an `.msi` and NSIS installer from CI, signed when the secrets are set. A WebDriver test runs the whole
   flow on the fixture app in the real window on macOS and Windows. Updates are a stub.
-- **Phase 5: ready for anyone.** The human pilot with a presenter outside Jessica's team, then pilots on real products.
+- **Phase 5 (done; pilots next): ready for anyone.** The presenter guide (⌥G, from replica-kit 1.6.0): a window for the
+  laptop screen that follows the stage over a BroadcastChannel, made from the same script as the focus points
+  (`scenecast notes`, `guide-shots`, the `notes` check), opened by the app's Present step on the app's screen. Fast
+  checks: `scenecast quick` checks only what a change touched (under 3 minutes on the fixture, measured in CI); the
+  app runs it after a build, a script or an edit, and the whole checklist only on Export. Script focus points follow
+  wording and date edits; marks against the screen's edge stay on screen. The one-page guide (`docs/guide.md` and its
+  PDF), the "replicate a demo" skill (`skill/SKILL.md`, `scenecast install-skill`), and a GitHub Release with the
+  installers from a version tag (v0.3.0; unsigned until the signing secrets exist). Next: the human pilot with a
+  presenter outside Jessica's team, then pilots on real products.
 
 ## Foundation from Seth's scenecast
 

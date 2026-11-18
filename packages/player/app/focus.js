@@ -195,8 +195,11 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
   function markAt(p, box, Z) {
     const k = 1 / pt(), pen = PEN * k;
     if (p.mark !== 'arrow') {
-      const px = 12 * k / Z, py = 8 * k / Z, a = [box[0] - px, box[1] - py], b = [box[2] + px, box[3] + py];
-      return { kind: 'rect', a, b, ext: [a[0] - pen / 2, a[1] - pen / 2, b[0] + pen / 2, b[1] + pen / 2] };
+      // Padded, but never past the page's edges: a target flush against the screen's edge (a list's first column)
+      // gets its mark drawn just inside the screen, not cut off.
+      const px = 12 * k / Z, py = 8 * k / Z, h = pen / 2;
+      const a = [Math.max(box[0] - px, h), Math.max(box[1] - py, h)], b = [Math.min(box[2] + px, W() - h), Math.min(box[3] + py, H() - h)];
+      return { kind: 'rect', a, b, ext: [a[0] - h, a[1] - h, b[0] + h, b[1] + h] };
     }
     const g = 8 * k / Z, d = p.dir || 'sw', inset = Math.min(28 * k / Z, (box[2] - box[0]) / 2), v = DIRS[d];
     const tip = [d.includes('w') ? box[0] + (d.length > 1 ? inset : -g) : d.includes('e') ? box[2] - (d.length > 1 ? inset : -g) : (box[0] + box[2]) / 2,

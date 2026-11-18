@@ -22,6 +22,8 @@ test('presenting: the app window opens full screen', () => {
   assert.deepEqual(launchCommand(url, { platform: 'darwin', fullscreen: true }),
     ['open', ['-na', 'Google Chrome', '--args', '--start-fullscreen', `--app=${url}`]]);
   assert.deepEqual(launchCommand(url, { platform: 'win32', executable: 'msedge.exe', fullscreen: true })[1], ['--start-fullscreen', `--app=${url}`]);
+  // The presenter guide: where it goes, on the laptop screen.
+  assert.deepEqual(launchCommand(url, { platform: 'win32', executable: 'msedge.exe', position: [-1280.4, 0], size: [1280, 800] })[1], ['--window-position=-1280,0', '--window-size=1280,800', `--app=${url}`]);
 });
 
 test('profile folders on both', () => {

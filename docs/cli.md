@@ -10,7 +10,7 @@ scenecast new demos/hello --title "Hello" --app chat=https://chat.example.com/ -
 ```
 
 `init` is an alias. `--dir <parent>` creates it inside another folder; `--port` sets the replica's localhost port.
-Each `--app id=url` is a browser tab of the demo; its presenter key is a letter of its id (never F, N or P).
+Each `--app id=url` is a browser tab of the demo; its presenter key is a letter of its id (never F, G, N or P).
 
 A project is a demo folder that is also a `.scenecast` bundle:
 
@@ -49,9 +49,12 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 | `scenecast script <file> [--matcher text\|<file.mjs>] [--no-write] [--no-pdf] [--strict] [--json\|--ndjson]` | Script to focus points (below). |
 | `scenecast edit [--port N] [--no-open] [--ndjson]` | The replica in edit mode (below). |
 | `scenecast text "<old>" "<new>"` | A wording or date tweak, live on reload. |
-| `scenecast check [--only a,b] [--skip a,b]` | The whole fidelity checklist. Flags every fallback scene first. |
+| `scenecast check [--only a,b] [--skip a,b]` | The whole fidelity checklist, the presenter guide included. Flags every fallback scene first. Run it once before a release (`release` does); `quick` covers each change before that. |
 | `scenecast fidelity [--rounds 3] [--threshold 0.5] [--no-fix] [--json\|--ndjson]` | The fidelity loop: real vs replica for every captured state, each difference diagnosed and fixed in `flow.fixes.json`, built and checked again (below). |
-| `scenecast quick` | The checks for only what changed. |
+| `scenecast quick` | The checks for only what changed since the last pass: the screens a change touched (their controls, groups, panes, chips), the presenter keys if the beats changed, focus points if they changed, the presenter guide if its script or notes changed. No two runs, zoom, drags, reset or contact sheet: those run with `check`, once before a release. Under 3 minutes on the fixture (the selftest measures it). |
+| `scenecast notes [--script <file>] [--check [--as-windows]]` | The presenter guide's notes (`presenter/notes.json`) from the script; `--check` holds script, guide and replica to each other in headless Chrome (the walk). See [presenter.md](presenter.md). |
+| `scenecast guide-shots` | The presenter guide's pictures (`presenter/shots/`), one per beat. |
+| `scenecast install-skill [--dest <dir>]` | The "replicate a demo" skill for Copilot (`~/.copilot/skills/scenecast-replicate-demo`), with the docs it reads. |
 | `scenecast status`, `scenecast save "<msg>"` | Where things stand; secret scan and commit. |
 | `scenecast release [--push]` | Build, manifest, full checklist, secret scan, commit (and push). |
 | `scenecast sheet`, `scenecast hovers`, `scenecast scan [<dir>]` | Contact sheet, hover sheet, secret scan. |

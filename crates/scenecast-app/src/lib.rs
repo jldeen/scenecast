@@ -5,9 +5,11 @@
 //!
 //! - [`library`]: the user's demos and where each stands (recorded, built, fidelity score, focus points, last checked).
 //! - [`record`]: the recorder extension, preflight item by item, and the recording.
-//! - [`build`]: the build with its scrub report, and the checklist.
+//! - [`build`]: the build with its scrub report, and the checks: quick after a change, the whole checklist before
+//!   an export.
 //! - [`fidelity`]: the fidelity loop and its report, real vs replica for each state.
 //! - [`script`]: script to focus points, and its sheets.
+//! - [`guide`]: the presenter guide (notes from the script, pictures, the window next to the stage).
 //! - [`servers`]: the replica served for the editor or for presenting.
 //! - [`keys`]: the presenter's one-page key reference.
 //! - [`export`]: a plain folder or a zip for another presenter.
@@ -18,6 +20,7 @@ pub mod build;
 pub mod export;
 pub mod fidelity;
 pub mod files;
+pub mod guide;
 pub mod keys;
 pub mod library;
 pub mod record;

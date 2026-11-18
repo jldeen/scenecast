@@ -22,6 +22,7 @@ import { buildInputs, buildDiff } from '../kit/lib/buildkey.mjs';
 import { compileEdits, applyEdits, applyEditsJson } from '../kit/lib/edits.mjs';
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), 'app');
+const PRESENTER = join(dirname(fileURLToPath(import.meta.url)), 'presenter');
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
 const PORT = +arg(args, '--port', 0) || demo.port;
@@ -128,6 +129,14 @@ async function editorApi(req, res, path) {
 function resolve(path) {
   if (path === '/' || path === '/index.html') return join(APP, 'index.html');
   if (path === '/favicon.ico') return null;
+  // The presenter guide (⌥G): the demo's own presenter/ files first (notes.json, shots/, any override), then the kit's.
+  if (path === '/presenter.html') path = '/presenter/index.html';
+  if (path.startsWith('/presenter/')) {
+    let rel;
+    try { rel = decodeURIComponent(path.slice('/presenter/'.length)); } catch { return null; }
+    for (const dir of [join(demo.dir, 'presenter'), PRESENTER]) { const f = normalize(join(dir, rel)); if (f.startsWith(dir + sep) && existsSync(f) && statSync(f).isFile()) return f; }
+    return null;
+  }
   if (path.startsWith('/bundle/')) {
     let rel;
     try { rel = decodeURIComponent(path.slice('/bundle/'.length)); } catch { return null; }
@@ -212,7 +221,7 @@ createServer(async (req, res) => {
   if (path.startsWith('/snaps/') || path.startsWith('/streams/')) await refresh();
   if (!f || !existsSync(f) || !statSync(f).isFile()) {
     // Unknown assets answer with an empty 204 rather than a 404, so nothing shows in the console.
-    res.writeHead(path.startsWith('/assets/') || path === '/favicon.ico' ? 204 : 404); return res.end();
+    res.writeHead(path.startsWith('/assets/') || path === '/favicon.ico' || path === '/presenter/notes.json' ? 204 : 404); return res.end();
   }
   const immutable = path.startsWith('/assets/');
   res.writeHead(200, { 'content-type': TYPES[extname(f)] || 'application/octet-stream', 'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache', 'access-control-allow-origin': '*' });

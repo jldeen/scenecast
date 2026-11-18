@@ -83,6 +83,14 @@ enum Command {
     /// The editor: the replica in edit mode (dots for focus points, wording and date changes, beat starts, undo),
     /// every change saved to focus.json and flow.editor.json. In the replica its key is ⌥⇧E (Ctrl+Alt+Shift+E).
     Edit(engine_cmds::EditArgs),
+    /// The presenter guide's notes (presenter/notes.json) from the script: the talk track word for word, the clicks,
+    /// watch-outs, times and where each beat is on the stage (--script <file>; --check: script, guide and replica
+    /// agree, in a headless browser; --as-windows: as Edge on Windows).
+    Notes(Passthrough),
+    /// The presenter guide's pictures (presenter/shots/): each beat's screen, rendered from the replica.
+    GuideShots(Passthrough),
+    /// Install the "replicate a demo" skill for Copilot (~/.copilot/skills/scenecast-replicate-demo; --dest <dir>).
+    InstallSkill(engine_cmds::InstallSkillArgs),
     /// Where the project is and what to run next.
     Status(Passthrough),
     /// Secret scan, then commit.
@@ -340,6 +348,9 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Script(a) => return engine_cmds::script(&a),
         Command::Edit(a) => return engine_cmds::edit(&a),
         Command::Quick(a) => return engine_cmds::check(&a, true),
+        Command::Notes(a) => return engine_cmds::handover("notes", &a, true),
+        Command::GuideShots(a) => return engine_cmds::handover("guide-shots", &a, true),
+        Command::InstallSkill(a) => return engine_cmds::install_skill(&a).map(|()| 0),
         Command::Status(a) => return engine_cmds::handover("status", &a, true),
         Command::Save(a) => return engine_cmds::handover("save", &a, true),
         Command::Release(a) => return engine_cmds::release(&a),

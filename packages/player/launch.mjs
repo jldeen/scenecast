@@ -24,10 +24,12 @@ export function profileRoot(browser, platform = process.platform, env = process.
 }
 
 // The command that opens `url` as an app window: [file, args]. null where there is none (Linux: open it yourself).
-// fullscreen: the window opens full screen (presenting).
-export function launchCommand(url, { browser, profile, platform = process.platform, executable, fullscreen } = {}) {
+// fullscreen: the window opens full screen (presenting). position [x, y] and size [w, h]: where the window goes (the
+// presenter guide, on the laptop screen).
+export function launchCommand(url, { browser, profile, platform = process.platform, executable, fullscreen, position, size } = {}) {
   const b = browser === 'edge' || browser === 'chrome' ? browser : defaultBrowser(platform);
-  const flags = [...(profile ? [`--profile-directory=${profile}`] : []), ...(fullscreen ? ['--start-fullscreen'] : []), `--app=${url}`];
+  const flags = [...(profile ? [`--profile-directory=${profile}`] : []), ...(fullscreen ? ['--start-fullscreen'] : []),
+    ...(position ? [`--window-position=${position.map(Math.round).join(',')}`] : []), ...(size ? [`--window-size=${size.map(Math.round).join(',')}`] : []), `--app=${url}`];
   if (platform === 'darwin') return ['open', ['-na', MAC_APP[b], '--args', ...flags]];
   if (platform === 'win32' && executable) return [executable, flags];
   return null;

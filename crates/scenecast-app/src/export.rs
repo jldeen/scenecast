@@ -97,6 +97,50 @@ pub fn export(dir: &Path, dest: &Path, kind: ExportKind) -> Result<ExportOutcome
     }
 }
 
+/// An export with the whole checklist first: the one time it runs (quick checks cover each change before it).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckedExport {
+    /// What was exported; `None` when the checks failed and the export waited.
+    pub exported: Option<ExportOutcome>,
+    /// The checklist, when it ran.
+    pub checks: Option<crate::build::ChecksOutcome>,
+    /// `ran`: it ran now; `current`: it passed already and nothing it covers changed since; `skipped`: exported anyway.
+    pub checked: &'static str,
+}
+
+/// Runs the whole checklist unless it already passed on the replica as it is now, then exports. A failing check stops
+/// the export unless `anyway` (the presenter saw the failures and chose to export).
+pub fn export_checked(
+    dir: &Path,
+    dest: &Path,
+    kind: ExportKind,
+    anyway: bool,
+    mut on: impl FnMut(crate::Update),
+) -> Result<CheckedExport, AppError> {
+    let (checks, checked) = if anyway {
+        (None, "skipped")
+    } else if crate::build::needs_full_check(dir) {
+        let c = crate::build::checks(dir, false, &mut on)?;
+        if !c.pass {
+            return Ok(CheckedExport {
+                exported: None,
+                checks: Some(c),
+                checked: "ran",
+            });
+        }
+        (Some(c), "ran")
+    } else {
+        (None, "current")
+    };
+    on(crate::Update::stage("export", "Exporting the replica"));
+    Ok(CheckedExport {
+        exported: Some(export(dir, dest, kind)?),
+        checks,
+        checked,
+    })
+}
+
 fn tempfile_dir(near: &Path) -> std::io::Result<PathBuf> {
     let mut n = 0u32;
     loop {

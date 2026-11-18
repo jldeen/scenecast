@@ -4,7 +4,7 @@
 // agent watches), side paths are captured (hovers, clicks with a menu whose styles load on open, a resize handle,
 // step groups, a "+N" chip list, zoom, a virtualized grid), the replica is built, served, and the fidelity checklist
 // runs on it, including two identical runs of the recorded path; then script to focus points and the editor
-// (script-focus.mjs).
+// (script-focus.mjs), and the presenter guide (presenter-walk.mjs).
 //   node test/selftest.mjs [--keep]        (--keep leaves the temp demo folder and prints where it is)
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, unlinkSync, utimesSync, renameSync } from 'node:fs';
@@ -21,6 +21,7 @@ import { compileFlow } from '../kit/compile/flow.mjs';
 import { loadDemo } from '../kit/lib/demo.mjs';
 import { flowParts } from '../kit/lib/buildkey.mjs';
 import { scriptAndEditor } from './script-focus.mjs';
+import { presenterWalk } from './presenter-walk.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -500,6 +501,7 @@ export default flow => {
   r = await run(['quick'], at);
   times.quick = Math.round((Date.now() - t1) / 1000);
   const q = JSON.parse(readFileSync(join(DEMO, '.out', 'quick.json'), 'utf8'));
+  check('quick: under 3 minutes', times.quick < 180, `${times.quick} s`);
   check('quick: only the screens the tweak touched, and they pass', q.pass && q.scope.includes('chat-01-message') && !q.scope.some(x => x.startsWith('admin')) && q.scope.length < Object.keys(flow.states).length, JSON.stringify([q.scope, q.items.filter(i => i.status === 'fail')]));
   // 8 · Release again: the tweak baked in, the full checklist, a commit; then nothing pending.
   t1 = Date.now();
@@ -523,6 +525,8 @@ export default flow => {
   check('status: nothing pending', /build +up to date/.test(r.out) && /all committed/.test(r.out), r.out);
   // 9 · Script to focus points, and the editor in Chrome and Edge (script-focus.mjs).
   await scriptAndEditor({ DEMO, BIN, check, times });
+  // 10 · The presenter guide (presenter-walk.mjs): notes, pictures, and the walk as a Mac and as Edge on Windows.
+  Object.assign(times, Object.fromEntries(Object.entries(await presenterWalk({ DEMO, BIN, check })).map(([k, v]) => [k === 'secs' ? 'presenter' : 'presenter' + k[0].toUpperCase() + k.slice(1), v])));
   console.log('TIMES ' + JSON.stringify(times));
   writeFileSync(join(tmp, 'times.json'), JSON.stringify(times));
 } catch (e) {

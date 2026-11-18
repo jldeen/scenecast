@@ -7,16 +7,18 @@ Windows, with Edge or Chrome. No terminal. (The `scenecast` CLI does the same un
 
 ## Install
 
-From the latest green CI run on `main` (Actions → CI → the run → Artifacts):
+From the [latest release](https://github.com/jldeen/scenecast/releases/latest):
 
-- **macOS** (Apple silicon and Intel): `scenecast-macOS-installers` → `Scenecast_<version>_universal.dmg`. Open it and
-  drag Scenecast to Applications.
-- **Windows**: `scenecast-Windows-installers` → `Scenecast_<version>_x64_en-US.msi`, or the setup `.exe` (installs for
-  you only, no admin).
+- **macOS** (Apple silicon and Intel): `Scenecast_<version>_universal.dmg`. Open it and drag Scenecast to Applications.
+- **Windows**: `Scenecast_<version>_x64-setup.exe` (installs for you only, no admin), or the `.msi`.
 
 The app carries what it needs (its engine and Node). You need Microsoft Edge or Google Chrome. Until the installers
-are signed ([signing.md](signing.md)), macOS asks once (Control-click → Open) and Windows SmartScreen says "unknown
-publisher" (More info → Run anyway).
+are signed ([signing.md](signing.md)), each system asks once: on the Mac, System Settings → Privacy & Security → **Open
+Anyway**; on Windows, SmartScreen's "Windows protected your PC" → **More info** → **Run anyway**. The
+[one-page guide](../guide.md) walks a presenter through it ([PDF](../guide.pdf)).
+
+Every green CI run on `main` also has the installers as artifacts (`scenecast-macOS-installers`,
+`scenecast-Windows-installers`).
 
 Your demos are kept in `Documents/Scenecast`.
 
@@ -26,12 +28,16 @@ Your demos are kept in `Documents/Scenecast`.
 |---|---|
 | **New demo** | Name it, list its apps (each one's start page: a tab while you record), pick Edge or Chrome. |
 | **Record** | Set up the recorder once (it builds the extension and shows you the three clicks to load it in your browser). **Check** says whether everything's ready: the receiver, your browser and profile, the recorder, each app's tab (open, light theme, on its start screen); **Check and fix** puts right what it can, and never restarts a browser you already have open. Then **Start recording** and run the demo once: the app shows each screen as it's captured, the side states being swept, and the recorder's time apart from the product's. **Stop recording**. |
-| **Build & check** | Turns the recording into the replica, scrubbing secrets and personal data on the way (the scrub report lists what was removed; a password, key or token stops the build). Then the checks: what changed, or every check. |
+| **Build & check** | Turns the recording into the replica, scrubbing secrets and personal data on the way (the scrub report lists what was removed; a password, key or token stops the build). Then the checks for what changed run on their own. |
 | **Fidelity** | Every captured state of the real product next to the replica, compared pixel by pixel, with the fonts. **Fix differences** diagnoses each one, patches this demo, builds and compares again. |
-| **Script** | Paste your script or open it (text, Markdown or RunLines `.sk`). **Find the focus points** puts each line on its screen and makes its focus points; the line-to-screen sheet and the cue sheet show here. |
-| **Edit** | Opens the replica in edit mode in Edge or Chrome: add dots, change wording and dates, set beat starts. Each saved change is listed in the app as it happens. |
-| **Present** | The presenter keys on one page first. **Start presenting** opens the replica full screen in Edge or Chrome, and the app steps out of the way (the key page is never on screen while you present). **Stop presenting** when you're done. |
-| **Export** | The replica as a plain folder or a zip, for another presenter: they open `index.html`, no install. |
+| **Script** | Paste your script or open it (text, Markdown or RunLines `.sk`). **Find the focus points** puts each line on its screen and makes its focus points; the line-to-screen sheet and the cue sheet show here. The same script becomes the **presenter guide** (its notes and a picture per beat). Then the checks for what changed. |
+| **Edit** | Opens the replica in edit mode in Edge or Chrome: add dots, change wording and dates, set beat starts. Each saved change is listed in the app as it happens. **Stop editing** runs the checks for what the edits touched. |
+| **Present** | The presenter keys on one page first, and the presenter guide's. **Start presenting** opens the replica full screen in Edge or Chrome and, ticked by default, the [presenter guide](../presenter.md) on the screen the app is on (the laptop's); the app steps out of the way. **Open presenter guide** opens it again. **Stop presenting** when you're done. |
+| **Export** | Every check first (two identical runs, cold starts, every zoom, focus points, the presenter guide), unless it already passed and nothing changed since; a failing check stops it, with **Export anyway**. Then the replica as a plain folder or a zip, for another presenter: they open `index.html`, no install. |
+
+**Fast checks.** A small change never runs the whole checklist. After a build, a script or an edit, the app runs
+`quick`: only the screens and states the change touched (and the keys, focus points or presenter guide if those
+changed), a minute or two. The whole checklist runs once, on Export.
 
 From the library: open, duplicate (with its recording) or delete (to the Trash or Recycle Bin) any demo, with where
 each one stands: recorded, built, fidelity score, focus points, last checked.
@@ -43,8 +49,9 @@ each one stands: recorded, built, fidelity score, focus points, last checked.
 | ![New demo](new-demo.png) New demo | ![Ready to record](record.png) Record: the recorder and preflight |
 | ![Recording](recording.png) Recording, live | ![Build and check](build.png) Build, scrub report, checks |
 | ![Fidelity](fidelity.png) Fidelity: real vs replica | ![Script](script.png) Script to focus points |
-| ![Edit](edit.png) Edit: saved changes | ![Present](present.png) Present: the key reference |
-| ![Export](export.png) Export | ![Library](library.png) The library |
+| ![Edit](edit.png) Edit: saved changes | ![Present](present.png) Present: the keys and the presenter guide |
+| ![The presenter guide](presenter-guide.png) The presenter guide, on the laptop screen | ![Export](export.png) Export: every check, then the folder or zip |
+| ![Library](library.png) The library | |
 
 ## Why the replica opens in Edge or Chrome
 
@@ -62,7 +69,8 @@ npm run build:test && npm run test:ui                # the UI test: the whole fl
 ```
 
 - `crates/scenecast-app`: the commands the window calls (library, record, build and checks, fidelity, script,
-  servers for edit and present, key reference, export, what the window may show from the library (on the app's `scenecast:` protocol), the update stub), each
+  the presenter guide (`guide`: notes, pictures, opening it on the app's screen), servers for edit and present, key
+  reference, export (with the whole checklist first), what the window may show from the library (on the app's `scenecast:` protocol), the update stub), each
   with a typed result and serializable progress. Unit-tested in the main workspace on Ubuntu, macOS and Windows.
 - `apps/desktop/src-tauri`: the Tauri shell (its own Cargo workspace): commands, `job` events, one job per demo at a
   time. Built with `--features webdriver`, it has an embedded WebDriver server for the UI test; installers never do.
