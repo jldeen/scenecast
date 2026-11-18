@@ -92,3 +92,6 @@ npm test                         # builds the binary, then the JS unit, capture 
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of it on Ubuntu, macOS and Windows.
+`.github/workflows/repeat.yml` runs `npm test` five times side by side on one OS, then the hover check and the
+checklist again on each run's demo (`gh workflow run repeat.yml -f os=windows-latest`): a check that passes one run
+and not the next is a bug.

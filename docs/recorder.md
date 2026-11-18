@@ -101,6 +101,10 @@ sent (`scenecast run`); every built-in command and side path works.
 - `packages/selftest/selftest.mjs`: the fixture recorded **through the extension**, end to end (preflight, record
   with every side state, a service-worker stop and resume, build, the full checklist twice). `--agent` runs it on
   the Playwright agent instead; `--record-only` stops after recording (for timing).
+- `packages/selftest/hover-repeat.mjs`: the hover check and the checklist over and over on a kept selftest demo
+  (`.github/workflows/repeat.yml`). A missed hover prints the player's hover trace (`d1.hoverTrace()`); the hover
+  check reads the player once it has settled, never at a fixed time, and the selftest proves it with every page timer
+  300 ms late (`SCENECAST_LATE_TIMERS`).
 - `packages/selftest/capture-fixture.mjs`: the capture of a tricky page, including a closed shadow root and a
   cross-site frame.
 - `packages/selftest/fidelity-loop.mjs`: the fixture's lab app (`examples/fixture-app/lab.mjs`, seeded with a

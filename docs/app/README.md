@@ -40,7 +40,7 @@ each one stands: recorded, built, fidelity score, focus points, last checked.
 
 | | |
 |---|---|
-| ![New demo](new-demo.png) New demo | ![Ready to record](record.png) Record: ready to record |
+| ![New demo](new-demo.png) New demo | ![Ready to record](record.png) Record: the recorder and preflight |
 | ![Recording](recording.png) Recording, live | ![Build and check](build.png) Build, scrub report, checks |
 | ![Fidelity](fidelity.png) Fidelity: real vs replica | ![Script](script.png) Script to focus points |
 | ![Edit](edit.png) Edit: saved changes | ![Present](present.png) Present: the key reference |
