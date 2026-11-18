@@ -165,24 +165,32 @@ pub fn build(
     )
 }
 
-fn build_with_raw(
-    dir: &Path,
-    args: &[OsString],
-    raw_override: Option<PathBuf>,
-    mut on: impl FnMut(BuildProgress),
-) -> Result<BuildResult, BuildError> {
-    let dir = &crate::engine::dunce(fs::canonicalize(dir)?);
+/// The demo's raw capture folder (`demo.json` `raw`, else `~/.scenecast/<name>/raw`; `REPLICA_RAW` wins), resolved
+/// the way the build resolves it. It may not exist yet.
+pub fn raw_dir(dir: &Path) -> Result<PathBuf, BuildError> {
+    if let Some(raw) = std::env::var_os("REPLICA_RAW") {
+        return resolve_raw(dir, PathBuf::from(raw));
+    }
     let config: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("demo.json"))?)?;
-    let raw = raw_override
-        .or_else(|| config["raw"].as_str().map(PathBuf::from))
+    raw_dir_from(dir, &config)
+}
+
+fn raw_dir_from(dir: &Path, config: &serde_json::Value) -> Result<PathBuf, BuildError> {
+    let raw = config["raw"]
+        .as_str()
+        .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(format!(
                 "~/.scenecast/{}/raw",
                 config["name"].as_str().unwrap_or("demo")
             ))
         });
+    resolve_raw(dir, raw)
+}
+
+fn resolve_raw(dir: &Path, raw: PathBuf) -> Result<PathBuf, BuildError> {
     let raw_text = raw.to_str().ok_or(BuildError::NonUtf8Raw)?;
-    let raw = if raw_text.starts_with("~/") {
+    Ok(if raw_text.starts_with("~/") {
         let rest = raw.strip_prefix("~").expect("checked raw path prefix");
         let home = if cfg!(windows) {
             std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
@@ -195,6 +203,20 @@ fn build_with_raw(
         raw
     } else {
         dir.join(raw)
+    })
+}
+
+fn build_with_raw(
+    dir: &Path,
+    args: &[OsString],
+    raw_override: Option<PathBuf>,
+    mut on: impl FnMut(BuildProgress),
+) -> Result<BuildResult, BuildError> {
+    let dir = &crate::engine::dunce(fs::canonicalize(dir)?);
+    let config: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("demo.json"))?)?;
+    let raw = match raw_override {
+        Some(raw) => resolve_raw(dir, raw)?,
+        None => raw_dir_from(dir, &config)?,
     };
     let allowlist = config
         .pointer("/scrub/allowlist")

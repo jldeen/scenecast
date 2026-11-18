@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Scenecast",
+  "version": "0.2.0",
+  "identifier": "com.github.jldeen.scenecast",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Scenecast",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "center": true,
+        "theme": "Light"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: http://127.0.0.1:*; frame-src http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "msi", "nsis"],
+    "category": "Productivity",
+    "shortDescription": "Live demos, replicated: real pages, every run identical.",
+    "longDescription": "Scenecast records a live web demo once and turns it into a high-fidelity, deterministic replica for presenting: real captured pages, real fonts, ZoomIt-style focus points.",
+    "copyright": "MIT",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../../packages/": "packages/",
+      "../../../node_modules/playwright-core/": "node_modules/playwright-core/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": null,
+      "hardenedRuntime": true
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "installMode": "currentUser" }
+    }
+  }
+}

@@ -1,5 +1,5 @@
 // Replica server. No dependencies, no network: it serves the player, bundle, captured pages and assets on localhost.
-//   node packages/player/serve.mjs --demo <dir> [--port 4620] [--open] [--pace N] [--release]
+//   node packages/player/serve.mjs --demo <dir> [--port 4620] [--open [--fullscreen]] [--pace N] [--release]
 // --open opens it as an app window (no tabs or address bar; launch.mjs): Chrome on the Mac (⌃⌘F for full screen),
 // Edge on Windows (F11), or demo.json chrome.browser, on chrome.profile. REPLICA_NO_OPEN=1 serves without opening
 // a window (checks while her window is in use).
@@ -224,5 +224,5 @@ createServer(async (req, res) => {
   console.log(`${demo.cfg.title || demo.name} replica: ${url}${RELEASE ? ' (release: as built)' : ''}`);
   refresh();
   if (EDITING && args.includes('--edit')) console.log('@edit ' + JSON.stringify({ event: 'ready', url: url + (url.includes('?') ? '&' : '?') + 'edit=1' }));
-  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) openApp(args.includes('--edit') ? url + (url.includes('?') ? '&' : '?') + 'edit=1' : url, demo.cfg.chrome);
+  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) openApp(args.includes('--edit') ? url + (url.includes('?') ? '&' : '?') + 'edit=1' : url, { ...demo.cfg.chrome, fullscreen: args.includes('--fullscreen') });
 });

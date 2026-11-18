@@ -1,0 +1,19 @@
+[package]
+name = "scenecast-app"
+description = "What the Scenecast desktop app calls: the demo library and each step (record, build, fidelity, script, edit, present, export), with structured progress. No UI toolkit: the Tauri shell in apps/desktop sits on top."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+scenecast-build.workspace = true
+scenecast-core.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tiny_http = "0.12"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile.workspace = true

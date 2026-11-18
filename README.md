@@ -17,6 +17,11 @@ import; checks flag every fallback scene.
 **macOS and Windows are both first-class.** The CLI, the recorder, the player, the launcher (Chrome or Edge as an app
 window) and the checks run on both, and CI tests both (and Linux).
 
+**The desktop app is how presenters use it: no terminal.** Make a demo, record it in Edge or Chrome, build and check
+it, compare it with the real product, match the script to focus points, edit, present full screen, and export it for
+someone else, all in one window (macOS `.dmg`, Windows `.msi` or setup `.exe`). See [docs/app](docs/app/README.md).
+The CLI stays underneath for automation and CI; both drive the same Rust core.
+
 ## Layout
 
 | Path | What |
@@ -24,6 +29,8 @@ window) and the checks run on both, and CI tests both (and Linux).
 | `crates/scenecast-core` | Bundle model (schema v2) and validation; v1 bundles migrate on read. JSON Schema export. |
 | `crates/scenecast-build` | Library: new projects, running the JS engine with progress, `manifest.json` from a build. |
 | `crates/scenecast-cli` | The `scenecast` binary. |
+| `crates/scenecast-app` | What the desktop app calls: the demo library and each step, with serializable progress (no UI toolkit). |
+| `apps/desktop` | The desktop app (Tauri): its window (`ui/`), shell (`src-tauri/`), UI test and installers. |
 | `packages/kit` | The engine's CLI entry (run by `scenecast`), demo settings, flow compiler, workflow, project template. |
 | `packages/recorder` | Capture: the recorder extension (MV3, Edge and Chrome), serializer, driver, recorder, side-state audits (hovers, clicks, drags, lists), receiver, build of raw captures. |
 | `packages/player` | The replica: server, morph engine, streams, presenter keys, focus points, app-window launcher. |
@@ -36,6 +43,9 @@ window) and the checks run on both, and CI tests both (and Linux).
 | `docs/` | [CLI](docs/cli.md), [bundle format](docs/bundle-format.md), [architecture](docs/architecture.md), [engine flow format](docs/engine/flow-format.md), [checklist](docs/engine/checklist.md), [lessons](docs/engine/lessons.md). |
 
 ## Setup (macOS or Windows)
+
+Presenters: install the app from the latest CI run's `scenecast-macOS-installers` or `scenecast-Windows-installers`
+artifact (see [docs/app](docs/app/README.md)). Everything below is for the CLI and for working on Scenecast.
 
 Rust (stable), Node 20 or later, and Google Chrome or Microsoft Edge.
 

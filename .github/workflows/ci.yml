@@ -22,7 +22,9 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
-        run: cargo fmt --all --check
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
       - name: Test
         run: cargo test --workspace
       - name: Lint
@@ -63,3 +65,124 @@ jobs:
         run: npm test
         env:
           SCENECAST_BIN: ${{ runner.os == 'Windows' && 'target/debug/scenecast.exe' || 'target/debug/scenecast' }}
+
+  desktop-ui:
+    # The desktop app end to end, in its real window through its embedded WebDriver server: a scripted new user creates
+    # a demo of the fixture app, records it (Chromium with the recorder extension, headless), builds and checks it, runs
+    # fidelity and the script, adds a dot and changes a date in the editor, presents and exports. No terminal.
+    name: Desktop app UI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: desktop-ui
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+      - name: Install
+        run: |
+          npm ci
+          npm ci --prefix apps/desktop
+      - name: Chromium for the presenter's browser (the recorder extension, loaded unpacked)
+        run: npx playwright-core install chromium
+      - name: Build the app (with the test WebDriver server)
+        working-directory: apps/desktop
+        run: npm run build:test
+      - name: Lint the app
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --features webdriver -- -D warnings
+      - name: UI test
+        working-directory: apps/desktop
+        run: npm run test:ui
+        env:
+          SCENECAST_UI_SHOTS: ${{ github.workspace }}/ui-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screens-${{ runner.os }}
+          path: ui-shots/
+          if-no-files-found: ignore
+
+  installers:
+    # A universal macOS .dmg and a Windows .msi and NSIS installer, with the engine and Node inside. Signed when the
+    # signing secrets are set (docs/app/signing.md); unsigned (ad-hoc on the Mac) when they aren't.
+    name: Installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin --bundles app,dmg
+          - os: windows-latest
+            targets: ''
+            args: --bundles msi,nsis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: installers
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+      - name: Install
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix apps/desktop
+      - name: Signing secrets, when there are any
+        shell: bash
+        env:
+          S_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          S_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          S_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          S_APPLE_ID: ${{ secrets.APPLE_ID }}
+          S_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          S_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          S_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          S_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD; do
+            value="$(printenv "S_$name" || true)"
+            if [ -n "$value" ]; then
+              { echo "$name<<SCENECAST_EOF"; echo "$value"; echo "SCENECAST_EOF"; } >> "$GITHUB_ENV"
+              echo "$name is set"
+            fi
+          done
+      - name: Node and signing for the installer
+        working-directory: apps/desktop
+        run: node scripts/prepare-bundle.mjs
+      - name: Build the installers
+        working-directory: apps/desktop
+        run: npx tauri build ${{ matrix.args }} --config src-tauri/tauri.bundle.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scenecast-${{ runner.os }}-installers
+          path: |
+            apps/desktop/src-tauri/target/**/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/**/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/**/bundle/nsis/*.exe
+          if-no-files-found: error

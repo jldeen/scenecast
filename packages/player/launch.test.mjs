@@ -18,6 +18,12 @@ test('Windows: launch Edge directly, without shell interpolation', () => {
   assert.equal(registryAppPath('    (Default)    REG_SZ    C:\\Program Files\\Edge\\msedge.exe\r\n'), 'C:\\Program Files\\Edge\\msedge.exe');
 });
 
+test('presenting: the app window opens full screen', () => {
+  assert.deepEqual(launchCommand(url, { platform: 'darwin', fullscreen: true }),
+    ['open', ['-na', 'Google Chrome', '--args', '--start-fullscreen', `--app=${url}`]]);
+  assert.deepEqual(launchCommand(url, { platform: 'win32', executable: 'msedge.exe', fullscreen: true })[1], ['--start-fullscreen', `--app=${url}`]);
+});
+
 test('profile folders on both', () => {
   assert.match(profileRoot('chrome', 'darwin', {}, '/Users/x'), /Library.Application Support.Google.Chrome$/);
   assert.match(profileRoot('edge', 'win32', { LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' }, 'C:\\Users\\x'), /Microsoft.Edge.User Data$/);

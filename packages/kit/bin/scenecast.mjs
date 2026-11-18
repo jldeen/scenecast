@@ -22,7 +22,8 @@ const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary;
 
 Every demo command takes --demo <dir>, or runs from inside the demo folder.`
 
-function rx() { try { return loadDemo(rest).cfg.receiverPort; } catch (e) { return 47621; } }
+// The receiver's port: --port, else REPLICA_RX_PORT (as preflight and the receiver use it), else the demo's, else the default.
+function rx() { const given = arg(rest, '--port') || process.env.REPLICA_RX_PORT; if (given) return +given; try { return loadDemo(rest).cfg.receiverPort; } catch (e) { return 47621; } }
 async function send(op, args = {}, tmo = 900) {
   const { send } = await import('../../recorder/cli.mjs');
   process.env.REPLICA_RX_PORT = process.env.REPLICA_RX_PORT || String(rx());
@@ -38,10 +39,10 @@ async function main() {
     case 'new': console.log('scenecast new is in the scenecast binary (Rust): it writes the project and its manifest'); return 1;
     case 'extension': {
       // The recorder extension (MV3, Edge and Chrome), unpacked: ~/.scenecast/extension unless a folder is given.
-      const out = rest.find(a => !a.startsWith('--')) || join(homedir(), '.scenecast', 'extension');
+      const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo') || join(homedir(), '.scenecast', 'extension');
       return node('recorder/build.mjs', ['--extension', out, '--port', String(rx())]);
     }
-    case 'agent': { const out = rest.find(a => !a.startsWith('--')); return node('recorder/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
+    case 'agent': { const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo'); return node('recorder/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
     case 'preflight': return (await import('../lib/preflight.mjs')).main(rest, loadDemo);
     case 'receiver': return node('recorder/receiver.mjs', ['--demo', loadDemo(rest).dir]);
     case 'cmd': { const [op, j] = rest; return send(op, j && j.startsWith('{') ? JSON.parse(j) : {}); }

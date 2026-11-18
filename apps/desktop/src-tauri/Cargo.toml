@@ -1,0 +1,33 @@
+[package]
+name = "scenecast-desktop"
+description = "Scenecast's desktop app (Tauri, macOS and Windows) on the scenecast-app library"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/jldeen/scenecast"
+default-run = "scenecast-desktop"
+
+# Its own workspace: it needs a webview toolkit to build, which the rest of the repo doesn't.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+scenecast-app = { path = "../../../crates/scenecast-app" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+trash = "5"
+# The embedded WebDriver server the UI test drives the app through (macOS, Windows, Linux). Never in an installer.
+tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+
+[features]
+webdriver = ["dep:tauri-plugin-wdio-webdriver"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

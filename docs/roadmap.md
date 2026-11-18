@@ -32,7 +32,14 @@ first-class. Phases:
   the replica (⌥⇧E, or `scenecast edit`): dots that snap to what they point at, wording and date changes everywhere
   the text appears, beat starts, undo; every change shows at once and is saved. Both are Rust library calls with
   progress (`scenecast_build::script`, `scenecast_build::edit`).
-- **Phase 5: ready for anyone**, then a desktop app (Tauri, macOS and Windows) on the same Rust core.
+- **Phase 4b (done): the desktop app.** Tauri, macOS and Windows, on the same Rust core (`crates/scenecast-app`, the
+  commands; `apps/desktop`, the window): the demo library with each demo's status; new demo and record (preflight item
+  by item with fixes, the one-time Load unpacked guided, live screens and recorder vs product time); build with the
+  scrub report and the checks; fidelity with real vs replica side by side and Fix; script to focus points with the
+  sheets; the editor; present (the key reference first, then full screen); export as a folder or zip. A universal
+  `.dmg` and an `.msi` and NSIS installer from CI, signed when the secrets are set. A WebDriver test runs the whole
+  flow on the fixture app in the real window on macOS and Windows. Updates are a stub.
+- **Phase 5: ready for anyone.** The human pilot with a presenter outside Jessica's team, then pilots on real products.
 
 ## Foundation from Seth's scenecast
 

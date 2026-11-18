@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scenecast</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="shell">
+    <nav class="sidebar" aria-label="Demos">
+      <div class="brand">
+        <img src="icon.svg" alt="" width="28" height="28">
+        <span>Scenecast</span>
+      </div>
+      <button id="new-demo" class="btn primary block" data-test="new-demo">
+        <span aria-hidden="true">＋</span> New demo
+      </button>
+      <button id="nav-library" class="nav-item" aria-current="page" data-test="nav-library">
+        <span class="nav-icon" aria-hidden="true">▦</span> All demos
+      </button>
+      <h2 class="nav-heading" id="demos-heading">Your demos</h2>
+      <ul id="demo-list" class="demo-list" aria-labelledby="demos-heading"></ul>
+      <div class="sidebar-foot">
+        <button id="check-updates" class="link" data-test="check-updates">Check for updates</button>
+        <span id="version" class="muted"></span>
+      </div>
+    </nav>
+    <main id="main" tabindex="-1"></main>
+  </div>
+  <div id="announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

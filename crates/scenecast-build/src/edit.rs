@@ -74,6 +74,10 @@ impl EditServer {
     pub fn events(&self) -> impl Iterator<Item = EditProgress> + '_ {
         self.events.iter()
     }
+    /// The server's events as a channel of their own (for a thread that forwards them); `events()` is empty after.
+    pub fn take_events(&mut self) -> Receiver<EditProgress> {
+        std::mem::replace(&mut self.events, mpsc::channel().1)
+    }
     pub fn stop(&mut self) -> std::io::Result<()> {
         self.child.kill()?;
         self.child.wait().map(|_| ())
