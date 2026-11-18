@@ -230,7 +230,8 @@ try {
   check('shows the scrub report', (await exists('scrub-clean')) || (await exists('scrub-summary')));
   await click('checks-quick');
   await waitFor('the checks', () => exists('checks-done'), 600000);
-  check('runs the checks', (await attr('checks-done', 'data-pass')) === 'true', await text('checks-done'));
+  const failing = await b.execute(() => [...document.querySelectorAll('[aria-label=Checks] [data-status=fail]')].map(li => li.innerText.replace(/\s+/g, ' ')).join('; '));
+  check('runs the checks', (await attr('checks-done', 'data-pass')) === 'true', `${await text('checks-done')} ${failing}`);
   await shot('07-build');
   lap('build');
 

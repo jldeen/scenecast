@@ -27,6 +27,13 @@ tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 [features]
 webdriver = ["dep:tauri-plugin-wdio-webdriver"]
 
+# Debug builds (the UI test's) without debug info: the webview stack's makes them gigabytes, on disk and in CI caches.
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+debug = 0
+
 [profile.release]
 codegen-units = 1
 lto = true
