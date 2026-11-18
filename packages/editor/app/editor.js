@@ -328,8 +328,11 @@ export default function editor(api) {
       <div data-status style="margin-top:8px;color:${/^Not saved|problem/.test(st.status) ? '#a14a00' : '#555'}">${q(st.status || 'Click to drop a dot · drag across text to change it')}</div>`;
   }
   function setPaused(v) { st.paused = v; render(); }
-  async function toggle(on = !st.on) {
+  async function toggle(on) {
     await loaded;
+    // On or off is decided once the editor's data is in: a key pressed while ?edit=1 is still turning it on flips
+    // what's on screen by then, not the state from before.
+    if (on === undefined) on = !st.on;
     if (on && !ui) build();
     st.on = on; st.sel = null; st.replace = null; st.paused = false;
     if (focus()) focus().clear();

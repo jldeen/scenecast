@@ -280,7 +280,10 @@ try {
   await page.waitForFunction(() => window.d1 && window.d1.state.active && window.d1.editor, null, { timeout: 60000 });
   const d1 = (fn, arg) => page.evaluate(fn, arg);
   const idle = async () => { await d1(() => window.d1.editor.idle()); await d1(() => window.d1.idle()); };
-  if (!(await d1(() => window.d1.editor.on))) { await page.keyboard.press('Control+Alt+Shift+KeyE'); await idle(); }
+  // The app serves it with ?edit=1: the editor turns itself on once its data is in. Pressing its key here as well
+  // could land just after that, and turn it off again.
+  await page.waitForFunction(() => window.d1.editor.on && !!document.querySelector('[data-scenecast-editor="overlay"]'), null, { timeout: 60000 });
+  await idle();
   const word = (app, w) => d1(([app, w]) => {
     const d = window.d1.doc(app), it = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT);
     for (let n; (n = it.nextNode());) { const i = n.data.indexOf(w); if (i < 0) continue; const r = d.createRange(); r.setStart(n, i); r.setEnd(n, i + w.length); const bx = r.getBoundingClientRect(), f = d.defaultView.frameElement.getBoundingClientRect(); if (bx.width) return { x0: f.x + bx.left, x1: f.x + bx.right, y: f.y + bx.top + bx.height / 2 }; }
