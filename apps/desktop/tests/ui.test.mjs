@@ -245,7 +245,8 @@ try {
   const only = await b.$('#only-diffs');
   if (await only.isSelected()) await only.click();
   await waitFor('the side-by-side pictures', async () => (await b.$$(T('shot'))).length >= compared, 20000);
-  const loaded = await b.execute(() => [...document.querySelectorAll('[data-test=shot] img')].filter(i => i.complete && i.naturalWidth > 0).length);
+  // Lazy pictures: the first one is in view; wait for it to arrive.
+  const loaded = await waitFor('a picture to load', () => b.execute(() => [...document.querySelectorAll('[data-test=shot] img')].filter(i => i.complete && i.naturalWidth > 0).length), 20000).catch(() => 0);
   check('each state real and replica side by side', loaded >= 1, `${loaded} pictures loaded, ${shots.length} differing`);
   await shot('08-fidelity');
   lap('fidelity');
