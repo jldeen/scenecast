@@ -13,7 +13,7 @@ import { createReadStream, existsSync, statSync, readFileSync, readdirSync, real
 import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp } from './launch.mjs';
-import { diffFlow } from './app/bundle-flow.js';
+import { diffFlow, flowFromBundle, applyFlowOverrides } from './app/bundle-flow.js';
 import { readFocusJson, readEditorOverrides, checkFocusJson, checkEditorOverrides, writeJsonAtomic, FOCUS_JSON, EDITOR_JSON } from '../kit/lib/overrides.mjs';
 import { textRe } from '../kit/lib/edits.mjs';
 import { loadDemo, arg } from '../kit/lib/demo.mjs';
@@ -203,6 +203,10 @@ createServer(async (req, res) => {
         const mods = [...((live.flow && live.flow.modules) || manifest.playback?.options?.modules || [])].filter(m => m !== '/app/focus-module.js' && m !== '/editor/editor.js');
         (manifest.development_overrides ||= []).push({ path: ['modules'], value: ['/app/focus-module.js', ...mods, '/editor/editor.js'] });
       }
+      // The presenter guide's stage side (⌥G; packages/player/presenter/), on every replica this server serves (not in
+      // an export: the guide needs this server). It reads presenter/notes.json (scenecast notes) when there is one.
+      const mods = applyFlowOverrides(flowFromBundle(manifest), manifest.development_overrides).modules || [];
+      if (!mods.includes('/app/presenter-module.js')) (manifest.development_overrides ||= []).push({ path: ['modules'], value: [...mods, '/app/presenter-module.js'] });
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' });
       return res.end(JSON.stringify(manifest));
     } catch (e) {

@@ -18,7 +18,8 @@ const ROOT = join(KIT, '..');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const binary = () => process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(ROOT, 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
 const scenecast = (BIN, DEMO, ...args) => new Promise(res => {
-  const p = spawn(BIN, args, { cwd: DEMO, env: { ...process.env, REPLICA_NO_OPEN: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const env = typeof args[args.length - 1] === 'object' ? args.pop() : {};
+  const p = spawn(BIN, args, { cwd: DEMO, env: { ...process.env, REPLICA_NO_OPEN: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; p.stdout.on('data', d => out += d); p.stderr.on('data', d => out += d); p.on('close', code => res({ code, out }));
 });
 
@@ -75,6 +76,12 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
   let rep = JSON.parse(readFileSync(join(DEMO, '.out', 'notes-check.json'), 'utf8'));
   const ids = ['script', 'focus-beats', 'stage', 'pictures', 'window-opens', 'window-content', 'window-follows', 'window-browses', 'window-goes', 'timer', 'steps', 'errors'];
   check('presenter walk: ⌥G opens the guide; it follows, browses, goes, steps, times; script, guide and replica agree', r.code === 0 && rep.pass && ids.every(id => (rep.items.find(i => i.id === id) || {}).status === 'pass') && /over \d+ beats?/.test((rep.items.find(i => i.id === 'steps') || {}).detail), r.out);
+  // In Edge too, where it's installed (the macOS and Windows runners): on Windows, its real Ctrl+Alt keys.
+  if (process.platform === 'win32' || process.platform === 'darwin') {
+    r = await run('notes', '--check', { REPLICA_CHROME_CHANNEL: 'msedge' });
+    rep = JSON.parse(readFileSync(join(DEMO, '.out', 'notes-check.json'), 'utf8'));
+    check(`presenter walk in Edge (${process.platform === 'win32' ? 'Windows, Ctrl+Alt' : 'Mac, ⌥'})`, r.code === 0 && rep.pass && ids.every(id => (rep.items.find(i => i.id === id) || {}).status === 'pass') && (process.platform !== 'win32' || /Ctrl\+Alt\+G/.test(rep.items.find(i => i.id === 'window-opens').detail)), r.out);
+  }
   r = await run('notes', '--check', '--as-windows');
   rep = JSON.parse(readFileSync(join(DEMO, '.out', 'notes-check.json'), 'utf8'));
   check('presenter walk as Edge on Windows: Ctrl+Alt keys, the guide reads Ctrl+Alt', r.code === 0 && rep.pass && rep.windows && /Ctrl\+Alt\+G/.test(rep.items.find(i => i.id === 'window-opens').detail), r.out);

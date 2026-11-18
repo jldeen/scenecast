@@ -570,6 +570,10 @@ async fn present_start(
         stop_servers(&state, &id);
         let mut session = PresentSession::start(&dir, true)?;
         let guide_url = if guide.unwrap_or(true) && scenecast_app::guide::status(&dir).is_some() {
+            // The browser the stage just opened in gets a moment to start: the guide must open in that same browser.
+            if session.opened {
+                std::thread::sleep(Duration::from_millis(1500));
+            }
             Some(scenecast_app::guide::open(
                 &dir,
                 &session.url,

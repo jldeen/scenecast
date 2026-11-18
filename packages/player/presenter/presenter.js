@@ -1,5 +1,5 @@
 // The presenter guide (/presenter.html, scenecast, from replica-kit 1.6.0): ⌥G on the stage opens it (Ctrl+Alt+G on Windows). It follows
-// the stage's beat over a BroadcastChannel (engine/app/presenter-module.js has the protocol). Its Back, Next, beat
+// the stage's beat over a BroadcastChannel (packages/player/app/presenter-module.js has the protocol). Its Back, Next, beat
 // circles and keys only browse: the window shows another beat to read ahead or back ("Previewing beat 7 · stage is on
 // beat 3") and the stage stays put. "Back to live" (or Esc) returns to the stage's beat; only "Go to this beat on
 // stage" moves the stage. Its content is the demo's presenter/notes.json, made from the script by `scenecast notes`

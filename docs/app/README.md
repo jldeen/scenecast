@@ -50,8 +50,8 @@ each one stands: recorded, built, fidelity score, focus points, last checked.
 | ![Recording](recording.png) Recording, live | ![Build and check](build.png) Build, scrub report, checks |
 | ![Fidelity](fidelity.png) Fidelity: real vs replica | ![Script](script.png) Script to focus points |
 | ![Edit](edit.png) Edit: saved changes | ![Present](present.png) Present: the keys and the presenter guide |
-| ![The presenter guide](presenter-guide.png) The presenter guide, on the laptop screen | ![Export](export.png) Export: every check, then the folder or zip |
-| ![Library](library.png) The library | |
+| ![Presenting](presenting.png) Presenting, with the presenter guide | ![The presenter guide](presenter-guide.png) The presenter guide, on the laptop screen |
+| ![Export](export.png) Export: every check, then the folder or zip | ![Library](library.png) The library |
 
 ## Why the replica opens in Edge or Chrome
 
