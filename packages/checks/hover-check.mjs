@@ -87,7 +87,7 @@ for (const hp of flow.hoverPages) {
     await p.waitForTimeout((d.delay || 0) / SPEED + (SPEED > 1 ? 200 : 450));
     const on = await p.evaluate(app => window.d1.hovers(app), hp.app);
     const shown = on.some(h => h.id === d.id);
-    if (shown) r.shown++; else { const why = await p.evaluate(([x, y, app]) => window.d1.hoverAt(x, y, app), [cx, cy, hp.app]); report.failed.push({ id: d.id, text: ((d.portals || [])[0] || {}).text || JSON.stringify(d.anchors[0]).slice(0, 90), at: why }); }
+    if (shown) r.shown++; else { const why = await p.evaluate(([x, y, app]) => window.d1.hoverAt(x, y, app), [cx, cy, hp.app]); const trace = await p.evaluate(() => window.d1.hoverTrace ? window.d1.hoverTrace().slice(-40) : []); report.failed.push({ id: d.id, text: ((d.portals || [])[0] || {}).text || JSON.stringify(d.anchors[0]).slice(0, 90), at: why, trace }); }
     // Same picture area as the real one, moved by however far the element sits from where it was.
     const real = `${RAWH}${d.shot}`;
     if (d.shot && existsSync(real)) {

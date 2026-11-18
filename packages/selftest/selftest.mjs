@@ -25,7 +25,8 @@ import { scriptAndEditor } from './script-focus.mjs';
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
 if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
-const keep = process.argv.includes('--keep');
+// SCENECAST_SELFTEST_KEEP=<file>: keep the demo folder too, and write where it is to that file (selftest/hover-repeat.mjs).
+const keep = process.argv.includes('--keep') || !!process.env.SCENECAST_SELFTEST_KEEP;
 // The recorder: the extension (MV3, chrome.debugger) by default; --agent for the Playwright-driven agent.
 const MODE = process.argv.includes('--agent') || process.env.SCENECAST_RECORDER === 'agent' ? 'agent' : 'extension';
 const RX_PORT = 47691, REPLICA_PORT = 4699;
@@ -515,6 +516,7 @@ export default flow => {
   for (const p of procs) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' }); else p.kill(); }
   fx.close();
   if (keep || fails.length) console.log('demo folder: ' + tmp); else rmSync(tmp, { recursive: true, force: true });
+  if (process.env.SCENECAST_SELFTEST_KEEP) writeFileSync(process.env.SCENECAST_SELFTEST_KEEP, tmp);
 }
 console.log(fails.length ? `${fails.length} FAILED` : 'ALL PASS');
 process.exit(fails.length ? 1 : 0);

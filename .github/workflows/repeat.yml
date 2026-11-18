@@ -1,0 +1,55 @@
+name: Repeat
+
+# The engine tests several times over on one OS, side by side (identical every run is the requirement): the full
+# npm test in each job, then the hover check and the whole checklist again on the job's kept demo.
+#   gh workflow run repeat.yml --ref main -f os=windows-latest
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: Runner
+        default: windows-latest
+      loops:
+        description: Extra hover checks and checklists on each job's demo
+        default: '10'
+
+jobs:
+  engine:
+    name: Engine ${{ inputs.os }} run ${{ matrix.run }}
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Chromium for the extension tests
+        run: npx playwright-core install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+      - name: Build the scenecast binary
+        run: cargo build -p scenecast-cli
+      - name: Git identity for the test demo's commits
+        run: |
+          git config --global user.name "scenecast ci"
+          git config --global user.email "ci@localhost"
+      - name: Engine tests (unit, capture, selftest)
+        run: npm test
+        env:
+          SCENECAST_SELFTEST_KEEP: ${{ runner.temp }}/selftest-demo.txt
+          SCENECAST_BIN: ${{ runner.os == 'Windows' && 'target/debug/scenecast.exe' || 'target/debug/scenecast' }}
+      - name: Hover check and checklist, again and again
+        if: always()
+        shell: bash
+        env:
+          SCENECAST_BIN: ${{ runner.os == 'Windows' && 'target/debug/scenecast.exe' || 'target/debug/scenecast' }}
+          LOOPS: ${{ inputs.loops }}
+          SCENECAST_SELFTEST_KEEP: ${{ runner.temp }}/selftest-demo.txt
+        run: node packages/selftest/hover-repeat.mjs

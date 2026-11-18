@@ -349,6 +349,7 @@ function onOver(e, app, doc) {
   }, T(hit.t.delay === undefined ? 350 : hit.t.delay));
 }
 function onOut(e, app, doc) {
+  hvTrace('out', hvName(e.target), '->', hvName(e.relatedTarget));
   hvOut(app);
   const h = app.hover;
   if (!h) { if (hoverTimer && !(e.relatedTarget && findTransition(app, 'hover', e.relatedTarget, doc))) { clearTimeout(hoverTimer); hoverTimer = null; } return; }
@@ -377,6 +378,10 @@ function frag(doc, html) {
 }
 const isHovered = el => { try { return el.matches(':hover'); } catch (e) { return false; } };
 function hvState(app) { return app.hv || (app.hv = { on: new Set(), timers: new Map() }); }
+// What the hovers did, last 300 events (for the checks: why a hover didn't show).
+const hvLog = [];
+const hvTrace = (...a) => { hvLog.push([Math.round(performance.now()), ...a].join(' ')); if (hvLog.length > 300) hvLog.shift(); };
+const hvName = el => el ? el.localName + (el.id ? '#' + el.id : '') + ' ' + norm(el.innerText).slice(0, 24) : '-';
 function hvDefsAt(app, doc, target) {
   const H = hoverData[app.id];
   if (!H || !target) return [];
@@ -454,13 +459,14 @@ function hvFits(el, d) {
   return true;
 }
 function hvOver(e, app, doc, now) {
-  if (busy) return;
+  if (busy) { hvTrace('over-busy', hvName(e.target)); return; }
   if (e.clientX !== undefined) app.ptr = { doc, x: e.clientX, y: e.clientY };
   const st = hvState(app);
   for (const { d, el } of hvDefsAt(app, doc, e.target)) {
     const k = d.id;
-    if ([...st.on].some(h => h.d === d && h.el === el) || st.timers.has(k)) continue;
-    const show = () => { st.timers.delete(k); if (!busy && el.isConnected && (now || isHovered(el))) hvApply(app, doc, d, el); };
+    if ([...st.on].some(h => h.d === d && h.el === el) || st.timers.has(k)) { hvTrace('over-skip', k, st.timers.has(k) ? 'timer' : 'on'); continue; }
+    hvTrace('over', k, hvName(e.target));
+    const show = () => { st.timers.delete(k); const ok = !busy && el.isConnected && (now || isHovered(el)); hvTrace('fire', k, 'busy=' + busy, 'conn=' + el.isConnected, 'hov=' + isHovered(el)); if (ok) hvApply(app, doc, d, el); };
     if (now) show(); else st.timers.set(k, setTimeout(show, T(d.delay || 0)));
   }
 }
@@ -470,7 +476,7 @@ function hvOut(app) {
   st.sweepPending = true;
   st.sweep = setTimeout(() => {
     st.sweepPending = false;
-    for (const h of [...st.on]) if (!(h.el.isConnected && (isHovered(h.el) || h.nodes.some(isHovered)))) hvUndo(app, h);
+    for (const h of [...st.on]) if (!(h.el.isConnected && (isHovered(h.el) || h.nodes.some(isHovered)))) { hvTrace('sweep', h.d.id, 'conn=' + h.el.isConnected); hvUndo(app, h); }
   }, T(110));
 }
 function hvCss(doc, app, page, enable = true) {
@@ -494,7 +500,8 @@ function hvCssAll(doc, app) {
   for (const p of pages) hvCss(doc, app, p, false);
 }
 function hvApply(app, doc, d, el) {
-  if (!hvFits(el, d)) return;
+  if (!hvFits(el, d)) { hvTrace('nofit', d.id); return; }
+  hvTrace('apply', d.id);
   hvCss(doc, app, d.page);
   const h = { d, el, doc, undo: [], nodes: [], portals: [] };
   for (const op of d.ops || []) {
@@ -543,6 +550,7 @@ function hvUndo(app, h) {
 }
 function hvClear(app) {
   const st = hvState(app);
+  if (st.timers.size || st.on.size) hvTrace('clear', [...st.timers.keys(), ...[...st.on].map(h => h.d.id)].join(','), (new Error().stack.split('\n')[2] || '').trim().slice(0, 60));
   for (const t of st.timers.values()) clearTimeout(t);
   st.timers.clear();
   for (const h of [...st.on]) hvUndo(app, h);
@@ -1565,6 +1573,7 @@ window.d1 = {
   },
   flags: id => ({ ...(apps[id || active].flags || {}) }),
   sizes: id => ({ ...(apps[id || active].sizes || {}) }),
+  hoverTrace: () => hvLog.slice(),
   hovers: id => [...hvState(apps[id || active]).on].map(h => ({ id: h.d.id, text: h.portals.map(p => norm(p.node.innerText)).join(' / '), ops: (h.d.ops || []).length })),
 };
 Object.assign(window.d1, exposed);
