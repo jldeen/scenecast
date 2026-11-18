@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseProcs, judgeBrowser } from './preflight.mjs';
+import { createServer } from 'node:http';
+import { parseProcs, judgeBrowser, preflight } from './preflight.mjs';
 
 test('main browser processes on the Mac, with their flags; helpers left out', () => {
   const ps = [
@@ -33,4 +34,17 @@ test('a running browser is judged, never restarted: same user data folder, debug
   assert.equal(judgeBrowser(procs, { ...want, debugPort: 9222 }).needsPort, true);
   assert.equal(judgeBrowser(procs, { ...want, userDataDir: '/other' }).running, false);
   assert.equal(judgeBrowser(procs, { ...want, browser: 'chrome' }).running, false);
+});
+
+test('a receiver slow to answer is the one running: not started again', async () => {
+  // Answers its ping in 1.2 s (a loaded machine): longer than the first ping waits.
+  const srv = createServer((req, res) => setTimeout(() => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, raw: '/slow', agent: { polling: false, secsAgo: null } })); }, 1200));
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port, stop = new Error('stop');
+  let got = null;
+  try {
+    await preflight({ dir: '.', cfg: { receiverPort: port, recorder: 'extension', chrome: {}, apps: [] } }, { onItem: r => { if (r.id === 'receiver') { got = r; throw stop; } } }).catch(e => { if (e !== stop) throw e; });
+  } finally { srv.close(); }
+  assert.equal(got.status, 'ok', JSON.stringify(got));
+  assert.match(got.detail, /\/slow/);
 });

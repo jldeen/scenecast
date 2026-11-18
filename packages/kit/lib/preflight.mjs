@@ -11,6 +11,7 @@ import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { connect } from 'node:net';
 import { KIT } from './demo.mjs';
 import { defaultBrowser, profileRoot, launchCommand } from '../../player/launch.mjs';
 
@@ -57,6 +58,10 @@ async function ping(port, ms = 1500) {
   const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms);
   try { return await (await fetch(`http://127.0.0.1:${port}/ping`, { signal: ac.signal })).json(); } catch (e) { return null; } finally { clearTimeout(t); }
 }
+// Whether anything is listening on the port: refused at once when nothing is, whatever the machine's load.
+function listening(port) {
+  return new Promise(res => { const c = connect(port, '127.0.0.1'); c.once('connect', () => { c.destroy(); res(true); }); c.once('error', () => res(false)); });
+}
 async function op(port, cmd, tmoS) {
   const { send } = await import('../../recorder/cli.mjs');
   return send(cmd, tmoS, port);
@@ -73,10 +78,14 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   };
 
   // Receiver: the recorder posts to it.
+  // A receiver slow to answer (a loaded machine, the recorder sending it a capture) is still running: one is started
+  // only when nothing is listening on its port, never because a ping took too long.
   let up = await ping(port, 800);
+  if (!up && await listening(port)) up = await ping(port, 10000);
   let started = false;
   await item('receiver', async () => {
     if (up) return { status: 'ok', detail: `up on ${port} → ${up.raw}` };
+    if (await listening(port)) return { status: 'fail', detail: `something on ${port} isn't answering as a receiver: stop it, or set another receiverPort in demo.json` };
     if (!fix) return { status: 'fail', detail: `nothing on ${port}: run scenecast receiver` };
     const k = spawn(process.execPath, [join(KIT, 'recorder', 'receiver.mjs'), '--demo', demo.dir], { detached: true, stdio: 'ignore', env: { ...process.env, REPLICA_RX_PORT: String(port) } });
     k.unref();
@@ -93,7 +102,7 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   await item('browser', async () => {
     // A receiver just started: a recorder already running in the browser connects on its next try (every 2 s). Give
     // it that, so a browser that's open isn't taken for one that isn't.
-    if (started && recorder === 'extension') for (let i = 0; i < 12 && !connected(up); i++) { await sleep(500); up = await ping(port, 500); }
+    if (started && recorder === 'extension') for (let i = 0; i < 12 && !connected(up); i++) { await sleep(500); up = (await ping(port, 1500)) || up; }
     if (connected(up) && recorder === 'extension') return { status: 'ok', detail: 'the recorder extension is connected, so the browser is running (not touched)' };
     const procs = await listProcs();
     const b = judgeBrowser(procs, { browser, userDataDir, defaultDir: profileRoot(browser), debugPort: recorder === 'agent' ? cfg.chrome.debugPort || 9222 : null });
@@ -121,7 +130,7 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
 
   // The recorder: connected to the receiver (the extension retries every 2 s; give a fresh one a moment).
   const rec = await item('recorder', async () => {
-    for (let i = 0; i < waitAgentS * 2 && !connected(up); i++) { await sleep(500); up = await ping(port, 500); }
+    for (let i = 0; i < waitAgentS * 2 && !connected(up); i++) { await sleep(500); up = (await ping(port, 1500)) || up; }
     if (connected(up)) {
       const e = recorder === 'extension' ? await op(port, { op: 'extension' }, 8) : { ok: true };
       return { status: 'ok', detail: recorder === 'extension' && e.ok ? `extension ${e.value.version} connected` : `${recorder} connected` };
