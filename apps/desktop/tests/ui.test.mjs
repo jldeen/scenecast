@@ -295,13 +295,20 @@ try {
   check('the editor reaches the answer with its beat keys', !!fri);
   const more = await d1(() => window.d1.locate({ sel: 'button[aria-label="More options"]' }, 'chat'));
   await page.mouse.click(more.x, more.y); await idle();
-  await waitFor('the dot saved', async () => +(await text('saved-count')) >= 1, 30000);
+  // On a miss: what the editor did with the click (its status, its dots) and what the app listed.
+  const why = async () => {
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'zz-editor.png') }).catch(() => {});
+    const s = await d1(() => { const x = window.d1.editor.state(); return { status: x.status, sel: x.sel, dots: x.points.filter(p => p.source === 'dot').map(p => p.id), history: x.history }; }).catch(e => e.message);
+    let disk; try { disk = JSON.parse(readFileSync(join(DEMO, 'focus.json'), 'utf8')).points.filter(p => p.source === 'dot').map(p => p.id); } catch (e) { disk = e.message; }
+    return JSON.stringify({ more, editor: s, onDisk: disk, appSaved: await text('saved-count').catch(e => e.message) });
+  };
+  await waitFor('the dot saved', async () => +(await text('saved-count')) >= 1, 30000).catch(async e => { throw new Error(`${e.message}: ${await why()}`); });
   fri = await word('chat', 'Friday');
   await page.mouse.move(fri.x0 + 2, fri.y); await page.mouse.down();
   await page.mouse.move((fri.x0 + fri.x1) / 2, fri.y, { steps: 4 }); await page.mouse.move(fri.x1 - 2, fri.y, { steps: 4 }); await page.mouse.up();
   await page.waitForSelector('input[data-replace]', { timeout: 15000 });
   await page.keyboard.type('Monday', { delay: 20 }); await page.keyboard.press('Enter'); await idle();
-  await waitFor('the date saved', async () => +(await text('saved-count')) >= 2, 30000);
+  await waitFor('the date saved', async () => +(await text('saved-count')) >= 2, 30000).catch(async e => { throw new Error(`${e.message}: ${await why()}`); });
   const fj = JSON.parse(readFileSync(join(DEMO, 'focus.json'), 'utf8')), ej = JSON.parse(readFileSync(join(DEMO, 'flow.editor.json'), 'utf8'));
   check('edit: the app lists the dot and the date as they are saved', fj.points.some(p => p.source === 'dot') && JSON.stringify(ej.edits).includes('Monday'), JSON.stringify(ej));
   await page.close();
