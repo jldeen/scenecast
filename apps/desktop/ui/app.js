@@ -755,7 +755,7 @@ document.addEventListener('click', async e => {
   if (ds.reveal) return call('reveal', { path: ds.reveal }).catch(() => {});
   if (ds.copy) { await navigator.clipboard?.writeText(ds.copy).catch(() => {}); return toast('Copied'); }
   if (ds.openUrl) return call('open_url', { url: ds.openUrl }).catch(() => {});
-  if (ds.openFile) { const u = await invoke('file_url', { path: ds.openFile }); if (u) call('open_url', { url: u }).catch(() => {}); return; }
+  if (ds.openFile) return call('open_file', { path: ds.openFile }).catch(() => {});
   if (ds.removeApp !== undefined) { const rows = document.querySelectorAll('[data-app-row]'); if (rows.length > 1) t.closest('[data-app-row]').remove(); return; }
   if (t.id === 'add-app') { const n = document.querySelectorAll('[data-app-row]').length; $('#apps').insertAdjacentHTML('beforeend', appRow(n)); return $(`#app-id-${n}`).focus(); }
 });

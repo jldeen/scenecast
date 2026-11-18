@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use scenecast_app::export::ExportKind;
-use scenecast_app::files::FileServer;
+use scenecast_app::files::FileScope;
 use scenecast_app::library::{Demo, Library, NewDemo};
 use scenecast_app::servers::{EditSession, PresentSession};
 use scenecast_app::{AppError, Update};
@@ -22,7 +22,7 @@ type Res<T> = Result<T, AppError>;
 
 struct AppState {
     library: Library,
-    files: FileServer,
+    files: FileScope,
     busy: Mutex<HashMap<String, String>>,
     recording: Mutex<HashSet<String>>,
     edits: Mutex<HashMap<String, EditSession>>,
@@ -616,9 +616,52 @@ async fn pick_folder(app: AppHandle) -> Res<Option<String>> {
     .await
 }
 
+/// The app's own protocol for files from the library: `scenecast://localhost/…` (`http://scenecast.localhost/…` on
+/// Windows, where WebView2 serves custom protocols that way).
+const FILES_BASE: &str = if cfg!(windows) {
+    "http://scenecast.localhost"
+} else {
+    "scenecast://localhost"
+};
+
 #[tauri::command]
 fn file_url(state: State<'_, Shared>, path: String) -> Option<String> {
-    state.files.url(Path::new(&path))
+    state
+        .files
+        .url_path(Path::new(&path))
+        .map(|p| format!("{FILES_BASE}{p}"))
+}
+
+fn serve_file(
+    state: &AppState,
+    request: &tauri::http::Request<Vec<u8>>,
+) -> tauri::http::Response<Vec<u8>> {
+    let found = state
+        .files
+        .resolve(request.uri().path())
+        .and_then(|p| Some((std::fs::read(&p).ok()?, p)));
+    match found {
+        Some((body, path)) => tauri::http::Response::builder()
+            .header("Content-Type", scenecast_app::files::content_type(&path))
+            .header("Cache-Control", "no-cache")
+            .body(body),
+        None => tauri::http::Response::builder()
+            .status(404)
+            .body(b"not found".to_vec()),
+    }
+    .expect("a static response")
+}
+
+/// Opens a report from the library in the default browser (its pictures beside it, as on disk).
+#[tauri::command]
+fn open_file(state: State<'_, Shared>, app: AppHandle, path: String) -> Res<()> {
+    let path = PathBuf::from(path);
+    if state.files.url_path(&path).is_none() || !path.is_file() {
+        return Err(AppError::Invalid(format!("not opening {}", path.display())));
+    }
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::Invalid(format!("can't open {}: {e}", path.display())))
 }
 
 #[tauri::command]
@@ -698,7 +741,7 @@ fn main() {
     default_check_browser();
     let library = Library::new(Library::default_root());
     let _ = std::fs::create_dir_all(&library.root);
-    let files = FileServer::start().expect("the app's file server");
+    let files = FileScope::default();
     files.allow(&library.root);
     let state: Shared = Arc::new(AppState {
         library,
@@ -716,6 +759,10 @@ fn main() {
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     let app = builder
         .manage(state.clone())
+        .register_uri_scheme_protocol("scenecast", {
+            let state = state.clone();
+            move |_ctx, request| serve_file(&state, &request)
+        })
         .invoke_handler(tauri::generate_handler![
             app_info,
             list_demos,
@@ -748,6 +795,7 @@ fn main() {
             export_demo,
             pick_folder,
             file_url,
+            open_file,
             reveal,
             open_url,
             check_updates,

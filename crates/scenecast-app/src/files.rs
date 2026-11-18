@@ -1,18 +1,15 @@
-//! A local file server for what the app shows from a demo's folder (the fidelity report's pictures, the script's
-//! sheets): `http://127.0.0.1:<port>/<token>/<path>`. Only on the loopback address, only with the token, only files
-//! inside the folders it's been allowed (the library), so relative links inside a report work as they do on disk.
+//! What the app's window may show from disk (the fidelity report's pictures, the script's sheets): files inside the
+//! folders it's been allowed (the library), addressed as `/<root>/<path inside it>` so relative links inside a report
+//! work as they do on disk, the same on macOS and Windows (no drive letters in a URL). The app serves these paths on
+//! its own `scenecast:` protocol.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, RwLock};
-use std::thread;
+use std::sync::RwLock;
 
-use crate::AppError;
-
-pub struct FileServer {
-    /// `http://127.0.0.1:<port>/<token>`.
-    pub base: String,
-    roots: Arc<RwLock<Vec<PathBuf>>>,
+#[derive(Default)]
+pub struct FileScope {
+    roots: RwLock<Vec<PathBuf>>,
 }
 
 fn canonical(path: &Path) -> PathBuf {
@@ -23,24 +20,6 @@ fn canonical(path: &Path) -> PathBuf {
         Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
         _ => p,
     }
-}
-
-fn token() -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-    let mut out = String::new();
-    for i in 0..2u64 {
-        let mut h = RandomState::new().build_hasher();
-        h.write_u64(i ^ std::process::id() as u64);
-        h.write_u128(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0),
-        );
-        out.push_str(&format!("{:016x}", h.finish()));
-    }
-    out
 }
 
 pub fn content_type(path: &Path) -> &'static str {
@@ -66,29 +45,6 @@ pub fn content_type(path: &Path) -> &'static str {
     }
 }
 
-/// The file a request path names, if it's inside one of the roots.
-fn resolve(roots: &[PathBuf], url_path: &str) -> Option<PathBuf> {
-    let path = url_path.split(['?', '#']).next().unwrap_or("");
-    let decoded = percent_decode(path)?;
-    let rel = Path::new(decoded.trim_start_matches('/'));
-    if rel.components().any(|c| !matches!(c, Component::Normal(_))) {
-        return None;
-    }
-    let candidate = if cfg!(windows) {
-        // `/C:/Users/…` on Windows.
-        PathBuf::from(decoded.trim_start_matches('/'))
-    } else {
-        PathBuf::from(&decoded)
-    };
-    let real = fs::canonicalize(&candidate).ok()?;
-    let real = canonical(&real);
-    roots
-        .iter()
-        .any(|root| real.starts_with(root))
-        .then_some(real)
-        .filter(|p| p.is_file())
-}
-
 fn percent_decode(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -106,10 +62,10 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-fn percent_encode_path(path: &str) -> String {
+fn percent_encode(part: &str) -> String {
     let mut out = String::new();
-    for b in path.bytes() {
-        if b.is_ascii_alphanumeric() || b"/-_.~:".contains(&b) {
+    for b in part.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
             out.push(b as char);
         } else {
             out.push_str(&format!("%{b:02X}"));
@@ -118,48 +74,8 @@ fn percent_encode_path(path: &str) -> String {
     out
 }
 
-impl FileServer {
-    pub fn start() -> Result<Self, AppError> {
-        let server = tiny_http::Server::http("127.0.0.1:0")
-            .map_err(|e| AppError::Invalid(format!("the app's file server: {e}")))?;
-        let port = server
-            .server_addr()
-            .to_ip()
-            .map(|a| a.port())
-            .ok_or_else(|| AppError::Invalid("the app's file server has no port".into()))?;
-        let token = token();
-        let roots: Arc<RwLock<Vec<PathBuf>>> = Arc::default();
-        let shared = roots.clone();
-        let prefix = format!("/{token}");
-        thread::spawn(move || {
-            for request in server.incoming_requests() {
-                let url = request.url().to_owned();
-                let found = url
-                    .strip_prefix(&prefix)
-                    .filter(|rest| rest.starts_with('/'))
-                    .and_then(|rest| resolve(&shared.read().expect("roots lock"), rest));
-                let response = match found.and_then(|p| Some((fs::read(&p).ok()?, p))) {
-                    Some((body, path)) => tiny_http::Response::from_data(body)
-                        .with_header(
-                            tiny_http::Header::from_bytes("Content-Type", content_type(&path))
-                                .expect("static header"),
-                        )
-                        .with_header(
-                            tiny_http::Header::from_bytes("Cache-Control", "no-cache")
-                                .expect("static header"),
-                        ),
-                    None => tiny_http::Response::from_string("not found").with_status_code(404),
-                };
-                let _ = request.respond(response);
-            }
-        });
-        Ok(Self {
-            base: format!("http://127.0.0.1:{port}/{token}"),
-            roots,
-        })
-    }
-
-    /// Lets the server hand out files inside `dir`.
+impl FileScope {
+    /// Lets the window show files inside `dir`.
     pub fn allow(&self, dir: &Path) {
         let dir = canonical(dir);
         let mut roots = self.roots.write().expect("roots lock");
@@ -168,77 +84,108 @@ impl FileServer {
         }
     }
 
-    /// The URL of a file or folder inside an allowed folder (a folder's ends in `/`, for relative links).
-    pub fn url(&self, path: &Path) -> Option<String> {
+    /// `/<root>/<path>` for a file or folder inside an allowed folder (a folder's ends in `/`, for relative links).
+    pub fn url_path(&self, path: &Path) -> Option<String> {
         let real = canonical(path);
-        if !self.roots.read().ok()?.iter().any(|r| real.starts_with(r)) {
-            return None;
+        let roots = self.roots.read().ok()?;
+        let (i, root) = roots
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| real.starts_with(r))
+            .max_by_key(|(_, r)| r.components().count())?;
+        let mut out = format!("/{i}");
+        for c in real.strip_prefix(root).ok()?.components() {
+            out.push('/');
+            out.push_str(&percent_encode(&c.as_os_str().to_string_lossy()));
         }
-        let mut text = real.to_string_lossy().replace('\\', "/");
-        if !text.starts_with('/') {
-            text.insert(0, '/');
+        if real.is_dir() {
+            out.push('/');
         }
-        if real.is_dir() && !text.ends_with('/') {
-            text.push('/');
+        Some(out)
+    }
+
+    /// The file a `/<root>/<path>` names, if it's a file inside that root.
+    pub fn resolve(&self, url_path: &str) -> Option<PathBuf> {
+        let path = url_path.split(['?', '#']).next().unwrap_or("");
+        let decoded = percent_decode(path)?;
+        let mut parts = decoded.trim_start_matches('/').split('/');
+        let i: usize = parts.next()?.parse().ok()?;
+        let root = self.roots.read().ok()?.get(i)?.clone();
+        let mut candidate = root.clone();
+        for part in parts.filter(|p| !p.is_empty()) {
+            let mut c = Path::new(part).components();
+            match (c.next(), c.next()) {
+                (Some(Component::Normal(n)), None) => candidate.push(n),
+                _ => return None,
+            }
         }
-        Some(format!("{}{}", self.base, percent_encode_path(&text)))
+        let real = canonical(&candidate);
+        (real.starts_with(&root) && real.is_file()).then_some(real)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
 
-    fn get(url: &str) -> (u16, Vec<u8>) {
-        let rest = url.strip_prefix("http://").unwrap();
-        let (host, path) = rest.split_once('/').unwrap();
-        let mut s = std::net::TcpStream::connect(host).unwrap();
-        write!(s, "GET /{path} HTTP/1.0\r\nHost: {host}\r\n\r\n").unwrap();
-        let mut buf = Vec::new();
-        s.read_to_end(&mut buf).unwrap();
-        let text = String::from_utf8_lossy(&buf);
-        let status = text[9..12].parse().unwrap();
-        let body_at = text.find("\r\n\r\n").unwrap() + 4;
-        (status, buf[body_at..].to_vec())
+    #[test]
+    fn hands_out_files_inside_allowed_folders_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = tmp.path().join("my library");
+        let out = lib.join("demo/.out/fidelity");
+        fs::create_dir_all(out.join("round-1")).unwrap();
+        fs::write(out.join("report.html"), "<img src=round-1/a.png>").unwrap();
+        fs::write(out.join("round-1/a.png"), [137, 80]).unwrap();
+        fs::write(tmp.path().join("secret.txt"), "no").unwrap();
+        let scope = FileScope::default();
+        assert_eq!(scope.url_path(&lib), None);
+        scope.allow(&lib);
+
+        let page = scope.url_path(&out.join("report.html")).unwrap();
+        assert_eq!(page, "/0/demo/.out/fidelity/report.html");
+        assert_eq!(
+            scope.resolve(&page),
+            Some(canonical(&out.join("report.html")))
+        );
+        // A relative link resolves against the page's folder.
+        let folder = scope.url_path(&out).unwrap();
+        assert_eq!(folder, "/0/demo/.out/fidelity/");
+        assert_eq!(
+            scope.resolve(&format!("{folder}round-1/a.png?x=1")),
+            Some(canonical(&out.join("round-1/a.png")))
+        );
+        assert_eq!(scope.url_path(&lib.join("demo")).unwrap(), "/0/demo/");
+
+        assert_eq!(scope.url_path(&tmp.path().join("secret.txt")), None);
+        for bad in [
+            "/0/../secret.txt",
+            "/0/demo/..%2F..%2Fsecret.txt",
+            "/0/demo/.out/./fidelity/report.html",
+            "/1/report.html",
+            "/x/report.html",
+            "/0/demo",
+            "/0/C:%5Csecret.txt",
+        ] {
+            assert_eq!(scope.resolve(bad), None, "{bad}");
+        }
     }
 
     #[test]
-    fn serves_files_inside_allowed_folders_only() {
+    fn encodes_names_and_picks_the_closest_root() {
         let tmp = tempfile::tempdir().unwrap();
-        let lib = tmp.path().join("my library");
-        fs::create_dir_all(lib.join("demo/.out/fidelity/round-1")).unwrap();
-        fs::write(
-            lib.join("demo/.out/fidelity/report.html"),
-            "<img src=round-1/a.png>",
-        )
-        .unwrap();
-        fs::write(lib.join("demo/.out/fidelity/round-1/a.png"), [137, 80]).unwrap();
-        fs::write(tmp.path().join("secret.txt"), "no").unwrap();
-        let server = FileServer::start().unwrap();
-        assert_eq!(server.url(&lib), None);
-        server.allow(&lib);
-
-        let page = server
-            .url(&lib.join("demo/.out/fidelity/report.html"))
-            .unwrap();
-        assert!(page.contains("my%20library"));
-        assert_eq!(get(&page), (200, b"<img src=round-1/a.png>".to_vec()));
-        // A relative link resolves against the page's folder.
-        let folder = server.url(&lib.join("demo/.out/fidelity")).unwrap();
-        assert!(folder.ends_with('/'));
-        assert_eq!(get(&format!("{folder}round-1/a.png")).1, vec![137, 80]);
-
-        assert_eq!(server.url(&tmp.path().join("secret.txt")), None);
-        let outside = page.replace("my%20library/demo/.out/fidelity/report.html", "secret.txt");
-        assert_eq!(get(&outside).0, 404);
-        let climbing = page.replace("demo/.out/fidelity/report.html", "../secret.txt");
-        assert_eq!(get(&climbing).0, 404);
-        let no_token = page.replace(
-            &server.base,
-            &server.base[..server.base.rfind('/').unwrap()],
+        let outer = tmp.path().join("a");
+        let inner = outer.join("b c");
+        fs::create_dir_all(&inner).unwrap();
+        fs::write(inner.join("x #1.html"), "x").unwrap();
+        let scope = FileScope::default();
+        scope.allow(&outer);
+        scope.allow(&inner);
+        let url = scope.url_path(&inner.join("x #1.html")).unwrap();
+        assert_eq!(url, "/1/x%20%231.html");
+        assert_eq!(
+            scope.resolve(&url),
+            Some(canonical(&inner.join("x #1.html")))
         );
-        assert_eq!(get(&no_token).0, 404);
     }
 
     #[test]

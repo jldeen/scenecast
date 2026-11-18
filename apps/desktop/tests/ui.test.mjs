@@ -257,7 +257,7 @@ try {
   await waitFor('script to focus', async () => (await exists('script-summary')) && !(await exists('script-running')), 600000, 1000);
   const points = +(await attr('script-summary', 'data-points'));
   check('script to focus points: lines on their screens, focus points made', points >= 1 && existsSync(join(DEMO, 'focus.json')), points);
-  check('the line-to-screen sheet shows', await waitFor('the sheet', () => b.execute(() => { const f = document.querySelector('[data-test=sheet-frame]'); return !!f && /^http:\/\/127\.0\.0\.1:/.test(f.src); }), 20000));
+  check('the line-to-screen sheet shows', await waitFor('the sheet', () => b.execute(() => { const f = document.querySelector('[data-test=sheet-frame]'); return !!f && /^(scenecast:|http:\/\/scenecast\.localhost)/.test(f.src); }), 20000));
   await shot('09-script');
   await click('cues-tab');
   check('the cue sheet shows', await waitFor('the cue sheet', () => b.execute(() => /cues\.html$/.test(document.querySelector('[data-test=sheet-frame]')?.src || '')), 20000));

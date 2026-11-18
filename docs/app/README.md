@@ -62,7 +62,7 @@ npm run build:test && npm run test:ui                # the UI test: the whole fl
 ```
 
 - `crates/scenecast-app`: the commands the window calls (library, record, build and checks, fidelity, script,
-  servers for edit and present, key reference, export, a loopback file server for reports, the update stub), each
+  servers for edit and present, key reference, export, what the window may show from the library (on the app's `scenecast:` protocol), the update stub), each
   with a typed result and serializable progress. Unit-tested in the main workspace on Ubuntu, macOS and Windows.
 - `apps/desktop/src-tauri`: the Tauri shell (its own Cargo workspace): commands, `job` events, one job per demo at a
   time. Built with `--features webdriver`, it has an embedded WebDriver server for the UI test; installers never do.

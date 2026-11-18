@@ -11,7 +11,7 @@
 //! - [`servers`]: the replica served for the editor or for presenting.
 //! - [`keys`]: the presenter's one-page key reference.
 //! - [`export`]: a plain folder or a zip for another presenter.
-//! - [`files`]: a local, token-guarded file server for reports and pictures shown in the app.
+//! - [`files`]: what the window may show from disk (reports, pictures), on the app's own protocol.
 //! - [`updates`]: app updates (a stub for now).
 
 pub mod build;

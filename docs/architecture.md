@@ -41,8 +41,8 @@ to the engine so it cannot process a different folder from the one Rust scanned.
 **The desktop app** is a Tauri window over `scenecast-app`, which wraps `scenecast-build` for a UI: demos as a
 library (status from what's on disk), each step returning a typed result and reporting `Update`s (stages, engine
 lines, preflight items, recorder status, checklist items, fidelity and script events, editor saves) that the shell
-forwards as `job` events, one job per demo at a time. Reports and pictures from a demo's `.out` are shown through a
-loopback file server with a per-run token. The replica is edited and presented in Edge or Chrome (the browser its
+forwards as `job` events, one job per demo at a time. Reports and pictures from a demo's `.out` are shown through the app's own
+`scenecast:` protocol, limited to the library. The replica is edited and presented in Edge or Chrome (the browser its
 fidelity is measured in), not the app's own webview, which is WebKit on the Mac. Installers carry `packages/`, its
 `playwright-core` and Node, and the app points the engine at them. See [app/README.md](app/README.md).
 

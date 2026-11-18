@@ -12,7 +12,6 @@ scenecast-core.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tiny_http = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
