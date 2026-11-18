@@ -170,22 +170,21 @@ try {
   const extDir = await waitFor('the extension folder', async () => (await exists('extension-dir')) && text('extension-dir'), 120000);
   check('builds the recorder extension and says where it is', resolve(extDir) === resolve(EXT) && existsSync(join(EXT, 'manifest.json')), extDir);
   await shot('03-record-setup');
-  // Before the presenter loads it: preflight says the recorder isn't there, with what to do.
-  await click('preflight-fix');
+  // Before the presenter loads it: Check (no fixes, so it starts nothing) says the recorder isn't there, with what to do.
+  await click('preflight');
   await waitFor('preflight', () => exists('preflight-result'), 120000);
-  check('preflight without the extension: the recorder fails, with how to load it', (await attr('pf-recorder', 'data-status')) === 'fail' && (await exists('fix-recorder')) && (await attr('pf-receiver', 'data-status')) !== 'fail');
-  // Preflight started the receiver (it stays up for the presenter); the test stops it at the end.
-  receiverPid = +((/pid (\d+)/.exec(await text('pf-receiver')) || [])[1]) || null;
+  check('preflight without the extension: the recorder fails, with how to load it', (await attr('pf-recorder', 'data-status')) === 'fail' && (await exists('fix-recorder')));
   ctx = await launchWithExtension(EXT, join(tmp, 'profile'));
   const chat = await ctx.newPage();
   await chat.goto(fx.chat);
   for (const p of ctx.pages()) if (p !== chat) await p.close();
   await sizeWindow(chat, 1600, 900);
   await chat.bringToFront();
-  // Fix: opens the missing admin tab; the browser that's running isn't touched.
-  await waitFor('the preflight to finish', async () => !(await (await el('preflight-fix')).getAttribute('disabled')), 30000).catch(() => {});
+  // Check and fix: starts the receiver, opens the missing admin tab; the browser that's running isn't touched.
   await click('preflight-fix');
   await waitFor('preflight ready', async () => (await attr('preflight-result', 'data-ready')) === 'true', 180000);
+  // Preflight started the receiver (it stays up for the presenter); the test stops it at the end.
+  receiverPid = +((/pid (\d+)/.exec(await text('pf-receiver')) || [])[1]) || null;
   check('preflight: ready, the admin tab opened', (await attr('pf-app-admin', 'data-status')) === 'fixed' && (await attr('pf-browser', 'data-status')) === 'ok');
   const admin = ctx.pages().find(p => p.url().startsWith(fx.admin));
   check('the admin tab is open in the presenter\'s browser', !!admin);

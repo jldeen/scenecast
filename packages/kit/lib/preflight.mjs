@@ -74,12 +74,14 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
 
   // Receiver: the recorder posts to it.
   let up = await ping(port, 800);
+  let started = false;
   await item('receiver', async () => {
     if (up) return { status: 'ok', detail: `up on ${port} → ${up.raw}` };
     if (!fix) return { status: 'fail', detail: `nothing on ${port}: run scenecast receiver` };
     const k = spawn(process.execPath, [join(KIT, 'recorder', 'receiver.mjs'), '--demo', demo.dir], { detached: true, stdio: 'ignore', env: { ...process.env, REPLICA_RX_PORT: String(port) } });
     k.unref();
     for (let i = 0; i < 20 && !up; i++) { await sleep(250); up = await ping(port, 500); }
+    started = !!up;
     return up ? { status: 'fixed', detail: `started on ${port} (pid ${k.pid})` } : { status: 'fail', detail: `couldn't start a receiver on ${port}` };
   });
 
@@ -89,6 +91,9 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   const userDataDir = cfg.chrome.userDataDir || profileRoot(browser);
   const profile = cfg.chrome.profile || 'Default';
   await item('browser', async () => {
+    // A receiver just started: a recorder already running in the browser connects on its next try (every 2 s). Give
+    // it that, so a browser that's open isn't taken for one that isn't.
+    if (started && recorder === 'extension') for (let i = 0; i < 12 && !connected(up); i++) { await sleep(500); up = await ping(port, 500); }
     if (connected(up) && recorder === 'extension') return { status: 'ok', detail: 'the recorder extension is connected, so the browser is running (not touched)' };
     const procs = await listProcs();
     const b = judgeBrowser(procs, { browser, userDataDir, defaultDir: profileRoot(browser), debugPort: recorder === 'agent' ? cfg.chrome.debugPort || 9222 : null });
