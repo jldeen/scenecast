@@ -8,6 +8,15 @@ import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { comparePngs } from './compare.mjs';
 import { loadDemo, bundleFlow, arg as argOf } from '../kit/lib/demo.mjs';
+// A picture of part of the page. Headless Chrome on the macOS runners sometimes never hands one over (the capture
+// hangs after the fonts load); asked again after a frame, through the DevTools protocol, it does.
+async function shotOf(p, clip) {
+  try { return await p.screenshot({ clip, timeout: 15000 }); } catch (e) {
+    await p.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {});
+    const s = await p.context().newCDPSession(p);
+    try { const { data } = await s.send('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: 1 }, fromSurface: true }); return Buffer.from(data, 'base64'); } finally { await s.detach().catch(() => {}); }
+  }
+}
 
 const demo = loadDemo(process.argv.slice(2));
 const arg = (k, d) => argOf(process.argv.slice(2), k, d);
@@ -113,7 +122,7 @@ for (const hp of flow.hoverPages) {
       const clip = { x: Math.max(0, c.x + off.x + dx), y: Math.max(0, c.y + off.y + dy), width: Math.min(c.w, VPW), height: Math.min(c.h, VPH) };
       clip.x = Math.min(clip.x, VPW - 20); clip.y = Math.min(clip.y, VPH - 20);
       clip.width = Math.max(8, Math.min(clip.width, VPW - clip.x)); clip.height = Math.max(8, Math.min(clip.height, VPH - clip.y));
-      const png = await p.screenshot({ clip });
+      const png = await shotOf(p, clip);
       let pct = null;
       try { const [res] = await comparePngs(cmp, [[readFileSync(real).toString('base64'), png.toString('base64')]]); pct = res.pct; } catch (e) {}
       writeFileSync(ROWS + d.id + '-rep.png', png);
