@@ -389,6 +389,7 @@ mod tests {
                 }],
                 browser: None,
                 profile: None,
+                ..Default::default()
             })
             .unwrap();
         let default = if cfg!(windows) { "edge" } else { "chrome" };

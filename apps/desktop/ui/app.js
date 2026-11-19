@@ -253,18 +253,46 @@ function appRow(i, app = {}) {
       <input id="app-url-${i}" type="url" placeholder="https://…" value="${esc(app.url)}" data-app-url data-test="app-url-${i}"></div>
     <button type="button" class="btn subtle" data-remove-app aria-label="Remove app ${i + 1}">Remove</button></div>`;
 }
+// The four ways to make a demo. The AI ones use GitHub Copilot through the presenter's own GitHub sign-in.
+const MODES = {
+  record: { title: 'Record for me', icon: '✦', text: 'Say what the demo should show (or give your notes, a doc or a script). Copilot plans the steps, you check the plan, and it clicks through in your browser while it records. It asks you before anything that sends, saves or changes something.' },
+  script: { title: 'I\u2019ll click, you script it', icon: '✎', text: 'Click through once with the recorder on, without knowing the beats. Afterwards Copilot writes the beats, what to say, the focus points and your presenter guide.' },
+  coach: { title: 'Coach me', icon: '➜', text: 'Click through yourself while Copilot shows the next step and what to say, live, here and in a small window for your laptop screen.' },
+  manual: { title: 'I know my demo', icon: '●', text: 'You run the demo the way you\u2019ll present it, and bring your own script later.' },
+};
+// Regions drawn by the AI parts, joined to REGIONS once it's there.
+const REGIONS_LATE = {};
+const aiMode = m => m === 'record' || m === 'script' || m === 'coach';
 function renderNew() {
   S.view = 'new';
   S.id = null;
   renderSidebar();
-  const browser = isMac() ? 'chrome' : 'edge';
   $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>New demo</h1>
-    <p class="muted">Name it, and list the web apps it shows (each is a tab in the browser while you record).</p></div></div>
-    <form id="new-form" class="card stack" novalidate>
+    <p class="muted">How do you want to make it?</p></div></div>
+    <div class="modes" role="list">${Object.entries(MODES).map(([m, x]) => `<button class="mode card" role="listitem" data-mode="${m}" data-test="mode-${m}">
+      <span class="mode-icon" aria-hidden="true">${x.icon}</span><span class="mode-title">${esc(x.title)}</span>
+      <span class="muted small">${esc(x.text)}</span>${aiMode(m) ? '<span class="pill info">GitHub Copilot</span>' : ''}</button>`).join('')}</div>`;
+  $('[data-mode]').focus();
+}
+function renderNewForm(mode) {
+  S.view = 'new';
+  S.newMode = mode;
+  const browser = isMac() ? 'chrome' : 'edge';
+  const m = MODES[mode];
+  const wants = mode === 'record' || mode === 'coach';
+  $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>New demo: ${esc(m.title)}</h1>
+    <p class="muted">${esc(m.text)}</p></div><button class="btn subtle" data-action="new">Choose another way</button></div>
+    ${aiMode(mode) ? `<div data-region="copilot-mini"></div>` : ''}
+    <form id="new-form" class="card stack" novalidate data-mode="${mode}">
       <div><label for="new-title">Name</label><input id="new-title" type="text" required placeholder="Contoso supplier delay" data-test="new-title"></div>
       <fieldset><legend>Apps <span class="hint">Its start page's web address; the name is how you'll switch to it (⌥ or Ctrl+Alt and its first letter).</span></legend>
         <div id="apps">${appRow(0)}</div>
         <button type="button" class="btn small" id="add-app" data-test="add-app">＋ Add another app</button></fieldset>
+      ${wants ? `<div><label for="new-goal">What should the demo show? <span class="hint">In your own words: one line is enough.</span></label>
+        <textarea id="new-goal" rows="3" data-test="new-goal" placeholder="Show how the assistant answers a question about the supplier delay on PO-450101, then where IT manages the tools."></textarea></div>
+        <div><label for="new-source">Material to work from <span class="hint">Optional: notes, a doc, an email, or a script you already have (a RunLines .sk too).</span></label>
+        <textarea id="new-source" rows="4" data-test="new-source" placeholder="Paste it here, or open a file."></textarea>
+        <div class="row" style="margin-top:6px"><button type="button" class="btn small" data-action="pick-source" data-test="pick-source">Open a file…</button><span class="muted small" id="source-name"></span></div></div>` : ''}
       <fieldset><legend>Record in</legend>
         <label class="choice"><input type="radio" name="browser" value="edge" ${browser === 'edge' ? 'checked' : ''}> Microsoft Edge</label>
         <label class="choice"><input type="radio" name="browser" value="chrome" ${browser === 'chrome' ? 'checked' : ''}> Google Chrome</label></fieldset>
@@ -275,6 +303,8 @@ function renderNew() {
         <button class="btn" type="button" data-action="library">Cancel</button></div>
     </form>`;
   $('#new-title').focus();
+  renderRegions();
+  if (aiMode(mode) && !AI.status) refreshAi();
   const form = $('#new-form');
   const load = async () => {
     const b = form.browser.value;
@@ -288,8 +318,11 @@ function renderNew() {
 }
 async function createDemo(form) {
   const apps = [...form.querySelectorAll('[data-app-row]')].map(r => ({ id: $('[data-app-id]', r).value.trim(), url: $('[data-app-url]', r).value.trim() }));
-  const spec = { title: $('#new-title').value, apps, browser: form.browser.value, profile: form.querySelector('[name=profile]:checked')?.value || null };
+  const mode = form.dataset.mode || 'manual';
+  const goal = $('#new-goal')?.value.trim() || null, source = $('#new-source')?.value.trim() || null;
+  const spec = { title: $('#new-title').value, apps, browser: form.browser.value, profile: form.querySelector('[name=profile]:checked')?.value || null, mode, goal, source };
   const err = $('#new-error');
+  if (mode === 'record' && !goal && !source) { err.hidden = false; err.textContent = 'Say what the demo should show, or give it something to work from.'; return; }
   try {
     const d = await invoke('create_demo', { spec });
     await loadDemos();
@@ -301,13 +334,89 @@ async function createDemo(form) {
   }
 }
 
+// ---- Copilot -----------------------------------------------------------------------------------------------------
+
+// The presenter's GitHub Copilot: signed in or not, the code to enter while signing in, the settings.
+const AI = { status: null, checking: false, signing: false, code: null, runtime: null, error: null, models: null, settings: null };
+async function refreshAi() {
+  AI.checking = true; renderCopilotState();
+  try { AI.status = await invoke('ai_status'); AI.settings = AI.status.settings; AI.error = null; } catch (e) { AI.error = String(e); }
+  AI.checking = false; renderCopilotState();
+  if (S.view === 'copilot') renderCopilot();
+  renderRegions();
+}
+function renderCopilotState() {
+  const el = $('#copilot-state');
+  if (!el) return;
+  const st = AI.status;
+  el.className = 'pill small ' + (st?.signedIn ? 'ok' : AI.checking ? '' : 'warn');
+  el.textContent = AI.signing ? 'Signing in…' : st?.signedIn ? 'On' : AI.checking ? '…' : 'Sign in';
+  el.dataset.signedIn = String(!!st?.signedIn);
+}
+const signedInLine = () => {
+  const st = AI.status;
+  if (AI.checking && !st) return '<p class="muted small">Checking your GitHub sign-in…</p>';
+  if (st?.signedIn) return `<span class="pill ok" data-test="ai-signed-in">GitHub Copilot: ${esc(st.login || 'signed in')}</span>`;
+  return `<div class="notice warn"><div>These use <strong>GitHub Copilot</strong> through your own GitHub account. <button class="btn small primary" data-action="copilot" data-test="go-sign-in">Sign in with GitHub</button></div></div>`;
+};
+Object.assign(REGIONS_LATE, {
+  'copilot-mini': () => signedInLine(),
+  'copilot-signin'() {
+    if (AI.error && !AI.signing) return errorBox(AI.error);
+    if (!AI.signing) return '';
+    const rt = AI.runtime;
+    if (!AI.code) return `${progressBar(true)}<p class="small">${rt && !rt.ready ? `Getting Copilot ready (once): ${Math.round((rt.got || 0) / 1048576)} of ${Math.round((rt.total || 0) / 1048576) || '…'} MB` : 'Starting…'}</p>`;
+    return `<div class="notice info" data-test="device-code" data-code="${esc(AI.code.userCode)}"><div>
+      <p>Enter this code at <strong>${esc(AI.code.verificationUri)}</strong>, signed in to the GitHub account that has Copilot:</p>
+      <p class="device-code">${esc(AI.code.userCode)}</p>
+      <div class="row"><button class="btn primary" data-copy-open="${esc(AI.code.userCode)}" data-url="${esc(AI.code.verificationUri)}">Copy the code and open GitHub</button>
+      <span class="muted small">This turns green on its own when you're done.</span></div></div></div>`;
+  },
+});
+function renderCopilot() {
+  S.view = 'copilot';
+  S.id = null;
+  renderSidebar();
+  const st = AI.status, set = AI.settings || { model: 'auto', pageText: true };
+  const models = AI.models || [];
+  $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>GitHub Copilot</h1>
+    <p class="muted">Record for me, I\u2019ll click you script it, and Coach me use GitHub Copilot through your own GitHub account and its Copilot plan. No keys to set up.</p></div></div>
+    <div class="card"><h2>Your account</h2>
+      <div class="row" style="margin-top:8px">${st?.signedIn ? `<span class="pill ok" data-test="ai-signed-in">Signed in as ${esc(st.login || 'you')}</span>
+        <button class="btn" data-action="ai-sign-out" data-test="ai-sign-out">Sign out</button>`
+        : `<span class="pill warn">Not signed in</span><button class="btn primary" data-action="ai-sign-in" data-test="ai-sign-in" ${AI.signing ? 'disabled' : ''}>Sign in with GitHub</button>`}
+        ${AI.checking ? '<span class="muted small">Checking…</span>' : ''}</div>
+      <div data-region="copilot-signin" style="margin-top:10px"></div>
+      ${st && !st.signedIn && st.runtime && !st.runtime.ready ? `<p class="muted small">The first sign-in gets Copilot ready on this computer (about ${st.runtime.mb || 80} MB, once).</p>` : ''}</div>
+    <div class="card"><h2>What Copilot sees</h2>
+      <p>Only what each step needs: what the demo should show, the plan, and for the screen at hand its buttons, links and boxes by name and, if you allow it, its words. Never screenshots. Email addresses, IDs, tokens and web address queries are taken out first. Everything sent is kept with the demo, under <strong>What was sent to Copilot</strong> on its Record step.</p>
+      <label class="choice" style="margin-top:10px"><input type="checkbox" id="ai-page-text" data-test="ai-page-text" ${set.pageText !== false ? 'checked' : ''}> Send the page\u2019s words, not just its controls (better plans and talk tracks)</label>
+      <div style="margin-top:12px"><label for="ai-model">Model</label>
+        <select id="ai-model" style="width:auto" data-test="ai-model"><option value="auto">Automatic (Copilot picks)</option>${models.map(m => `<option value="${esc(m.id)}" ${set.model === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+        ${st?.signedIn && !AI.models ? '<button class="btn small subtle" data-action="ai-models">Show the models I can use</button>' : ''}</div></div>`;
+  $('#ai-model').value = set.model || 'auto';
+  $('#ai-page-text').onchange = e => saveAiSettings({ pageText: e.target.checked });
+  $('#ai-model').onchange = e => saveAiSettings({ model: e.target.value });
+  renderRegions();
+}
+async function saveAiSettings(patch) {
+  AI.settings = await call('ai_settings', { set: patch });
+  toast('Saved');
+}
+listen('job', ({ payload: { demo: id, job, update: u } }) => {
+  if (job !== 'ai-sign-in') return;
+  if (u.type === 'event' && u.event === 'device-code') AI.code = u.data;
+  if (u.type === 'event' && u.event === 'runtime') AI.runtime = u.data;
+  renderRegions();
+});
+
 // ---- A demo ------------------------------------------------------------------------------------------------------
 
 function tabDone(t, s) {
   return { record: s.recorded, build: s.built, fidelity: !!s.fidelity, script: s.focusPoints > 0 }[t];
 }
 function tabJobs(t) {
-  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
+  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-script', 'coach'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
 }
 function renderTabsBar() {
   const d = demo();
@@ -500,6 +609,7 @@ const REGIONS = {
     return html + errorBox(j.error || stop.error);
   },
 };
+Object.assign(REGIONS, REGIONS_LATE);
 
 const PANELS = {};
 PANELS.record = (panel, d) => {
@@ -517,9 +627,8 @@ PANELS.record = (panel, d) => {
       <div class="row"><button class="btn primary" data-action="preflight" data-test="preflight">Check</button>
         <button class="btn" data-action="preflight-fix" data-test="preflight-fix">Check and fix</button></div>
       <div data-region="preflight" style="margin-top:12px"></div></div>
-    <div class="card"><h2><span class="step-num">3</span>Record</h2>
-      <p class="muted">Run the demo once, the way you'll present it. Wait for each screen to be captured before the next step.</p>
-      <div data-region="record"></div></div>`;
+    ${recordCards(d)}`;
+  if (aiMode(d.mode)) loadAi(d.id);
   const sel = $('#browser', panel);
   sel.value = d.browser;
   const pick = $('#profile-pick', panel);
@@ -543,6 +652,158 @@ PANELS.record = (panel, d) => {
   });
   showProfiles();
 };
+
+// ---- The AI modes on the Record step -----------------------------------------------------------------------------
+
+const AIS = {};   // per demo: what ai_get says (goal, material, plan, what was sent, the last run)
+async function loadAi(id) {
+  AIS[id] = await invoke('ai_get', { id }).catch(() => AIS[id] || {});
+  if (S.id === id && S.tab === 'record') {
+    for (const [sel, v] of [['#ai-goal', AIS[id].goal], ['#ai-source', AIS[id].source], ['#ai-plan', AIS[id].plan]]) {
+      const el = $(sel);
+      if (el && document.activeElement !== el && !el.dataset.dirty) el.value = v || '';
+    }
+    renderRegions();
+  }
+}
+const recordCard = (n, note) => `<div class="card"><h2><span class="step-num">${n}</span>Record</h2>
+      <p class="muted">${note || 'Run the demo once, the way you\u2019ll present it. Wait for each screen to be captured before the next step.'}</p>
+      <div data-region="record"></div></div>`;
+const goalFields = () => `<div><label for="ai-goal">What should the demo show?</label>
+      <textarea id="ai-goal" rows="3" data-test="ai-goal" data-save="goal" placeholder="In your own words: one line is enough."></textarea></div>
+    <div style="margin-top:10px"><label for="ai-source">Material to work from <span class="hint">Optional: notes, a doc, an email, a script.</span></label>
+      <textarea id="ai-source" rows="3" data-test="ai-source" data-save="source"></textarea>
+      <div class="row" style="margin-top:6px"><button class="btn small" data-action="pick-source-demo">Open a file…</button></div></div>`;
+function recordCards(d) {
+  const sent = aiMode(d.mode) ? `<div class="card"><h2>What was sent to Copilot</h2><div data-region="ai-sent"></div></div>` : '';
+  if (d.mode === 'record') return `<div data-region="copilot-mini"></div>
+    <div class="card"><h2><span class="step-num">3</span>What to show</h2>
+      <p class="muted">Copilot reads your words and each app's start screen, and drafts the steps: what to click and type, and what to say.</p>
+      ${goalFields()}
+      <div class="row" style="margin-top:12px"><button class="btn primary" data-action="ai-plan" data-test="ai-plan">Draft the plan</button></div>
+      <div data-region="ai-plan-progress"></div></div>
+    <div class="card"><h2><span class="step-num">4</span>The plan</h2>
+      <p class="muted">Read it and change anything: one step per line (<code>- Click "Plugins"</code>, <code>- Type "…" in "Message"</code>, <code>- Press Enter</code>, <code>- Go to admin</code>, <code>- Wait for the answer</code>, <code>- You: …</code> for something only you can do), <code>&gt;</code> lines are what to say. Steps marked <strong>ask first</strong> could send, save or change something: Copilot stops and asks you before each one.</p>
+      <label for="ai-plan" class="visually-hidden">Plan</label>
+      <textarea id="ai-plan" class="plan" data-test="ai-plan-text" data-save="plan" placeholder="Draft the plan first."></textarea>
+      <div class="row" style="margin-top:10px"><button class="btn primary" data-action="ai-record" data-test="ai-record">Approve and record</button>
+        <span class="muted small">Your browser needs to be ready (step 2). Copilot clicks in your app tabs: keep your hands off until it asks.</span></div>
+      <div data-region="ai-run" style="margin-top:12px"></div><div data-region="ai-after"></div></div>
+    ${sent}`;
+  if (d.mode === 'coach') return `<div data-region="copilot-mini"></div>
+    <div class="card"><h2><span class="step-num">3</span>Your coach</h2>
+      <p class="muted">Start the coach, then start recording and click through. It shows the next step and what to say, and keeps up as you go; if you go your own way, it suggests what's next from your goal.</p>
+      ${goalFields()}
+      <div class="row" style="margin-top:12px"><button class="btn primary" data-action="coach-start" data-test="coach-start">Start coaching</button>
+        <button class="btn" data-action="coach-window" data-test="coach-window">Open the coach window</button>
+        <button class="btn subtle" data-action="ai-plan" data-test="ai-plan">Draft the plan again</button></div>
+      <div data-region="coach" style="margin-top:12px"></div></div>
+    ${recordCard(4, 'Click through the demo. When you stop, Copilot writes the beats, what to say, the focus points and your presenter guide.')}
+    <div data-region="ai-after"></div>${sent}`;
+  if (d.mode === 'script') return `<div data-region="copilot-mini"></div>
+    ${recordCard(3, 'Click through the demo once; you don\u2019t need to know the beats. When you stop, Copilot writes the beats, what to say, the focus points and your presenter guide.')}
+    <div data-region="ai-after"></div>${sent}`;
+  return recordCard(3);
+}
+const questionKinds = new Set(['confirm', 'question', 'you-do']);
+function pendingQuestion(events) {
+  const answered = new Set(events.filter(e => e.event === 'answered').map(e => e.data.id));
+  return [...events].reverse().find(e => questionKinds.has(e.event) && !answered.has(e.data.id));
+}
+Object.assign(REGIONS, {
+  'ai-plan-progress'(d) {
+    const j = J(d.id)['ai-plan'] || {};
+    if (running('ai-plan', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-planning">Copilot is reading your words and the start screens, and drafting the plan…</p>`;
+    const plan = (j.events || []).find(e => e.event === 'plan');
+    if (plan && j.outcome) return `<div class="notice ok" data-test="ai-plan-done" data-steps="${plan.data.steps}"><div><strong>Plan drafted:</strong> ${plural(plan.data.beats, 'beat')}, ${plural(plan.data.steps, 'step')}${plan.data.askFirst ? `, ${plan.data.askFirst} asking you first` : ''}. Check it below.</div></div>`;
+    return errorBox(j.error);
+  },
+  'ai-run'(d) {
+    const j = J(d.id)['ai-record'] || {};
+    const on = running('ai-record', d.id);
+    const ev = (j.events || []);
+    if (!on && !j.outcome && !j.error) {
+      const run = AIS[d.id]?.run;
+      return run ? `<p class="muted small">Last run ${esc(ago(Date.parse(run.at)))}: ${plural(run.steps.length, 'step')}${run.stopped ? ', stopped' : ''}.</p>` : '';
+    }
+    const steps = ev.filter(e => e.event === 'step');
+    const cur = steps.at(-1)?.data;
+    const q = on ? pendingQuestion(ev) : null;
+    const st = j.status;
+    const notes = ev.filter(e => ['adapted', 'skipped', 'note', 'waiting'].includes(e.event)).slice(-4);
+    let html = '';
+    if (on) html += `${progressBar(true)}<div class="row"><strong data-test="ai-step" data-n="${cur?.n || 0}">${cur ? `Step ${cur.n} of ${cur.of}: ${esc(cur.text)}` : esc(j.stages?.at(-1)?.label || 'Starting…')}</strong><span class="spacer"></span>
+      <button class="btn small" data-action="ai-stop" data-test="ai-stop">Stop</button></div>
+      ${st ? `<p class="muted small">${plural(st.count || 0, 'screen')} captured, ${plural(st.streams || 0, 'streamed answer')}${st.busy ? ' · capturing this screen…' : ''}</p>` : ''}`;
+    if (q) {
+      const x = q.data;
+      if (q.event === 'confirm') html += `<div class="notice warn ask" role="alert" data-test="ai-confirm" data-qid="${esc(x.id)}"><div><strong>May I?</strong> Next: <strong>${esc(x.step)}</strong> in ${esc(x.app)}. ${esc(x.why)}.
+        <div class="row" style="margin-top:10px"><button class="btn primary" data-answer="do" data-qid="${esc(x.id)}" data-test="ai-confirm-do">Do it</button>
+        <button class="btn" data-answer="self" data-qid="${esc(x.id)}" data-test="ai-confirm-self">I'll click it myself</button>
+        <button class="btn" data-answer="skip" data-qid="${esc(x.id)}" data-test="ai-confirm-skip">Skip it</button>
+        <button class="btn subtle" data-answer="stop" data-qid="${esc(x.id)}">Stop recording</button></div></div></div>`;
+      else html += `<div class="notice info ask" role="alert" data-test="ai-question" data-qid="${esc(x.id)}"><div><strong>${q.event === 'you-do' ? 'Your turn' : 'I need a hand'}:</strong> ${esc(x.text)}${x.step ? ` <span class="muted small">(step: ${esc(x.step)})</span>` : ''}
+        <div class="row" style="margin-top:10px"><button class="btn primary" data-answer="done" data-qid="${esc(x.id)}" data-test="ai-question-done">I did it</button>
+        <button class="btn" data-answer="skip" data-qid="${esc(x.id)}">Skip it</button>
+        <button class="btn subtle" data-answer="stop" data-qid="${esc(x.id)}">Stop recording</button></div>
+        ${q.event === 'question' ? `<div class="row" style="margin-top:8px"><input type="text" id="ai-instead" placeholder='Or tell it what to do: Click "Plugins"' style="flex:1"><button class="btn" data-answer="do" data-qid="${esc(x.id)}" data-with-text="1">Do this instead</button></div>` : ''}</div></div>`;
+    }
+    if (notes.length && on) html += `<ul class="small muted">${notes.map(e => `<li>${esc(e.event === 'adapted' ? `Did "${e.data.to}" instead of "${e.data.from}"` : e.event === 'skipped' ? `Skipped "${e.data.step}": ${e.data.why}` : e.data.text)}</li>`).join('')}</ul>`;
+    if (j.outcome) {
+      const o = j.outcome;
+      html += `<div class="notice ok" data-test="ai-record-done" data-steps="${o.steps}" data-confirmed="${o.confirmed}"><div><strong>Recorded for you:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}${o.confirmed ? `, ${o.confirmed} after you said yes` : ''}${o.stopped ? ' (stopped early)' : ''}. ${o.script ? `The talk track: ${plural(o.script.beats, 'beat')}, ${plural(o.script.lines, 'line')}.` : ''}</div></div>`;
+    }
+    return html + errorBox(j.error);
+  },
+  'ai-after'(d) {
+    const c = J(d.id).aiChain;
+    if (!c) return '';
+    const labels = { script: 'Copilot is writing the beats and what to say…', build: 'Building the replica…', focus: 'Putting each line on its screen: focus points and the presenter guide…', checks: 'Checking what changed…' };
+    if (c.error) return errorBox(c.error);
+    if (c.stage !== 'done') return `${progressBar(true)}<p class="small" data-test="ai-after" data-stage="${c.stage}">${labels[c.stage]}</p>`;
+    return `<div class="notice ok" data-test="ai-after-done"><div><strong>Your demo is ready.</strong> The script is under <button class="link" data-goto="script">Script</button> (edit it any time), the focus points and presenter guide are made, and the checks for them pass. <button class="link" data-goto="present">Present it</button>.</div></div>`;
+  },
+  coach(d) {
+    const j = J(d.id).coach || {};
+    const on = running('coach', d.id);
+    const c = (j.events || []).filter(e => e.event === 'coach').at(-1)?.data;
+    if (!on && !c) return j.lines?.some(l => l.error) ? errorBox(j.lines.filter(l => l.error).at(-1).text) : '<p class="muted small">Not coaching yet.</p>';
+    if (!c) return `${progressBar(true)}<p class="small">${esc(j.stages?.at(-1)?.label || 'Getting ready…')}</p>`;
+    return `<div class="coach-box" data-test="coach-next" data-done="${c.done}" data-of="${c.of}" data-finished="${c.finished}">
+      <div class="muted small">${c.finished ? 'That was the whole plan: stop recording when you\u2019re done.' : `Beat ${c.beat + 1}: ${esc(c.beatTitle)}${c.offPlan ? ' · off the plan, so a suggestion' : ''}`}</div>
+      ${c.next ? `<div class="coach-next"><span class="muted small">Next</span> ${esc(c.next)}</div>` : ''}
+      ${c.say ? `<div class="coach-say"><span class="muted small">Say</span> ${esc(c.say)}</div>` : ''}
+      <div class="progress"><div style="width:${c.of ? Math.round(100 * c.done / c.of) : 0}%;animation:none"></div></div>
+      <p class="muted small">${!c.recording ? 'Start recording below when you\u2019re ready.' : c.busy ? 'Capturing this screen…' : 'Ready for your next step.'}${on ? '' : ' (The coach has stopped.)'}</p></div>`;
+  },
+  'ai-sent'(d) {
+    const sent = AIS[d.id]?.sent || [];
+    if (!sent.length) return '<p class="muted small">Nothing yet.</p>';
+    const task = { plan: 'Draft the plan', adapt: 'A step that didn\u2019t fit the screen', next: 'A coaching suggestion', script: 'Write the talk track' };
+    return `<p class="muted small">Each request, exactly as sent${sent.some(x => x.pageText === false) ? '' : ' (page words included: turn that off on the Copilot page)'}.</p>
+      <ul class="status-list" data-test="ai-sent-list">${sent.slice(-12).reverse().map(x => `<li><span class="id">${esc(task[x.task] || x.task)}</span><span class="small muted">${esc(x.model)} · ${(x.chars / 1024).toFixed(1)} KB · ${esc(ago(Date.parse(x.at)))}</span>
+        <button class="btn small subtle" data-open-file="${esc(x.file)}">Show</button><span></span></li>`).join('')}</ul>`;
+  },
+});
+// After the talk track exists: the replica, its focus points and guide, the checks for what changed.
+async function aiFinish(id, write) {
+  const set = stage => { J(id).aiChain = { stage }; renderRegions(); };
+  try {
+    if (write) { set('script'); const w = await step('ai-script', 'ai_script', {}); if (!w) throw new Error(J(id)['ai-script']?.error || 'the talk track wasn\u2019t written'); }
+    set('build');
+    const b = await step('build', 'build', { force: false });
+    if (!b?.ok) throw new Error(b?.stopped || J(id).build?.error || 'the build stopped: see Build & check');
+    set('focus');
+    const sc = await step('script', 'script_run', {});
+    if (!sc) throw new Error(J(id).script?.error || 'the focus points weren\u2019t made: see Script');
+    set('checks');
+    const q = await quickChecks(id);
+    if (q && !q.pass) throw new Error('some checks fail: see Build & check');
+    set('done');
+    toast('Your demo is ready');
+  } catch (e) { J(id).aiChain = { stage: 'error', error: e.message }; renderRegions(); }
+  loadAi(id);
+}
 
 // ---- Build and check ---------------------------------------------------------------------------------------------
 
@@ -829,6 +1090,20 @@ PANELS.export = async (panel, d) => {
 // ---- Actions -----------------------------------------------------------------------------------------------------
 
 // The checks for only what changed: after a build, an edit or a new script. Never the whole checklist (that's Export).
+async function saveAiField(field, value, id = S.id) {
+  AIS[id] = await call('ai_save', { id, [field]: value });
+}
+async function saveAiFields(id = S.id) {
+  const goal = $('#ai-goal'), source = $('#ai-source');
+  if (!goal && !source) return;
+  AIS[id] = await call('ai_save', { id, goal: goal ? goal.value : null, source: source ? source.value : null });
+}
+document.addEventListener('input', e => { if (e.target.dataset.save) e.target.dataset.dirty = '1'; });
+document.addEventListener('change', e => {
+  const f = e.target.dataset.save;
+  if (!f || f === 'plan' || S.view !== 'demo') return;
+  saveAiField(f, e.target.value).then(() => { delete e.target.dataset.dirty; }).catch(() => {});
+});
 async function quickChecks(id = S.id) {
   if (!S.demos.find(x => x.id === id)?.status.built) return;
   if (id !== S.id) return;
@@ -851,6 +1126,42 @@ async function copyText(text) {
 }
 const ACTIONS = {
   new: renderNew,
+  copilot: () => { renderCopilot(); refreshAi(); },
+  'ai-sign-in': async () => {
+    AI.signing = true; AI.code = null; AI.runtime = null; AI.error = null; renderCopilotState(); renderCopilot();
+    try { await invoke('ai_sign_in'); toast('Signed in to GitHub Copilot'); } catch (e) { AI.error = typeof e === 'string' ? e : e.message; }
+    AI.signing = false; AI.code = null;
+    await refreshAi();
+  },
+  'ai-sign-out': async () => { await call('ai_sign_out'); await refreshAi(); },
+  'ai-models': async () => { AI.models = (await call('ai_models')).models; renderCopilot(); },
+  'pick-source': async () => { const f = await call('pick_text_file'); if (f) { $('#new-source').value = f.text; $('#source-name').textContent = f.name; } },
+  'pick-source-demo': async () => { const f = await call('pick_text_file'); if (f) { $('#ai-source').value = f.text; await saveAiField('source', f.text); toast(`Using ${f.name}`); } },
+  'ai-plan': async () => {
+    const id = S.id;
+    await saveAiFields(id);
+    const o = await step('ai-plan', 'ai_plan', {});
+    if (o) { const p = $('#ai-plan'); if (p) delete p.dataset.dirty; await loadAi(id); }
+  },
+  'ai-record': async () => {
+    const id = S.id;
+    const plan = $('#ai-plan')?.value || '';
+    if (!plan.trim()) return toast('Draft the plan first', true);
+    try { await saveAiFields(id); await call('ai_save', { id, plan }); } catch { return; }
+    J(id).aiChain = null;
+    const o = await step('ai-record', 'ai_record', {});
+    loadAi(id);
+    if (o) await aiFinish(id, false);
+  },
+  'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
+  'coach-start': async () => {
+    const id = S.id;
+    await saveAiFields(id);
+    J(id).coach = { events: [], lines: [], stages: [] };
+    await call('ai_coach', { id });
+    rerender();
+  },
+  'coach-window': async () => { const u = await call('ai_coach_window', { id: S.id }); if (S.info.noOpen) toast(u); },
   library: renderLibrary,
   extension: () => step('extension', 'prepare_extension', {}),
   install: () => {
@@ -874,7 +1185,12 @@ const ACTIONS = {
     J(S.id).record = { status: { recording: true, count: 0 } };
     await step('record', 'record_start', { resume: false });
   },
-  'record-stop': () => step('record-stop', 'record_stop', {}, () => { J(S.id).record = {}; }),
+  'record-stop': async () => {
+    const id = S.id;
+    const o = await step('record-stop', 'record_stop', {}, () => { J(id).record = {}; });
+    const d = S.demos.find(x => x.id === id);
+    if (o && (d?.mode === 'script' || d?.mode === 'coach')) await aiFinish(id, true);
+  },
   build: async () => {
     const o = await step('build', 'build', { force: false }, o => { J(S.id).scrub = o.scrub; });
     if (o?.ok) await quickChecks();
@@ -938,6 +1254,13 @@ document.addEventListener('click', async e => {
   if (!t) return;
   const ds = t.dataset;
   if (ds.open) { e.preventDefault(); return openDemo(ds.open); }
+  if (ds.mode) return renderNewForm(ds.mode);
+  if (ds.answer) {
+    const text = ds.withText ? $('#ai-instead')?.value.trim() : undefined;
+    if (ds.withText && !text) return toast('Say what to do instead', true);
+    return call('ai_answer', { id: S.id, question: ds.qid, answer: ds.answer, text: text || null });
+  }
+  if (ds.copyOpen) { await copyText(ds.copyOpen); toast('Code copied'); return call('open_url', { url: ds.url }).catch(() => {}); }
   if (ds.action && ACTIONS[ds.action]) { e.preventDefault(); return ACTIONS[ds.action](); }
   if (ds.duplicate) return duplicateDemo(ds.duplicate);
   if (ds.delete) return deleteDemo(ds.delete);
@@ -967,6 +1290,7 @@ document.addEventListener('keydown', e => {
 });
 $('#new-demo').onclick = renderNew;
 // Busy while the list loads: the table is drawn again when it's in (screen readers wait; so does the UI test).
+$('#nav-copilot').onclick = ACTIONS.copilot;
 $('#nav-library').onclick = async () => { const m = $('#main'); m.setAttribute('aria-busy', 'true'); try { await loadDemos(); renderLibrary(); } finally { m.removeAttribute('aria-busy'); } };
 // ---- Updates: checked at start and every few hours; one click downloads, installs and restarts on the new version.
 const U = { available: null, busy: false, progress: null };
@@ -1015,6 +1339,7 @@ await loadDemos();
 await refreshServers();
 renderLibrary();
 if (S.info.engineError) toast(S.info.engineError, true);
+refreshAi();
 checkUpdates(true);
 setInterval(() => { if (!U.busy) checkUpdates(true); }, 4 * 3600 * 1000);
 window.__scenecast = S;

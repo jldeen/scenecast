@@ -209,3 +209,20 @@ dialog .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px
 @media (max-width: 1100px) { .step-cards li { grid-template-columns: 1fr; } .step-cards figure { border-right: 0; border-bottom: 1px solid var(--border); } }
 .sidebar-foot { flex-wrap: wrap; }
 .update { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 8px; border-radius: var(--radius); background: var(--accent-soft); }
+
+/* New demo: the four ways to make one. */
+.modes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.mode { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.mode:hover, .mode:focus-visible { border-color: var(--accent); }
+.mode-icon { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 17px; }
+.mode-title { font-weight: 600; font-size: 15px; }
+/* Copilot: the sign-in code, the plan, the coach. */
+.device-code { font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: .12em; margin: 8px 0 12px; }
+textarea.plan { min-height: 280px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
+.notice.ask { border: 1px solid currentColor; }
+.coach-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.coach-next { font-size: 19px; font-weight: 600; margin-top: 8px; }
+.coach-say { font-size: 16px; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 10px; margin-top: 10px; }
+.coach-next .muted, .coach-say .muted { display: block; font-weight: 400; }
+textarea[rows] { min-height: 0; font-family: inherit; font-size: 13.5px; }
+.modes { align-items: stretch; } .mode { height: 100%; justify-content: flex-start; }

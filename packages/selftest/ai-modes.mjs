@@ -7,6 +7,8 @@
 //   2. I'll click, you script it: a person clicks through (Playwright), no plan → the talk track from the recording.
 //   3. Coach me: a goal → the coach's live suggestions, which the "person" follows step by step → the talk track.
 //   node packages/selftest/ai-modes.mjs [--keep] [--only 1,2,3]
+// --real: Record for me on GitHub Copilot instead (SCENECAST_COPILOT_TOKEN, or the stored sign-in), goal only, every
+// send answered "Do it": a local check that a real model makes a sensible demo (not run in CI).
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,14 +23,15 @@ const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
 if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 const keep = process.argv.includes('--keep');
-const only = (process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : '1,2,3').split(',').map(Number);
+const REAL = process.argv.includes('--real');
+const only = (process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : REAL ? '1' : '1,2,3').split(',').map(Number);
 const RX_PORT = 47695, REPLICA_PORT = 4695;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-ai-'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1500)}` : '')); if (!ok) fails.push(name); };
 const GIT_ID = { GIT_AUTHOR_NAME: 'scenecast ai test', GIT_AUTHOR_EMAIL: 'ai-test@localhost', GIT_COMMITTER_NAME: 'scenecast ai test', GIT_COMMITTER_EMAIL: 'ai-test@localhost' };
-const ENV = { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1', SCENECAST_AI_MODEL: 'stub', SCENECAST_AI_HOME: join(tmp, 'ai-home') };
+const ENV = { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX_PORT), REPLICA_NO_OPEN: '1', SCENECAST_AI_MODEL: REAL ? 'copilot' : 'stub', ...(REAL ? {} : { SCENECAST_AI_HOME: join(tmp, 'ai-home') }) };
 const run = (args, opts = {}) => new Promise(res => {
   const p = spawn(BIN, args, { cwd: opts.cwd || tmp, env: { ...ENV, ...opts.env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; p.stdout.on('data', d => { out += d; if (opts.echo) process.stdout.write(d); }); p.stderr.on('data', d => { out += d; process.stderr.write(d); });
@@ -146,14 +149,15 @@ try {
   if (only.includes(1)) {
     const t0 = Date.now();
     const goal = 'Ask "Summarize the supplier delay on PO-450101", then close the workspace, then open Plugins. In admin, search "alpha" and open alpha-6. Then go to chat, start a new chat and ask "What will it cost us?" with the send button.';
-    const DEMO = await newDemo('record-for-me', { mode: 'record', goal });
+    const DEMO = await newDemo('record-for-me', { mode: 'record', goal: REAL && process.env.SCENECAST_AI_GOAL || goal });
     r = await run(['ai', 'plan', '--demo', DEMO]);
     const plan = existsSync(join(DEMO, 'plan.md')) ? parsePlan(readFileSync(join(DEMO, 'plan.md'), 'utf8')) : { beats: [] };
     const steps = plan.beats.flatMap(b => b.steps.map(s => s.text));
-    check('record for me: a plan from the goal alone', r.code === 0 && plan.beats.length >= 4 && ['Type "Summarize the supplier delay on PO-450101" in "Message"', 'Click "Close workspace"', 'Click "Plugins"', 'Go to admin', 'Type "alpha" in "Search tools by name"', 'Click "alpha-6"', 'Click "Send"'].every(s => steps.includes(s)), r.out.slice(-600) + JSON.stringify(steps));
-    check('record for me: sends are marked "ask first" in the plan', /Press Enter — ask first/.test(readFileSync(join(DEMO, 'plan.md'), 'utf8')) && /Click "Send" — ask first/.test(readFileSync(join(DEMO, 'plan.md'), 'utf8')) && !/Search tools by name.*\n- Press Enter — ask first/.test(readFileSync(join(DEMO, 'plan.md'), 'utf8')), readFileSync(join(DEMO, 'plan.md'), 'utf8'));
+    check('record for me: a plan from the goal alone', r.code === 0 && (REAL ? plan.beats.length >= 2 : plan.beats.length >= 4 && ['Type "Summarize the supplier delay on PO-450101" in "Message"', 'Click "Close workspace"', 'Click "Plugins"', 'Go to admin', 'Type "alpha" in "Search tools by name"', 'Click "alpha-6"', 'Click "Send"'].every(s => steps.includes(s))), r.out.slice(-600) + JSON.stringify(steps));
+    if (REAL) console.log(readFileSync(join(DEMO, 'plan.md'), 'utf8'));
+    check('record for me: sends are marked "ask first" in the plan', REAL || /Press Enter — ask first/.test(readFileSync(join(DEMO, 'plan.md'), 'utf8')) && /Click "Send" — ask first/.test(readFileSync(join(DEMO, 'plan.md'), 'utf8')) && !/Search tools by name.*\n- Press Enter — ask first/.test(readFileSync(join(DEMO, 'plan.md'), 'utf8')), readFileSync(join(DEMO, 'plan.md'), 'utf8'));
     const sent = json((await run(['ai', 'sent', '--demo', DEMO])).out.split('\n').find(l => l.startsWith('@ai ')).slice(4)).result.sent;
-    check('record for me: what was sent is kept, and shown', sent.length === 1 && sent[0].task === 'plan' && /Search tools by name/.test(readFileSync(sent[0].file, 'utf8')), JSON.stringify(sent));
+    check('record for me: what was sent is kept, and shown', sent.length >= 1 && sent[0].task === 'plan' && /Search tools by name/.test(readFileSync(sent[0].file, 'utf8')), JSON.stringify(sent));
     // Run it. Each confirmation: nothing happens until it's answered (the recorder sees no action), then "Do it" for
     // Enter, "I'll click it myself" for Send (and the test clicks it).
     const confirms = [];
@@ -167,7 +171,7 @@ try {
       await sleep(1500);
       const a1 = json((await run(['record', 'status'], { cwd: DEMO })).out).actions;
       held = held === false ? false : a0 === a1;
-      if (/Send/.test(e.step)) {
+      if (/Send/.test(e.step) && !REAL) {
         await run(['ai', 'answer', '--demo', DEMO, e.id, 'self']);
         await sleep(800);
         await chat.click('[aria-label="Send"]');
@@ -175,10 +179,11 @@ try {
     });
     const res = await pr.done;
     const done = pr.events.find(e => e.event === 'done');
-    check('record for me: runs the plan to the end', res.code === 0 && done && !done.result.stopped && done.result.summary.states >= 8 && done.result.summary.streams === 2, JSON.stringify(pr.events.filter(e => /error|note|done|question/.test(e.event))) + res.err.slice(-800));
-    check('record for me: asked before each send, and waited', confirms.length === 2 && /Enter/.test(confirms[0].step) && /Send/.test(confirms[1].step) && held === true, JSON.stringify(confirms));
-    check('record for me: "I\'ll click it myself" waited for the presenter', pr.events.some(e => e.event === 'step-done' && e.did === 'presenter'), JSON.stringify(pr.events.filter(e => e.event === 'step-done')));
-    check('record for me: the talk track written from what happened', existsSync(join(DEMO, 'script.md')) && /Kestrel moved the ship date/.test(readFileSync(join(DEMO, 'script.md'), 'utf8')) && done && done.result.script.lines >= 4, existsSync(join(DEMO, 'script.md')) ? readFileSync(join(DEMO, 'script.md'), 'utf8') : 'no script.md');
+    check('record for me: runs the plan to the end', res.code === 0 && done && !done.result.stopped && done.result.summary.states >= (REAL ? 4 : 8) && (REAL || done.result.summary.streams === 2), JSON.stringify(pr.events.filter(e => /error|note|done|question/.test(e.event))) + res.err.slice(-800));
+    check('record for me: asked before each send, and waited', REAL ? confirms.length >= 1 && held === true : confirms.length === 2 && /Enter/.test(confirms[0].step) && /Send/.test(confirms[1].step) && held === true, JSON.stringify(confirms));
+    check('record for me: "I\'ll click it myself" waited for the presenter', REAL || pr.events.some(e => e.event === 'step-done' && e.did === 'presenter'), JSON.stringify(pr.events.filter(e => e.event === 'step-done')));
+    if (REAL && existsSync(join(DEMO, 'script.md'))) console.log(readFileSync(join(DEMO, 'script.md'), 'utf8'));
+    check('record for me: the talk track written from what happened', existsSync(join(DEMO, 'script.md')) && /Kestrel|ship date|six days/i.test(readFileSync(join(DEMO, 'script.md'), 'utf8')) && done && done.result.script.lines >= 4, existsSync(join(DEMO, 'script.md')) ? readFileSync(join(DEMO, 'script.md'), 'utf8') : 'no script.md');
     await finish('record for me', DEMO);
     times.recordForMe = Math.round((Date.now() - t0) / 1000);
   }

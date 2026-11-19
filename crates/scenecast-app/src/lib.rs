@@ -3,6 +3,7 @@
 //! The Tauri shell (`apps/desktop`) turns these into commands and events; the CLI drives the same `scenecast-build`
 //! underneath.
 //!
+//! - [`ai`]: AI-assisted recording with GitHub Copilot: Record for me, I'll click you script it, Coach me.
 //! - [`library`]: the user's demos and where each stands (recorded, built, fidelity score, focus points, last checked).
 //! - [`record`]: the recorder extension, preflight item by item, and the recording.
 //! - [`build`]: the build with its scrub report, and the checks: quick after a change, the whole checklist before
@@ -16,6 +17,7 @@
 //! - [`export`]: a plain folder or a zip for another presenter.
 //! - [`files`]: what the window may show from disk (reports, pictures), on the app's own protocol.
 
+pub mod ai;
 pub mod build;
 pub mod export;
 pub mod fidelity;

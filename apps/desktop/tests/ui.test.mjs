@@ -53,6 +53,9 @@ const app = spawn(BIN, [], {
     // The test's own headless browser plays the presenter's: the app shows each replica's address instead of opening it.
     REPLICA_NO_OPEN: '1',
     REPLICA_CHROME_CHANNEL: process.env.REPLICA_CHROME_CHANNEL || 'chrome',
+    // The AI modes on the deterministic stand-in model: no network, no GitHub account.
+    SCENECAST_AI_MODEL: 'stub',
+    SCENECAST_AI_HOME: join(tmp, 'ai-home'),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -154,6 +157,10 @@ try {
 
   // ---- 1 · A new demo, pointed at the fixture app's two tabs ---------------------------------------------------
   await click('empty-new');
+  // Four ways to make a demo; "I know my demo" is the one a presenter who knows the beats picks.
+  check('New demo: the four ways to make one', await waitFor('the choice', async () => (await exists('mode-record')) && (await exists('mode-script')) && (await exists('mode-coach')) && (await exists('mode-manual')), 20000));
+  await shot('02a-new-demo-choice');
+  await click('mode-manual');
   await type('new-title', 'Fixture demo');
   await type('app-id-0', 'chat');
   await type('app-url-0', fx.chat);
@@ -396,6 +403,62 @@ try {
   const zip = await waitFor('the zip export', async () => (await attr('export-done', 'data-kind')) === 'zip' && attr('export-done', 'data-path'), 300000);
   check('exports a zip, without running every check again (nothing changed)', /\.zip$/.test(zip) && statSync(zip).size > 1000 && (await attr('export-done', 'data-checked')) === 'current', zip);
   lap('export');
+
+  // ---- Record for me: a goal, the plan, the browser driven while it records, the presenter saying yes ------------
+  await click('nav-copilot');
+  check('Copilot: the account and what it sees', await waitFor('the Copilot page', () => exists('ai-signed-in'), 60000) && (await exists('ai-page-text')));
+  await shot('14-copilot');
+  await click('new-demo');
+  await click('mode-record');
+  await type('new-title', 'For me');
+  await type('app-id-0', 'chat');
+  await type('app-url-0', fx.chat);
+  await click('add-app');
+  await type('app-id-1', 'admin');
+  await type('app-url-1', fx.admin);
+  await type('new-goal', 'Ask "Summarize the supplier delay on PO-450101", then open Plugins. In admin, search "alpha" and open alpha-6. Then go to chat, start a new chat and ask "What will it cost us?" with the send button.');
+  await shot('15-new-record-for-me');
+  await click('create-demo');
+  await waitFor('the demo', async () => (await exists('demo-title')) && (await text('demo-title')) === 'For me');
+  const FM = join(LIB, 'for-me');
+  {
+    const c = JSON.parse(readFileSync(join(FM, 'demo.json'), 'utf8'));
+    Object.assign(c, { raw: join(tmp, 'raw-for-me'), viewport: { width: 1600, height: 900, dpr: 1 }, zooms: [150] });
+    Object.assign(c.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200, auto: false });
+    writeFileSync(join(FM, 'demo.json'), JSON.stringify(c, null, 2));
+  }
+  check('Record for me: the goal kept with the demo', /supplier delay/.test(readFileSync(join(FM, 'ai.json'), 'utf8')));
+  await chat.goto(fx.chat); await admin.goto(fx.admin); await chat.bringToFront();
+  await waitFor('the recorder to connect', async () => (await attr('recorder-state', 'data-connected')) === 'true', 60000);
+  await click('preflight-fix');
+  await waitFor('preflight ready', async () => (await attr('preflight-result', 'data-ready')) === 'true', 180000);
+  await click('ai-plan');
+  await waitFor('the plan', () => exists('ai-plan-done'), 180000);
+  const planText = await b.execute(() => document.querySelector('[data-test="ai-plan-text"]').value);
+  check('Record for me: a plan in plain words, sends asking first', /Click "Plugins"/.test(planText) && /Press Enter — ask first/.test(planText) && /Click "Send" — ask first/.test(planText), planText);
+  await shot('16-plan');
+  await chat.bringToFront();
+  await click('ai-record');
+  // Each send waits for the presenter: Enter gets "Do it", Send "I'll click it myself" (and the person clicks it).
+  const answerNext = async (how, before) => {
+    const q = await waitFor('Copilot to ask', async () => { const id = await attr('ai-confirm', 'data-qid'); return id && id !== before && id; }, 300000);
+    await sleep(1200);
+    if (how === 'do') await shot('17-may-i');
+    await click(how === 'do' ? 'ai-confirm-do' : 'ai-confirm-self');
+    return q;
+  };
+  const q1 = await answerNext('do');
+  await answerNext('self', q1);
+  await sleep(1500);
+  await chat.click('[aria-label="Send"]');
+  await waitFor('Record for me to finish', () => exists('ai-record-done'), 600000);
+  check('Record for me: recorded, two sends after the presenter\'s go-ahead', (await attr('ai-record-done', 'data-confirmed')) === '1' && +(await attr('ai-record-done', 'data-steps')) >= 10, await text('ai-record-done'));
+  await waitFor('the demo to be ready', async () => (await exists('ai-after-done')) || (await b.execute(() => /notice bad/.test(document.querySelector('[data-region="ai-after"]')?.innerHTML || ''))), 900000);
+  check('Record for me: built, the talk track on its screens, the guide, the checks pass', await exists('ai-after-done'), await b.execute(() => document.querySelector('[data-region="ai-after"]')?.innerText));
+  check('Record for me: what was sent to Copilot, listed', await exists('ai-sent-list'));
+  await shot('18-record-for-me-done');
+  check('Record for me: script.md and focus points', /Kestrel moved the ship date/.test(readFileSync(join(FM, 'script.md'), 'utf8')) && JSON.parse(readFileSync(join(FM, 'focus.json'), 'utf8')).points.length > 0);
+  lap('record for me');
 
   // ---- The library shows where it stands ----------------------------------------------------------------------
   await click('nav-library');

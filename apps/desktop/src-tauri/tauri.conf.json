@@ -45,7 +45,12 @@
     ],
     "resources": {
       "../../../packages/": "packages/",
-      "../../../node_modules/playwright-core/": "node_modules/playwright-core/"
+      "../../../node_modules/playwright-core/": "node_modules/playwright-core/",
+      "../../../node_modules/@github/copilot-sdk/": "node_modules/@github/copilot-sdk/",
+      "../../../node_modules/koffi/": "node_modules/koffi/",
+      "../../../node_modules/lossless-json/": "node_modules/lossless-json/",
+      "../../../node_modules/vscode-jsonrpc/": "node_modules/vscode-jsonrpc/",
+      "../../../node_modules/zod/": "node_modules/zod/"
     },
     "macOS": {
       "minimumSystemVersion": "11.0",

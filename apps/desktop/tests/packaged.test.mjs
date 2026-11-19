@@ -73,8 +73,8 @@ try {
   fx = startFixture();
   const extDir = join(homedir(), 'Documents', 'Scenecast', 'Recorder Extension');
   rmSync(extDir, { recursive: true, force: true });
-  const env = { ...process.env, SCENECAST_LIBRARY: LIB, SCENECAST_SELFTEST: HOOK };
-  for (const k of ['SCENECAST_JS', 'SCENECAST_NODE', 'SCENECAST_EXTENSION_DIR', 'REPLICA_RX_PORT', 'REPLICA_NO_OPEN']) delete env[k];
+  const env = { ...process.env, SCENECAST_LIBRARY: LIB, SCENECAST_SELFTEST: HOOK, SCENECAST_AI_HOME: join(tmp, 'ai-home') };
+  for (const k of ['SCENECAST_JS', 'SCENECAST_AI_MODEL', 'COPILOT_CLI_PATH', 'GH_TOKEN', 'GITHUB_TOKEN', 'COPILOT_GITHUB_TOKEN', 'SCENECAST_NODE', 'SCENECAST_EXTENSION_DIR', 'REPLICA_RX_PORT', 'REPLICA_NO_OPEN']) delete env[k];
   const log = [];
   app = spawn(exe, [], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   app.stdout.on('data', d => log.push(String(d))); app.stderr.on('data', d => log.push(String(d)));
@@ -153,6 +153,12 @@ try {
   const green = extPage && await waitFor('the setup page to say connected', () => extPage.locator('.state.ok').count(), 15000).catch(() => 0);
   check('…and says the recorder is connected', !!green);
   check('…as a tab in that profile\'s window', !!extPage, ctx.pages().map(p => p.url()).join(', '));
+
+  // ---- GitHub Copilot: the installed app gets Copilot's runtime (first sign-in does this), checks it, and starts it ----
+  const rt = await hook('ai', { args: ['runtime'] }, 900000);
+  check('Copilot: the runtime fetched from the release and checked', rt.ok && rt.value.ready === true, JSON.stringify(rt).slice(0, 800));
+  const ais = await hook('ai', { args: ['status'] }, 300000);
+  check('Copilot: the SDK starts in the installed app (not signed in here)', ais.ok && ais.value.runtime && ais.value.runtime.ready === true && ais.value.signedIn === false, JSON.stringify(ais).slice(0, 800));
 
   // ---- Quit: the receiver goes with the app ---------------------------------------------------------------------
   app.kill();

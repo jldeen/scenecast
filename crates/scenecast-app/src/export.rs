@@ -252,6 +252,7 @@ mod tests {
                 }],
                 browser: None,
                 profile: None,
+                ..Default::default()
             })
             .unwrap();
         let err = export(&demo.dir, &default_dest(&lib.root), ExportKind::Folder).unwrap_err();

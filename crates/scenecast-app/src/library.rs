@@ -88,6 +88,9 @@ pub struct Demo {
     pub browser: String,
     /// The browser profile (`Profile 10`), when the demo names one.
     pub profile: Option<String>,
+    /// How it's made: `record` (Record for me), `script` (I'll click, you script it), `coach` (Coach me) or
+    /// `manual` (I know my demo; also every demo from before there was a choice).
+    pub mode: String,
     pub status: DemoStatus,
 }
 
@@ -102,6 +105,15 @@ pub struct NewDemo {
     /// The browser profile's folder name (`Profile 10`); none: the one that's open when recording.
     #[serde(default)]
     pub profile: Option<String>,
+    /// How it's made (`record`, `script`, `coach`, `manual`; default `manual`).
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// What the demo should show, in the presenter's words (Record for me, Coach me).
+    #[serde(default)]
+    pub goal: Option<String>,
+    /// Material to work from: notes, a doc, an email, a script (Record for me, Coach me).
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -206,6 +218,13 @@ impl Library {
                 "add the web address of at least one app".into(),
             ));
         }
+        if let Some(m) = spec.mode.as_deref()
+            && !crate::ai::MODES.contains(&m)
+        {
+            return Err(AppError::Invalid(format!(
+                "`{m}` isn't a way to make a demo"
+            )));
+        }
         fs::create_dir_all(&self.root)?;
         let id = self.free_id(&slug(title));
         create_project(&NewProject {
@@ -219,6 +238,14 @@ impl Library {
         }
         if let Some(profile) = spec.profile.as_deref().filter(|p| !p.trim().is_empty()) {
             crate::record::set_profile(&self.root.join(&id), profile)?;
+        }
+        if spec.mode.is_some() || spec.goal.is_some() || spec.source.is_some() {
+            crate::ai::save(
+                &self.root.join(&id),
+                spec.mode.as_deref().or(Some("manual")),
+                spec.goal.as_deref(),
+                spec.source.as_deref(),
+            )?;
         }
         self.get(&id)
     }
@@ -365,6 +392,7 @@ pub fn load(dir: &Path) -> Result<Demo, AppError> {
         apps,
         browser: crate::record::browser(dir),
         profile: crate::record::profile(dir),
+        mode: crate::ai::read(dir).mode.unwrap_or_else(|| "manual".into()),
         status: status(dir, manifest.as_ref()),
         dir: dir.to_path_buf(),
         id,
@@ -522,7 +550,34 @@ mod tests {
             ],
             browser: Some("edge".into()),
             profile: None,
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn keeps_how_a_demo_is_made() {
+        let (_tmp, lib) = lib();
+        assert_eq!(lib.create(&new_demo("Mine")).unwrap().mode, "manual");
+        let d = lib
+            .create(&NewDemo {
+                mode: Some("record".into()),
+                goal: Some("Show the supplier delay".into()),
+                ..new_demo("For me")
+            })
+            .unwrap();
+        assert_eq!(d.mode, "record");
+        assert_eq!(
+            crate::ai::read(&d.dir).goal.as_deref(),
+            Some("Show the supplier delay")
+        );
+        assert!(
+            lib.create(&NewDemo {
+                mode: Some("magic".into()),
+                ..new_demo("Bad")
+            })
+            .is_err()
+        );
+        assert!(lib.get("bad").is_err(), "nothing is made for a bad mode");
     }
 
     #[test]

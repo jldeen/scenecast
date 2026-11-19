@@ -32,6 +32,8 @@ struct AppState {
     preflights: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// The recorder extension's folder, and what happened when this app updated it.
     extension: Mutex<Value>,
+    /// Demos the AI coach is coaching now (it runs beside the recording, not as the demo's one job).
+    coaches: Mutex<HashSet<String>>,
 }
 
 type Shared = Arc<AppState>;
@@ -427,8 +429,8 @@ fn start_recorder_side(state: Shared) {
 }
 
 /// The packaged-app test's way in (no WebDriver in an installer): with `SCENECAST_SELFTEST=<folder>`, each
-/// `<name>.request.json` there ({"action": "receiver"|"preflight"|"install"|"profiles"|"state", "demo": id, "fix":
-/// bool}) runs through the same code as the window's buttons, and its answer lands in `<name>.response.json`.
+/// `<name>.request.json` there ({"action": "receiver"|"preflight"|"install"|"profiles"|"state"|"ai", "demo": id,
+/// "fix": bool, "args": [the `scenecast ai` arguments]}) runs through the same code as the window's buttons, and its answer lands in `<name>.response.json`.
 fn selftest_hook(state: Shared, app: AppHandle) {
     let Some(dir) = std::env::var_os("SCENECAST_SELFTEST").map(PathBuf::from) else {
         return;
@@ -472,6 +474,18 @@ fn selftest_hook(state: Shared, app: AppHandle) {
                             .dir(&id)
                             .and_then(|d| scenecast_app::record::profiles(Some(&d), None)),
                         "busy" => Ok(json!(state.busy.lock().expect("busy lock").clone())),
+                        "ai" => {
+                            let args: Vec<String> = req["args"]
+                                .as_array()
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|x| x.as_str().map(str::to_owned))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                            scenecast_app::ai::run(None, &args, |_| {})
+                        }
                         "version" => Ok(json!({
                             "version": app.package_info().version.to_string(),
                             "pid": std::process::id(),
@@ -709,6 +723,222 @@ async fn script_run(
         scenecast_app::script::run(dir, |u| busy.emit(u))
     })
     .await
+}
+
+// ---- AI-assisted recording (GitHub Copilot) ----------------------------------------------------------------------
+
+/// Signed in to GitHub? The model, the settings, whether Copilot's runtime is here yet.
+#[tauri::command]
+async fn ai_status() -> Res<Value> {
+    blocking(|| scenecast_app::ai::run(None, &["status"], |_| {})).await
+}
+
+/// Sign in with GitHub (device flow): `job` events on job `ai-sign-in` carry the code to enter, then it waits.
+#[tauri::command]
+async fn ai_sign_in(app: AppHandle) -> Res<Value> {
+    blocking(move || {
+        scenecast_app::ai::run(None, &["sign-in"], |u| emit(&app, "", "ai-sign-in", u))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn ai_sign_out() -> Res<Value> {
+    blocking(|| scenecast_app::ai::run(None, &["sign-out"], |_| {})).await
+}
+
+#[tauri::command]
+async fn ai_models() -> Res<Value> {
+    blocking(|| scenecast_app::ai::run(None, &["models"], |_| {})).await
+}
+
+/// The presenter's AI settings (`model`, `pageText`); `set` changes some.
+#[tauri::command]
+async fn ai_settings(set: Option<serde_json::Map<String, Value>>) -> Res<Value> {
+    blocking(move || {
+        let pairs: Vec<String> = set
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| {
+                format!(
+                    "{k}={}",
+                    v.as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| v.to_string())
+                )
+            })
+            .collect();
+        let mut args = vec!["settings"];
+        for p in &pairs {
+            args.push("--set");
+            args.push(p);
+        }
+        scenecast_app::ai::run(None, &args, |_| {})
+    })
+    .await
+}
+
+#[tauri::command]
+async fn ai_get(state: State<'_, Shared>, id: String) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || Ok(scenecast_app::ai::get(&state.library.dir(&id)?))).await
+}
+
+/// Keeps the demo's mode, goal, material and plan (whichever are given).
+#[tauri::command]
+async fn ai_save(
+    state: State<'_, Shared>,
+    id: String,
+    mode: Option<String>,
+    goal: Option<String>,
+    source: Option<String>,
+    plan: Option<String>,
+) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let dir = state.library.dir(&id)?;
+        scenecast_app::ai::save(&dir, mode.as_deref(), goal.as_deref(), source.as_deref())?;
+        if let Some(p) = plan {
+            scenecast_app::ai::save_plan(&dir, &p)?;
+        }
+        Ok(scenecast_app::ai::get(&dir))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn ai_plan(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    job(state, app, id, "ai-plan", |dir, busy| {
+        scenecast_app::ai::run(Some(dir), &["plan"], |u| busy.emit(u))
+    })
+    .await
+}
+
+/// Record for me: the approved plan, in the presenter's browser, while it records; then the talk track.
+#[tauri::command]
+async fn ai_record(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
+    job(state, app, id, "ai-record", |dir, busy| {
+        scenecast_app::ai::run(Some(dir), &["record"], |u| busy.emit(u))
+    })
+    .await
+}
+
+/// The talk track from the recording (I'll click, you script it; Coach me).
+#[tauri::command]
+async fn ai_script(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    job(state, app, id, "ai-script", |dir, busy| {
+        scenecast_app::ai::run(Some(dir), &["script"], |u| busy.emit(u))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn ai_answer(
+    state: State<'_, Shared>,
+    id: String,
+    question: String,
+    answer: String,
+    text: Option<String>,
+) -> Res<()> {
+    scenecast_app::ai::answer(
+        &state.library.dir(&id)?,
+        &question,
+        &answer,
+        text.as_deref(),
+    )
+}
+
+#[tauri::command]
+async fn ai_stop(state: State<'_, Shared>, id: String) -> Res<()> {
+    scenecast_app::ai::stop(&state.library.dir(&id)?)
+}
+
+/// Coach me: runs beside the recording (the presenter starts and stops it as usual) until the recording ends or
+/// ai_stop; its suggestions are `job` events on job `coach`.
+#[tauri::command]
+async fn ai_coach(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<()> {
+    let shared = state.inner().clone();
+    let dir = shared.library.dir(&id)?;
+    if !shared
+        .coaches
+        .lock()
+        .expect("coaches lock")
+        .insert(id.clone())
+    {
+        return Ok(());
+    }
+    let _ = scenecast_app::receiver::host().ensure(&dir);
+    let _ = app.emit(
+        "job-state",
+        JobState {
+            demo: &id,
+            job: "coach",
+            running: true,
+        },
+    );
+    std::thread::spawn(move || {
+        let r = scenecast_app::ai::run(Some(&dir), &["coach"], |u| emit(&app, &id, "coach", u));
+        if let Err(e) = r {
+            emit(
+                &app,
+                &id,
+                "coach",
+                Update::Line {
+                    text: e.to_string(),
+                    error: true,
+                },
+            );
+        }
+        shared.coaches.lock().expect("coaches lock").remove(&id);
+        let _ = app.emit(
+            "job-state",
+            JobState {
+                demo: &id,
+                job: "coach",
+                running: false,
+            },
+        );
+    });
+    Ok(())
+}
+
+/// A text file the presenter picks (notes, a doc saved as text or Markdown, an email, a script, a RunLines .sk):
+/// `{ name, text }`, or nothing when they cancel.
+#[tauri::command]
+async fn pick_text_file(app: AppHandle) -> Res<Option<Value>> {
+    blocking(move || {
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title("Open your material")
+            .add_filter(
+                "Text",
+                &["md", "markdown", "txt", "sk", "eml", "json", "html"],
+            )
+            .blocking_pick_file()
+            .and_then(|f| f.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        let bytes = std::fs::read(&file)?;
+        if bytes.len() > 2_000_000 {
+            return Err(AppError::Invalid(
+                "that file is too big to work from (2 MB at most)".into(),
+            ));
+        }
+        Ok(Some(json!({
+            "name": file.file_name().map(|n| n.to_string_lossy().into_owned()),
+            "text": String::from_utf8_lossy(&bytes),
+        })))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn ai_coach_window(state: State<'_, Shared>, id: String) -> Res<String> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::ai::open_coach(&state.library.dir(&id)?)).await
 }
 
 // ---- Edit and present --------------------------------------------------------------------------------------------
@@ -1194,6 +1424,7 @@ fn main() {
         presents: Mutex::default(),
         preflights: Mutex::default(),
         extension: Mutex::new(Value::Null),
+        coaches: Mutex::default(),
     });
     start_recorder_side(state.clone());
 
@@ -1236,6 +1467,21 @@ fn main() {
             script_save,
             script_open,
             script_run,
+            ai_status,
+            ai_sign_in,
+            ai_sign_out,
+            ai_models,
+            ai_settings,
+            ai_get,
+            ai_save,
+            ai_plan,
+            ai_record,
+            ai_script,
+            ai_answer,
+            ai_stop,
+            ai_coach,
+            ai_coach_window,
+            pick_text_file,
             edit_start,
             edit_stop,
             key_reference,
