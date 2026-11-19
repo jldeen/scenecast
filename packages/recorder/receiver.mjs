@@ -58,6 +58,9 @@ createServer(async (req, res) => {
   try {
     follow();
     const u = new URL(req.url, 'http://x');
+    // Only the recorder (an extension, or a local tool with no Origin) talks to the receiver: never a web page.
+    const origin = req.headers.origin;
+    if (origin && !/^(chrome|moz)?-?extension:\/\//.test(origin)) { res.writeHead(403); return res.end(); }
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
     // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
     if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });

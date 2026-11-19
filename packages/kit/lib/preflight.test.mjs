@@ -48,3 +48,34 @@ test('a receiver slow to answer is the one running: not started again', async ()
   assert.equal(got.status, 'ok', JSON.stringify(got));
   assert.match(got.detail, /\/slow/);
 });
+
+test('profiles: the open one with the recorder is picked, by its name; the demo\'s own choice wins; plain-words advice', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { browserProfiles, pickProfile } = await import('./profiles.mjs');
+  const { recorderAdvice } = await import('./preflight.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'sc-profiles-'));
+  const ext = join(root, 'Recorder Extension');
+  mkdirSync(ext);
+  for (const d of ['Default', 'Profile 10', 'Profile 3']) mkdirSync(join(root, d));
+  writeFileSync(join(root, 'Local State'), JSON.stringify({ profile: { last_used: 'Default', last_active_profiles: ['Profile 10'], info_cache: { Default: { name: 'Person 1' }, 'Profile 10': { name: 'Work', user_name: 'j@example.com' }, 'Profile 3': { name: 'Home' } } } }));
+  writeFileSync(join(root, 'Profile 10', 'Secure Preferences'), JSON.stringify({ extensions: { settings: { abc: { path: ext, location: 4, disable_reasons: [] } } } }));
+  writeFileSync(join(root, 'Profile 10', 'Preferences'), JSON.stringify({ extensions: { ui: { developer_mode: true } } }));
+  writeFileSync(join(root, 'Profile 3', 'Preferences'), JSON.stringify({ extensions: { ui: { developer_mode: false } } }));
+  const procs = [{ pid: 9, browser: 'chrome', userDataDir: root, profile: null, debugPort: null }];
+  const info = await browserProfiles({ browser: 'chrome', userDataDir: root, procs, extDirs: [ext], pictures: false });
+  const by = d => info.profiles.find(p => p.dir === d);
+  assert.equal(by('Profile 10').name, 'Work');
+  assert.ok(info.running && by('Profile 10').open && by('Profile 10').extension.enabled);
+  assert.equal(by('Default').extension.id, null);
+  assert.equal(info.picked, 'Profile 10');
+  assert.equal(pickProfile(info.profiles, 'Profile 3'), 'Profile 3');
+  assert.equal(pickProfile([], null), 'Default');
+  assert.match(recorderAdvice({ info, profile: 'Profile 3', browser: 'chrome', extDir: ext }), /in Chrome profile "Work", but this demo uses "Home"/);
+  const off = { ...info, profiles: info.profiles.map(p => p.dir === 'Profile 10' ? { ...p, extension: { ...p.extension, devMode: false } } : p) };
+  assert.match(recorderAdvice({ info: off, profile: 'Profile 10', browser: 'chrome', extDir: ext }), /Developer mode is off/);
+  const none = { ...info, profiles: info.profiles.map(p => ({ ...p, extension: { id: null } })) };
+  assert.match(recorderAdvice({ info: none, profile: 'Default', browser: 'chrome', extDir: ext, other: { browser: 'edge', profiles: [{ extension: { id: 'x' } }] } }), /in Edge, but this demo records in Chrome/);
+  assert.match(recorderAdvice({ info: none, profile: 'Default', browser: 'chrome', extDir: ext }), /Click Install recorder/);
+});
