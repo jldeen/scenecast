@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { defaultBrowser, profileRoot } from '../../player/launch.mjs';
+import { defaultBrowser, profileRoot, chosenProfile } from '../../player/launch.mjs';
 
 // Where the app puts the recorder extension for the presenter to load: a folder they can see, not a hidden one.
 export function extensionDir(env = process.env, home = homedir()) {
@@ -129,7 +129,7 @@ export async function openExtensionsPage(demo) {
   const { openInBrowser } = await import('../../player/launch.mjs');
   const ch = demo.cfg.chrome || {};
   const browser = ch.browser || defaultBrowser();
-  const info = await browserProfiles({ browser, userDataDir: ch.userDataDir, preferred: ch.profile, pictures: false });
+  const info = await browserProfiles({ browser, userDataDir: ch.userDataDir, preferred: chosenProfile(ch), pictures: false });
   const p = info.profiles.find(x => x.dir === info.picked);
   const page = browser === 'edge' ? 'edge://extensions' : 'chrome://extensions';
   const port = +(process.env.REPLICA_RX_PORT || demo.cfg.receiverPort || 47621);
@@ -147,7 +147,7 @@ export async function main(args, loadDemo) {
   const ch = (demo && demo.cfg.chrome) || {};
   const i = args.indexOf('--browser');
   const browser = i >= 0 ? args[i + 1] : ch.browser || defaultBrowser();
-  const r = await browserProfiles({ browser, userDataDir: i >= 0 ? undefined : ch.userDataDir, preferred: ch.profile, pictures: !args.includes('--no-pictures') });
+  const r = await browserProfiles({ browser, userDataDir: i >= 0 ? undefined : ch.userDataDir, preferred: chosenProfile(ch), pictures: !args.includes('--no-pictures') });
   if (args.includes('--json')) console.log(JSON.stringify(r));
   else {
     console.log(`${browser} (${r.userDataDir})${r.running ? `, running (pid ${r.pid})` : ', not running'}`);

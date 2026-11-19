@@ -4,7 +4,7 @@
   "title": "__TITLE__",
   "port": __PORT__,
   "viewport": { "width": 1920, "height": 1080, "dpr": 2 },
-  "chrome": { "profile": "Default" },
+  "chrome": {},
   "raw": "~/.scenecast/__NAME__/raw",
   "apps": __APPS__,
   "record": {

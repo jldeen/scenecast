@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { connect } from 'node:net';
 import { KIT } from './demo.mjs';
-import { defaultBrowser, profileRoot, openInBrowser } from '../../player/launch.mjs';
+import { defaultBrowser, profileRoot, openInBrowser, chosenProfile } from '../../player/launch.mjs';
 import { parseProcs, listProcs, openProfiles, browserProfiles, extensionDir } from './profiles.mjs';
 
 export { parseProcs, openProfiles };
@@ -75,11 +75,12 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   const bname = NAME[browser] || browser;
   const userDataDir = cfg.chrome.userDataDir || profileRoot(browser);
   const extDir = extensionDir();
-  let procs = null, info = null, profile = cfg.chrome.profile || null;
+  const chosen = chosenProfile(cfg.chrome);
+  let procs = null, info = null, profile = chosen;
   const look = async () => {
     procs = await listProcs();
-    info = await browserProfiles({ browser, userDataDir: cfg.chrome.userDataDir, procs, preferred: cfg.chrome.profile, pictures: false });
-    profile = cfg.chrome.profile || info.picked;
+    info = await browserProfiles({ browser, userDataDir: cfg.chrome.userDataDir, procs, preferred: chosen, pictures: false });
+    profile = chosen || info.picked;
   };
   const label = dir => { const p = info && info.profiles.find(x => x.dir === dir); return p && p.name !== dir ? `"${p.name}" (${dir})` : `"${dir}"`; };
   await item('browser', async () => {
@@ -91,7 +92,7 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
     await look();
     const open = info.running ? info.profiles.filter(p => p.open).map(p => p.dir) : [];
     // The demo names a profile that isn't open: only then is a connected recorder not enough.
-    const wantOpen = cfg.chrome.profile && info.running && !open.includes(cfg.chrome.profile);
+    const wantOpen = chosen && info.running && !open.includes(chosen);
     if (connected(up) && recorder === 'extension' && !wantOpen) return { status: 'ok', detail: `the recorder is connected, so ${bname} is running${info.running && profile ? `, profile ${label(profile)}` : ''} (not touched)`, profile: info.running ? profile : null };
     const b = judgeBrowser(procs, { browser, userDataDir, defaultDir: profileRoot(browser), debugPort: recorder === 'agent' ? cfg.chrome.debugPort || 9222 : null });
     const urls = cfg.apps.map(a => a.url).filter(Boolean);

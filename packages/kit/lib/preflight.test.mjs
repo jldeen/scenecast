@@ -79,3 +79,11 @@ test('profiles: the open one with the recorder is picked, by its name; the demo\
   assert.match(recorderAdvice({ info: none, profile: 'Default', browser: 'chrome', extDir: ext, other: { browser: 'edge', profiles: [{ extension: { id: 'x' } }] } }), /in Edge, but this demo records in Chrome/);
   assert.match(recorderAdvice({ info: none, profile: 'Default', browser: 'chrome', extDir: ext }), /Click Install recorder/);
 });
+
+test('a "Default" profile from the old template means the one that\'s open; a picked one is kept', async () => {
+  const { chosenProfile } = await import('../../player/launch.mjs');
+  assert.equal(chosenProfile({ profile: 'Default' }), null);
+  assert.equal(chosenProfile({ profile: 'Default', profilePicked: true }), 'Default');
+  assert.equal(chosenProfile({ profile: 'Profile 10' }), 'Profile 10');
+  assert.equal(chosenProfile({}), null);
+});

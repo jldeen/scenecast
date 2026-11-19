@@ -305,16 +305,21 @@ pub fn set_profile(dir: &Path, profile: &str) -> Result<(), AppError> {
     let obj = cfg["chrome"].as_object_mut().expect("an object");
     if profile.trim().is_empty() {
         obj.remove("profile");
+        obj.remove("profilePicked");
     } else {
         obj.insert("profile".into(), Value::from(profile.trim()));
+        obj.insert("profilePicked".into(), Value::from(true));
     }
     std::fs::write(&file, serde_json::to_string_pretty(&cfg)? + "\n")?;
     Ok(())
 }
 
-/// The demo's chosen profile, if it has one.
+/// The demo's chosen profile, if the presenter picked one ("Default" from 0.3.0's template, not picked, means the
+/// one that's open).
 pub fn profile(dir: &Path) -> Option<String> {
-    config(dir).and_then(|c| c["chrome"]["profile"].as_str().map(str::to_owned))
+    let c = config(dir)?;
+    let p = c["chrome"]["profile"].as_str()?;
+    (p != "Default" || c["chrome"]["profilePicked"] == true).then(|| p.to_owned())
 }
 
 /// Preflight: each item as it lands. With `fix`, what fails is put right where it can be; a running browser is
@@ -394,6 +399,14 @@ mod tests {
         if std::env::var_os("REPLICA_RX_PORT").is_none() {
             assert_eq!(receiver_port(&demo.dir), DEFAULT_RECEIVER_PORT);
         }
+        // 0.3.0's template said "Default" for every demo: not a choice. A picked profile is kept.
+        assert_eq!(profile(&demo.dir), None);
+        set_profile(&demo.dir, "Profile 10").unwrap();
+        assert_eq!(profile(&demo.dir).as_deref(), Some("Profile 10"));
+        set_profile(&demo.dir, "Default").unwrap();
+        assert_eq!(profile(&demo.dir).as_deref(), Some("Default"));
+        set_profile(&demo.dir, "").unwrap();
+        assert_eq!(profile(&demo.dir), None);
         let s = setup_for(PathBuf::from("/x/extension"), "edge", 47621);
         assert_eq!(s.extensions_page, "edge://extensions");
         assert!(s.steps.iter().any(|s| s.contains("Load unpacked")));

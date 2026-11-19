@@ -9,6 +9,13 @@ import { join } from 'node:path';
 const MAC_APP = { chrome: 'Google Chrome', edge: 'Microsoft Edge' };
 const WIN_EXE = { chrome: 'chrome.exe', edge: 'msedge.exe' };
 
+// The profile the demo names, if the presenter picked it: "Default" written by 0.3.0's template (not picked) means
+// "the one that's open", like no profile at all.
+export function chosenProfile(chrome = {}) {
+  const p = chrome.profile;
+  return p && (p !== 'Default' || chrome.profilePicked) ? p : null;
+}
+
 export function defaultBrowser(platform = process.platform) {
   return platform === 'win32' ? 'edge' : 'chrome';
 }
@@ -57,6 +64,7 @@ export async function windowsBrowser(browser) {
 }
 
 export function openApp(url, chrome = {}) {
+  chrome = { ...chrome, profile: chosenProfile(chrome) || undefined };
   const yourself = err => { if (err) console.log(`open it yourself: ${url}`); };
   if (chrome.profile && chrome.profile !== 'Default') {
     const b = chrome.browser || defaultBrowser();
