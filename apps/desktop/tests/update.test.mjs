@@ -8,7 +8,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -74,7 +74,7 @@ try {
   const c = await hook('update-check');
   check(`Check for updates finds ${newVersion}`, c.ok && c.value.available === newVersion, JSON.stringify(c));
   const u = await hook('update-install', {}, 300000);
-  check('Update: downloads, installs, restarts', u.ok && u.value === 'restarting', JSON.stringify(u));
+  check('Update: downloads, checks its signature, installs', u.ok && u.value === 'restarting', JSON.stringify(u));
   // The new version, relaunched by the update, answers the hook (it has the same environment).
   const v1 = await waitFor(`Scenecast ${newVersion} to come back`, async () => {
     const r = await hook('version', {}, 15000).catch(() => null);

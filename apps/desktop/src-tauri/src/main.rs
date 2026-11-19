@@ -1084,7 +1084,10 @@ struct UpdateProgress {
 
 /// Downloads the update (progress as `update-progress` events), installs it, and restarts on it. Demos and settings
 /// stay where they are (the library is in Documents, apart from the app).
-async fn update_install_now(app: &AppHandle, before_restart: impl FnOnce()) -> Res<()> {
+async fn update_install_now(
+    app: &AppHandle,
+    before_install: impl FnOnce() + Send + 'static,
+) -> Res<()> {
     let err = |e: tauri_plugin_updater::Error| AppError::Invalid(format!("update: {e}"));
     let Some(up) = updater(app).map_err(err)?.check().await.map_err(err)? else {
         return Err(AppError::Invalid(
@@ -1105,7 +1108,10 @@ async fn update_install_now(app: &AppHandle, before_restart: impl FnOnce()) -> R
                 },
             );
         },
+        // Downloaded and checked: it installs now (on Windows the installer takes over and this process ends).
         move || {
+            scenecast_app::receiver::host().stop();
+            before_install();
             let _ = a2.emit(
                 "update-progress",
                 UpdateProgress {
@@ -1118,8 +1124,6 @@ async fn update_install_now(app: &AppHandle, before_restart: impl FnOnce()) -> R
     )
     .await
     .map_err(err)?;
-    scenecast_app::receiver::host().stop();
-    before_restart();
     app.restart();
 }
 
