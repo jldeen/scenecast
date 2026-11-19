@@ -257,7 +257,7 @@ default export is the list, or a function of the flow that returns it. With any 
 ```js
 { id: 'the-cost', beat: 9, app: 'copilot', states: ['cop-payoff'],
   find: '$35,073 chargeback',                       // text on screen, or:
-  union: ['Workflow', { sel: 'aside ul[role=list]' }, { text: 'Caldova IQ', up: 'button' }],   // the box around all
+  union: ['Workflow', { sel: 'aside ul[role=list]' }, { text: 'Northwind IQ', up: 'button' }],   // the box around all
   mark: 'arrow', dir: 'sw', len: 150,               // default a rectangle; an arrow's head on it, its tail to dir
   open: ['21 items complete'], grow: [26, 0, 0, 0], maxZoom: 1.5, line: '7.5' }
 ```

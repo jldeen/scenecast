@@ -61,7 +61,7 @@ function renderChat(fresh) {
 }
 function renderPlugins() {
   page = 'plugins';
-  const items = ['Supply chain disruption', 'Caldova IQ', 'Fabric IQ', 'Work IQ', 'Connectors', 'Planner'].map((n, i) => '<li class="card" role="listitem"><b>' + n + '</b><span>Plugin ' + (i + 1) + ' of 6</span></li>').join('');
+  const items = ['Supply chain disruption', 'Northwind IQ', 'Fabric IQ', 'Work IQ', 'Connectors', 'Planner'].map((n, i) => '<li class="card" role="listitem"><b>' + n + '</b><span>Plugin ' + (i + 1) + ' of 6</span></li>').join('');
   $('#main').innerHTML = '<div class="plugins"><h1>Plugins</h1><ul role="list" class="cards">' + items + '</ul></div>';
 }
 function wireComposer() {
