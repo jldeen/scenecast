@@ -86,6 +86,13 @@ stop the extension's service worker at any time; when it starts again, the exten
 checkpoint by itself (the selftest stops it mid-recording to prove this). `scenecast record start --resume` does the
 same by hand, and lists any app tab that isn't on the screen it was on.
 
+## Driven by the AI
+
+Record for me (docs/ai.md) runs the demo through the same command loop: `observe` reads the page as the AI sees it
+(its controls by role and name, where they are, its headings and words: `outline-page.js`), then `click`, `type` and
+`press` do the step, so the recorder captures it exactly as it captures a person's clicks. `record status` lists the
+last few steps (`recent`), which the coach follows. The receiver also serves the coach window (`/coach`).
+
 ## How it's built
 
 `packages/recorder/build.mjs` builds one body of code two ways:

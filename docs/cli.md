@@ -145,6 +145,29 @@ bring its own, a model for instance: `--matcher my-matcher.mjs` or `demo.json` `
 whose default export is `{ name, async match({ lines, screens, sequence, flow }) }` (the interface and helpers
 are in `packages/script/match.mjs`). From Rust: `scenecast_build::script::run(dir, &ScriptOptions, |progress| …)`.
 
+## AI-assisted recording: `scenecast ai`
+
+GitHub Copilot through the presenter's own GitHub sign-in (docs/ai.md). Each prints one `@ai {json}` line per event
+(progress, questions, `done` with the result, or `error`).
+
+```bash
+scenecast ai sign-in                  # GitHub device flow: a code to enter at github.com/login/device
+scenecast ai status                   # signed in? the model, the settings, Copilot's runtime
+scenecast ai settings --set pageText=false --set model=auto
+scenecast ai plan   --demo <dir>      # plan.md from ai.json's goal and/or source.md, and each app's start screen
+scenecast ai record --demo <dir>      # Record for me: the approved plan, in the browser, while recording; then script.md
+scenecast ai script --demo <dir>      # the talk track (script.md) from the recording: one beat per replica beat
+scenecast ai coach  --demo <dir>      # Coach me: the next step and line, live, until the recording stops
+scenecast ai answer --demo <dir> q2 do|self|skip|stop|done [text]   # answer a question it asked
+scenecast ai stop   --demo <dir>      # stop Record for me or the coach (what was recorded is kept)
+scenecast ai sent   --demo <dir>      # what was sent to the model (.out/ai/sent/)
+```
+
+`SCENECAST_AI_MODEL=stub` runs on the deterministic stand-in (no network, no account; what CI uses), or
+`=<file.mjs>` on your own (`ask(task, input)`). `SCENECAST_AI_HOME` is where sign-in, settings and Copilot's runtime
+live. Then `scenecast build`, `scenecast script script.md`, `scenecast notes`, `scenecast guide-shots` and
+`scenecast quick`, as for any script.
+
 ## The editor: `scenecast edit`
 
 The replica in edit mode, for people to adjust what the script matcher did, or to add their own focus points.

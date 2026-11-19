@@ -21,7 +21,9 @@ packages/            npm workspaces: everything that runs in the browser
                      (flow.fixes.json) the flow compiler and build apply
   script             script to focus points: parse, index each screen, pluggable matcher, sheets
   editor             the editor inside the replica (dots, wording and dates, beat starts, undo)
-  selftest           end-to-end tests against examples/fixture-app (and the fidelity loop on its seeded lab app)
+  ai                 AI-assisted recording with GitHub Copilot (the presenter's own sign-in, through the Copilot SDK) or a
+                     deterministic stand-in: plans, Record for me, the talk track from a recording, the coach (docs/ai.md)
+  selftest           end-to-end tests against examples/fixture-app (the fidelity loop on its seeded lab app, the AI modes)
 ```
 
 **The split.** Rust owns the bundle format, validation, build orchestration and the CLI; JavaScript owns what

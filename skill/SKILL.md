@@ -125,6 +125,13 @@ extension mid-recording, `scenecast record start --resume` continues from the la
 
 Then tell the coordinator the browser is free, and `scenecast save "recording"`.
 
+**The presenter doesn't know the beats?** Use the AI modes (docs/ai.md; GitHub Copilot through their own sign-in,
+`scenecast ai status`): put the goal in `ai.json` (`{ "mode": "record", "goal": "…" }`) and any material in
+`source.md`, then `scenecast ai plan` (show them `plan.md`; they approve or edit it) and `scenecast ai record`, which
+runs it in their browser while recording and asks before every send or change (answer with `scenecast ai answer`
+only what the presenter says). Or they click through once and `scenecast ai script` writes `script.md` from the
+recording; or `scenecast ai coach` suggests each next step while they record. Step 6 then takes that script.md.
+
 ### 4 · Build (1 min)
 
 ```bash

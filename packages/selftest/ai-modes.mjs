@@ -73,6 +73,16 @@ async function sizeWindow(page, w, h) {
   await s.detach();
 }
 
+// The receiver asked to make way (on Windows the scenecast binary waits on its Node: killing it leaves Node on the port).
+async function stopReceiver() {
+  await fetch(`http://127.0.0.1:${RX_PORT}/quit`, { method: 'POST' }).catch(() => {});
+  for (let i = 0; i < 50; i++) {
+    const free = await new Promise(res => { const s = createServer().once('error', () => res(false)).once('listening', () => s.close(() => res(true))).listen(RX_PORT, '127.0.0.1'); });
+    if (free) break;
+    await sleep(200);
+  }
+  if (receiver) try { receiver.kill(); } catch (e) {}
+}
 const fx = startFixture();
 const procs = [];
 let ctx = null, receiver = null;
@@ -99,7 +109,7 @@ try {
     Object.assign(cfg.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200, auto: false });
     writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(cfg, null, 2));
     if (ai) writeFileSync(join(DEMO, 'ai.json'), JSON.stringify(ai, null, 2));
-    if (receiver) { receiver.kill(); await sleep(500); }
+    if (receiver) await stopReceiver();
     receiver = spawn(BIN, ['receiver', '--demo', DEMO], { cwd: DEMO, env: ENV, stdio: 'ignore' }); procs.push(receiver);
     await chat.goto(fx.chat); await admin.goto(fx.admin); await chat.bringToFront();
     let e = {};
@@ -249,6 +259,7 @@ try {
 } catch (e) {
   check('ai modes ran to the end', false, String(e.stack || e));
 } finally {
+  await stopReceiver();
   for (const p of procs) { try { p.kill(); } catch (e) {} }
   if (ctx) await ctx.close().catch(() => {});
   fx.close();

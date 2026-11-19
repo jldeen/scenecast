@@ -23,6 +23,12 @@ it, compare it with the real product, match the script to focus points, edit, pr
 `.msi` or setup `.exe`). **Start here: [the one-page guide](docs/guide.md)** ([PDF](docs/guide.pdf)); the app in
 detail: [docs/app](docs/app/README.md). The CLI stays underneath for automation and CI; both drive the same Rust core.
 
+**You don't need to know the beats.** New demo asks how: **Record for me** (say what it should show; GitHub Copilot
+plans it, you approve, and it clicks through in your browser while it records, asking before anything that sends or
+changes something), **I'll click, you script it** (Copilot writes the script from your recording), **Coach me** (the
+next step and line, live) or **I know my demo**. Copilot is used through the presenter's own GitHub sign-in: no keys.
+See [docs/ai.md](docs/ai.md).
+
 **Small fixes are fast.** After each change, only the checks for what it touched run (`scenecast quick`: a minute or
 two; the app runs it on its own after a build, a script or an edit). The whole checklist runs once, before a release
 (`scenecast release`, the app's Export).
@@ -44,6 +50,7 @@ script's times, and pictures of what's on screen now and next. It's made from th
 | `packages/recorder` | Capture: the recorder extension (MV3, Edge and Chrome), serializer, driver, recorder, side-state audits (hovers, clicks, drags, lists), receiver, build of raw captures. |
 | `packages/player` | The replica: server, morph engine, streams, presenter keys, focus points, the presenter guide (`presenter/`, `app/presenter-module.js`), app-window launcher. |
 | `packages/checks` | The fidelity checklist, the presenter guide's pictures and its check (`guide-shots.mjs`, `notes-check.mjs`). |
+| `packages/ai` | AI-assisted recording: GitHub Copilot through the presenter's own sign-in (or a deterministic stand-in for tests), plans in plain words, Record for me, the talk track from a recording, the coach ([docs/ai.md](docs/ai.md)). |
 | `packages/script` | Script to focus points: the script parsed, every screen indexed, the pluggable matcher (deterministic by default), the line-to-screen sheet and the cue sheet. |
 | `packages/editor` | The editor inside the replica: focus-point dots, wording and date changes, beat starts, undo. |
 | `packages/fixer` | The fidelity fixer: pluggable diagnosers and the per-demo patches. |

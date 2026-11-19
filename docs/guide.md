@@ -29,8 +29,12 @@ are kept in **Documents/Scenecast**.
 
 ![The demo library](app/library.png)
 
-1. **New demo.** Name it, add each web app it shows (its start page's address), pick Edge or Chrome and the
-   **profile** you're signed in to the apps with (Scenecast lists your browser's profiles by name).
+1. **New demo.** Pick how you want to make it: **Record for me** (say what it should show; Copilot plans it and
+   clicks through while it records), **I'll click, you script it** (click through once; Copilot writes the script),
+   **Coach me** (Copilot shows each next step and line while you click) or **I know my demo**. The first three use
+   GitHub Copilot: on the **Copilot** page, **Sign in with GitHub** once and enter the code it shows
+   ([more](ai.md)). Then name the demo, add each web app it shows (its start page's address), pick Edge or Chrome and
+   the **profile** you're signed in to the apps with (Scenecast lists your browser's profiles by name).
 2. **Record → Install recorder** (once per browser). Scenecast opens a page with the steps in the browser you
    already have open, in your profile, shows the **Recorder Extension** folder (in Documents/Scenecast) in Finder or
    File Explorer, and copies `chrome://extensions` (or `edge://extensions`). Paste that in the address bar and press
@@ -43,7 +47,14 @@ are kept in **Documents/Scenecast**.
 
    ![Ready to record](app/record.png)
 
-4. **Start recording**, then run the demo once, the way you'll present it, in your browser. **Wait for "Ready for
+4. **Record for me:** press **Draft the plan**, read it (change anything), then **Approve and record**. Keep your hands
+   off the browser; when it asks **May I?** before a send or a save, say **Do it**, **I'll click it myself** or
+   **Skip it**. It builds the replica, writes your script and presenter guide and runs the checks after: skip to step 9.
+   **Coach me:** press **Start coaching** (and **Open the coach window** for your laptop screen), then record as below
+   and follow it. **I'll click, you script it:** just record as below. Either way, when you stop, Scenecast writes the
+   script, focus points and presenter guide and runs the checks on its own.
+
+   **Otherwise: Start recording**, then run the demo once, the way you'll present it, in your browser. **Wait for "Ready for
    your next step"** before each click: Scenecast captures each screen and everything you could hover or open on it.
    **Stop recording** at the end. (A "started debugging this browser" bar shows while it records: leave it.)
 
