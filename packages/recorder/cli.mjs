@@ -4,7 +4,7 @@
 // cli.mjs run <file.js> ['{"tab":"…"}'] runs a flow script (capture/lib.js is prepended) as the 'js' op.
 // REPLICA_RX_PORT picks the receiver's port (47621).
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export async function send(cmd, tmo = 300, port = process.env.REPLICA_RX_PORT || 47621) {
@@ -24,7 +24,7 @@ export function flowScript(file, extra = {}) {
   return { op: 'js', tab: extra.tab, code: `const ARGS = ${JSON.stringify(extra)};\nconst HOVER_PAGE = ${JSON.stringify(hp)};\n` + readFileSync(join(here, 'lib.js'), 'utf8') + '\n' + readFileSync(file, 'utf8') };
 }
 
-if (process.argv[1] && process.argv[1].endsWith('cli.mjs')) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   let [op, args = '{}', tmo = '300'] = process.argv.slice(2);
   let cmd;
   if (op === 'run') { cmd = flowScript(args, process.argv[4] ? JSON.parse(process.argv[4]) : {}); tmo = process.argv[5] || '900'; }

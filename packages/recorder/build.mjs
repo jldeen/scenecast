@@ -19,6 +19,7 @@ export function core() {
   return `const SER = ${JSON.stringify(read('serialize.js'))};
 const HOVER_PAGE = ${JSON.stringify(strip(read('hover-page.js')))};
 const REC_PAGE = ${JSON.stringify(strip(read('recorder-page.js')))};
+const OUTLINE_PAGE = ${JSON.stringify(strip(read('outline-page.js')))};
 ${read('driver.js')}
 const SIDE_HOVERS = async (ARGS) => {
 ${read('flows/hover-audit.js')}

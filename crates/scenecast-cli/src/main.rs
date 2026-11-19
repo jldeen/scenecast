@@ -90,6 +90,10 @@ enum Command {
     /// watch-outs, times and where each beat is on the stage (--script <file>; --check: script, guide and replica
     /// agree, in a headless browser; --as-windows: as Edge on Windows).
     Notes(Passthrough),
+    /// AI-assisted recording with GitHub Copilot (the presenter's own GitHub sign-in): status, sign-in, sign-out;
+    /// plan (draft plan.md from the goal), record (Record for me), script (the talk track from a recording), coach
+    /// (Coach me), answer, stop, sent. SCENECAST_AI_MODEL=stub uses the deterministic stand-in. See docs/ai.md.
+    Ai(Passthrough),
     /// The presenter guide's pictures (presenter/shots/): each beat's screen, rendered from the replica.
     GuideShots(Passthrough),
     /// Install the "replicate a demo" skill for Copilot (~/.copilot/skills/scenecast-replicate-demo; --dest <dir>).
@@ -353,6 +357,7 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Edit(a) => return engine_cmds::edit(&a),
         Command::Quick(a) => return engine_cmds::check(&a, true),
         Command::Notes(a) => return engine_cmds::handover("notes", &a, true),
+        Command::Ai(a) => return engine_cmds::handover("ai", &a, false),
         Command::GuideShots(a) => return engine_cmds::handover("guide-shots", &a, true),
         Command::InstallSkill(a) => return engine_cmds::install_skill(&a).map(|()| 0),
         Command::Status(a) => return engine_cmds::handover("status", &a, true),

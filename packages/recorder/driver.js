@@ -245,6 +245,8 @@ const OPS = {
   async type(c) { const p = await pageFor(c.tab); await p.keyboard.type(c.text, { delay: c.delay || 15 }); return 'ok'; },
   async press(c) { const p = await pageFor(c.tab); await p.keyboard.press(c.key); return 'ok'; },
   async wheel(c) { const p = await pageFor(c.tab); if (c.x !== undefined) await p.mouse.move(c.x, c.y); await p.mouse.wheel(0, c.dy || 0); await sleep(400); return 'ok'; },
+  // The page as the AI sees it (outline-page.js): its controls by role and name, where they are, and its words.
+  async observe(c) { const p = await pageFor(c.tab); return p.mainFrame().evaluate(`(${OUTLINE_PAGE})(${JSON.stringify(c.opts || {})})`); },
   async js(c) { const AF = Object.getPrototypeOf(async function () {}).constructor; return new AF('ctx', 'page', 'H', c.code)(ctx, c.tab ? await pageFor(c.tab) : page0, H); },
 };
 

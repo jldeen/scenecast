@@ -18,7 +18,7 @@ const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary;
   preflight [--check] [--json|--ndjson]  profiles [--browser chrome|edge] [--json]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release] [--no-editor]
   script <file> [--matcher text|<file.mjs>] [--no-write] [--no-pdf] [--strict]  edit [--no-open] [--port N]
-  notes [--script <file>] [--check [--as-windows]]  guide-shots
+  notes [--script <file>] [--check [--as-windows]]  guide-shots  ai status|sign-in|plan|record|script|coach|answer|stop|sent
   text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
   check [--runs 2]  checklist [--skip a,b] [--only a,b]  fidelity-compare|fidelity-fix|fidelity-report  sheet  hovers  scan [<dir>]
 
@@ -136,6 +136,7 @@ async function main() {
       console.log(`presenter/notes.json: "${n.title}", ${n.beats.length - 2} beats, ${n.beats.reduce((k, b) => k + b.say.length, 0)} lines, ${n.parts.length} parts, ${n.shots.length} pictures (scenecast guide-shots)${share.length ? `\n  beats with no screen of their own (→ steps the guide): ${share.join(', ')}` : ''}`);
       return 0;
     }
+    case 'ai': return node('ai/cli.mjs', rest);
     case 'guide-shots': return node('checks/guide-shots.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
     case 'quick': { const demo = loadDemo(rest); await refreshGuide(demo); return node('checks/fidelity.mjs', ['--quick', ...(rest.includes('--demo') ? rest : ['--demo', demo.dir, ...rest])]); }
     case 'text': return (await import('../lib/workflow.mjs')).text(rest);

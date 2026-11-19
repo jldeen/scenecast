@@ -82,6 +82,30 @@ setInterval(async () => {
 </script>`;
 }
 
+// Coach me's window (the AI's coach posts here): the next step and the line to say, big, for the laptop screen.
+let coachNow = null;
+const COACH_PAGE = `<!doctype html><meta charset="utf-8"><title>Scenecast coach</title>
+<style>body{font:18px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;padding:28px 32px;color:#1b1b1f;background:#fafafa}
+.k{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#6b6b75;margin:18px 0 6px}.next{font-size:30px;font-weight:600}
+.say{font-size:24px;color:#0f548c;border-left:4px solid #0f6cbd;padding-left:14px}.bar{height:6px;background:#e6e6ea;border-radius:3px;margin-top:22px}
+.bar div{height:6px;background:#0f6cbd;border-radius:3px}.muted{color:#6b6b75;font-size:15px}.off{color:#8a5300}</style>
+<div class="muted" id="beat">Waiting for the coach…</div>
+<div class="k">Next</div><div class="next" id="next">—</div>
+<div class="k">Say</div><div class="say" id="say">—</div>
+<div class="bar"><div id="prog" style="width:0"></div></div><p class="muted" id="state"></p>
+<script>
+setInterval(async () => {
+  const c = await fetch('/coach.json', { cache: 'no-store' }).then(r => r.json()).catch(() => null);
+  if (!c || !c.at) return;
+  document.getElementById('beat').textContent = c.finished ? 'That was the whole plan. Stop recording in Scenecast when you are done.' : 'Beat ' + (c.beat + 1) + ': ' + c.beatTitle + (c.offPlan ? ' (off the plan: a suggestion)' : '');
+  document.getElementById('beat').className = c.offPlan ? 'muted off' : 'muted';
+  document.getElementById('next').textContent = c.next || '—';
+  document.getElementById('say').textContent = c.say || '—';
+  document.getElementById('prog').style.width = (c.of ? Math.round(100 * c.done / c.of) : 0) + '%';
+  document.getElementById('state').textContent = !c.recording ? 'Not recording yet: press Start recording in Scenecast.' : c.busy ? 'Hold on: capturing this screen…' : 'Ready for your next step.';
+}, 700);
+</script>`;
+
 createServer(async (req, res) => {
   try {
     follow();
@@ -91,6 +115,8 @@ createServer(async (req, res) => {
     if (origin && !/^(chrome|moz)?-?extension:\/\//.test(origin) && origin !== `http://127.0.0.1:${PORT}`) { res.writeHead(403); return res.end(); }
     // Install recorder's page, opened in the presenter's browser and profile: the steps, and a tick when it connects.
     if (req.method === 'GET' && u.pathname === '/setup') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(setupPage(u.searchParams.get('browser'), u.searchParams.get('dir'))); }
+    if (req.method === 'GET' && u.pathname === '/coach') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(COACH_PAGE); }
+    if (req.method === 'GET' && u.pathname === '/coach.json') return json(res, 200, coachNow || {});
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
     // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
     if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });
@@ -164,6 +190,7 @@ createServer(async (req, res) => {
         log(`recording: ${Object.keys(data.states || {}).length} states, ${Object.keys(data.streams || {}).length} streams, ${(data.path || []).length} steps`);
         return json(res, 200, { ok: true });
       }
+      case '/coach': coachNow = data; return json(res, 200, { ok: true });
       case '/log': log('driver: ' + String(data.msg).slice(0, 2000)); return json(res, 200, { ok: true });
       default: return json(res, 404, { error: 'not found' });
     }
