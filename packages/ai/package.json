@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/ai",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "AI-assisted recording: Record for me (a plan, then the browser driven through the recorder), I'll click you script it, and Coach me. GitHub Copilot through the presenter's own GitHub sign-in, or a deterministic stand-in for tests.",

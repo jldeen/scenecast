@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/kit",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Shared engine code: the CLI entry the scenecast binary runs, demo settings, flow compiler, workflow (text, status, save, release), project template."

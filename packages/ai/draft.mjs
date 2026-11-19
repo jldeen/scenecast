@@ -3,7 +3,7 @@
 // approve in the app.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parsePlan, parseStep, formatPlan, risk, stepCount } from './plan.mjs';
+import { parsePlan, parseStep, formatPlan, stepCount } from './plan.mjs';
 import { compactOutline } from './model.mjs';
 import { rx, observe } from './run.mjs';
 
@@ -28,7 +28,7 @@ export async function draftPlan({ demo, model, settings = {}, emit = () => {} })
   if (!plan.beats.length) throw new Error('the plan came back empty: say a bit more about what the demo should show');
   const text = formatPlan(plan);
   writeFileSync(join(demo.dir, PLAN), text);
-  emit({ event: 'plan', beats: plan.beats.length, steps: stepCount(plan), askFirst: plan.beats.flatMap(b => b.steps).filter(s => risk(s)).length });
+  emit({ event: 'plan', beats: plan.beats.length, steps: stepCount(plan), askFirst: (text.match(/ — ask first/g) || []).length });
   return { text, plan };
 }
 

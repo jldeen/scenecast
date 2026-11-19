@@ -47,6 +47,8 @@ each one stands: recorded, built, fidelity score, focus points, last checked.
 
 | | |
 |---|---|
+| ![New demo: how](new-demo-choice.png) New demo: the four ways | ![GitHub Copilot](copilot.png) Copilot: sign-in, and what it sees |
+| ![The plan](plan.png) Record for me: the goal and the plan | ![May I?](may-i.png) Record for me: asking before a send |
 | ![New demo](new-demo.png) New demo | ![Ready to record](record.png) Record: the recorder and preflight |
 | ![Recording](recording.png) Recording, live | ![Build and check](build.png) Build, scrub report, checks |
 | ![Fidelity](fidelity.png) Fidelity: real vs replica | ![Script](script.png) Script to focus points |

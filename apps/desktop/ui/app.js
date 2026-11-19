@@ -781,8 +781,9 @@ Object.assign(REGIONS, {
     if (!sent.length) return '<p class="muted small">Nothing yet.</p>';
     const task = { plan: 'Draft the plan', adapt: 'A step that didn\u2019t fit the screen', next: 'A coaching suggestion', script: 'Write the talk track' };
     return `<p class="muted small">Each request, exactly as sent${sent.some(x => x.pageText === false) ? '' : ' (page words included: turn that off on the Copilot page)'}.</p>
-      <ul class="status-list" data-test="ai-sent-list">${sent.slice(-12).reverse().map(x => `<li><span class="id">${esc(task[x.task] || x.task)}</span><span class="small muted">${esc(x.model)} · ${(x.chars / 1024).toFixed(1)} KB · ${esc(ago(Date.parse(x.at)))}</span>
-        <button class="btn small subtle" data-open-file="${esc(x.file)}">Show</button><span></span></li>`).join('')}</ul>`;
+      <table class="data" data-test="ai-sent-list" aria-label="What was sent to Copilot"><thead><tr><th scope="col">For</th><th scope="col">Model</th><th scope="col">Size</th><th scope="col">When</th><th scope="col"><span class="visually-hidden">Open</span></th></tr></thead>
+      <tbody>${sent.slice(-12).reverse().map(x => `<tr><td>${esc(task[x.task] || x.task)}</td><td class="muted">${esc(x.model)}</td><td class="muted">${(x.chars / 1024).toFixed(1)} KB</td><td class="muted">${esc(ago(Date.parse(x.at)))}</td>
+        <td><button class="btn small subtle" data-open-file="${esc(x.file)}">Show</button></td></tr>`).join('')}</tbody></table>`;
   },
 });
 // After the talk track exists: the replica, its focus points and guide, the checks for what changed.
