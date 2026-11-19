@@ -10,11 +10,11 @@
 //! - [`fidelity`]: the fidelity loop and its report, real vs replica for each state.
 //! - [`script`]: script to focus points, and its sheets.
 //! - [`guide`]: the presenter guide (notes from the script, pictures, the window next to the stage).
+//! - [`receiver`]: the receiver the recorder extension talks to, kept running for the demo that's open.
 //! - [`servers`]: the replica served for the editor or for presenting.
 //! - [`keys`]: the presenter's one-page key reference.
 //! - [`export`]: a plain folder or a zip for another presenter.
 //! - [`files`]: what the window may show from disk (reports, pictures), on the app's own protocol.
-//! - [`updates`]: app updates (a stub for now).
 
 pub mod build;
 pub mod export;
@@ -23,10 +23,10 @@ pub mod files;
 pub mod guide;
 pub mod keys;
 pub mod library;
+pub mod receiver;
 pub mod record;
 pub mod script;
 pub mod servers;
-pub mod updates;
 
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};

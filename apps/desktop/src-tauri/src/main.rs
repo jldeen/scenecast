@@ -4,8 +4,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use scenecast_app::export::ExportKind;
 use scenecast_app::files::FileScope;
@@ -27,6 +28,10 @@ struct AppState {
     recording: Mutex<HashSet<String>>,
     edits: Mutex<HashMap<String, EditSession>>,
     presents: Mutex<HashMap<String, PresentSession>>,
+    /// The preflight running on each demo, and how to stop it (a newer one replaces it).
+    preflights: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// The recorder extension's folder, and what happened when this app updated it.
+    extension: Mutex<Value>,
 }
 
 type Shared = Arc<AppState>;
@@ -237,6 +242,59 @@ async fn prepare_extension(
     .await
 }
 
+/// One preflight per demo: a newer one (Check pressed again, Check and fix, a Fix button) stops the one running and
+/// takes its place, so the demo is never left "busy (preflight)".
+fn run_preflight(
+    state: &Shared,
+    app: &AppHandle,
+    id: &str,
+    fix: bool,
+) -> Res<scenecast_app::record::PreflightReport> {
+    let dir = state.library.dir(id)?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    if let Some(old) = state
+        .preflights
+        .lock()
+        .expect("preflights lock")
+        .insert(id.to_owned(), cancel.clone())
+    {
+        old.store(true, Ordering::SeqCst);
+    }
+    let t = Instant::now();
+    while state
+        .busy
+        .lock()
+        .expect("busy lock")
+        .get(id)
+        .map(String::as_str)
+        == Some("preflight")
+        && t.elapsed() < Duration::from_secs(20)
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let done = |state: &Shared| {
+        let mut m = state.preflights.lock().expect("preflights lock");
+        if m.get(id).is_some_and(|c| Arc::ptr_eq(c, &cancel)) {
+            m.remove(id);
+        }
+    };
+    if cancel.load(Ordering::SeqCst) {
+        return Err(AppError::Invalid("replaced by a newer check".into()));
+    }
+    let busy = match Busy::take(state, app, id, "preflight") {
+        Ok(b) => b,
+        Err(e) => {
+            done(state);
+            return Err(e);
+        }
+    };
+    let out =
+        scenecast_app::record::preflight_with(&dir, fix, Some(cancel.clone()), |u| busy.emit(u));
+    done(state);
+    drop(busy);
+    out
+}
+
 #[tauri::command]
 async fn preflight(
     state: State<'_, Shared>,
@@ -244,10 +302,214 @@ async fn preflight(
     id: String,
     fix: bool,
 ) -> Res<scenecast_app::record::PreflightReport> {
-    job(state, app, id, "preflight", move |dir, busy| {
-        scenecast_app::record::preflight(dir, fix, |u| busy.emit(u))
+    let state = state.inner().clone();
+    blocking(move || run_preflight(&state, &app, &id, fix)).await
+}
+
+/// The receiver for this demo, started if it isn't running (opening a demo, its Fix button); the demo is
+/// remembered so the next start of the app has its receiver up at once.
+fn ensure_receiver(state: &Shared, id: &str) -> Res<Value> {
+    let dir = state.library.dir(id)?;
+    let _ = std::fs::write(state.library.root.join(".last-demo"), id);
+    let started = scenecast_app::receiver::host().ensure(&dir);
+    let mut out = receiver_json(state);
+    if let Err(e) = started {
+        out["error"] = Value::from(e.to_string());
+    }
+    Ok(out)
+}
+
+fn receiver_json(state: &Shared) -> Value {
+    let r = scenecast_app::receiver::host().state();
+    json!({ "receiver": r, "extension": state.extension.lock().expect("extension lock").clone() })
+}
+
+#[tauri::command]
+async fn receiver_ensure(state: State<'_, Shared>, id: String) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || ensure_receiver(&state, &id)).await
+}
+
+#[tauri::command]
+async fn receiver_status(state: State<'_, Shared>) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || Ok(receiver_json(&state))).await
+}
+
+/// Install recorder: the visible folder (current), the extensions page in the running browser and the demo's
+/// profile, and the folder shown selected in Finder or File Explorer.
+fn install_recorder_now(
+    state: &Shared,
+    app: &AppHandle,
+    id: &str,
+) -> Res<scenecast_app::record::InstallReport> {
+    let dir = state.library.dir(id)?;
+    let _ = ensure_receiver(state, id);
+    let r = scenecast_app::record::install(&dir)?;
+    if std::env::var_os("REPLICA_NO_OPEN").is_none() {
+        let _ = app.opener().reveal_item_in_dir(&r.dir);
+    }
+    *state.extension.lock().expect("extension lock") =
+        json!({ "dir": r.dir, "version": r.version });
+    Ok(r)
+}
+
+#[tauri::command]
+async fn install_recorder(
+    state: State<'_, Shared>,
+    app: AppHandle,
+    id: String,
+) -> Res<scenecast_app::record::InstallReport> {
+    let state = state.inner().clone();
+    blocking(move || install_recorder_now(&state, &app, &id)).await
+}
+
+#[tauri::command]
+async fn browser_profiles(
+    state: State<'_, Shared>,
+    id: Option<String>,
+    browser: Option<String>,
+) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let dir = match id.as_deref() {
+            Some(id) => Some(state.library.dir(id)?),
+            None => None,
+        };
+        scenecast_app::record::profiles(dir.as_deref(), browser.as_deref())
     })
     .await
+}
+
+#[tauri::command]
+async fn set_profile(state: State<'_, Shared>, id: String, profile: String) -> Res<()> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::record::set_profile(&state.library.dir(&id)?, &profile)).await
+}
+
+/// At start: the extension folder current (a loaded recorder whose files changed reloads itself once it connects),
+/// and the receiver up for the demo open last.
+fn start_recorder_side(state: Shared) {
+    std::thread::spawn(move || {
+        if let Ok(last) = std::fs::read_to_string(state.library.root.join(".last-demo"))
+            && state.library.dir(last.trim()).is_ok()
+        {
+            let _ = ensure_receiver(&state, last.trim());
+        }
+        let (dir, updated) = match scenecast_app::record::ensure_extension() {
+            Ok(x) => x,
+            Err(e) => {
+                *state.extension.lock().expect("extension lock") =
+                    json!({ "error": e.to_string() });
+                return;
+            }
+        };
+        let version = scenecast_app::record::recorder_version();
+        *state.extension.lock().expect("extension lock") =
+            json!({ "dir": dir, "version": version, "updated": updated, "reloaded": false });
+        if !updated {
+            return;
+        }
+        // Updated: the loaded recorder still runs the old files until it reloads; it does that itself when asked.
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(600) {
+            let r = scenecast_app::receiver::host().state();
+            if r.connected
+                && let Some(port) = r.port
+                && scenecast_app::receiver::send_command(port, &json!({ "op": "reload" })).is_some()
+            {
+                state.extension.lock().expect("extension lock")["reloaded"] = Value::from(true);
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+}
+
+/// The packaged-app test's way in (no WebDriver in an installer): with `SCENECAST_SELFTEST=<folder>`, each
+/// `<name>.request.json` there ({"action": "receiver"|"preflight"|"install"|"profiles"|"state", "demo": id, "fix":
+/// bool}) runs through the same code as the window's buttons, and its answer lands in `<name>.response.json`.
+fn selftest_hook(state: Shared, app: AppHandle) {
+    let Some(dir) = std::env::var_os("SCENECAST_SELFTEST").map(PathBuf::from) else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_millis(300));
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in entries.flatten() {
+                let path = e.path();
+                let Some(name) = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.strip_suffix(".request.json"))
+                    .map(str::to_owned)
+                else {
+                    continue;
+                };
+                let Ok(req) = std::fs::read(&path)
+                    .map_err(|_| ())
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).map_err(|_| ()))
+                else {
+                    continue;
+                };
+                let _ = std::fs::remove_file(&path);
+                let (state, app, dir) = (state.clone(), app.clone(), dir.clone());
+                std::thread::spawn(move || {
+                    let id = req["demo"].as_str().unwrap_or_default().to_owned();
+                    let out: Res<Value> = match req["action"].as_str().unwrap_or_default() {
+                        "receiver" => ensure_receiver(&state, &id),
+                        "state" => Ok(receiver_json(&state)),
+                        "preflight" => run_preflight(&state, &app, &id, req["fix"] == true)
+                            .and_then(|r| Ok(serde_json::to_value(r)?)),
+                        "install" => install_recorder_now(&state, &app, &id)
+                            .and_then(|r| Ok(serde_json::to_value(r)?)),
+                        "profiles" => state
+                            .library
+                            .dir(&id)
+                            .and_then(|d| scenecast_app::record::profiles(Some(&d), None)),
+                        "busy" => Ok(json!(state.busy.lock().expect("busy lock").clone())),
+                        "version" => Ok(json!({
+                            "version": app.package_info().version.to_string(),
+                            "pid": std::process::id(),
+                        })),
+                        "create" => {
+                            serde_json::from_value::<scenecast_app::NewDemo>(req["spec"].clone())
+                                .map_err(AppError::from)
+                                .and_then(|spec| {
+                                    Ok(serde_json::to_value(state.library.create(&spec)?)?)
+                                })
+                        }
+                        "update-check" => serde_json::to_value(tauri::async_runtime::block_on(
+                            update_check_now(&app),
+                        ))
+                        .map_err(AppError::from),
+                        "update-install" => {
+                            let done = dir.join(format!("{name}.response.json"));
+                            tauri::async_runtime::block_on(update_install_now(&app, move || {
+                                let _ = std::fs::write(
+                                    &done,
+                                    json!({ "ok": true, "value": "restarting" }).to_string(),
+                                );
+                            }))
+                            .map(|_| Value::Null)
+                        }
+                        other => Err(AppError::Invalid(format!("unknown action {other}"))),
+                    };
+                    let answer = match out {
+                        Ok(v) => json!({ "ok": true, "value": v }),
+                        Err(e) => json!({ "ok": false, "error": e.to_string() }),
+                    };
+                    let tmp = dir.join(format!("{name}.response.tmp"));
+                    let _ = std::fs::write(&tmp, answer.to_string());
+                    let _ = std::fs::rename(&tmp, dir.join(format!("{name}.response.json")));
+                });
+            }
+        }
+    });
 }
 
 /// Starts recording, then reports the recorder's status every second until it stops.
@@ -750,9 +1012,120 @@ fn open_url(app: AppHandle, url: String) -> Res<()> {
         .map_err(|e| AppError::Invalid(format!("can't open {url}: {e}")))
 }
 
+// ---- Updates -----------------------------------------------------------------------------------------------------
+
+/// What the update check found.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheck {
+    current: String,
+    available: Option<String>,
+    notes: Option<String>,
+    error: Option<String>,
+}
+
+/// The updater: the release feed in tauri.conf.json, or `SCENECAST_UPDATE_URL` (the update test's local server).
+fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, tauri_plugin_updater::Error> {
+    use tauri_plugin_updater::UpdaterExt;
+    let mut b = app.updater_builder();
+    if let Some(url) = std::env::var("SCENECAST_UPDATE_URL")
+        .ok()
+        .and_then(|u| u.parse().ok())
+    {
+        b = b.endpoints(vec![url])?;
+    }
+    b.build()
+}
+
+async fn update_check_now(app: &AppHandle) -> UpdateCheck {
+    let current = app.package_info().version.to_string();
+    match updater(app) {
+        Ok(u) => match u.check().await {
+            Ok(Some(up)) => UpdateCheck {
+                current,
+                available: Some(up.version.clone()),
+                notes: up.body.clone(),
+                error: None,
+            },
+            Ok(None) => UpdateCheck {
+                current,
+                available: None,
+                notes: None,
+                error: None,
+            },
+            Err(e) => UpdateCheck {
+                current,
+                available: None,
+                notes: None,
+                error: Some(e.to_string()),
+            },
+        },
+        Err(e) => UpdateCheck {
+            current,
+            available: None,
+            notes: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
 #[tauri::command]
-fn check_updates(app: AppHandle) -> scenecast_app::updates::UpdateCheck {
-    scenecast_app::updates::check(&app.package_info().version.to_string())
+async fn check_updates(app: AppHandle) -> UpdateCheck {
+    update_check_now(&app).await
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProgress {
+    downloaded: u64,
+    total: Option<u64>,
+    stage: &'static str,
+}
+
+/// Downloads the update (progress as `update-progress` events), installs it, and restarts on it. Demos and settings
+/// stay where they are (the library is in Documents, apart from the app).
+async fn update_install_now(app: &AppHandle, before_restart: impl FnOnce()) -> Res<()> {
+    let err = |e: tauri_plugin_updater::Error| AppError::Invalid(format!("update: {e}"));
+    let Some(up) = updater(app).map_err(err)?.check().await.map_err(err)? else {
+        return Err(AppError::Invalid(
+            "no update: this is the newest Scenecast".into(),
+        ));
+    };
+    let mut downloaded = 0u64;
+    let (a1, a2) = (app.clone(), app.clone());
+    up.download_and_install(
+        move |chunk, total| {
+            downloaded += chunk as u64;
+            let _ = a1.emit(
+                "update-progress",
+                UpdateProgress {
+                    downloaded,
+                    total,
+                    stage: "download",
+                },
+            );
+        },
+        move || {
+            let _ = a2.emit(
+                "update-progress",
+                UpdateProgress {
+                    downloaded: 0,
+                    total: None,
+                    stage: "install",
+                },
+            );
+        },
+    )
+    .await
+    .map_err(err)?;
+    scenecast_app::receiver::host().stop();
+    before_restart();
+    app.restart();
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Res<()> {
+    update_install_now(&app, || {}).await
 }
 
 /// In an installed app, the engine (`packages/`, its `node_modules`) and Node come with it, as resources: point the
@@ -815,11 +1188,15 @@ fn main() {
         recording: Mutex::default(),
         edits: Mutex::default(),
         presents: Mutex::default(),
+        preflights: Mutex::default(),
+        extension: Mutex::new(Value::Null),
     });
+    start_recorder_side(state.clone());
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     let app = builder
@@ -838,6 +1215,11 @@ fn main() {
             set_browser,
             prepare_extension,
             preflight,
+            receiver_ensure,
+            receiver_status,
+            install_recorder,
+            browser_profiles,
+            set_profile,
             record_start,
             record_status,
             record_stop,
@@ -866,11 +1248,20 @@ fn main() {
             reveal,
             open_url,
             check_updates,
+            install_update,
         ])
+        .setup({
+            let state = state.clone();
+            move |app| {
+                selftest_hook(state, app.handle().clone());
+                Ok(())
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building the Scenecast app");
     app.run(move |_, event| {
         if let tauri::RunEvent::Exit = event {
+            scenecast_app::receiver::host().stop();
             let ids: Vec<String> = state
                 .edits
                 .lock()

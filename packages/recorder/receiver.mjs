@@ -4,19 +4,34 @@
 // loop (GET /cmd, POST /cmd/result), and keeps the recorder's recording (recording.json).
 //   node capture/receiver.mjs --demo <dir>        or        node capture/receiver.mjs <rawDir> [port]
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync, rmSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { loadDemo } from '../kit/lib/demo.mjs';
 
 const argv = process.argv.slice(2);
 const demo = argv.includes('--demo') || !argv[0] ? loadDemo(argv) : null;
-const RAW = demo ? demo.raw : argv[0];
+let RAW = demo ? demo.raw : argv[0];
 const PORT = +(demo ? (process.env.REPLICA_RX_PORT || demo.cfg.receiverPort) : (argv[1] || 47621));
 for (const d of ['snaps', 'streams', 'shots', 'blobs']) mkdirSync(join(RAW, d), { recursive: true });
-const URLS = join(RAW, 'urls.json');
-const urlIndex = existsSync(URLS) ? JSON.parse(readFileSync(URLS, 'utf8')) : {};
+let URLS = join(RAW, 'urls.json');
+let urlIndex = existsSync(URLS) ? JSON.parse(readFileSync(URLS, 'utf8')) : {};
 const saveIndex = () => writeFileSync(URLS, JSON.stringify(urlIndex, null, 1));
+// A receiver kept running (the desktop app's) follows demo.json: a raw folder changed there is where captures go.
+let cfgAt = demo ? statSync(join(demo.dir, 'demo.json')).mtimeMs : 0;
+function follow() {
+  if (!demo) return;
+  let at; try { at = statSync(join(demo.dir, 'demo.json')).mtimeMs; } catch (e) { return; }
+  if (at === cfgAt) return;
+  cfgAt = at;
+  let raw; try { raw = loadDemo(demo.dir).raw; } catch (e) { return; }
+  if (raw === RAW) return;
+  RAW = raw;
+  for (const d of ['snaps', 'streams', 'shots', 'blobs']) mkdirSync(join(RAW, d), { recursive: true });
+  URLS = join(RAW, 'urls.json');
+  urlIndex = existsSync(URLS) ? JSON.parse(readFileSync(URLS, 'utf8')) : {};
+  log(`raw folder now ${RAW} (demo.json changed)`);
+}
 const log = s => { const l = `${new Date().toISOString()} ${s}`; console.log(l); appendFileSync(join(RAW, 'receiver.log'), l + '\n'); };
 
 const EXT = { 'text/css': 'css', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/x-icon': 'ico', 'image/vnd.microsoft.icon': 'ico', 'font/woff2': 'woff2', 'font/woff': 'woff', 'font/ttf': 'ttf', 'application/font-woff2': 'woff2', 'application/font-woff': 'woff', 'application/x-font-woff': 'woff', 'font/otf': 'otf', 'application/json': 'json', 'image/avif': 'avif' };
@@ -31,32 +46,43 @@ function storeBlob(buf, type, url) {
 }
 const fromDataUrl = d => { const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(d || ''); if (!m) return null; return { type: m[1], buf: m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])) }; };
 
-const cmds = []; let waiter = null; let agentAt = 0; const results = {};
+const cmds = []; const waiters = []; const drop = w => { const i = waiters.indexOf(w); if (i >= 0) waiters.splice(i, 1); }; let agentAt = 0; const results = {};
+const SINCE = Date.now(), OWNER = process.env.SCENECAST_RX_OWNER || 'cli', DEMO = demo ? demo.dir : null;
+// Started by the desktop app: go when the app does (it stops this receiver when it quits; this covers a crash).
+const PARENT = +process.env.SCENECAST_RX_PARENT || 0;
+if (PARENT) setInterval(() => { try { process.kill(PARENT, 0); } catch (e) { if (e.code !== 'EPERM') process.exit(0); } }, 3000).unref();
 function body(req) { return new Promise((res, rej) => { const c = []; req.on('data', d => c.push(d)); req.on('end', () => res(Buffer.concat(c))); req.on('error', rej); }); }
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(obj)); };
 
 createServer(async (req, res) => {
   try {
+    follow();
     const u = new URL(req.url, 'http://x');
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
     // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
-    if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: !!waiter, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });
+    if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });
     // The recorder's checkpoint, for record start --resume.
     if (req.method === 'GET' && u.pathname === '/recording-partial') { const f = join(RAW, 'recording-partial.json'); return existsSync(f) ? json(res, 200, JSON.parse(readFileSync(f, 'utf8'))) : json(res, 404, { error: 'no checkpoint' }); }
     // Remote control: the driver long-polls for its next command.
     if (req.method === 'GET' && u.pathname === '/cmd') {
       agentAt = Date.now();
       if (cmds.length) return json(res, 200, cmds.shift());
-      const t = setTimeout(() => { waiter = null; json(res, 200, { op: 'idle' }); }, 20000);
-      waiter = c => { clearTimeout(t); waiter = null; json(res, 200, c); };
+      // Each waiting recorder in turn; a command goes to the one that asked last (two copies of the extension
+      // loaded can't strand a command on a poll that's gone).
+      const w = c => { clearTimeout(t); drop(w); json(res, 200, c); };
+      const t = setTimeout(() => w({ op: 'idle' }), 20000);
+      waiters.push(w);
+      res.on('close', () => { if (!res.writableEnded) { clearTimeout(t); drop(w); } });
       return;
     }
     const buf = await body(req);
     const data = buf.length ? JSON.parse(buf.toString('utf8')) : {};
     switch (u.pathname) {
+      // Another receiver wants this port (the desktop app, for the demo that's open): this one makes way.
+      case '/quit': json(res, 200, { ok: true, pid: process.pid }); log('quit (asked to make way)'); setTimeout(() => process.exit(0), 100); return;
       case '/cmd': { // queue a command (from bash) → returns its id; read the result with GET /result?id=
         const c = { id: data.id || ('c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)), ...data };
-        if (waiter) waiter(c); else cmds.push(c);
+        if (waiters.length) waiters[waiters.length - 1](c); else cmds.push(c);
         return json(res, 200, { id: c.id });
       }
       case '/cmd/result': agentAt = Date.now(); results[data.id] = data; log(`result ${data.id} ${String(data.ok)} ${(data.error || '').slice(0, 200)}`); return json(res, 200, { ok: true });

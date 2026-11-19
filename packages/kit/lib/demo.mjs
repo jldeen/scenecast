@@ -15,7 +15,8 @@ const home = p => p.startsWith('~/') ? join(homedir(), p.slice(2)) : p;
 export const DEFAULTS = {
   port: 4620,
   viewport: { width: 1920, height: 1080, dpr: 2 },
-  chrome: { profile: 'Default' },
+  // No profile: the one the presenter has open (preflight finds it), never a guess at "Default".
+  chrome: {},
   receiverPort: 47621,
   record: { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, maxS: 240, busy: [], ignore: [], groups: { button: 'button[aria-expanded][aria-controls]' } },
   zooms: [50, 67, 75, 90, 110, 125, 150, 175, 200],

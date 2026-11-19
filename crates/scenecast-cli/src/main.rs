@@ -45,8 +45,11 @@ enum Command {
     Preflight(Passthrough),
     /// Record the demo once in the browser (start [--resume] [--no-auto] | status | stop | side <kind>).
     Record(Passthrough),
-    /// Build the recorder extension for Edge and Chrome (load it unpacked once; ~/.scenecast/extension by default).
+    /// Build the recorder extension for Edge and Chrome (load it unpacked once; Documents/Scenecast/Recorder Extension
+    /// by default).
     Extension(Passthrough),
+    /// The browser's profiles: names, which are open, which has the recorder, and the one preflight uses.
+    Profiles(Passthrough),
     /// Build the capture agent (agent.js) for a Playwright-driven browser instead of the extension.
     Agent(Passthrough),
     /// The local receiver the capture agent posts captures to (keep it running while recording).
@@ -333,6 +336,7 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Preflight(a) => return engine_cmds::handover("preflight", &a, true),
         Command::Record(a) => return engine_cmds::handover("record", &a, true),
         Command::Extension(a) => return engine_cmds::handover("extension", &a, false),
+        Command::Profiles(a) => return engine_cmds::handover("profiles", &a, false),
         Command::Agent(a) => return engine_cmds::handover("agent", &a, false),
         Command::Receiver(a) => return engine_cmds::handover("receiver", &a, true),
         Command::Cmd(a) => return engine_cmds::handover("cmd", &a, false),

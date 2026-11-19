@@ -39,7 +39,7 @@ export function registryAppPath(output) {
   return output.split(/\r?\n/).map(line => line.match(/\sREG_SZ\s+(.+)$/i)?.[1]?.trim()).find(Boolean) || null;
 }
 
-async function windowsBrowser(browser) {
+export async function windowsBrowser(browser) {
   const exe = WIN_EXE[browser], key = `Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exe}`;
   for (const root of ['HKCU', 'HKLM']) {
     const output = await new Promise(resolve => execFile('reg.exe', ['query', `${root}\\${key}`, '/ve'], (err, stdout) => resolve(err ? '' : stdout)));
@@ -77,4 +77,32 @@ export function openApp(url, chrome = {}) {
   const cmd = launchCommand(url, chrome);
   if (!cmd) return yourself(true);
   execFile(cmd[0], cmd[1], { windowsVerbatimArguments: process.platform === 'win32' }, yourself);
+}
+
+const LINUX_BIN = { chrome: ['google-chrome', 'google-chrome-stable', 'chromium'], edge: ['microsoft-edge', 'microsoft-edge-stable'] };
+// The command that opens `urls` as ordinary tabs in a window of `profile`: handed to the browser that's running (its
+// own single-instance hand-off), so nothing is quit or restarted and no tab closes. [file, args], or null.
+export function windowCommand(urls, { browser, profile, userDataDir, platform = process.platform, executable } = {}) {
+  const b = browser === 'edge' || browser === 'chrome' ? browser : defaultBrowser(platform);
+  const flags = [...(userDataDir ? [`--user-data-dir=${userDataDir}`] : []), ...(profile ? [`--profile-directory=${profile}`] : []), ...[].concat(urls)];
+  if (platform === 'darwin') return ['open', ['-na', MAC_APP[b], '--args', ...flags]];
+  if (platform === 'win32') return executable ? [executable, flags] : null;
+  return [executable || LINUX_BIN[b][0], flags];
+}
+// Opens `urls` in the presenter's browser, in `profile`'s window. Resolves { ok, error }.
+export async function openInBrowser(urls, opts = {}) {
+  const b = opts.browser === 'edge' || opts.browser === 'chrome' ? opts.browser : defaultBrowser();
+  const userDataDir = opts.userDataDir && opts.userDataDir !== profileRoot(b) ? opts.userDataDir : undefined;
+  const executable = process.platform === 'win32' ? await windowsBrowser(b).catch(() => null) : opts.executable;
+  const cmd = windowCommand(urls, { ...opts, browser: b, userDataDir, executable });
+  if (!cmd) return { ok: false, error: `can't find ${b === 'edge' ? 'Microsoft Edge' : 'Google Chrome'} on this computer` };
+  return new Promise(res => {
+    const child = spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: process.platform !== 'win32', windowsHide: false });
+    let done = false;
+    const end = r => { if (!done) { done = true; res(r); } };
+    child.once('error', e => end({ ok: false, error: e.message }));
+    // The new process hands the window to the running browser and leaves at once; a first start keeps running.
+    child.once('exit', code => end(code ? { ok: false, error: `${cmd[0]} exited with ${code}` } : { ok: true }));
+    setTimeout(() => { child.unref(); end({ ok: true }); }, 4000);
+  });
 }

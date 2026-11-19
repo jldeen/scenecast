@@ -8,7 +8,7 @@ handles, zoom 50–200%, long virtualized lists), and each AI answer as it strea
 ## Install (once, macOS and Windows)
 
 ```bash
-scenecast extension            # writes ~/.scenecast/extension (Windows: %USERPROFILE%\.scenecast\extension)
+scenecast extension            # writes Documents/Scenecast/Recorder Extension (SCENECAST_EXTENSION_DIR to change)
 ```
 
 Then in the browser the demo runs in:
@@ -17,12 +17,15 @@ Then in the browser the demo runs in:
 2. Turn on **Developer mode**.
 3. **Load unpacked** → pick that folder.
 
-The extension's popup shows whether it's connected to scenecast and the receiver's port (47621 unless the demo's
-`demo.json` says `receiverPort`; change it in the popup to match). While it records, the browser shows a "started
+In the desktop app, **Install recorder** does the first step and opens the page for you. The extension finds the
+receiver by itself: the demo's port (47621 unless `demo.json` says `receiverPort`) and the next nine, the desktop
+app's own first; its popup says whether it's connected. While it records, the browser shows a "started
 debugging this browser" bar: leave it (Cancel stops the recording).
 
-After a scenecast update, run `scenecast extension` again and press the reload button on the extension's card
-(`scenecast preflight` rebuilds the folder when its version is behind).
+After a scenecast update, the folder is rebuilt (the app does it when it starts; `scenecast preflight` when its
+version is behind) and the extension reloads itself when it's connected (`preflight` with fixes asks it to); if it
+can't, press **Reload** on its card. 0.3.0 and earlier used a hidden `~/.scenecast/extension` folder: remove that
+copy from the browser (the app replaces its files with a stub that says so).
 
 ## Before recording: `scenecast preflight`
 

@@ -65,20 +65,28 @@ async function call(cmd, args = {}) {
   }
 }
 // Runs a step's command with the demo marked busy, re-rendering what depends on it.
+// A newer run of the same job (Check pressed again, then Check and fix) takes its place: the older one's answer is
+// dropped, and only the newest clears the job's busy mark.
 async function step(job, cmd, args, after) {
   const id = S.id;
+  const token = {};
   J(id).running[job] = true;
-  J(id)[job] = { ...(J(id)[job] || {}), stages: [], lines: [], items: [], events: [], error: null, outcome: null, startedAt: Date.now() };
+  J(id)[job] = { ...(J(id)[job] || {}), stages: [], lines: [], items: [], events: [], error: null, outcome: null, startedAt: Date.now(), token };
+  const mine = () => J(id)[job]?.token === token;
   rerender();
   try {
-    const out = await call(cmd, { id, ...args });
+    const out = await invoke(cmd, { id, ...args });
+    if (!mine()) return;
     J(id)[job].outcome = out;
     if (after) await after(out);
     return out;
   } catch (e) {
-    J(id)[job].error = e.message;
+    if (!mine()) return;
+    const msg = typeof e === 'string' ? e : e?.message || String(e);
+    toast(msg, true);
+    J(id)[job].error = msg;
   } finally {
-    delete J(id).running[job];
+    if (mine()) delete J(id).running[job];
     await refreshDemo(id);
     rerender();
   }
@@ -260,15 +268,27 @@ function renderNew() {
       <fieldset><legend>Record in</legend>
         <label class="choice"><input type="radio" name="browser" value="edge" ${browser === 'edge' ? 'checked' : ''}> Microsoft Edge</label>
         <label class="choice"><input type="radio" name="browser" value="chrome" ${browser === 'chrome' ? 'checked' : ''}> Google Chrome</label></fieldset>
+      <fieldset><legend>Profile <span class="hint">The one you’re signed in to the apps with. Change it any time on the Record step.</span></legend>
+        <div id="new-profiles" data-test="new-profiles">${profileOptions(null)}</div></fieldset>
       <p id="new-error" class="notice bad" hidden role="alert"></p>
       <div class="row"><button class="btn primary" type="submit" data-test="create-demo">Create demo</button>
         <button class="btn" type="button" data-action="library">Cancel</button></div>
     </form>`;
   $('#new-title').focus();
+  const form = $('#new-form');
+  const load = async () => {
+    const b = form.browser.value;
+    const box = $('#new-profiles');
+    box.innerHTML = profileOptions(null);
+    const info = await invoke('browser_profiles', { browser: b }).catch(() => null);
+    if (box.isConnected && form.browser.value === b) box.innerHTML = profileOptions(info, '');
+  };
+  form.addEventListener('change', e => { if (e.target.name === 'browser') load(); });
+  load();
 }
 async function createDemo(form) {
   const apps = [...form.querySelectorAll('[data-app-row]')].map(r => ({ id: $('[data-app-id]', r).value.trim(), url: $('[data-app-url]', r).value.trim() }));
-  const spec = { title: $('#new-title').value, apps, browser: form.browser.value };
+  const spec = { title: $('#new-title').value, apps, browser: form.browser.value, profile: form.querySelector('[name=profile]:checked')?.value || null };
   const err = $('#new-error');
   try {
     const d = await invoke('create_demo', { spec });
@@ -287,7 +307,7 @@ function tabDone(t, s) {
   return { record: s.recorded, build: s.built, fidelity: !!s.fidelity, script: s.focusPoints > 0 }[t];
 }
 function tabJobs(t) {
-  return { record: ['preflight', 'record', 'record-stop', 'extension'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
+  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
 }
 function renderTabsBar() {
   const d = demo();
@@ -314,8 +334,23 @@ async function openDemo(id, tab) {
     <div class="tabs" role="tablist" aria-label="Steps" id="tabs"></div>
     <section id="panel" role="tabpanel" aria-labelledby="tab-${S.tab}" tabindex="0"></section>`;
   renderTabsBar();
+  invoke('receiver_ensure', { id }).then(r => { if (S.id === id) { S.rx = r; renderRegions(); } }).catch(() => {});
   await renderPanel();
 }
+// The receiver and the recorder, every 1.5 s on the Record step: turns green the moment the extension connects.
+setInterval(async () => {
+  if (S.view !== 'demo' || S.tab !== 'record' || document.hidden) return;
+  const was = !!S.rx?.receiver?.connected;
+  S.rx = await invoke('receiver_status').catch(() => S.rx);
+  const now = !!S.rx?.receiver?.connected;
+  if (now !== was) {
+    if (now) { toast('The recorder is connected'); announce('The recorder is connected'); }
+    const pf = J(S.id).preflight;
+    // It connected after a check that said it wasn't: check again (nothing is fixed without asking).
+    if (now && pf?.items?.some(i => i.id === 'recorder' && i.status === 'fail') && !running('preflight')) step('preflight', 'preflight', { fix: false });
+  }
+  scheduleRegions();
+}, 1500);
 function rerender() {
   if (S.view !== 'demo') return;
   renderTabsBar();
@@ -345,15 +380,69 @@ const icon = (status, label) => `<span class="icon ${esc(status)}" role="img" ar
 // ---- Record ------------------------------------------------------------------------------------------------------
 
 const PREFLIGHT_LABEL = { receiver: 'Receiver', browser: 'Browser', recorder: 'Recorder extension' };
+const BNAME = { chrome: 'Google Chrome', edge: 'Microsoft Edge' };
+const avatar = p => p.picture ? `<img class="avatar" src="${esc(p.picture)}" alt="">`
+  : `<span class="avatar" style="background:${esc(p.color || '#8a8a94')}" aria-hidden="true">${esc((p.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+// The profile picker: the browser's own profiles by name and picture; "" is the one that's open when recording.
+function profileOptions(info, chosen) {
+  if (!info) return '<p class="muted small">Looking at the browser\u2019s profiles…</p>';
+  if (!info.profiles?.length) return `<p class="muted small">No ${esc(BNAME[info.browser] || info.browser)} profiles on this computer yet: it uses the one you open.</p>`;
+  const picked = chosen || '';
+  const auto = info.profiles.find(p => p.dir === info.picked);
+  return `<div class="profiles" role="radiogroup" aria-label="Browser profile">
+    <label class="profile"><input type="radio" name="profile" value="" ${picked === '' ? 'checked' : ''} data-test="profile-auto">
+      <span class="avatar auto" aria-hidden="true">✓</span><span><span class="pname">The one that\u2019s open</span>
+      <span class="small muted">${auto ? `now: ${esc(auto.name)}` : 'when you record'}</span></span></label>
+    ${info.profiles.map(p => `<label class="profile"><input type="radio" name="profile" value="${esc(p.dir)}" ${picked === p.dir ? 'checked' : ''} data-test="profile-${esc(p.dir.replace(/\s+/g, '-'))}">
+      ${avatar(p)}<span><span class="pname">${esc(p.name)}</span>
+      <span class="small muted">${esc([p.email, p.open ? 'open' : '', p.extension?.id ? 'has the recorder' : ''].filter(Boolean).join(' · ') || p.dir)}</span></span></label>`).join('')}
+  </div>`;
+}
+const rxState = () => S.rx?.receiver || {};
 const REGIONS = {
-  extension(d) {
-    const ext = J(d.id).extension?.outcome;
-    if (!ext) return '';
-    return `<ol class="steps">${ext.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
-      <div class="path"><code data-test="extension-dir">${esc(ext.dir)}</code>
-        <button class="btn small" data-copy="${esc(ext.dir)}">Copy</button>
-        <button class="btn small" data-reveal="${esc(ext.dir)}">Show</button></div>
-      <p class="muted small" style="margin-top:8px">You only do this once per browser. Scenecast never restarts a browser you already have open.</p>`;
+  recorder(d) {
+    const r = rxState(), x = S.rx?.extension || {};
+    const rxLine = r.running ? `<span class="pill ok" data-test="receiver-state" data-port="${r.port}">Receiver running · port ${r.port}</span>`
+      : r.error ? `<span class="pill bad" data-test="receiver-state">Receiver stopped</span> <span class="small">${esc(r.error)}</span> <button class="btn small" data-action="receiver-fix">Start it</button>`
+        : '<span class="pill" data-test="receiver-state">Receiver starting…</span>';
+    const recLine = r.connected ? `<span class="pill ok" data-test="recorder-state" data-connected="true">Recorder connected</span>`
+      : `<span class="pill warn" data-test="recorder-state" data-connected="false">Recorder not connected</span>`;
+    const upd = x.updated ? `<p class="small muted" style="margin-top:6px">The recorder was updated to ${esc(x.version)}. ${x.reloaded ? 'Scenecast reloaded it for you.' : `If it doesn\u2019t connect, click Reload on Scenecast Recorder at ${d.browser}://extensions.`}</p>` : '';
+    return `<div class="row">${rxLine}${recLine}</div>${upd}`;
+  },
+  install(d) {
+    const j = J(d.id).install || {};
+    const o = j.outcome;
+    const on = running('install', d.id);
+    if (!o && !on && !j.error) return '';
+    if (on) return progressBar(true) + '<p class="muted small">Getting the recorder ready…</p>';
+    if (j.error) return errorBox(j.error);
+    const b = o.browser, connected = rxState().connected;
+    const shot = n => `img/setup/${b}-${n}.png`;
+    const notes = [];
+    if (o.openError) notes.push(`Couldn\u2019t open ${esc(o.extensionsPage)} (${esc(o.openError)}). Open ${esc(o.browserName)}, type <code>${esc(o.extensionsPage)}</code> in the address bar and press Enter.`);
+    else if (!o.running) notes.push(`${esc(o.browserName)} wasn\u2019t open: it\u2019s starting with your profile ${esc(o.profileName || '')}.`);
+    if (o.oldLoaded) notes.push('You still have the old copy (from the hidden .scenecast folder) loaded: click <strong>Remove</strong> on it first.');
+    if (o.loaded && o.devMode === false) notes.push('Developer mode is off, so the recorder is switched off: turn Developer mode on (step 1).');
+    if (connected) return `<div class="notice ok" data-test="install-status" data-connected="true"><div><strong>Done: the recorder is connected.</strong> You won\u2019t need to do this again.</div></div>
+      <div class="path"><code data-test="extension-dir">${esc(o.dir)}</code><button class="btn small" data-reveal="${esc(o.dir)}">Show in ${folderWord()}</button></div>`;
+    return `<div class="notice ${connected ? 'ok' : 'info'}" data-test="install-status" data-connected="${!!connected}"><div>
+        ${connected ? '<strong>Done: the recorder is connected.</strong> You won\u2019t need to do this again.'
+          : `<strong>${o.opened ? `${esc(o.extensionsPage)} is open in ${esc(o.browserName)}${o.profileName ? ` (${esc(o.profileName)})` : ''}` : 'Almost there'}</strong>, and the folder is shown in ${folderWord()}. Do the steps below; this turns green on its own.`}
+      </div></div>
+      ${notes.map(n => `<div class="notice warn"><div>${n}</div></div>`).join('')}
+      <div class="path"><code data-test="extension-dir">${esc(o.dir)}</code>
+        <button class="btn small" data-copy="${esc(o.dir)}" data-test="copy-path">Copy path</button>
+        <button class="btn small" data-reveal="${esc(o.dir)}">Show in ${folderWord()}</button>
+        <button class="btn small" data-action="install">Open ${esc(o.extensionsPage)} again</button></div>
+      <ol class="step-cards">
+        <li><figure><img src="${shot('1-developer-mode')}" alt="The extensions page with the Developer mode switch circled"></figure>
+          <div><strong>Turn on Developer mode</strong><p class="small muted">${b === 'edge' ? 'Bottom of the left side of the page.' : 'Top right of the page.'}</p></div></li>
+        <li><figure><img src="${shot('2-load-unpacked')}" alt="Developer mode on, with Load unpacked circled"></figure>
+          <div><strong>Drag the Recorder Extension folder onto the page</strong><p class="small muted">From the ${folderWord()} window that just opened. Or click <strong>Load unpacked</strong> and pick the folder (Copy path, then paste it in the dialog${isMac() ? ' with ⌘⇧G' : ''}).</p></div></li>
+        <li><figure><img src="${shot('3-loaded')}" alt="Scenecast Recorder loaded, its Reload button circled"></figure>
+          <div><strong>That\u2019s it</strong><p class="small muted">Scenecast Recorder shows up and this turns green within a few seconds. After a Scenecast update, Reload (circled) gets the new recorder; Scenecast does it for you when it can.</p></div></li>
+      </ol>`;
   },
   preflight(d) {
     const j = J(d.id).preflight || {};
@@ -365,8 +454,9 @@ const REGIONS = {
     return `${progressBar(on)}<ul class="status-list" aria-label="Preflight">${items.map(i => {
       const label = PREFLIGHT_LABEL[i.id] || (i.id.startsWith('app ') ? `App: ${i.id.slice(4)}` : i.id);
       const fix = i.status === 'fail' ? (i.id === 'recorder'
-        ? `<button class="btn small" data-action="extension" data-test="fix-${esc(i.id)}">Set it up</button>`
-        : `<button class="btn small" data-action="preflight-fix" data-test="fix-${esc(i.id.replace(' ', '-'))}">Fix</button>`) : '';
+        ? `<button class="btn small" data-action="${/Fix reloads|reload/i.test(i.detail) && /is \d/.test(i.detail) ? 'preflight-fix' : 'install'}" data-test="fix-${esc(i.id)}">${/is \d/.test(i.detail) ? 'Fix' : 'Install recorder'}</button>`
+        : i.id === 'receiver' ? `<button class="btn small" data-action="receiver-fix" data-test="fix-receiver">Fix</button>`
+          : `<button class="btn small" data-action="preflight-fix" data-test="fix-${esc(i.id.replace(' ', '-'))}">Fix</button>`) : '';
       return `<li data-test="pf-${esc(i.id.replace(' ', '-'))}" data-status="${esc(i.status)}">${icon(i.status)}<span class="id">${esc(label)}</span>
         <span class="small">${esc(i.detail)}</span>${fix}</li>`;
     }).join('')}</ul>
@@ -414,12 +504,14 @@ const REGIONS = {
 const PANELS = {};
 PANELS.record = (panel, d) => {
   panel.innerHTML = `<div class="card"><h2><span class="step-num">1</span>The recorder</h2>
-      <p class="muted">A small extension in your own browser does the recording. Set it up once; it stays.</p>
-      <div class="row"><button class="btn" data-action="extension" data-test="prepare-extension">Set up the recorder</button>
+      <p class="muted">A small extension in your own browser does the recording. Install it once; it stays.</p>
+      <div data-region="recorder" style="margin:10px 0"></div>
+      <div class="row"><button class="btn primary" data-action="install" data-test="install-recorder">Install recorder</button>
         <span class="muted small">Record in</span>
         <select id="browser" aria-label="Browser to record in" style="width:auto" data-test="browser">
           <option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select></div>
-      <div data-region="extension"></div></div>
+      <div style="margin-top:12px"><span class="muted small">Profile</span><div id="profile-pick" data-test="profile-pick"></div></div>
+      <div data-region="install" style="margin-top:12px"></div></div>
     <div class="card"><h2><span class="step-num">2</span>Ready to record?</h2>
       <p class="muted">Checks the receiver, your browser and profile, the recorder, and each app's tab (open, light theme, on its start screen). It fixes what it can, and never restarts your browser.</p>
       <div class="row"><button class="btn primary" data-action="preflight" data-test="preflight">Check</button>
@@ -430,10 +522,26 @@ PANELS.record = (panel, d) => {
       <div data-region="record"></div></div>`;
   const sel = $('#browser', panel);
   sel.value = d.browser;
+  const pick = $('#profile-pick', panel);
+  const showProfiles = async () => {
+    pick.innerHTML = profileOptions(J(d.id).profiles, demo()?.profile);
+    J(d.id).profiles = await invoke('browser_profiles', { id: d.id }).catch(() => null);
+    if (pick.isConnected) pick.innerHTML = profileOptions(J(d.id).profiles, demo()?.profile);
+  };
+  pick.onchange = e => {
+    if (e.target.name !== 'profile') return;
+    call('set_profile', { id: d.id, profile: e.target.value }).then(async () => {
+      await refreshDemo(d.id);
+      toast(e.target.value ? `Recording in profile ${e.target.closest('label').querySelector('.pname').textContent}` : 'Recording in the profile that\u2019s open');
+    });
+  };
   sel.onchange = () => call('set_browser', { id: d.id, browser: sel.value }).then(async () => {
     toast(`Recording in ${sel.selectedOptions[0].text}`);
     await refreshDemo(d.id);
+    J(d.id).profiles = null;
+    showProfiles();
   });
+  showProfiles();
 };
 
 // ---- Build and check ---------------------------------------------------------------------------------------------
@@ -734,10 +842,28 @@ async function exportDemo(kind, anyway) {
 async function refreshServers() {
   S.servers = await invoke('servers').catch(() => S.servers);
 }
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return; } catch { /* the webview may not allow it: the old way */ }
+  const t = document.createElement('textarea');
+  t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+  document.body.append(t); t.select();
+  try { document.execCommand('copy'); } finally { t.remove(); }
+}
 const ACTIONS = {
   new: renderNew,
   library: renderLibrary,
   extension: () => step('extension', 'prepare_extension', {}),
+  install: () => {
+    if (S.tab !== 'record') { S.tab = 'record'; openDemo(S.id); }
+    setTimeout(() => $('[data-region=install]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+    return step('install', 'install_recorder', {});
+  },
+  'receiver-fix': async () => {
+    const id = S.id;
+    S.rx = await call('receiver_ensure', { id }).catch(() => S.rx);
+    renderRegions();
+    if (J(id).preflight?.items?.length) await step('preflight', 'preflight', { fix: false });
+  },
   preflight: () => step('preflight', 'preflight', { fix: false }),
   'preflight-fix': () => step('preflight', 'preflight', { fix: true }),
   'record-start': async () => {
@@ -816,7 +942,7 @@ document.addEventListener('click', async e => {
   if (ds.goto) { S.tab = ds.goto; return openDemo(S.id); }
   if (ds.sheet) { J(S.id).sheetTab = ds.sheet; return renderPanel(); }
   if (ds.reveal) return call('reveal', { path: ds.reveal }).catch(() => {});
-  if (ds.copy) { await navigator.clipboard?.writeText(ds.copy).catch(() => {}); return toast('Copied'); }
+  if (ds.copy) { await copyText(ds.copy); return toast('Copied'); }
   if (ds.openUrl) return call('open_url', { url: ds.openUrl }).catch(() => {});
   if (ds.openFile) return call('open_file', { path: ds.openFile }).catch(() => {});
   if (ds.removeApp !== undefined) { const rows = document.querySelectorAll('[data-app-row]'); if (rows.length > 1) t.closest('[data-app-row]').remove(); return; }
@@ -839,10 +965,43 @@ document.addEventListener('keydown', e => {
 $('#new-demo').onclick = renderNew;
 // Busy while the list loads: the table is drawn again when it's in (screen readers wait; so does the UI test).
 $('#nav-library').onclick = async () => { const m = $('#main'); m.setAttribute('aria-busy', 'true'); try { await loadDemos(); renderLibrary(); } finally { m.removeAttribute('aria-busy'); } };
-$('#check-updates').onclick = async () => {
-  const u = await call('check_updates');
-  dialog({ title: 'Updates', body: `<p>${esc(u.message)}</p>`, cancel: null });
-};
+// ---- Updates: checked at start and every few hours; one click downloads, installs and restarts on the new version.
+const U = { available: null, busy: false, progress: null };
+function renderUpdate() {
+  const el = $('#update');
+  if (!U.available) { el.hidden = true; return; }
+  el.hidden = false;
+  const p = U.progress;
+  const pct = p?.total ? Math.round(100 * p.downloaded / p.total) : null;
+  el.innerHTML = U.busy
+    ? `<div class="small"><strong>Updating to v${esc(U.available)}…</strong> ${p?.stage === 'install' ? 'Installing; Scenecast restarts in a moment.' : pct !== null ? `${pct}%` : 'Downloading'}</div>
+       <div class="progress" role="progressbar" aria-label="Downloading the update" ${pct !== null ? `aria-valuenow="${pct}"` : ''}><div style="${pct !== null ? `width:${pct}%;animation:none` : ''}"></div></div>`
+    : `<div class="small">Update available: <strong>v${esc(U.available)}</strong></div>
+       <button class="btn small primary" id="update-now" data-test="update-now">Update</button>`;
+  const b = $('#update-now');
+  if (b) b.onclick = installUpdate;
+}
+async function checkUpdates(quiet) {
+  const u = await invoke('check_updates').catch(e => ({ error: String(e) }));
+  U.available = u.available || null;
+  renderUpdate();
+  if (quiet) return u;
+  if (u.error) dialog({ title: 'Updates', body: `<p>Couldn\u2019t check for updates: ${esc(u.error)}</p>`, cancel: null });
+  else if (!u.available) dialog({ title: 'Updates', body: `<p>You have the newest Scenecast (v${esc(u.current)}).</p>`, cancel: null });
+  return u;
+}
+async function installUpdate() {
+  U.busy = true; U.progress = null; renderUpdate();
+  try {
+    // Restarts on the new version when it's installed: nothing after this runs.
+    await invoke('install_update');
+  } catch (e) {
+    U.busy = false; renderUpdate();
+    toast(`The update didn\u2019t install: ${typeof e === 'string' ? e : e.message}`, true);
+  }
+}
+listen('update-progress', ({ payload }) => { U.progress = payload; renderUpdate(); });
+$('#check-updates').onclick = () => checkUpdates(false);
 
 // ---- Start -------------------------------------------------------------------------------------------------------
 
@@ -853,4 +1012,6 @@ await loadDemos();
 await refreshServers();
 renderLibrary();
 if (S.info.engineError) toast(S.info.engineError, true);
+checkUpdates(true);
+setInterval(() => { if (!U.busy) checkUpdates(true); }, 4 * 3600 * 1000);
 window.__scenecast = S;

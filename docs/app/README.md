@@ -27,7 +27,7 @@ Your demos are kept in `Documents/Scenecast`.
 | Step | What you do |
 |---|---|
 | **New demo** | Name it, list its apps (each one's start page: a tab while you record), pick Edge or Chrome. |
-| **Record** | Set up the recorder once (it builds the extension and shows you the three clicks to load it in your browser). **Check** says whether everything's ready: the receiver, your browser and profile, the recorder, each app's tab (open, light theme, on its start screen); **Check and fix** puts right what it can, and never restarts a browser you already have open. Then **Start recording** and run the demo once: the app shows each screen as it's captured, the side states being swept, and the recorder's time apart from the product's. **Stop recording**. |
+| **Record** | The receiver the extension talks to runs while the demo is open (the app starts it with its own Node, restarts it if it stops, stops it on quit). **Install recorder** once: it puts the extension in Documents/Scenecast/Recorder Extension, opens the extensions page in your running browser and profile, shows the folder in Finder or File Explorer, and walks through Developer mode and the drag with real pictures; it turns green when the extension connects (it finds the receiver itself, no port to set). Pick the browser profile by name (or "the one that's open"). **Check** says whether everything's ready: the receiver, your browser and profile, the recorder, each app's tab (open, light theme, on its start screen); **Check and fix** puts right what it can, and never restarts a browser you already have open. Then **Start recording** and run the demo once: the app shows each screen as it's captured, the side states being swept, and the recorder's time apart from the product's. **Stop recording**. |
 | **Build & check** | Turns the recording into the replica, scrubbing secrets and personal data on the way (the scrub report lists what was removed; a password, key or token stops the build). Then the checks for what changed run on their own. |
 | **Fidelity** | Every captured state of the real product next to the replica, compared pixel by pixel, with the fonts. **Fix differences** diagnoses each one, patches this demo, builds and compares again. |
 | **Script** | Paste your script or open it (text, Markdown or RunLines `.sk`). **Find the focus points** puts each line on its screen and makes its focus points; the line-to-screen sheet and the cue sheet show here. The same script becomes the **presenter guide** (its notes and a picture per beat). Then the checks for what changed. |
@@ -80,7 +80,14 @@ npm run build:test && npm run test:ui                # the UI test: the whole fl
   macOS, Windows and Linux). CI runs it on macOS and Windows; `SCENECAST_UI_SHOTS=<dir>` saves each screen.
 - Installers: `scripts/prepare-bundle.mjs` (Node, checked by SHA-256; signing when its secrets are set), then
   `tauri build`. See [signing.md](signing.md).
-- App updates: `scenecast_app::updates::check` is a stub ("Check for updates" in the window calls it). An update
-  service would plug in there (the Tauri updater plugin with a signed feed).
+- App updates: the Tauri updater plugin reads `latest.json` from the newest GitHub release (signed with the updater
+  key; its public half is in `tauri.conf.json`, the private half is the `TAURI_SIGNING_PRIVATE_KEY` secret). The app
+  checks at start and every 4 hours; **Update** downloads, installs and restarts. The release job writes
+  `latest.json` (`scripts/latest-json.mjs`) when the installers were built with the key.
+- `apps/desktop/tests/packaged.test.mjs`: the installers themselves, installed and started as a presenter would
+  (CI, macOS and Windows): receiver, extension connecting in Chrome on a non-Default profile, Fix, Install recorder.
+  `apps/desktop/tests/update.test.mjs`: version N updating to N+1 served locally. Both drive the app through its
+  test hook (`SCENECAST_SELFTEST=<folder>`), which runs the same code as the window's buttons.
+- The Install recorder pictures: `node apps/desktop/scripts/setup-shots.mjs` (the real extensions pages).
 
 The screenshots here come from the UI test (`SCENECAST_UI_SHOTS`).

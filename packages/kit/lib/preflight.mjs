@@ -10,41 +10,16 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { connect } from 'node:net';
 import { KIT } from './demo.mjs';
-import { defaultBrowser, profileRoot, launchCommand } from '../../player/launch.mjs';
+import { defaultBrowser, profileRoot, openInBrowser } from '../../player/launch.mjs';
+import { parseProcs, listProcs, openProfiles, browserProfiles, extensionDir } from './profiles.mjs';
 
+export { parseProcs, openProfiles };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const BIN = { darwin: { chrome: /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome( |$)/, edge: /\/Microsoft Edge\.app\/Contents\/MacOS\/Microsoft Edge( |$)/ }, win32: { chrome: /\\chrome\.exe"?( |$)/i, edge: /\\msedge\.exe"?( |$)/i } };
+const NAME = { chrome: 'Chrome', edge: 'Edge' };
+const PAGE = { chrome: 'chrome://extensions', edge: 'edge://extensions' };
 
-// The browser's main processes (not its renderers and helpers), from `ps` or Win32_Process command lines.
-export function parseProcs(text, platform = process.platform) {
-  const out = [];
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*(\d+)\s+(.*)$/.exec(line); if (!m) continue;
-    const cmd = m[2];
-    if (/ --type=/.test(cmd)) continue;
-    const browser = Object.entries(BIN[platform] || {}).find(([, re]) => re.test(cmd));
-    if (!browser) continue;
-    // ps doesn't quote: an unquoted value runs to the next flag (--profile-directory=Profile 10 --…).
-    const flag = k => { const f = new RegExp(`--${k}=("([^"]*)"|(.*?))(?= --|$)`).exec(cmd); return f ? (f[2] !== undefined ? f[2] : f[3].trim()) : null; };
-    out.push({ pid: +m[1], browser: browser[0], userDataDir: flag('user-data-dir'), profile: flag('profile-directory'), debugPort: flag('remote-debugging-port') && +flag('remote-debugging-port') });
-  }
-  return out;
-}
-function listProcs() {
-  return new Promise(res => {
-    if (process.platform === 'win32') {
-      const ps = "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe' OR Name='msedge.exe'\" | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }";
-      execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeout: 15000, maxBuffer: 1 << 24 }, (e, so) => res(parseProcs(so || '', 'win32')));
-    } else execFile('ps', ['-axww', '-o', 'pid=,args='], { timeout: 10000, maxBuffer: 1 << 24 }, (e, so) => res(parseProcs(so || '', process.platform)));
-  });
-}
-// Which profiles a running browser has open: its Local State (written as it runs).
-export function openProfiles(userDataDir) {
-  try { const s = JSON.parse(readFileSync(join(userDataDir, 'Local State'), 'utf8')); return (s.profile && s.profile.last_active_profiles) || []; } catch (e) { return null; }
-}
 // The browser for this demo, and whether the one running is it: same browser, same user data folder, the demo's
 // profile open, and the debugging port when the recorder needs one.
 export function judgeBrowser(procs, want) {
@@ -67,7 +42,7 @@ async function op(port, cmd, tmoS) {
   return send(cmd, tmoS, port);
 }
 
-export async function preflight(demo, { fix = true, onItem = () => {}, waitAgentS = 25 } = {}) {
+export async function preflight(demo, { fix = true, onItem = () => {}, waitAgentS = fix ? 20 : 6 } = {}) {
   const t0 = Date.now(), cfg = demo.cfg, port = +(process.env.REPLICA_RX_PORT || cfg.receiverPort);
   const recorder = cfg.recorder === 'agent' ? 'agent' : 'extension';
   const items = [];
@@ -97,50 +72,68 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   // Recorder connected? Then the browser is running, whatever it's called: nothing to look at there.
   const connected = p => p && p.agent && (p.agent.polling || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
   const browser = cfg.chrome.browser || defaultBrowser();
+  const bname = NAME[browser] || browser;
   const userDataDir = cfg.chrome.userDataDir || profileRoot(browser);
-  const profile = cfg.chrome.profile || 'Default';
+  const extDir = extensionDir();
+  let procs = null, info = null, profile = cfg.chrome.profile || null;
+  const look = async () => {
+    procs = await listProcs();
+    info = await browserProfiles({ browser, userDataDir: cfg.chrome.userDataDir, procs, preferred: cfg.chrome.profile, pictures: false });
+    profile = cfg.chrome.profile || info.picked;
+  };
+  const label = dir => { const p = info && info.profiles.find(x => x.dir === dir); return p && p.name !== dir ? `"${p.name}" (${dir})` : `"${dir}"`; };
   await item('browser', async () => {
     // A receiver just started: a recorder already running in the browser connects on its next try (every 2 s). Give
     // it that, so a browser that's open isn't taken for one that isn't.
     if (started && recorder === 'extension') for (let i = 0; i < 12 && !connected(up); i++) { await sleep(500); up = (await ping(port, 1500)) || up; }
-    if (connected(up) && recorder === 'extension') return { status: 'ok', detail: 'the recorder extension is connected, so the browser is running (not touched)' };
-    const procs = await listProcs();
+    await look();
+    const open = info.running ? info.profiles.filter(p => p.open).map(p => p.dir) : [];
+    // The demo names a profile that isn't open: only then is a connected recorder not enough.
+    const wantOpen = cfg.chrome.profile && info.running && !open.includes(cfg.chrome.profile);
+    if (connected(up) && recorder === 'extension' && !wantOpen) return { status: 'ok', detail: `the recorder is connected, so ${bname} is running${info.running && profile ? `, profile ${label(profile)}` : ''} (not touched)`, profile: info.running ? profile : null };
     const b = judgeBrowser(procs, { browser, userDataDir, defaultDir: profileRoot(browser), debugPort: recorder === 'agent' ? cfg.chrome.debugPort || 9222 : null });
-    const open = b.running ? openProfiles(userDataDir) : null;
     const urls = cfg.apps.map(a => a.url).filter(Boolean);
     if (b.running) {
       // Never relaunched: a running browser with the wrong flags is the presenter's call.
       if (b.needsPort) return { status: 'fail', detail: `${browser} is running (pid ${b.pid}) without --remote-debugging-port=${cfg.chrome.debugPort || 9222}; the agent recorder needs it. Not restarting it: quit ${browser} yourself, or record with the extension (demo.json recorder: "extension")` };
-      if (open && !open.includes(profile)) {
-        if (!fix) return { status: 'fail', detail: `${browser} is running, but profile "${profile}" isn't open` };
-        const c = launchCommand(urls[0] || 'about:blank', { browser, profile });
-        if (c) { c[1] = c[1].map(a => a.startsWith('--app=') ? a.slice(6) : a); await new Promise(r => execFile(c[0], c[1], { windowsVerbatimArguments: process.platform === 'win32' }, () => r())); }
-        return { status: 'fixed', detail: `${browser} is running; opened a window of profile "${profile}" in it (not relaunched)` };
+      if (!open.includes(profile)) {
+        if (!fix) return { status: 'fail', detail: `${bname} is open, but not with profile ${label(profile)}${open.length ? ` (open: ${open.map(label).join(', ')})` : ''}. Fix opens a window for it, or pick the profile you use above`, profile };
+        const r = await openInBrowser(urls.length ? urls[0] : 'about:blank', { browser, profile, userDataDir: cfg.chrome.userDataDir });
+        return r.ok ? { status: 'fixed', detail: `${bname} is running; opened a window for profile ${label(profile)} in it (nothing closed or restarted)`, profile } : { status: 'fail', detail: `couldn't open a window for profile ${label(profile)}: ${r.error}`, profile };
       }
-      return { status: 'ok', detail: `${browser} running (pid ${b.pid}${b.debugPort ? `, debugging port ${b.debugPort}` : ''}), profile "${profile}"${open ? ' open' : ''}: not relaunched` };
+      return { status: 'ok', detail: `${bname} running (pid ${b.pid}${b.debugPort ? `, debugging port ${b.debugPort}` : ''}), profile ${label(profile)} open: not relaunched`, profile };
     }
-    if (!fix) return { status: 'fail', detail: `${browser} isn't running` };
-    const c = launchCommand(urls[0] || 'about:blank', { browser, profile });
-    if (!c) return { status: 'fail', detail: `start ${browser} with profile "${profile}" yourself` };
-    c[1] = c[1].map(a => a.startsWith('--app=') ? a.slice(6) : a);
-    if (recorder === 'agent') c[1].splice(c[1].length - 1, 0, `--remote-debugging-port=${cfg.chrome.debugPort || 9222}`);
-    await new Promise(r => execFile(c[0], c[1], { windowsVerbatimArguments: process.platform === 'win32' }, () => r()));
-    return { status: 'fixed', detail: `${browser} wasn't running: started it with profile "${profile}"` };
+    if (!fix) return { status: 'fail', detail: `${bname} isn't running`, profile };
+    if (recorder === 'agent') {
+      const r = await openInBrowser([`--remote-debugging-port=${cfg.chrome.debugPort || 9222}`, urls[0] || 'about:blank'], { browser, profile, userDataDir: cfg.chrome.userDataDir });
+      return r.ok ? { status: 'fixed', detail: `${bname} wasn't running: started it with profile ${label(profile)}`, profile } : { status: 'fail', detail: `start ${bname} with profile ${label(profile)} yourself (${r.error})`, profile };
+    }
+    const r = await openInBrowser(urls[0] || 'about:blank', { browser, profile, userDataDir: cfg.chrome.userDataDir });
+    return r.ok ? { status: 'fixed', detail: `${bname} wasn't running: started it with profile ${label(profile)}`, profile } : { status: 'fail', detail: `start ${bname} with profile ${label(profile)} yourself (${r.error})`, profile };
   });
 
-  // The recorder: connected to the receiver (the extension retries every 2 s; give a fresh one a moment).
+  // The recorder: connected to the receiver (the extension looks for it every 2 s; give a fresh one a moment).
+  const ver = JSON.parse(readFileSync(join(KIT, 'recorder', 'package.json'), 'utf8')).version;
   const rec = await item('recorder', async () => {
     for (let i = 0; i < waitAgentS * 2 && !connected(up); i++) { await sleep(500); up = (await ping(port, 1500)) || up; }
     if (connected(up)) {
-      const e = recorder === 'extension' ? await op(port, { op: 'extension' }, 8) : { ok: true };
-      return { status: 'ok', detail: recorder === 'extension' && e.ok ? `extension ${e.value.version} connected` : `${recorder} connected` };
+      if (recorder !== 'extension') return { status: 'ok', detail: `${recorder} connected` };
+      const e = await op(port, { op: 'extension' }, 8);
+      const have = e.ok && e.value ? e.value.version : null;
+      if (have && have !== ver) {
+        // Its files were updated (the app keeps the folder current): it needs a reload, which it can do itself.
+        if (!fix) return { status: 'fail', detail: `the recorder in ${bname} is ${have}; this app's is ${ver}. Fix reloads it (or click Reload (↻) on Scenecast Recorder at ${PAGE[browser]})`, version: have };
+        const r = await op(port, { op: 'reload' }, 5);
+        for (let i = 0; i < 30; i++) { await sleep(500); const p = await ping(port, 1500); if (connected(p)) { const e2 = await op(port, { op: 'extension' }, 8); if (e2.ok && e2.value.version === ver) return { status: 'fixed', detail: `reloaded the recorder: ${have} → ${ver}`, version: ver }; } }
+        return { status: 'fail', detail: `the recorder in ${bname} is ${have}${r.ok ? '' : ' and can\u2019t reload itself'}: at ${PAGE[browser]}, click Reload (↻) on Scenecast Recorder`, version: have };
+      }
+      return { status: 'ok', detail: `extension ${have || ''} connected`.replace('  ', ' '), version: have };
     }
     if (recorder === 'agent') return { status: 'fail', detail: 'no agent polling: run scenecast agent, then start it in the browser' };
-    const dir = join(homedir(), '.scenecast', 'extension');
-    const ver = JSON.parse(readFileSync(join(KIT, 'recorder', 'package.json'), 'utf8')).version;
-    const have = existsSync(join(dir, 'manifest.json')) && JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')).version;
-    if (fix && have !== ver) await new Promise(r => execFile(process.execPath, [join(KIT, 'recorder', 'build.mjs'), '--extension', dir, '--port', String(port)], () => r()));
-    return { status: 'fail', detail: `the recorder extension isn't connected. Load it once in ${browser}: ${browser}://extensions → Developer mode → Load unpacked → ${dir}. Already loaded? Check its receiver port (popup) is ${port}` };
+    const have = existsSync(join(extDir, 'manifest.json')) && JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8')).version;
+    if (fix && have !== ver) await new Promise(r => execFile(process.execPath, [join(KIT, 'recorder', 'build.mjs'), '--extension', extDir, '--port', String(port)], () => r()));
+    if (!info) await look();
+    return { status: 'fail', detail: recorderAdvice({ info, profile, browser, extDir, other: await browserProfiles({ browser: browser === 'edge' ? 'chrome' : 'edge', procs, pictures: false }).catch(() => null) }), extensionDir: extDir };
   });
 
   // Each app's tab: open, light, on its start screen. Only with the recorder there to look.
@@ -161,6 +154,28 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
 
   const secs = (Date.now() - t0) / 1000;
   return { ready: items.every(i => i.status === 'ok' || i.status === 'fixed'), secs: +secs.toFixed(1), items };
+}
+
+// What to do when the recorder isn't connected, in plain words, from what the browser's profiles say.
+export function recorderAdvice({ info, profile, browser, extDir, other }) {
+  const b = NAME[browser] || browser, page = PAGE[browser];
+  const profiles = (info && info.profiles) || [];
+  const named = dir => { const p = profiles.find(x => x.dir === dir); return p ? `"${p.name}"` : `"${dir}"`; };
+  const here = profiles.find(p => p.dir === profile);
+  const withExt = profiles.filter(p => p.extension && p.extension.id);
+  const old = withExt.find(p => /[\\/]\.scenecast[\\/]extension[\\/]?$/i.test(p.extension.path || ''));
+  if (info && !info.running) return `${b} isn't open. Open it with profile ${named(profile)}, then check again`;
+  if (here && here.extension && here.extension.id) {
+    const e = here.extension;
+    if (old && old.dir === profile) return `${b} has the old copy of the recorder (from the hidden .scenecast folder). At ${page}, remove "Scenecast Recorder", then click Install recorder`;
+    if (e.devMode === false) return `Developer mode is off in ${b}, so the recorder is switched off. At ${page}, turn on Developer mode (top right${browser === 'edge' ? ', or bottom left in Edge' : ''})`;
+    if (e.enabled === false) return `The recorder is switched off in ${b}. At ${page}, turn Scenecast Recorder on`;
+    return `The recorder is in ${b} but isn't talking to Scenecast yet. At ${page}, click Reload (↻) on Scenecast Recorder`;
+  }
+  if (withExt.length) return `The recorder is in ${b} profile ${withExt.map(p => named(p.dir)).join(', ')}, but this demo uses ${named(profile)}. Pick ${named(withExt[0].dir)} under Profile, or click Install recorder to add it to ${named(profile)}`;
+  const elsewhere = other && other.profiles.some(p => p.extension && p.extension.id);
+  if (elsewhere) return `The recorder is in ${NAME[other.browser]}, but this demo records in ${b}. Switch "Record in" to ${NAME[other.browser]}, or click Install recorder to add it to ${b}`;
+  return `The recorder isn't in ${b} yet. Click Install recorder: it opens ${page} and shows the folder to drag in (${extDir})`;
 }
 
 export async function main(args, loadDemo) {

@@ -167,8 +167,10 @@ jobs:
           S_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           S_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           S_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          S_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          S_TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD; do
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             value="$(printenv "S_$name" || true)"
             if [ -n "$value" ]; then
               { echo "$name<<SCENECAST_EOF"; echo "$value"; echo "SCENECAST_EOF"; } >> "$GITHUB_ENV"
@@ -184,11 +186,104 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: scenecast-${{ runner.os }}-installers
+          # With the updater's key: the signed update files too (.app.tar.gz on the Mac) and each one's .sig.
           path: |
             apps/desktop/src-tauri/target/**/bundle/dmg/*.dmg
             apps/desktop/src-tauri/target/**/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/**/bundle/msi/*.msi.sig
             apps/desktop/src-tauri/target/**/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/**/bundle/nsis/*.exe.sig
+            apps/desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz
+            apps/desktop/src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
+
+  packaged:
+    # The installers from the job above, installed the way a presenter installs them and started with nothing else:
+    # the receiver starts with the app's own Node, the extension (in Documents/Scenecast/Recorder Extension) connects
+    # in Google Chrome on a non-Default profile, preflight says so, Fix and Install recorder work in the running Chrome.
+    name: Installed app (${{ matrix.os }})
+    needs: installers
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install (the test's own tools; the app brings its own Node and engine)
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: scenecast-${{ runner.os }}-installers
+          path: dist
+      - name: Test the installed app
+        shell: bash
+        run: |
+          inst="$(find dist -name '*.dmg' -o -name '*-setup.exe' | head -1)"
+          echo "installer: $inst"
+          node apps/desktop/tests/packaged.test.mjs "$inst"
+
+  update:
+    # The in-app update: version N installed, N+1 served from this machine, Update clicked (through the app's test
+    # hook), and the app relaunched on N+1 with its demos kept. Unsigned builds; a throwaway updater key.
+    name: In-app update (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: app
+          - os: windows-latest
+            bundles: nsis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: update-test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+      - name: Install
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix apps/desktop
+      - name: Build N+1, then N
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          set -e
+          npx tauri signer generate --ci -p test -w "$RUNNER_TEMP/update-test.key" -f
+          export TAURI_SIGNING_PRIVATE_KEY="$(cat "$RUNNER_TEMP/update-test.key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=test
+          conf() {
+            node -e "const fs=require('fs');fs.writeFileSync('src-tauri/tauri.update-test.json',JSON.stringify({version:process.argv[1],bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey:fs.readFileSync(process.argv[2],'utf8').trim(),endpoints:['http://127.0.0.1:47811/latest.json'],dangerousInsecureTransportProtocol:true,windows:{installMode:'passive'}}}}))" "$1" "$RUNNER_TEMP/update-test.key.pub"
+          }
+          b=src-tauri/target/debug/bundle
+          conf 0.3.99
+          npx tauri build --debug --bundles ${{ matrix.bundles }} --config src-tauri/tauri.update-test.json
+          mkdir -p "$RUNNER_TEMP/new" "$RUNNER_TEMP/old"
+          if [ "$RUNNER_OS" = macOS ]; then cp $b/macos/*.app.tar.gz $b/macos/*.app.tar.gz.sig "$RUNNER_TEMP/new/"; else cp $b/nsis/*0.3.99*-setup.exe $b/nsis/*0.3.99*-setup.exe.sig "$RUNNER_TEMP/new/"; fi
+          conf 0.3.98
+          npx tauri build --debug --bundles ${{ matrix.bundles }} --config src-tauri/tauri.update-test.json
+          if [ "$RUNNER_OS" = macOS ]; then cp -R $b/macos/Scenecast.app "$RUNNER_TEMP/old/"; else cp $b/nsis/*0.3.98*-setup.exe "$RUNNER_TEMP/old/"; fi
+          ls -la "$RUNNER_TEMP/new" "$RUNNER_TEMP/old"
+      - name: Update N → N+1
+        shell: bash
+        run: |
+          old="$(ls -d "$RUNNER_TEMP"/old/* | head -1)"
+          node apps/desktop/tests/update.test.mjs "$old" "$RUNNER_TEMP/new" 0.3.99
 
   release:
     # On a version tag, once every job is green: a GitHub Release with the macOS and Windows installers and the printable
@@ -196,7 +291,7 @@ jobs:
     # set (docs/app/signing.md); docs/guide.md explains the one-time "open anyway" on each system.
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [rust, engine, desktop-ui, installers]
+    needs: [rust, engine, desktop-ui, installers, packaged, update]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -218,7 +313,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          # The update files get the version in their name (the Mac's is Scenecast.app.tar.gz as built).
+          for f in $(find dist -name 'Scenecast.app.tar.gz'); do mv "$f" "$(dirname "$f")/Scenecast_${TAG#v}_universal.app.tar.gz"; mv "$f.sig" "$(dirname "$f")/Scenecast_${TAG#v}_universal.app.tar.gz.sig"; done
           mapfile -t files < <(find dist -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) | sort)
+          # The in-app updater's feed: when the installers were signed with the updater's key (the
+          # TAURI_SIGNING_PRIVATE_KEY secret). Without it the release has no latest.json, and apps keep their version.
+          if find dist -name '*.sig' | grep -q .; then
+            node apps/desktop/scripts/latest-json.mjs dist "${TAG#v}" "https://github.com/${{ github.repository }}/releases/download/$TAG/" "docs/releases/$TAG.md"
+            mapfile -t -O "${#files[@]}" files < <(find dist -type f \( -name '*.sig' -o -name '*.app.tar.gz' -o -name 'latest.json' \) | sort)
+          else
+            echo "::warning::no updater signatures (TAURI_SIGNING_PRIVATE_KEY isn't set): no latest.json in this release"
+          fi
           printf '%s\n' "${files[@]}"
           find dist -name '*.dmg' | grep -q . || { echo "no macOS installer"; exit 1; }
           find dist -name '*.msi' | grep -q . || { echo "no Windows installer"; exit 1; }

@@ -251,6 +251,7 @@ mod tests {
                     url: "https://chat.example.com/".into(),
                 }],
                 browser: None,
+                profile: None,
             })
             .unwrap();
         let err = export(&demo.dir, &default_dest(&lib.root), ExportKind::Folder).unwrap_err();

@@ -15,7 +15,7 @@ const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(p
 const exit = code => process.exit(code || 0);
 const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary; see docs/cli.md)
 
-  preflight [--check] [--json|--ndjson]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
+  preflight [--check] [--json|--ndjson]  profiles [--browser chrome|edge] [--json]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release] [--no-editor]
   script <file> [--matcher text|<file.mjs>] [--no-write] [--no-pdf] [--strict]  edit [--no-open] [--port N]
   notes [--script <file>] [--check [--as-windows]]  guide-shots
@@ -59,12 +59,14 @@ async function main() {
     case undefined: case 'help': case '--help': case '-h': console.log(HELP); return 0;
     case 'new': console.log('scenecast new is in the scenecast binary (Rust): it writes the project and its manifest'); return 1;
     case 'extension': {
-      // The recorder extension (MV3, Edge and Chrome), unpacked: ~/.scenecast/extension unless a folder is given.
-      const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo') || join(homedir(), '.scenecast', 'extension');
+      // The recorder extension (MV3, Edge and Chrome), unpacked: Documents/Scenecast/Recorder Extension unless a folder is given.
+      const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo') || (await import('../lib/profiles.mjs')).extensionDir();
       return node('recorder/build.mjs', ['--extension', out, '--port', String(rx())]);
     }
     case 'agent': { const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo'); return node('recorder/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
     case 'preflight': return (await import('../lib/preflight.mjs')).main(rest, loadDemo);
+    case 'open-extensions': { const r = await (await import('../lib/profiles.mjs')).openExtensionsPage(loadDemo(rest)); console.log(JSON.stringify(r)); return r.ok ? 0 : 1; }
+    case 'profiles': return (await import('../lib/profiles.mjs')).main(rest, loadDemo);
     case 'receiver': return node('recorder/receiver.mjs', ['--demo', loadDemo(rest).dir]);
     case 'cmd': { const [op, j] = rest; return send(op, j && j.startsWith('{') ? JSON.parse(j) : {}); }
     case 'run': {

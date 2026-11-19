@@ -9,8 +9,11 @@ use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -33,6 +36,8 @@ pub enum EngineError {
         #[source]
         source: std::io::Error,
     },
+    #[error("stopped: a newer run took its place")]
+    Cancelled,
     #[error("failed to communicate with the engine")]
     Communication(#[source] std::io::Error),
 }
@@ -50,6 +55,10 @@ pub struct Engine {
     pub packages: PathBuf,
     /// The Node executable.
     pub node: PathBuf,
+    /// Extra environment for every command (the desktop app's receiver port).
+    pub env: Vec<(OsString, OsString)>,
+    /// When set, a running command is stopped (killed) as soon as this turns true.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Engine {
@@ -75,6 +84,8 @@ impl Engine {
         Ok(Self {
             packages: dunce(packages),
             node,
+            env: Vec::new(),
+            cancel: None,
         })
     }
 
@@ -113,6 +124,7 @@ impl Engine {
     {
         let mut cmd = Command::new(&self.node);
         cmd.arg(self.entry()).args(args);
+        cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
         cmd
     }
 
@@ -240,7 +252,24 @@ impl Engine {
         })
         .collect();
         drop(tx);
-        for p in rx {
+        let cancelled = || {
+            self.cancel
+                .as_ref()
+                .is_some_and(|c| c.load(Ordering::SeqCst))
+        };
+        loop {
+            let p = match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(p) => p,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if cancelled() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(EngineError::Cancelled);
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
             if let Progress::Stdout(line) = &p
                 && let Some(reply) = control.as_mut().and_then(|handler| handler(line))
             {

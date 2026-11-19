@@ -30,20 +30,94 @@ pub struct ExtensionSetup {
     pub steps: Vec<String>,
 }
 
-/// `SCENECAST_EXTENSION_DIR`, else `~/.scenecast/extension` (where preflight looks too).
-pub fn extension_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("SCENECAST_EXTENSION_DIR") {
-        return PathBuf::from(dir);
-    }
+fn home() -> PathBuf {
     let home = if cfg!(windows) {
         std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
     } else {
         std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
     };
-    home.map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join(".scenecast")
-        .join("extension")
+    home.map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
+}
+
+/// `SCENECAST_EXTENSION_DIR`, else `Documents/Scenecast/Recorder Extension`: a folder the presenter can see and drag
+/// onto the browser's extensions page (preflight looks there too).
+pub fn extension_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("SCENECAST_EXTENSION_DIR") {
+        return PathBuf::from(dir);
+    }
+    home()
+        .join("Documents")
+        .join("Scenecast")
+        .join("Recorder Extension")
+}
+
+/// Where 0.3.0 and earlier built it (a hidden folder).
+pub fn old_extension_dir() -> PathBuf {
+    home().join(".scenecast").join("extension")
+}
+
+/// The recorder's version in this app's engine (the extension's version).
+pub fn recorder_version() -> Option<String> {
+    let engine = engine().ok()?;
+    let pkg: Value =
+        serde_json::from_slice(&std::fs::read(engine.packages.join("recorder/package.json")).ok()?)
+            .ok()?;
+    pkg["version"].as_str().map(str::to_owned)
+}
+
+fn folder_version(dir: &Path) -> Option<String> {
+    let m: Value = serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).ok()?).ok()?;
+    m["version"].as_str().map(str::to_owned)
+}
+
+/// The extension folder, built (or rebuilt when this app's recorder is newer). Returns the folder and whether its
+/// files changed (a loaded extension then needs a reload).
+pub fn ensure_extension() -> Result<(PathBuf, bool), AppError> {
+    let out = extension_dir();
+    let want = recorder_version();
+    let have = folder_version(&out);
+    if have.is_some() && have == want {
+        return Ok((out, false));
+    }
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // The port it tries first (it looks through the next few too, and 47621 on).
+    let port = std::env::var("REPLICA_RX_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_RECEIVER_PORT);
+    recorder::build_extension(&engine()?, &out, port)?;
+    retire_old_extension();
+    Ok((out, have.is_some()))
+}
+
+/// The old hidden copy, when there is one, becomes a stub that does nothing and says where the recorder went (a
+/// browser that still has it loaded picks that up on its next start, so two copies never record at once).
+pub fn retire_old_extension() -> bool {
+    let old = old_extension_dir();
+    let Some(v) = folder_version(&old) else {
+        return false;
+    };
+    if v.starts_with("0.0.") {
+        return false;
+    }
+    let manifest = serde_json::json!({
+        "manifest_version": 3,
+        "name": "Scenecast Recorder (old copy: remove it)",
+        "description": "This copy moved. Remove it, then load the one in Documents/Scenecast/Recorder Extension (Scenecast: Install recorder).",
+        "version": "0.0.1",
+        "action": { "default_popup": "popup.html", "default_title": "Old copy: remove it" }
+    });
+    let popup = "<!doctype html><meta charset=utf-8><body style=\"font:13px system-ui;width:260px;margin:12px\"><h1 style=\"font-size:14px\">This copy moved</h1><p>Remove this extension, then in the Scenecast app click <b>Install recorder</b>. The recorder now lives in Documents/Scenecast/Recorder Extension.</p>";
+    let _ = std::fs::remove_dir_all(&old);
+    std::fs::create_dir_all(&old).is_ok()
+        && std::fs::write(
+            old.join("manifest.json"),
+            serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+        )
+        .is_ok()
+        && std::fs::write(old.join("popup.html"), popup).is_ok()
 }
 
 /// The receiver port the demo's recorder uses: `REPLICA_RX_PORT`, else `demo.json` `receiverPort`, else the default.
@@ -109,12 +183,135 @@ pub fn setup_for(dir: PathBuf, browser: &str, port: u16) -> ExtensionSetup {
     }
 }
 
-/// Builds the recorder extension for this demo's receiver port, and says how to load it.
+/// Builds the recorder extension (when it isn't current), and says how to load it.
 pub fn prepare_extension(dir: &Path) -> Result<ExtensionSetup, AppError> {
-    let port = receiver_port(dir);
-    let out = extension_dir();
-    recorder::build_extension(&engine()?, &out, port)?;
-    Ok(setup_for(out, &browser(dir), port))
+    let (out, _) = ensure_extension()?;
+    Ok(setup_for(out, &browser(dir), receiver_port(dir)))
+}
+
+/// What "Install recorder" did: the folder ready, the extensions page opened in the presenter's running browser (in
+/// the demo's profile), and the old hidden copy retired.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallReport {
+    pub dir: PathBuf,
+    pub version: Option<String>,
+    pub browser: String,
+    pub browser_name: String,
+    pub extensions_page: String,
+    /// The profile folder (`Profile 10`) and its name.
+    pub profile: Option<String>,
+    pub profile_name: Option<String>,
+    /// The extensions page opened in the browser.
+    pub opened: bool,
+    pub open_error: Option<String>,
+    /// The browser was running (so the page opened in it, nothing restarted).
+    pub running: bool,
+    /// The browser already has the recorder in this profile, with Developer mode on or off.
+    pub loaded: bool,
+    pub dev_mode: Option<bool>,
+    /// The old hidden copy is loaded somewhere (remove it).
+    pub old_loaded: bool,
+    pub steps: Vec<String>,
+}
+
+/// Install recorder: the folder, then the browser's extensions page in the demo's profile.
+pub fn install(dir: &Path) -> Result<InstallReport, AppError> {
+    let (out, _) = ensure_extension()?;
+    let b = browser(dir);
+    let setup = setup_for(out.clone(), &b, receiver_port(dir));
+    let mut opened = String::new();
+    let code = engine()?.run_with_progress(
+        scenecast_build::engine::with_demo("open-extensions", &[], dir),
+        |p| {
+            if let scenecast_build::Progress::Stdout(l) = p {
+                opened.push_str(&l);
+            }
+        },
+    )?;
+    let r: Value = opened
+        .find('{')
+        .and_then(|i| serde_json::from_str(&opened[i..]).ok())
+        .unwrap_or_default();
+    let open_error = r["error"].as_str().map(str::to_owned).or_else(|| {
+        (code != 0 && r.is_null()).then(|| format!("couldn't open {}", setup.extensions_page))
+    });
+    let steps = if b == "edge" {
+        vec![
+            "Turn on Developer mode (left side of the page, at the bottom)".to_owned(),
+            "Drag the Recorder Extension folder onto the page, or click Load unpacked and pick it"
+                .to_owned(),
+            "Scenecast turns green as soon as the recorder connects".to_owned(),
+        ]
+    } else {
+        vec![
+            "Turn on Developer mode (top right of the page)".to_owned(),
+            "Drag the Recorder Extension folder onto the page, or click Load unpacked and pick it"
+                .to_owned(),
+            "Scenecast turns green as soon as the recorder connects".to_owned(),
+        ]
+    };
+    Ok(InstallReport {
+        version: folder_version(&out),
+        dir: out,
+        browser: b,
+        browser_name: setup.browser_name,
+        extensions_page: setup.extensions_page,
+        profile: r["profile"].as_str().map(str::to_owned),
+        profile_name: r["profileName"].as_str().map(str::to_owned),
+        opened: r["ok"] == true,
+        open_error,
+        running: r["running"] == true,
+        loaded: r["loaded"] == true,
+        dev_mode: r["devMode"].as_bool(),
+        old_loaded: r["oldLoaded"] == true,
+        steps,
+    })
+}
+
+/// The browser's profiles (names, pictures, which are open, where the recorder is), for the demo or a browser.
+pub fn profiles(dir: Option<&Path>, browser: Option<&str>) -> Result<Value, AppError> {
+    let mut args: Vec<std::ffi::OsString> = vec!["profiles".into(), "--json".into()];
+    if let Some(b) = browser {
+        args.push("--browser".into());
+        args.push(b.into());
+    }
+    if let Some(d) = dir {
+        args.push("--demo".into());
+        args.push(d.as_os_str().to_owned());
+    }
+    let mut out = String::new();
+    engine()?.run_with_progress(args, |p| {
+        if let scenecast_build::Progress::Stdout(l) = p {
+            out.push_str(&l);
+        }
+    })?;
+    let start = out
+        .find('{')
+        .ok_or_else(|| AppError::Invalid("couldn't read the browser's profiles".into()))?;
+    Ok(serde_json::from_str(&out[start..])?)
+}
+
+/// Sets the demo's browser profile (the folder name, `Profile 10`) in `demo.json`; empty: the one that's open.
+pub fn set_profile(dir: &Path, profile: &str) -> Result<(), AppError> {
+    let file = dir.join("demo.json");
+    let mut cfg: Value = serde_json::from_slice(&std::fs::read(&file)?)?;
+    if !cfg["chrome"].is_object() {
+        cfg["chrome"] = Value::Object(Default::default());
+    }
+    let obj = cfg["chrome"].as_object_mut().expect("an object");
+    if profile.trim().is_empty() {
+        obj.remove("profile");
+    } else {
+        obj.insert("profile".into(), Value::from(profile.trim()));
+    }
+    std::fs::write(&file, serde_json::to_string_pretty(&cfg)? + "\n")?;
+    Ok(())
+}
+
+/// The demo's chosen profile, if it has one.
+pub fn profile(dir: &Path) -> Option<String> {
+    config(dir).and_then(|c| c["chrome"]["profile"].as_str().map(str::to_owned))
 }
 
 /// Preflight: each item as it lands. With `fix`, what fails is put right where it can be; a running browser is
@@ -122,16 +319,30 @@ pub fn prepare_extension(dir: &Path) -> Result<ExtensionSetup, AppError> {
 pub fn preflight(
     dir: &Path,
     fix: bool,
+    on: impl FnMut(Update),
+) -> Result<PreflightReport, AppError> {
+    preflight_with(dir, fix, None, on)
+}
+
+/// Preflight that stops (with [`scenecast_build::EngineError::Cancelled`]) when `cancel` turns true; the app's receiver
+/// is started first, so the receiver item is about the one the extension finds.
+pub fn preflight_with(
+    dir: &Path,
+    fix: bool,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     mut on: impl FnMut(Update),
 ) -> Result<PreflightReport, AppError> {
-    let engine = engine()?;
+    let _ = crate::receiver::host().ensure(dir);
+    let mut engine = crate::receiver::engine_for(dir)?;
+    engine.cancel = cancel;
     Ok(recorder::preflight(&engine, dir, fix, |item| {
         on(Update::Preflight { item: item.clone() })
     })?)
 }
 
 pub fn start(dir: &Path, resume: bool) -> Result<Value, AppError> {
-    let answer = recorder::record_start(&engine()?, dir, resume)?;
+    let _ = crate::receiver::host().ensure(dir);
+    let answer = recorder::record_start(&crate::receiver::engine_for(dir)?, dir, resume)?;
     if let Some(error) = answer.get("error").and_then(Value::as_str) {
         return Err(AppError::Invalid(error.to_owned()));
     }
@@ -139,11 +350,17 @@ pub fn start(dir: &Path, resume: bool) -> Result<Value, AppError> {
 }
 
 pub fn status(dir: &Path) -> Result<RecordStatus, AppError> {
-    Ok(recorder::record_status(&engine()?, dir)?)
+    Ok(recorder::record_status(
+        &crate::receiver::engine_for(dir)?,
+        dir,
+    )?)
 }
 
 pub fn stop(dir: &Path) -> Result<RecordSummary, AppError> {
-    Ok(recorder::record_stop(&engine()?, dir)?)
+    Ok(recorder::record_stop(
+        &crate::receiver::engine_for(dir)?,
+        dir,
+    )?)
 }
 
 #[cfg(test)]
@@ -163,6 +380,7 @@ mod tests {
                     url: "https://chat.example.com/".into(),
                 }],
                 browser: None,
+                profile: None,
             })
             .unwrap();
         let default = if cfg!(windows) { "edge" } else { "chrome" };

@@ -172,26 +172,38 @@ try {
   writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(cfg, null, 2));
   lap('create');
 
-  // ---- 2 · The recorder: set it up, load it unpacked, preflight with its fixes ---------------------------------
-  await click('prepare-extension');
+  // ---- 2 · The recorder: the app's receiver, Install recorder, the extension connecting, preflight ---------------
+  // Opening the demo started the receiver (on REPLICA_RX_PORT here): nothing to run, nothing to fix.
+  const rx = await waitFor('the receiver', async () => (await exists('receiver-state')) && (await attr('receiver-state', 'data-port')), 60000);
+  const ping = await fetch(`http://127.0.0.1:${RX_PORT}/ping`).then(r => r.json()).catch(() => null);
+  check('opening the demo starts the receiver, the app\'s own', +rx === RX_PORT && ping?.owner === 'app' && resolve(ping.demo) === resolve(DEMO), JSON.stringify(ping));
+  receiverPid = ping?.pid || null;
+  await click('install-recorder');
   const extDir = await waitFor('the extension folder', async () => (await exists('extension-dir')) && text('extension-dir'), 120000);
-  check('builds the recorder extension and says where it is', resolve(extDir) === resolve(EXT) && existsSync(join(EXT, 'manifest.json')), extDir);
+  check('Install recorder: the folder, ready to drag in, with the steps', resolve(extDir) === resolve(EXT) && existsSync(join(EXT, 'manifest.json')) && (await exists('install-status')) && (await attr('install-status', 'data-connected')) === 'false', extDir);
   await shot('03-record-setup');
-  // Before the presenter loads it: Check (no fixes, so it starts nothing) says the recorder isn't there, with what to do.
+  // Before the presenter loads it: Check (no fixes) says the recorder isn't there, with Install recorder.
+  await click('preflight');
+  // Pressed again at once (and then Check and fix): the newer check takes over; never "busy (preflight)".
+  await sleep(300);
   await click('preflight');
   await waitFor('preflight', () => exists('preflight-result'), 120000);
-  check('preflight without the extension: the recorder fails, with how to load it', (await attr('pf-recorder', 'data-status')) === 'fail' && (await exists('fix-recorder')));
+  check('overlapping checks: the newest one finishes, no busy error', !(await b.execute(() => [...document.querySelectorAll('.toast')].some(t => /busy/.test(t.textContent)))) && (await attr('pf-receiver', 'data-status')) === 'ok');
+  check('preflight without the extension: the recorder fails, with Install recorder', (await attr('pf-recorder', 'data-status')) === 'fail' && (await exists('fix-recorder')));
   ctx = await launchWithExtension(EXT, join(tmp, 'profile'));
+  // The extension finds the receiver on its own (no port to set), and the app turns green.
+  const t0c = Date.now();
+  await waitFor('the recorder to connect', async () => (await attr('recorder-state', 'data-connected')) === 'true', 60000);
+  check('the extension connects by itself and the app shows it', (await attr('install-status', 'data-connected')) === 'true', `${Date.now() - t0c} ms`);
+  times.connectMs = Date.now() - t0c;
   const chat = await ctx.newPage();
   await chat.goto(fx.chat);
   for (const p of ctx.pages()) if (p !== chat) await p.close();
   await sizeWindow(chat, 1600, 900);
   await chat.bringToFront();
-  // Check and fix: starts the receiver, opens the missing admin tab; the browser that's running isn't touched.
+  // Check and fix: opens the missing admin tab; the browser that's running isn't touched.
   await click('preflight-fix');
   await waitFor('preflight ready', async () => (await attr('preflight-result', 'data-ready')) === 'true', 180000);
-  // Preflight started the receiver (it stays up for the presenter); the test stops it at the end.
-  receiverPid = +((/pid (\d+)/.exec(await text('pf-receiver')) || [])[1]) || null;
   check('preflight: ready, the admin tab opened', (await attr('pf-app-admin', 'data-status')) === 'fixed' && (await attr('pf-browser', 'data-status')) === 'ok');
   const admin = ctx.pages().find(p => p.url().startsWith(fx.admin));
   check('the admin tab is open in the presenter\'s browser', !!admin);

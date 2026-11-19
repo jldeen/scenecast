@@ -22,14 +22,20 @@ access if the page says it's not found).
 You only do the "open anyway" step once. (The installers aren't signed yet; when they are, it goes away.) Your demos
 are kept in **Documents/Scenecast**.
 
+**Updates:** from 0.3.1 on, when there's a new version Scenecast says **Update available** at the bottom left. Click
+**Update**: it downloads, installs and restarts, and your demos stay as they are. (**Check for updates** asks now.)
+
 ## 2 · Your first demo
 
 ![The demo library](app/library.png)
 
-1. **New demo.** Name it, add each web app it shows (its start page's address), pick Edge or Chrome.
-2. **Record → Set up the recorder** (once per browser). Scenecast shows the three clicks: open
-   `edge://extensions` (or `chrome://extensions`), turn on **Developer mode**, **Load unpacked**, pick the folder it
-   shows you.
+1. **New demo.** Name it, add each web app it shows (its start page's address), pick Edge or Chrome and the
+   **profile** you're signed in to the apps with (Scenecast lists your browser's profiles by name).
+2. **Record → Install recorder** (once per browser). Scenecast opens `chrome://extensions` (or `edge://extensions`)
+   in the browser you already have open, in your profile, and shows the **Recorder Extension** folder (in
+   Documents/Scenecast) in Finder or File Explorer. Then, with the pictures it shows you: turn on **Developer mode**,
+   and drag the folder onto the page (or **Load unpacked** and pick it). Scenecast turns green as soon as the recorder
+   connects: nothing to type, no port to set.
 3. **Record → Check** (or **Check and fix**). Every line should go green: the receiver, your browser, the recorder,
    each app's tab (open, light, on its start screen). "Fix" puts right what it can; a dark app needs its theme set to
    **Light** (not System) in its own settings.

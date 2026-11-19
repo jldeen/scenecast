@@ -35,7 +35,8 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 | Command | What |
 |---|---|
 | `scenecast preflight [--check] [--json\|--ndjson]` | Is everything ready to record? Receiver, browser and profile, recorder, each app's tab (open, light, on its start screen). Fixes only what fails (`--check`: fixes nothing) and never relaunches a running browser. Seconds when all is set. See [recorder.md](recorder.md). |
-| `scenecast extension [<dir>]` | Builds the recorder extension for Edge and Chrome (`~/.scenecast/extension` by default). Load it once, unpacked. |
+| `scenecast extension [<dir>]` | Builds the recorder extension for Edge and Chrome (`Documents/Scenecast/Recorder Extension` by default). Load it once, unpacked. |
+| `scenecast profiles [--browser chrome\|edge] [--json]` | The browser's profiles by name: which are open, which has the recorder (and Developer mode on or off), and the one preflight uses when `demo.json` names none (the open one with the recorder, else the one used last). |
 | `scenecast receiver` | The local receiver the recorder posts to. Keep it running while recording (preflight starts it). |
 | `scenecast agent [<dir>]` | Builds `agent.js`: the same recorder for a Playwright-driven browser instead of the extension. |
 | `scenecast record start [--resume] [--no-auto]` / `status` / `stop` | Records the demo once; each new screen's side states (hovers, clicks, step groups, "+N", drags, zoom, long lists) are captured on the way. `status` and `stop` report the recorder's own time apart from the product's (`timing`). |

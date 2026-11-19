@@ -86,6 +86,8 @@ pub struct Demo {
     pub apps: Vec<DemoApp>,
     /// `edge` or `chrome`: what it's recorded and presented in.
     pub browser: String,
+    /// The browser profile (`Profile 10`), when the demo names one.
+    pub profile: Option<String>,
     pub status: DemoStatus,
 }
 
@@ -97,6 +99,9 @@ pub struct NewDemo {
     /// `edge` or `chrome` (default: Edge on Windows, Chrome on the Mac).
     #[serde(default)]
     pub browser: Option<String>,
+    /// The browser profile's folder name (`Profile 10`); none: the one that's open when recording.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -211,6 +216,9 @@ impl Library {
         })?;
         if let Some(browser) = spec.browser.as_deref().filter(|b| !b.is_empty()) {
             crate::record::set_browser(&self.root.join(&id), browser)?;
+        }
+        if let Some(profile) = spec.profile.as_deref().filter(|p| !p.trim().is_empty()) {
+            crate::record::set_profile(&self.root.join(&id), profile)?;
         }
         self.get(&id)
     }
@@ -356,6 +364,7 @@ pub fn load(dir: &Path) -> Result<Demo, AppError> {
         port: cfg["port"].as_u64().unwrap_or(0) as u16,
         apps,
         browser: crate::record::browser(dir),
+        profile: crate::record::profile(dir),
         status: status(dir, manifest.as_ref()),
         dir: dir.to_path_buf(),
         id,
@@ -512,6 +521,7 @@ mod tests {
                 },
             ],
             browser: Some("edge".into()),
+            profile: None,
         }
     }
 

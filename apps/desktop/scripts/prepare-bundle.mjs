@@ -1,6 +1,7 @@
 // Gets the installers' extras ready, and writes the `tauri build` overlay config (src-tauri/tauri.bundle.json):
 //   - Node.js, so presenters need nothing installed: the current LTS line's binary for this OS, checked against
 //     nodejs.org's SHA-256 list, into src-tauri/node/ (on the Mac both arm64 and x64, joined into one universal binary).
+//   - The updater's signed update files, when TAURI_SIGNING_PRIVATE_KEY is set.
 //   - Signing, only when its secrets are in the environment; unsigned otherwise (see docs/app/signing.md).
 //       macOS:   APPLE_CERTIFICATE (+ _PASSWORD) and APPLE_SIGNING_IDENTITY; notarized with APPLE_ID, APPLE_PASSWORD
 //                and APPLE_TEAM_ID. Tauri reads these itself; without them the app is ad-hoc signed.
@@ -101,5 +102,9 @@ if (platform === 'darwin') {
   const w = windowsSigning();
   if (w) { overlay.bundle.windows = w; signed = `signed (certificate ${w.certificateThumbprint.slice(0, 8)}…)`; }
 }
+// In-app updates: the signed update files (macOS .app.tar.gz, Windows installers) and their .sig, when the updater's
+// signing key is in the environment (TAURI_SIGNING_PRIVATE_KEY, a GitHub Actions secret).
+let updates = 'no updater key: no update files';
+if (process.env.TAURI_SIGNING_PRIVATE_KEY) { overlay.bundle.createUpdaterArtifacts = true; updates = 'signed update files'; }
 writeFileSync(join(TAURI, 'tauri.bundle.json'), JSON.stringify(overlay, null, 2) + '\n');
-console.log(`installer: Node ${version}${platform === 'darwin' ? ' (universal)' : ''}, ${signed}; overlay: src-tauri/tauri.bundle.json`);
+console.log(`installer: Node ${version}${platform === 'darwin' ? ' (universal)' : ''}, ${signed}, ${updates}; overlay: src-tauri/tauri.bundle.json`);
