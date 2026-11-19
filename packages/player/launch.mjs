@@ -85,15 +85,21 @@ const LINUX_BIN = { chrome: ['google-chrome', 'google-chrome-stable', 'chromium'
 export function windowCommand(urls, { browser, profile, userDataDir, platform = process.platform, executable } = {}) {
   const b = browser === 'edge' || browser === 'chrome' ? browser : defaultBrowser(platform);
   const flags = [...(userDataDir ? [`--user-data-dir=${userDataDir}`] : []), ...(profile ? [`--profile-directory=${profile}`] : []), ...[].concat(urls)];
-  if (platform === 'darwin') return ['open', ['-na', MAC_APP[b], '--args', ...flags]];
+  // The Mac: the browser's own binary when it's there (it hands the window to the running browser and leaves);
+  // `open -na` otherwise.
+  if (platform === 'darwin') return executable ? [executable, flags] : ['open', ['-na', MAC_APP[b], '--args', ...flags]];
   if (platform === 'win32') return executable ? [executable, flags] : null;
   return [executable || LINUX_BIN[b][0], flags];
+}
+export function macBrowser(browser, home = homedir()) {
+  const rel = join(`${MAC_APP[browser]}.app`, 'Contents', 'MacOS', MAC_APP[browser]);
+  return [join('/Applications', rel), join(home, 'Applications', rel)].find(p => existsSync(p)) || null;
 }
 // Opens `urls` in the presenter's browser, in `profile`'s window. Resolves { ok, error }.
 export async function openInBrowser(urls, opts = {}) {
   const b = opts.browser === 'edge' || opts.browser === 'chrome' ? opts.browser : defaultBrowser();
   const userDataDir = opts.userDataDir && opts.userDataDir !== profileRoot(b) ? opts.userDataDir : undefined;
-  const executable = process.platform === 'win32' ? await windowsBrowser(b).catch(() => null) : opts.executable;
+  const executable = process.platform === 'win32' ? await windowsBrowser(b).catch(() => null) : process.platform === 'darwin' ? macBrowser(b) : opts.executable;
   const cmd = windowCommand(urls, { ...opts, browser: b, userDataDir, executable });
   if (!cmd) return { ok: false, error: `can't find ${b === 'edge' ? 'Microsoft Edge' : 'Google Chrome'} on this computer` };
   return new Promise(res => {

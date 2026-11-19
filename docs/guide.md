@@ -31,10 +31,11 @@ are kept in **Documents/Scenecast**.
 
 1. **New demo.** Name it, add each web app it shows (its start page's address), pick Edge or Chrome and the
    **profile** you're signed in to the apps with (Scenecast lists your browser's profiles by name).
-2. **Record → Install recorder** (once per browser). Scenecast opens `chrome://extensions` (or `edge://extensions`)
-   in the browser you already have open, in your profile, and shows the **Recorder Extension** folder (in
-   Documents/Scenecast) in Finder or File Explorer. Then, with the pictures it shows you: turn on **Developer mode**,
-   and drag the folder onto the page (or **Load unpacked** and pick it). Scenecast turns green as soon as the recorder
+2. **Record → Install recorder** (once per browser). Scenecast opens a page with the steps in the browser you
+   already have open, in your profile, shows the **Recorder Extension** folder (in Documents/Scenecast) in Finder or
+   File Explorer, and copies `chrome://extensions` (or `edge://extensions`). Paste that in the address bar and press
+   Enter (browsers only open that page from their own address bar). Then, with the pictures Scenecast shows you: turn
+   on **Developer mode**, and drag the folder onto the page (or **Load unpacked** and pick it). Scenecast turns green as soon as the recorder
    connects: nothing to type, no port to set.
 3. **Record → Check** (or **Check and fix**). Every line should go green: the receiver, your browser, the recorder,
    each app's tab (open, light, on its start screen). "Fix" puts right what it can; a dark app needs its theme set to

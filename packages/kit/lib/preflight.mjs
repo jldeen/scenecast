@@ -86,6 +86,8 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
     // A receiver just started: a recorder already running in the browser connects on its next try (every 2 s). Give
     // it that, so a browser that's open isn't taken for one that isn't.
     if (started && recorder === 'extension') for (let i = 0; i < 12 && !connected(up); i++) { await sleep(500); up = (await ping(port, 1500)) || up; }
+    // Not connected at the start: it may have been busy (a command from a check just replaced); look once more.
+    if (recorder === 'extension' && !connected(up)) up = (await ping(port, 1500)) || up;
     await look();
     const open = info.running ? info.profiles.filter(p => p.open).map(p => p.dir) : [];
     // The demo names a profile that isn't open: only then is a connected recorder not enough.

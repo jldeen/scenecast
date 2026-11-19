@@ -202,8 +202,10 @@ pub struct InstallReport {
     /// The profile folder (`Profile 10`) and its name.
     pub profile: Option<String>,
     pub profile_name: Option<String>,
-    /// The extensions page opened in the browser.
+    /// The setup page (the steps, a tick on connect) opened in the browser, in the profile's window: browsers don't
+    /// open their extensions page from outside, so the app copies its address for the presenter to paste.
     pub opened: bool,
+    pub setup_url: Option<String>,
     pub open_error: Option<String>,
     /// The browser was running (so the page opened in it, nothing restarted).
     pub running: bool,
@@ -221,7 +223,7 @@ pub fn install(dir: &Path) -> Result<InstallReport, AppError> {
     let b = browser(dir);
     let setup = setup_for(out.clone(), &b, receiver_port(dir));
     let mut opened = String::new();
-    let code = engine()?.run_with_progress(
+    let code = crate::receiver::engine_for(dir)?.run_with_progress(
         scenecast_build::engine::with_demo("open-extensions", &[], dir),
         |p| {
             if let scenecast_build::Progress::Stdout(l) = p {
@@ -238,14 +240,14 @@ pub fn install(dir: &Path) -> Result<InstallReport, AppError> {
     });
     let steps = if b == "edge" {
         vec![
-            "Turn on Developer mode (left side of the page, at the bottom)".to_owned(),
+            "Paste edge://extensions in the address bar (it's copied), then turn on Developer mode (bottom left)".to_owned(),
             "Drag the Recorder Extension folder onto the page, or click Load unpacked and pick it"
                 .to_owned(),
             "Scenecast turns green as soon as the recorder connects".to_owned(),
         ]
     } else {
         vec![
-            "Turn on Developer mode (top right of the page)".to_owned(),
+            "Paste chrome://extensions in the address bar (it's copied), then turn on Developer mode (top right)".to_owned(),
             "Drag the Recorder Extension folder onto the page, or click Load unpacked and pick it"
                 .to_owned(),
             "Scenecast turns green as soon as the recorder connects".to_owned(),
@@ -260,6 +262,7 @@ pub fn install(dir: &Path) -> Result<InstallReport, AppError> {
         profile: r["profile"].as_str().map(str::to_owned),
         profile_name: r["profileName"].as_str().map(str::to_owned),
         opened: r["ok"] == true,
+        setup_url: r["setup"].as_str().map(str::to_owned),
         open_error,
         running: r["running"] == true,
         loaded: r["loaded"] == true,

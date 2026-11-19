@@ -54,13 +54,43 @@ if (PARENT) setInterval(() => { try { process.kill(PARENT, 0); } catch (e) { if 
 function body(req) { return new Promise((res, rej) => { const c = []; req.on('data', d => c.push(d)); req.on('end', () => res(Buffer.concat(c))); req.on('error', rej); }); }
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(obj)); };
 
+const escHtml = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function setupPage(browser, dir) {
+  const edge = browser === 'edge', page = edge ? 'edge://extensions' : 'chrome://extensions', mac = process.platform === 'darwin';
+  return `<!doctype html><meta charset="utf-8"><title>Install the Scenecast recorder</title>
+<style>body{font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:720px;margin:48px auto;padding:0 24px;color:#1b1b1f}
+h1{font-size:24px}ol{padding-left:22px}li{margin:14px 0}code{background:#f2f2f4;padding:2px 6px;border-radius:5px;font-size:14px}
+button{font:inherit;padding:6px 14px;border-radius:7px;border:1px solid #c9c9cf;background:#fff;cursor:pointer}button.primary{background:#0f6cbd;color:#fff;border-color:#0f6cbd}
+.state{padding:12px 16px;border-radius:9px;background:#ebf3fc;margin:20px 0}.state.ok{background:#e7f4e6;color:#0e7a0d;font-weight:600}</style>
+<h1>Install the Scenecast recorder</h1>
+<div class="state" id="state">Waiting for the recorder… this page turns green when it connects.</div>
+<ol>
+<li><strong>Open ${page}</strong>: click the address bar (${mac ? '⌘L' : 'Ctrl+L'}), paste (${mac ? '⌘V' : 'Ctrl+V'}) and press Enter. Scenecast already copied it.
+ <button class="primary" id="copy">Copy ${page} again</button></li>
+<li><strong>Turn on Developer mode</strong> (${edge ? 'bottom of the left side of the page' : 'top right of the page'}).</li>
+<li><strong>Drag the Recorder Extension folder onto that page</strong> from the ${mac ? 'Finder' : 'File Explorer'} window Scenecast opened, or click <strong>Load unpacked</strong> and pick it:<br><code>${escHtml(dir)}</code></li>
+</ol>
+<script>
+document.getElementById('copy').onclick = () => navigator.clipboard.writeText(${JSON.stringify(page)}).then(() => { document.getElementById('copy').textContent = 'Copied'; });
+setInterval(async () => {
+  const p = await fetch('/ping').then(r => r.json()).catch(() => null);
+  const on = p && p.agent && (p.agent.polling || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
+  const el = document.getElementById('state');
+  el.className = 'state' + (on ? ' ok' : '');
+  el.textContent = on ? '✓ The recorder is connected. You can close this tab.' : 'Waiting for the recorder… this page turns green when it connects.';
+}, 1500);
+</script>`;
+}
+
 createServer(async (req, res) => {
   try {
     follow();
     const u = new URL(req.url, 'http://x');
     // Only the recorder (an extension, or a local tool with no Origin) talks to the receiver: never a web page.
     const origin = req.headers.origin;
-    if (origin && !/^(chrome|moz)?-?extension:\/\//.test(origin)) { res.writeHead(403); return res.end(); }
+    if (origin && !/^(chrome|moz)?-?extension:\/\//.test(origin) && origin !== `http://127.0.0.1:${PORT}`) { res.writeHead(403); return res.end(); }
+    // Install recorder's page, opened in the presenter's browser and profile: the steps, and a tick when it connects.
+    if (req.method === 'GET' && u.pathname === '/setup') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(setupPage(u.searchParams.get('browser'), u.searchParams.get('dir'))); }
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
     // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
     if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });

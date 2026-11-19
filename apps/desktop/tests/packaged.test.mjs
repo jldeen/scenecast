@@ -129,7 +129,7 @@ try {
   const first1 = await a;
   const item = (r, k) => (r.value?.items || []).find(i => i.id === k) || {};
   check('preflight: receiver up, Chrome found, recorder connected', b.ok && item(b, 'receiver').status === 'ok' && item(b, 'browser').status === 'ok' && item(b, 'recorder').status === 'ok', JSON.stringify(b).slice(0, 1500));
-  check('a newer check replaces the one running', !first1.ok ? /replaced/.test(first1.error) : true, JSON.stringify(first1).slice(0, 400));
+  check('a newer check replaces the one running', !first1.ok ? /replaced|took its place/.test(first1.error) : true, JSON.stringify(first1).slice(0, 400));
   const busy = await hook('busy');
   check('nothing left busy', busy.ok && !Object.keys(busy.value).length, JSON.stringify(busy));
 
@@ -147,8 +147,11 @@ try {
   // ---- Install recorder: chrome://extensions in the running Chrome, in the demo's profile ------------------------
   writeFileSync(join(DEMO, 'demo.json'), JSON.stringify({ ...cfg, chrome: { ...cfg.chrome, profile: 'Profile 3' } }, null, 2));
   const inst = await hook('install', { demo: id });
-  check('Install recorder: the folder, and the extensions page opened in Chrome (Profile 3)', inst.ok && resolve(inst.value.dir) === resolve(extDir) && inst.value.opened && inst.value.running && inst.value.profile === 'Profile 3', JSON.stringify(inst).slice(0, 1500));
-  const extPage = await waitFor('chrome://extensions', () => ctx.pages().find(p => p.url().startsWith('chrome://extensions')), 20000).catch(() => null);
+  check('Install recorder: the folder, and its setup page opened in Chrome (Profile 3)', inst.ok && resolve(inst.value.dir) === resolve(extDir) && inst.value.opened && inst.value.running && inst.value.profile === 'Profile 3', JSON.stringify(inst).slice(0, 1500));
+  const extPage = await waitFor('the setup page', () => ctx.pages().find(p => p.url().startsWith(`http://127.0.0.1:${PORT}/setup`)), 20000).catch(() => null);
+  // It turns green on its own: the recorder is connected.
+  const green = extPage && await waitFor('the setup page to say connected', () => extPage.locator('.state.ok').count(), 15000).catch(() => 0);
+  check('…and says the recorder is connected', !!green);
   check('…as a tab in that profile\'s window', !!extPage, ctx.pages().map(p => p.url()).join(', '));
 
   // ---- Quit: the receiver goes with the app ---------------------------------------------------------------------

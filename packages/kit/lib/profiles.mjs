@@ -99,8 +99,11 @@ export async function browserProfiles({ browser = defaultBrowser(), userDataDir,
   const prof = state.profile || {};
   const cache = prof.info_cache || {};
   const active = new Set(running ? [...(prof.last_active_profiles || []), ...mine.map(p => p.profile).filter(Boolean)] : []);
+  // Local State lags a new profile (it's written in batches): the profile folders, and the running browser's own
+  // --profile-directory, count too.
   const dirs = new Set(Object.keys(cache));
-  if (!dirs.size && existsSync(join(userDataDir, 'Default'))) dirs.add('Default');
+  try { for (const n of readdirSync(userDataDir)) if (/^(Default|Profile \d+)$/.test(n) && existsSync(join(userDataDir, n, 'Preferences'))) dirs.add(n); } catch (e) { /* no such folder */ }
+  for (const p of mine) if (p.profile) dirs.add(p.profile);
   const order = prof.profiles_order || [];
   const profiles = [...dirs].sort((a, b) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999) || a.localeCompare(b)).map(dir => {
     const c = cache[dir] || {};
@@ -118,8 +121,10 @@ export async function browserProfiles({ browser = defaultBrowser(), userDataDir,
   return { browser, userDataDir, running, pid: running ? mine[0].pid : null, profiles, picked: pickProfile(profiles, preferred) };
 }
 
-// Install recorder's browser step: the extensions page, in the presenter's running browser and the demo's profile (a
-// new tab in it; nothing quit or restarted). Prints what it did and what the profile already has, as JSON.
+// Install recorder's browser step. Browsers don't open their extensions page from outside (a chrome:// address given
+// to a running Chrome opens a new tab instead), so: a window of the demo's profile in the running browser, on the
+// receiver's setup page (the steps, chrome://extensions to copy, and a tick when the recorder connects); the app puts
+// chrome://extensions on the clipboard too. Prints what it did and what the profile already has, as JSON.
 export async function openExtensionsPage(demo) {
   const { openInBrowser } = await import('../../player/launch.mjs');
   const ch = demo.cfg.chrome || {};
@@ -127,10 +132,12 @@ export async function openExtensionsPage(demo) {
   const info = await browserProfiles({ browser, userDataDir: ch.userDataDir, preferred: ch.profile, pictures: false });
   const p = info.profiles.find(x => x.dir === info.picked);
   const page = browser === 'edge' ? 'edge://extensions' : 'chrome://extensions';
+  const port = +(process.env.REPLICA_RX_PORT || demo.cfg.receiverPort || 47621);
+  const setup = `http://127.0.0.1:${port}/setup?browser=${browser}&dir=${encodeURIComponent(extensionDir())}`;
   // REPLICA_NO_OPEN (the UI test): say what would open, open nothing.
-  const r = process.env.REPLICA_NO_OPEN ? { ok: false, error: 'not opening (REPLICA_NO_OPEN)' } : await openInBrowser(page, { browser, profile: info.picked, userDataDir: ch.userDataDir });
+  const r = process.env.REPLICA_NO_OPEN ? { ok: false, error: 'not opening (REPLICA_NO_OPEN)' } : await openInBrowser(setup, { browser, profile: info.picked, userDataDir: ch.userDataDir });
   const oldLoaded = info.profiles.some(x => /[\\/]\.scenecast[\\/]extension[\\/]?$/i.test((x.extension && x.extension.path) || ''));
-  return { ok: r.ok, error: r.error || null, browser, page, running: info.running, profile: info.picked, profileName: p ? p.name : info.picked,
+  return { ok: r.ok, error: r.error || null, browser, page, setup, running: info.running, profile: info.picked, profileName: p ? p.name : info.picked,
     loaded: !!(p && p.extension.id && !/\.scenecast/.test(p.extension.path || '')), devMode: p ? p.extension.devMode : null, oldLoaded };
 }
 

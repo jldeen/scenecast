@@ -420,7 +420,7 @@ const REGIONS = {
     const b = o.browser, connected = rxState().connected;
     const shot = n => `img/setup/${b}-${n}.png`;
     const notes = [];
-    if (o.openError) notes.push(`Couldn\u2019t open ${esc(o.extensionsPage)} (${esc(o.openError)}). Open ${esc(o.browserName)}, type <code>${esc(o.extensionsPage)}</code> in the address bar and press Enter.`);
+    if (o.openError) notes.push(`Couldn\u2019t open ${esc(o.browserName)} (${esc(o.openError)}). Open it yourself, type <code>${esc(o.extensionsPage)}</code> in the address bar and press Enter.`);
     else if (!o.running) notes.push(`${esc(o.browserName)} wasn\u2019t open: it\u2019s starting with your profile ${esc(o.profileName || '')}.`);
     if (o.oldLoaded) notes.push('You still have the old copy (from the hidden .scenecast folder) loaded: click <strong>Remove</strong> on it first.');
     if (o.loaded && o.devMode === false) notes.push('Developer mode is off, so the recorder is switched off: turn Developer mode on (step 1).');
@@ -428,16 +428,16 @@ const REGIONS = {
       <div class="path"><code data-test="extension-dir">${esc(o.dir)}</code><button class="btn small" data-reveal="${esc(o.dir)}">Show in ${folderWord()}</button></div>`;
     return `<div class="notice ${connected ? 'ok' : 'info'}" data-test="install-status" data-connected="${!!connected}"><div>
         ${connected ? '<strong>Done: the recorder is connected.</strong> You won\u2019t need to do this again.'
-          : `<strong>${o.opened ? `${esc(o.extensionsPage)} is open in ${esc(o.browserName)}${o.profileName ? ` (${esc(o.profileName)})` : ''}` : 'Almost there'}</strong>, and the folder is shown in ${folderWord()}. Do the steps below; this turns green on its own.`}
+          : `<strong>${o.opened ? `A Scenecast page opened in ${esc(o.browserName)}${o.profileName ? ` (${esc(o.profileName)})` : ''}` : 'Almost there'}</strong>, and the folder is shown in ${folderWord()}. <strong>${esc(o.extensionsPage)}</strong> is copied: click the browser\u2019s address bar, paste and press Enter. Then the steps below; this turns green on its own.`}
       </div></div>
       ${notes.map(n => `<div class="notice warn"><div>${n}</div></div>`).join('')}
       <div class="path"><code data-test="extension-dir">${esc(o.dir)}</code>
         <button class="btn small" data-copy="${esc(o.dir)}" data-test="copy-path">Copy path</button>
         <button class="btn small" data-reveal="${esc(o.dir)}">Show in ${folderWord()}</button>
-        <button class="btn small" data-action="install">Open ${esc(o.extensionsPage)} again</button></div>
+        <button class="btn small" data-copy="${esc(o.extensionsPage)}">Copy ${esc(o.extensionsPage)}</button></div>
       <ol class="step-cards">
         <li><figure><img src="${shot('1-developer-mode')}" alt="The extensions page with the Developer mode switch circled"></figure>
-          <div><strong>Turn on Developer mode</strong><p class="small muted">${b === 'edge' ? 'Bottom of the left side of the page.' : 'Top right of the page.'}</p></div></li>
+          <div><strong>Open ${esc(o.extensionsPage)}, turn on Developer mode</strong><p class="small muted">Paste ${esc(o.extensionsPage)} (copied) in the address bar and press Enter. Developer mode is ${b === 'edge' ? 'at the bottom of the left side of the page' : 'top right of the page'}.</p></div></li>
         <li><figure><img src="${shot('2-load-unpacked')}" alt="Developer mode on, with Load unpacked circled"></figure>
           <div><strong>Drag the Recorder Extension folder onto the page</strong><p class="small muted">From the ${folderWord()} window that just opened. Or click <strong>Load unpacked</strong> and pick the folder (Copy path, then paste it in the dialog${isMac() ? ' with ⌘⇧G' : ''}).</p></div></li>
         <li><figure><img src="${shot('3-loaded')}" alt="Scenecast Recorder loaded, its Reload button circled"></figure>
@@ -854,6 +854,9 @@ const ACTIONS = {
   library: renderLibrary,
   extension: () => step('extension', 'prepare_extension', {}),
   install: () => {
+    // Browsers only open their extensions page from their own address bar: its address goes on the clipboard now,
+    // while this click still counts as one.
+    copyText(`${demo()?.browser === 'edge' ? 'edge' : 'chrome'}://extensions`);
     if (S.tab !== 'record') { S.tab = 'record'; openDemo(S.id); }
     setTimeout(() => $('[data-region=install]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
     return step('install', 'install_recorder', {});
