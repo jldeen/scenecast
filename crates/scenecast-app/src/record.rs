@@ -100,7 +100,8 @@ pub fn retire_old_extension() -> bool {
         return false;
     };
     if v.starts_with("0.0.") {
-        return false;
+        // Already the stub: gone once no browser profile still has it loaded.
+        return !old_extension_loaded(&old) && std::fs::remove_dir_all(&old).is_ok();
     }
     let manifest = serde_json::json!({
         "manifest_version": 3,
@@ -118,6 +119,61 @@ pub fn retire_old_extension() -> bool {
         )
         .is_ok()
         && std::fs::write(old.join("popup.html"), popup).is_ok()
+}
+
+/// Whether any Chrome or Edge profile on this computer still has the extension in `dir` loaded (its path is in the
+/// profile's preferences).
+fn old_extension_loaded(dir: &Path) -> bool {
+    let needle = serde_json::to_string(&dir.to_string_lossy()).unwrap_or_default();
+    let needle = needle.trim_matches('"');
+    let roots: Vec<PathBuf> = if cfg!(windows) {
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home().join("AppData").join("Local"));
+        vec![
+            local.join("Google").join("Chrome").join("User Data"),
+            local.join("Microsoft").join("Edge").join("User Data"),
+        ]
+    } else if cfg!(target_os = "macos") {
+        let support = home().join("Library").join("Application Support");
+        vec![
+            support.join("Google").join("Chrome"),
+            support.join("Microsoft Edge"),
+        ]
+    } else {
+        vec![
+            home().join(".config").join("google-chrome"),
+            home().join(".config").join("microsoft-edge"),
+        ]
+    };
+    roots
+        .iter()
+        .filter_map(|r| std::fs::read_dir(r).ok())
+        .flatten()
+        .flatten()
+        .any(|profile| {
+            ["Preferences", "Secure Preferences"].iter().any(|f| {
+                std::fs::read_to_string(profile.path().join(f)).is_ok_and(|t| t.contains(needle))
+            })
+        })
+}
+
+/// A demo made with 0.3.0's template names `"profile": "Default"` without the presenter picking it: that isn't a
+/// choice, so it goes (the recorder then uses the profile that's open). A profile the presenter picked stays.
+pub fn migrate_profile(dir: &Path) -> Result<bool, AppError> {
+    let file = dir.join("demo.json");
+    let mut cfg: Value = serde_json::from_slice(&std::fs::read(&file)?)?;
+    let Some(chrome) = cfg.get_mut("chrome").and_then(Value::as_object_mut) else {
+        return Ok(false);
+    };
+    if chrome.get("profile").and_then(Value::as_str) != Some("Default")
+        || chrome.get("profilePicked") == Some(&Value::Bool(true))
+    {
+        return Ok(false);
+    }
+    chrome.remove("profile");
+    std::fs::write(&file, serde_json::to_string_pretty(&cfg)? + "\n")?;
+    Ok(true)
 }
 
 /// The receiver port the demo's recorder uses: `REPLICA_RX_PORT`, else `demo.json` `receiverPort`, else the default.
@@ -364,11 +420,28 @@ pub fn status(dir: &Path) -> Result<RecordStatus, AppError> {
     )?)
 }
 
+/// Stops recording. Nothing recorded is an error that says why, never an empty success.
 pub fn stop(dir: &Path) -> Result<RecordSummary, AppError> {
-    Ok(recorder::record_stop(
-        &crate::receiver::engine_for(dir)?,
-        dir,
-    )?)
+    let summary = recorder::record_stop(&crate::receiver::engine_for(dir)?, dir).map_err(|e| {
+        match e {
+            recorder::RecorderError::Recorder(m) if m == "not recording" => AppError::Invalid(
+                "the recorder wasn't recording (it never started, or the browser restarted it). Run Check, then start again."
+                    .into(),
+            ),
+            e => e.into(),
+        }
+    })?;
+    nothing_recorded(&summary)?;
+    Ok(summary)
+}
+
+fn nothing_recorded(summary: &RecordSummary) -> Result<(), AppError> {
+    if summary.states == 0 {
+        return Err(AppError::Invalid(
+            "the recorder captured no screens (0). Run Check, then start again.".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -400,7 +473,15 @@ mod tests {
         if std::env::var_os("REPLICA_RX_PORT").is_none() {
             assert_eq!(receiver_port(&demo.dir), DEFAULT_RECEIVER_PORT);
         }
-        // 0.3.0's template said "Default" for every demo: not a choice. A picked profile is kept.
+        // 0.3.0's template said "Default" for every demo: not a choice, and it's taken out. A picked one is kept.
+        let file = demo.dir.join("demo.json");
+        let mut cfg: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        cfg["chrome"]["profile"] = Value::from("Default");
+        std::fs::write(&file, cfg.to_string()).unwrap();
+        assert!(migrate_profile(&demo.dir).unwrap());
+        let cfg: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert!(cfg["chrome"].get("profile").is_none() && cfg["chrome"]["browser"] == "edge");
+        assert!(!migrate_profile(&demo.dir).unwrap());
         assert_eq!(profile(&demo.dir), None);
         set_profile(&demo.dir, "Profile 10").unwrap();
         assert_eq!(profile(&demo.dir).as_deref(), Some("Profile 10"));
@@ -408,6 +489,14 @@ mod tests {
         assert_eq!(profile(&demo.dir).as_deref(), Some("Default"));
         set_profile(&demo.dir, "").unwrap();
         assert_eq!(profile(&demo.dir), None);
+        assert!(nothing_recorded(&RecordSummary::default()).is_err());
+        assert!(
+            nothing_recorded(&RecordSummary {
+                states: 3,
+                ..Default::default()
+            })
+            .is_ok()
+        );
         let s = setup_for(PathBuf::from("/x/extension"), "edge", 47621);
         assert_eq!(s.extensions_page, "edge://extensions");
         assert!(s.steps.iter().any(|s| s.contains("Load unpacked")));

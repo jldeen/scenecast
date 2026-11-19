@@ -4,7 +4,7 @@
 //   browser    Edge or Chrome running, with the demo's profile  → opens a window of that profile (or launches it if
 //              (and the debugging port, for the agent recorder)    it isn't running at all); never restarts it
 //   recorder   the extension (or agent) polling the receiver    → builds the extension folder and says how to load it
-//   apps       each app's tab open, light, on its start screen    → opens a missing tab, reloads one off its start
+//   apps       each app's tab open (light or dark), on its start screen    → opens a missing tab, reloads one off its start
 // Matches replica-kit's `replica preflight`. Under a minute when everything is set (each probe is bounded).
 // preflight(demo, { fix, onItem }) is the library call (the desktop app shows each item as it lands).
 import { execFile, spawn } from 'node:child_process';
@@ -40,6 +40,26 @@ function listening(port) {
 async function op(port, cmd, tmoS) {
   const { send } = await import('../../recorder/cli.mjs');
   return send(cmd, tmoS, port);
+}
+
+// Before recording: the recorder connected and running this app's version. One the browser still runs from before an
+// update is reloaded (it can do that itself); when it can't, the answer says to. { ok, version } or { error }.
+export async function recorderReady(demo, { waitS = 6 } = {}) {
+  const cfg = demo.cfg, port = +(process.env.REPLICA_RX_PORT || cfg.receiverPort);
+  if (cfg.recorder === 'agent') return { ok: true };
+  const browser = (cfg.chrome && cfg.chrome.browser) || defaultBrowser(), bname = NAME[browser] || browser, page = PAGE[browser];
+  const ver = JSON.parse(readFileSync(join(KIT, 'recorder', 'package.json'), 'utf8')).version;
+  const connected = p => p && p.agent && (p.agent.polling || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
+  let up = await ping(port, 1500);
+  for (let i = 0; i < waitS * 2 && !connected(up); i++) { await sleep(500); up = await ping(port, 1500); }
+  if (!up) return { error: `The receiver isn't running on port ${port}. Run Check, then start again.` };
+  if (!connected(up)) return { error: `The recorder isn't connected. Open ${bname} with the recorder in it (Install recorder shows how), then start again.` };
+  const version = async () => { const e = await op(port, { op: 'extension' }, 8); return e.ok && e.value ? e.value.version : null; };
+  const have = await version();
+  if (have === ver) return { ok: true, version: have };
+  const r = await op(port, { op: 'reload' }, 5);
+  if (r.ok) for (let i = 0; i < 30; i++) { await sleep(500); if (connected(await ping(port, 1500)) && await version() === ver) return { ok: true, version: ver, reloaded: have || 'unknown' }; }
+  return { error: `Reload the recorder extension: ${bname} is running recorder ${have || '(an old one)'}, and this app's is ${ver}. At ${page}, click Reload (↻) on Scenecast Recorder (and Remove any other Scenecast Recorder there), then start again.`, version: have, want: ver };
 }
 
 export async function preflight(demo, { fix = true, onItem = () => {}, waitAgentS = fix ? 20 : 6 } = {}) {
@@ -139,7 +159,7 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
     return { status: 'fail', detail: recorderAdvice({ info, profile, browser, extDir, other: await browserProfiles({ browser: browser === 'edge' ? 'chrome' : 'edge', procs, pictures: false }).catch(() => null) }), extensionDir: extDir };
   });
 
-  // Each app's tab: open, light, on its start screen. Only with the recorder there to look.
+  // Each app's tab: open, on its start screen (its theme said, never a reason to stop). Only with the recorder there to look.
   if (rec.status === 'ok') {
     const r = await op(port, { op: 'preflight', apps: cfg.apps, fix, waitS: 20 }, 120);
     for (const a of cfg.apps) {
@@ -148,9 +168,11 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
         if (!r.ok) return { status: 'fail', detail: r.error };
         if (o.missing) return { status: 'fail', detail: `no tab for ${a.id} (${a.match || a.url})${a.url ? '' : ': no url in demo.json to open'}` };
         if (o.r && o.r.error) return { status: 'fail', detail: o.r.error };
-        if (o.light === false) return { status: 'fail', detail: `${a.id} reads dark: set its theme to Light (not System)` };
         if (o.onStart === false) return { status: 'fail', detail: `${a.id} isn't on its start screen (${o.r.url})` };
-        return { status: o.fixed.length ? 'fixed' : 'ok', detail: `${o.r.url}${o.fixed.length ? ` (${o.fixed.join(', ')})` : ''}` };
+        // Light or dark both record; demo.json "theme" only adds a word when a tab doesn't match it.
+        const theme = o.light === false ? 'dark' : o.light === true ? 'light' : null;
+        const off = cfg.theme && theme && theme !== cfg.theme ? `; reads ${theme}, the demo's theme is ${cfg.theme}` : '';
+        return { status: o.fixed.length ? 'fixed' : 'ok', detail: `${o.r.url}${o.fixed.length ? ` (${o.fixed.join(', ')})` : ''}${theme ? ` · ${theme}` : ''}${off}` };
       });
     }
   } else for (const a of cfg.apps) await item(`app ${a.id}`, async () => ({ status: 'skip', detail: 'needs the recorder connected' }));

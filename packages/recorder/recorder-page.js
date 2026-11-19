@@ -142,9 +142,14 @@
     const frames = [...document.querySelectorAll('iframe')].filter(f => { const r = f.getBoundingClientRect(); return r.width * r.height > 0.3 * area; }).map(f => { try { return new URL(f.src, location.href).origin + new URL(f.src, location.href).pathname; } catch (e) { return null; } }).filter(Boolean);
     return { kind, groups, list, handles, frames };
   };
+  // The system's preference (dark) and how the page looks (theme: its opaque background at the middle, light or dark).
   R.colorScheme = () => {
     const bg = getComputedStyle(document.body || document.documentElement).backgroundColor;
-    return { dark: matchMedia('(prefers-color-scheme: dark)').matches, bg, scheme: getComputedStyle(document.documentElement).colorScheme };
+    const lum = c => { const m = /rgba?\(([^)]+)\)/.exec(c || ''); if (!m) return null; const v = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); if (v.length > 3 && v[3] < 0.5) return null; return (0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]) / 255; };
+    let l = null;
+    for (const e of [document.elementFromPoint(innerWidth / 2, innerHeight / 2), document.body, document.documentElement]) { for (let x = e; x && l === null; x = x.parentElement) l = lum(getComputedStyle(x).backgroundColor); if (l !== null) break; }
+    const dark = matchMedia('(prefers-color-scheme: dark)').matches, scheme = getComputedStyle(document.documentElement).colorScheme;
+    return { dark, bg, scheme, theme: l === null ? (dark && /dark/.test(scheme) ? 'dark' : 'light') : l < 0.5 ? 'dark' : 'light' };
   };
   try { new MutationObserver(l => { R.mut += l.length; R.lastMut = Date.now(); }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true }); } catch (e) {}
 

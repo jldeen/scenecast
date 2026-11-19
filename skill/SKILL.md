@@ -105,9 +105,9 @@ Edit `demo.json` as needed: each app's `match` and `start`, `chrome.browser` and
 1. **Ask first** before taking the presenter's browser (the coordinator, or ask_user), and say for how long.
 2. Once per browser: `scenecast extension`, then load `Documents/Scenecast/Recorder Extension` unpacked (`edge://extensions` or
    `chrome://extensions`, Developer mode, Load unpacked). See references/guide.md for the presenter's version.
-3. `scenecast preflight`: receiver, browser and profile, recorder, each app's tab (open, **light**, on its start
-   screen). It fixes only what fails and never relaunches a running browser. A dark app needs its theme set to
-   Light (not System) by hand. Run it again until everything passes; nothing else.
+3. `scenecast preflight`: receiver, browser and profile, recorder, each app's tab (open, on its start screen; its
+   theme, light or dark, is said, never a failure). It fixes only what fails and never relaunches a running browser.
+   Set each app's theme explicitly (Light or Dark, not System). Run it again until everything passes; nothing else.
 
 ### 3 · Record: one pass (< 45 min for a Demo 1-size demo)
 
@@ -190,7 +190,7 @@ command line: `scenecast present`, then **⌥G** (**Ctrl+Alt+G**) on the stage a
 - **Never click a menu item as a fallback** when a menu ignores Escape: click a neutral spot or reload.
 - **Never approve, send or delete** anything in the real product while recording, beyond what the demo itself does.
 - Don't change tenant settings beyond the demo's own reset. No tenant data in a shared repo.
-- Light mode everywhere.
+- One theme per demo, set explicitly in each app (Light or Dark, not System); demo.json `"theme"` names it.
 - Her name is **Jessica**, never "Jess".
 - Report what still needs a person: running the demo while it records, judging the sheets, rehearsing on the venue
   display with the presenter guide on the laptop screen.

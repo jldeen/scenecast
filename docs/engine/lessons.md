@@ -4,8 +4,10 @@ What the Ignite '26 Demo 1 replica taught, the hard way. The kit handles most of
 
 ## Before recording
 
-- **Light mode, set to Light, not System.** System follows the Mac, which can flip mid-capture. Every capture and
-  every video is light. The recorder refuses a dark page; `fidelity` checks every screen.
+- **Pick the theme, set it explicitly (Light or Dark, not System).** System follows the Mac, which can flip
+  mid-capture. The recorder records either one, and each screen keeps the theme it was captured in (the replica
+  answers `prefers-color-scheme` as it was then). demo.json `"theme"` says which the demo should be in: a screen in
+  the other is noted, and `fidelity` checks every screen against the theme it was recorded in. Never a refusal.
 - **Chrome without the debugger bar.** Quit Chrome and relaunch it with `--silent-debugger-extension-api` on the
   presenter's profile. Clicking the bar's × detaches every tab from the automation: the recorder loses them all.
 - **Ask before taking her Chrome.** Other sessions may be driving it. Message the coordinator first, and say when

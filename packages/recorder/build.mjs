@@ -60,6 +60,8 @@ export function buildExtension(outDir, port) {
   // One classic service worker script: the debugger shim, the recorder, then the glue that starts it.
   const sw = `// Built by scenecast (packages/recorder/build.mjs --extension); edit the sources, not this file.
 const DEFAULT_PORT = ${+port};
+// The version of the code running (the manifest's can be what the browser read when it first loaded the folder).
+const RECORDER_VERSION = ${JSON.stringify(VERSION)};
 let RX = 'http://127.0.0.1:' + DEFAULT_PORT;
 ${ext('cdp-page.js')}
 const page0 = { context: () => CDPX.ctx, request: CDPX.ctx.request, url: () => '', frames: () => [] };

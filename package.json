@@ -13,7 +13,8 @@
     "test:capture": "node packages/selftest/capture-fixture.mjs",
     "test:e2e": "node packages/selftest/selftest.mjs",
     "test:fidelity": "node packages/selftest/fidelity-loop.mjs",
-    "test:ai": "node packages/selftest/ai-modes.mjs"
+    "test:ai": "node packages/selftest/ai-modes.mjs",
+    "test:auditaur": "node apps/desktop/tests/auditaur-smoke.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.56.0"

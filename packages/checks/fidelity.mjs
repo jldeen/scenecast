@@ -271,29 +271,32 @@ try {
   } });
 
   tasks.push({ id: 'light', deps: ['two-run'], run: async () => {
-    // ---- light: every capture recorded in light mode, and every replica screen reads light.
+    // ---- light (theme): the replica keeps the theme each screen was recorded in, light or dark. demo.json "theme"
+    // (light|dark) names the one the demo should be in; a capture in the other is listed.
     if (want('light') && !QUICK) {
-      const dark = [];
+      const off = [], themes = new Set();
       for (const f of readdirSync(join(demo.data, 'snaps')).filter(f => f.endsWith('.json') && !f.startsWith('hovers-'))) {
         const m = JSON.parse(readFileSync(join(demo.data, 'snaps', f), 'utf8'));
-        // demo.json checks.light "rendered": the apps were set to Light while the OS was dark, so only the screens count.
-        if (m.colorScheme && m.colorScheme !== 'light' && ((demo.cfg.checks || {}).light !== 'rendered')) dark.push(`${m.id}: captured with prefers-color-scheme ${m.colorScheme}`);
+        const t = m.theme || 'light'; // before 0.3.2 only light pages recorded
+        themes.add(t);
+        if (demo.cfg.theme && t !== demo.cfg.theme) off.push(`${m.id}: captured ${t}, the demo's theme is ${demo.cfg.theme}`);
       }
-      if (check && check.shots && check.shots[0]) {
+      const want1 = demo.cfg.theme || (themes.size === 1 ? [...themes][0] : null);
+      if (want1 && check && check.shots && check.shots[0]) {
         const page = await browser.newPage();
         const run1 = join(demo.out, 'check', 'run1');
         const shots = Object.entries(check.shots[0]);
         const lum = await luminance(page, shots.map(([, s]) => readFileSync(join(run1, s.file)).toString('base64')));
-        shots.forEach(([n], i) => { if (lum[i] < 0.55) dark.push(`${n}: replica screen is dark (luminance ${lum[i]})`); });
+        shots.forEach(([n], i) => { if (want1 === 'light' ? lum[i] < 0.55 : lum[i] > 0.45) off.push(`${n}: replica screen reads ${want1 === 'light' ? 'dark' : 'light'} (luminance ${lum[i]}), recorded ${want1}`); });
         await page.close();
       }
-      add('light', 'Light mode', dark.length ? 'fail' : 'pass', dark.length ? dark.join('\n') : 'every capture light, every screen reads light');
+      add('light', 'Theme', off.length ? 'fail' : 'pass', off.length ? off.join('\n') : `every screen as recorded (${[...themes].join(' and ') || 'light'})`);
     }
   } });
 
   tasks.push({ id: 'render', deps: [], run: async () => {
     // ---- render: every screen (in --quick, each one that changed) loads with no error, console message or request
-    // off the machine, and reads light. Pictures: .out/render/<state>.png, to look at.
+    // off the machine, and reads in the theme it was recorded in. Pictures: .out/render/<state>.png, to look at.
     if (!want('render')) return;
     const list = Object.keys(S).filter(inScope);
     if (!list.length) return add('render', 'Every screen renders', 'skip', 'no screen changed');
@@ -314,8 +317,10 @@ try {
     }));
     const cp = await browser.newPage();
     const lum = await luminance(cp, shots.map(x => x[1])); await cp.close();
-    shots.forEach(([id], i) => { if (lum[i] < 0.55) bad.push(`${id}: reads dark (luminance ${lum[i]}); recapture in light mode`); });
-    add('render', 'Every screen renders', bad.length ? 'fail' : 'pass', bad.length ? bad.join('\n') : `${list.length} screens${QUICK ? ' (changed)' : ''}, no errors, light (render/*.png)`);
+    // Each screen reads as it was recorded: light, or dark when it was captured dark.
+    const themeOf = id => { try { return JSON.parse(readFileSync(join(demo.data, 'snaps', (S[id].snap || id) + '.json'), 'utf8')).theme || 'light'; } catch (e) { return 'light'; } };
+    shots.forEach(([id], i) => { const t = themeOf(id); if (t === 'light' ? lum[i] < 0.55 : lum[i] > 0.45) bad.push(`${id}: reads ${t === 'light' ? 'dark' : 'light'} (luminance ${lum[i]}), recorded ${t}`); });
+    add('render', 'Every screen renders', bad.length ? 'fail' : 'pass', bad.length ? bad.join('\n') : `${list.length} screens${QUICK ? ' (changed)' : ''}, no errors, each in its recorded theme (render/*.png)`);
   } });
 
   tasks.push({ id: 'transitions', deps: [], run: async () => {
@@ -957,7 +962,7 @@ try {
 
   // ---- for a person: what no script can judge.
   for (const [id, t] of [
-    ['manual-theme', "Each app's theme was set to Light (not System) before recording; dark mode anywhere means recapture"],
+    ['manual-theme', "Each app was in the theme the demo should show (light or dark) when it was recorded"],
     ['manual-look', 'The contact sheet and zoom sheet looked over: nothing missing, cut off, or out of place'],
     ['manual-pace', 'Pace feels right on stage (flow.pace; ?pace= to try)'],
     ['manual-differences', "The demo's README lists every difference from the live product, every edit and every composed part"],

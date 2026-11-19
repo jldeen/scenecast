@@ -97,7 +97,9 @@ async function recAddState(A, id, sig) {
   const st = { app: A.id, snap: id, sig: sig || await recSig(A.page), title: meta.title, on: [] };
   const focus = await recFocus(A.page);
   if (focus) st.focus = focus;
-  if (meta.cs && meta.cs.dark) REC.notes.push(`${id}: the page prefers dark mode; recapture in light mode`);
+  // Light or dark, it's recorded as it looks; demo.json "theme" only says when a screen doesn't match it.
+  if (meta.cs && meta.cs.theme) st.theme = meta.cs.theme;
+  if (REC.opts.theme && st.theme && st.theme !== REC.opts.theme) REC.notes.push(`${id}: reads ${st.theme}, and the demo's theme is ${REC.opts.theme}`);
   REC.states[id] = st;
   REC.sigs[A.id].set(st.sig, id);
   rlogr(`state ${id}`);
@@ -383,18 +385,16 @@ OPS.recordStart = async c => {
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
   Object.assign(REC, { on: true, resumed: undefined, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms });
   if (c.resume) return recResume(c);
-  for (const a of c.apps) {
-    const p = await pageFor(a.match);
+  // Every app's tab, or nothing starts: which aren't open, all at once.
+  const missing = [];
+  for (const a of c.apps || []) {
+    const p = await pageFor(a.match).catch(() => null);
+    if (!p) { missing.push(`${a.id} (a tab whose address has ${a.match})`); continue; }
     REC.apps.push({ id: a.id, match: a.match, page: p, state: null, n: 0, typing: null });
     REC.sigs[a.id] = new Map();
   }
-  const dark = [];
-  for (const A of REC.apps) {
-    await A.page.bringToFront(); await recInstall(A.page);
-    const cs = await A.page.mainFrame().evaluate(() => window.__rkrec && window.__rkrec.colorScheme()).catch(() => null);
-    if (cs && cs.dark) dark.push(A.id);
-  }
-  if (dark.length && !c.allowDark) { REC.on = false; return { error: `dark mode in ${dark.join(', ')}: set each app's theme to Light (not System) and start again` }; }
+  if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
+  for (const A of REC.apps) { await A.page.bringToFront(); await recInstall(A.page); }
   for (const A of REC.apps) {
     await A.page.bringToFront();
     if (c.neutral) await A.page.mouse.move(c.neutral[0], c.neutral[1]);

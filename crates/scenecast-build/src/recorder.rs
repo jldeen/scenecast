@@ -28,6 +28,9 @@ pub enum RecorderError {
     },
     #[error("the engine's `{command}` answered something that isn't JSON: {output}")]
     BadOutput { command: String, output: String },
+    /// The recorder answered with an error (`{"error": …}`): never read as an empty result.
+    #[error("{0}")]
+    Recorder(String),
 }
 
 /// How one preflight item came out.
@@ -120,7 +123,12 @@ pub fn parse_json<T: for<'de> Deserialize<'de>>(
         output: out.chars().take(400).collect(),
     };
     let start = out.find('{').ok_or_else(bad)?;
-    serde_json::from_str(&out[start..]).map_err(|_| bad())
+    let value: serde_json::Value = serde_json::from_str(&out[start..]).map_err(|_| bad())?;
+    // An error is an error, whatever the answer's type would make of it (a summary's fields all default to 0).
+    if let Some(e) = value.get("error").and_then(serde_json::Value::as_str) {
+        return Err(RecorderError::Recorder(e.to_owned()));
+    }
+    serde_json::from_value(value).map_err(|_| bad())
 }
 
 fn run(engine: &Engine, args: Vec<OsString>, command: &str) -> Result<String, RecorderError> {
@@ -260,6 +268,20 @@ mod tests {
         assert_eq!(
             r.items.iter().map(|i| i.status).collect::<Vec<_>>(),
             [ItemStatus::Ok, ItemStatus::Fixed, ItemStatus::Fail]
+        );
+    }
+
+    #[test]
+    fn an_error_answer_is_an_error_not_an_empty_recording() {
+        let e = parse_json::<RecordSummary>("record stop", r#"{ "error": "not recording" }"#)
+            .unwrap_err();
+        assert!(
+            matches!(e, RecorderError::Recorder(ref m) if m == "not recording"),
+            "{e}"
+        );
+        assert!(
+            parse_json::<RecordStatus>("record status", r#"{"error":"timeout waiting for c1"}"#)
+                .is_err()
         );
     }
 

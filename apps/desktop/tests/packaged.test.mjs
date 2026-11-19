@@ -7,6 +7,11 @@
 //   - the profile that's open is found (not "Default"); Fix opens a missing profile's window in the running browser,
 //     closing and restarting nothing; Install recorder opens chrome://extensions in that browser and profile
 //   - preflight says the recorder is connected; overlapping checks never leave the demo "busy"
+//   - Record, through the real extension, with the system set to Dark and the pages light (as on Jessica's Mac):
+//     the window's live count goes up, Stop writes recording.json with at least 3 screens
+//   - a recorder older than the app: Record refuses ("Reload the recorder extension"), and Stop with nothing
+//     recording is an error, never "0 screens" as a success
+// It replaces Documents/Scenecast/Recorder Extension and uses port 47621: on CI, or with SCENECAST_PACKAGED_OK=1.
 //   node apps/desktop/tests/packaged.test.mjs <Scenecast.dmg | Scenecast_x.y.z_x64-setup.exe>
 import { execFileSync, spawn } from 'node:child_process';
 import { realpathSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -22,6 +27,7 @@ const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1500)}` : '')); if (!ok) fails.push(name); return ok; };
 const installer = resolve(process.argv[2] || '');
 if (!existsSync(installer)) { console.log(`usage: packaged.test.mjs <installer> (${installer} isn't there)`); process.exit(2); }
+if (!process.env.CI && !process.env.SCENECAST_PACKAGED_OK) { console.log('packaged.test.mjs replaces Documents/Scenecast/Recorder Extension and needs port 47621: it runs on CI, or set SCENECAST_PACKAGED_OK=1'); process.exit(2); }
 // The real path: macOS's temp folder is under /var, a symlink, and the updater won't run an app from there.
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'scenecast-packaged-')));
 const PORT = 47621;
@@ -105,7 +111,8 @@ try {
   await waitFor('the extension folder', () => existsSync(join(extDir, 'manifest.json')), 60000);
   check('the recorder extension is in Documents/Scenecast/Recorder Extension', existsSync(join(extDir, 'sw.js')));
   ctx = await chromium.launchPersistentContext(UDD, {
-    channel: 'chrome', headless: false, viewport: null, ignoreDefaultArgs: ['--disable-extensions', '--no-startup-window'],
+    // The system set to Dark while the pages are light (Jessica's Mac): light or dark, it records.
+    channel: 'chrome', headless: false, viewport: null, colorScheme: 'dark', ignoreDefaultArgs: ['--disable-extensions', '--no-startup-window'],
     args: ['--profile-directory=Profile 3', '--enable-unsafe-extension-debugging', '--silent-debugger-extension-api', '--no-first-run', '--no-default-browser-check'],
   });
   const first = ctx.pages()[0] || await ctx.newPage();
@@ -159,6 +166,41 @@ try {
   check('Copilot: the runtime fetched from the release and checked', rt.ok && rt.value.ready === true, JSON.stringify(rt).slice(0, 800));
   const ais = await hook('ai', { args: ['status'] }, 300000);
   check('Copilot: the SDK starts in the installed app (not signed in here)', ais.ok && ais.value.runtime && ais.value.runtime.ready === true && ais.value.signedIn === false, JSON.stringify(ais).slice(0, 800));
+
+  // ---- Record through the real extension: live count, then at least 3 screens in recording.json -----------------
+  writeFileSync(join(DEMO, 'demo.json'), JSON.stringify({ ...cfg, chrome: { ...cfg.chrome, profile: 'Profile 3' }, record: { ...(cfg.record || {}), auto: false } }, null, 2));
+  for (const p of ctx.pages()) if (p !== first && !p.url().startsWith(fx.chat)) await p.close().catch(() => {});
+  if (!first.url().startsWith(fx.chat)) await first.goto(fx.chat);
+  const adminTab = await ctx.newPage(); await adminTab.goto(fx.admin);
+  await first.bringToFront();
+  const RAW = join(tmp, 'raw');
+  rmSync(join(RAW, 'recording.json'), { force: true });
+  const started = await hook('record-start', { demo: id }, 300000);
+  check('Record starts (system Dark, pages light)', started.ok && started.value?.recording, JSON.stringify(started).slice(0, 800));
+  const live = await waitFor('the live count', async () => { const st2 = await hook('record-status', { demo: id }); return st2.ok && st2.value.recording && st2.value.count >= 2 && st2.value; }, 120000, 1000).catch(e => e.message);
+  check('while recording, the status counts the screens captured', live?.count >= 2, JSON.stringify(live).slice(0, 600));
+  if (started.ok) {
+    await first.getByRole('link', { name: 'Plugins' }).click(); await sleep(4000);
+    await waitFor('the third screen', async () => (await hook('record-status', { demo: id })).value?.count >= 3, 60000, 1000).catch(() => {});
+  }
+  const stopped = await hook('record-stop', { demo: id }, 600000);
+  const recFile = join(RAW, 'recording.json');
+  const states = existsSync(recFile) ? Object.keys(JSON.parse(readFileSync(recFile, 'utf8')).states || {}).length : 0;
+  check('Stop: recording.json has at least 3 screens', stopped.ok && stopped.value.states >= 3 && states >= 3, `${states} screens; ${JSON.stringify(stopped).slice(0, 600)}`);
+  const again = await hook('record-stop', { demo: id });
+  check('Stop with nothing recording is an error (never 0 screens as a success)', !again.ok && /wasn.t recording/.test(again.error), JSON.stringify(again));
+
+  // ---- An older recorder in the browser: Record refuses and says to reload it --------------------------------------
+  const man = join(extDir, 'sw.js'), manText = readFileSync(man, 'utf8');
+  writeFileSync(man, manText.replace(/const RECORDER_VERSION = "[^"]*";/, 'const RECORDER_VERSION = "0.0.9";'));
+  const reload = () => fetch(`http://127.0.0.1:${PORT}/cmd`, { method: 'POST', body: JSON.stringify({ op: 'reload' }) });
+  await reload();
+  await sleep(3000);
+  await waitFor('the old recorder to connect', async () => (await hook('state')).value.receiver.connected, 60000, 1000).catch(() => {});
+  const stale = await hook('record-start', { demo: id }, 180000);
+  check('a recorder older than the app: Record refuses, "Reload the recorder extension"', !stale.ok && /Reload the recorder extension/.test(stale.error) && /0\.0\.9/.test(stale.error), JSON.stringify(stale).slice(0, 600));
+  writeFileSync(man, manText);
+  await reload().catch(() => {});
 
   // ---- Quit: the receiver goes with the app ---------------------------------------------------------------------
   app.kill();
