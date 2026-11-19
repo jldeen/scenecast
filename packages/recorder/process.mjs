@@ -110,9 +110,13 @@ function cssFile(url, depth = 0) {
   const text = readFileSync(join(RAW, 'blobs', e.file), 'utf8');
   return rewriteCss(text, url, depth);
 }
+// The system theme the screen being processed was captured with: prefers-color-scheme in fetched CSS is answered as
+// it was then (as the serializer does for the page's own CSS), so the replica keeps the theme it was recorded in.
+let SCHEME = null;
+const pinScheme = t => SCHEME ? t.replace(/\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)/gi, (m, v) => (v.toLowerCase() === SCHEME) ? '(min-width: 0px)' : '(max-width: -1px)') : t;
 // url(...) in fetched CSS, resolved against the stylesheet's own URL.
 function rewriteCss(text, base, depth = 0) {
-  return text
+  return pinScheme(text)
     .replace(/@import\s+(?:url\()?\s*["']([^"']+)["']\s*\)?\s*([^;]*);/g, (m, u, media) => {
       const abs = new URL(u, base).href; const t = depth < 4 ? cssFile(abs, depth + 1) : null;
       return t === null ? '' : (media.trim() ? `@media ${media.trim()}{${t}}` : t);
@@ -217,12 +221,13 @@ for (const f of readdirSync(snapsDir)) {
   }
   for (const d of s.docs) d.urls = subUrls(d.urls);
   const byKey = Object.fromEntries(s.docs.map(d => [d.key, d]));
+  SCHEME = (byKey.main && byKey.main.meta.colorScheme) || null;
   for (const d of s.docs) {
     const name = d.key === 'main' ? `${id}.html` : `${id}.${d.key}.html`;
     writeFileSync(join(OUT, 'snaps', name), rewriteDoc(d, id, byKey));
   }
   const main = byKey.main;
-  writeFileSync(join(OUT, 'snaps', `${id}.json`), JSON.stringify({ id, title: main.meta.title, url: scrub(main.meta.url).split('?')[0], viewport: main.meta.viewport, colorScheme: main.meta.colorScheme, customElements: [...new Set(s.docs.flatMap(d => d.meta.customElements || []))], frames: s.docs.filter(d => d.key !== 'main').map(d => ({ key: d.key, parent: d.parent, origin: (d.frameUrl || '').split('/').slice(0, 3).join('/') })) }, null, 1));
+  writeFileSync(join(OUT, 'snaps', `${id}.json`), JSON.stringify({ id, title: main.meta.title, url: scrub(main.meta.url).split('?')[0], viewport: main.meta.viewport, colorScheme: main.meta.colorScheme, theme: main.meta.theme, customElements: [...new Set(s.docs.flatMap(d => d.meta.customElements || []))], frames: s.docs.filter(d => d.key !== 'main').map(d => ({ key: d.key, parent: d.parent, origin: (d.frameUrl || '').split('/').slice(0, 3).join('/') })) }, null, 1));
   report.snaps.push(id);
 }
 // Streams: one <body> file per frame (git delta-compresses them well), plus an index with the real timings.

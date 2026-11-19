@@ -30,7 +30,7 @@ async function findReceiver() {
 }
 setInterval(() => { findReceiver().catch(() => {}); }, 2000);
 // The extension's own state, for the popup and the CLI (record status shows it too).
-OPS.extension = async () => ({ version: chrome.runtime.getManifest().version, receiver: RX, tabs: CDPX.ctx.pages().length, watching: CDPX.ctx.pages().filter(p => p.attached).map(p => p.url().slice(0, 120)) });
+OPS.extension = async () => ({ version: RECORDER_VERSION, manifest: chrome.runtime.getManifest().version, receiver: RX, tabs: CDPX.ctx.pages().length, watching: CDPX.ctx.pages().filter(p => p.attached).map(p => p.url().slice(0, 120)) });
 
 chrome.runtime.onMessage.addListener((m, sender, reply) => {
   (async () => {

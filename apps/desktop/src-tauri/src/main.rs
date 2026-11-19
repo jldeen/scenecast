@@ -311,6 +311,7 @@ async fn preflight(
 fn ensure_receiver(state: &Shared, id: &str) -> Res<Value> {
     let dir = state.library.dir(id)?;
     let _ = std::fs::write(state.library.root.join(".last-demo"), id);
+    let _ = scenecast_app::record::migrate_profile(&dir);
     let started = scenecast_app::receiver::host().ensure(&dir);
     let mut out = receiver_json(state);
     if let Err(e) = started {
@@ -396,6 +397,8 @@ fn start_recorder_side(state: Shared) {
         {
             let _ = ensure_receiver(&state, last.trim());
         }
+        // The old hidden copy (0.3.0 and earlier): a stub until no browser has it loaded, then gone.
+        scenecast_app::record::retire_old_extension();
         let (dir, updated) = match scenecast_app::record::ensure_extension() {
             Ok(x) => x,
             Err(e) => {
@@ -427,7 +430,8 @@ fn start_recorder_side(state: Shared) {
 }
 
 /// The packaged-app test's way in (no WebDriver in an installer): with `SCENECAST_SELFTEST=<folder>`, each
-/// `<name>.request.json` there ({"action": "receiver"|"preflight"|"install"|"profiles"|"state", "demo": id, "fix":
+/// `<name>.request.json` there ({"action": "receiver"|"preflight"|"install"|"profiles"|"state"|"record-start"|
+/// "record-status"|"record-stop", "demo": id, "fix":
 /// bool}) runs through the same code as the window's buttons, and its answer lands in `<name>.response.json`.
 fn selftest_hook(state: Shared, app: AppHandle) {
     let Some(dir) = std::env::var_os("SCENECAST_SELFTEST").map(PathBuf::from) else {
@@ -472,6 +476,16 @@ fn selftest_hook(state: Shared, app: AppHandle) {
                             .dir(&id)
                             .and_then(|d| scenecast_app::record::profiles(Some(&d), None)),
                         "busy" => Ok(json!(state.busy.lock().expect("busy lock").clone())),
+                        "record-start" => state.library.dir(&id).and_then(|d| {
+                            let _ = scenecast_app::receiver::host().ensure(&d);
+                            scenecast_app::record::start(&d, false)
+                        }),
+                        "record-status" => state.library.dir(&id).and_then(|d| {
+                            Ok(serde_json::to_value(scenecast_app::record::status(&d)?)?)
+                        }),
+                        "record-stop" => state.library.dir(&id).and_then(|d| {
+                            Ok(serde_json::to_value(scenecast_app::record::stop(&d)?)?)
+                        }),
                         "version" => Ok(json!({
                             "version": app.package_info().version.to_string(),
                             "pid": std::process::id(),
@@ -1203,6 +1217,33 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(feature = "webdriver")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    #[cfg(feature = "auditaur")]
+    let builder = {
+        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+        let _ = tracing_subscriber::registry()
+            .with(tauri_plugin_auditaur::tracing_layer())
+            .try_init();
+        builder
+            .plugin(
+                tauri_plugin_auditaur::Builder::new()
+                    .service_name("scenecast-desktop")
+                    .session_name("dev")
+                    .redact_defaults(true)
+                    .build(),
+            )
+            // The frontend collector in front of invoke and listen (apps/desktop/auditaur, built by the smoke script).
+            .plugin(
+                tauri::plugin::Builder::<tauri::Wry>::new("scenecast-auditaur")
+                    .js_init_script(
+                        include_str!(concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/../auditaur/dist/bridge.js"
+                        ))
+                        .to_owned(),
+                    )
+                    .build(),
+            )
+    };
     let app = builder
         .manage(state.clone())
         .register_uri_scheme_protocol("scenecast", {
@@ -1257,6 +1298,10 @@ fn main() {
         .setup({
             let state = state.clone();
             move |app| {
+                #[cfg(feature = "auditaur")]
+                app.add_capability(
+                    r#"{"identifier":"auditaur","windows":["main"],"permissions":["auditaur:default"]}"#,
+                )?;
                 selftest_hook(state, app.handle().clone());
                 Ok(())
             }

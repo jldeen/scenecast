@@ -1,7 +1,6 @@
-// Preflight, on the recorder (scenecast preflight runs it; the same as replica-kit's replica preflight): each app's tab is open, reads light, and is on its start screen.
+// Preflight, on the recorder (scenecast preflight runs it; the same as replica-kit's replica preflight): each app's tab is open and on its start screen (light or dark).
 // It only reads, and doesn't bring tabs to the front. With ARGS.fix it acts on what failed: a missing tab is opened
-// at the app's URL, and a tab that isn't on its start screen loads the app's URL again (not a dark one: its theme
-// needs setting first). Then it checks again.
+// at the app's URL, and a tab that isn't on its start screen loads the app's URL again. Then it checks again.
 // ARGS: { apps: [{ id, match, url, start?: { url?, text?, sel? } }], fix, waitS }
 const DARK = 0.35;
 async function probe(p, start) {
@@ -46,7 +45,7 @@ for (const a of ARGS.apps || []) {
   }
   if (!p) { o.missing = true; continue; }
   o.r = o.r || await probe(p, a.start);
-  if (ARGS.fix && !o.r.error && startOk(o.r) === false && o.r.lum >= DARK && a.url) {
+  if (ARGS.fix && !o.r.error && startOk(o.r) === false && a.url) {
     await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     o.fixed.push('start'); o.r = await waitStart(p, a, ARGS.waitS || 20);
   }

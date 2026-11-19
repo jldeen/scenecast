@@ -468,10 +468,17 @@ const REGIONS = {
     const j = J(d.id).record || {};
     const stop = J(d.id)['record-stop'] || {};
     const st = j.status;
-    const recording = st ? st.recording : !!j.outcome && !stop.outcome;
+    // Recording only once the recorder says so: a start that failed never shows as recording.
+    const recording = !j.error && (st ? st.recording : !!j.outcome && !stop.outcome);
     const t = st?.timing || {};
     let html = '';
-    if (recording || running('record', d.id)) {
+    if (running('record', d.id) && !recording) {
+      html += `<div class="notice info" data-test="record-starting"><div><strong>Starting…</strong> Checking the recorder, then capturing each app’s start screen. Wait for <strong>Recording</strong> before you click anything in ${esc(d.apps.length > 1 ? 'the app tabs' : 'the app')}.</div></div>${progressBar(true)}`;
+    } else if (j.error) {
+      html += `<div class="notice bad" data-test="record-failed" role="alert"><div><strong>Recording didn’t start, so nothing was recorded.</strong> ${esc(j.error)}</div></div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-start" data-test="record-start">Try again</button></div>`;
+      return html;
+    } else if (recording) {
       html += `<div class="notice info" data-test="recording" data-busy="${!!st?.busy}" data-count="${st?.count ?? 0}"><div>
         <strong>Recording.</strong> Go through the demo in ${esc(d.apps.length > 1 ? 'the app tabs' : 'the app')} as you'll present it. ${st?.busy ? 'Hold on: capturing this screen' + (st.side ? ` (${esc(st.side)})` : '') + '…' : 'Ready for your next step.'}</div></div>
         <div class="stats">
@@ -484,6 +491,14 @@ const REGIONS = {
         <p class="small muted">Side states (hovers, menus, panes, zoom, long lists) are captured on each new screen as you go${st?.side ? `: now <strong>${esc(st.side)}</strong>` : ''}.</p>
         ${st?.log?.length ? `<details><summary>Recorder log</summary><div class="log">${st.log.map(esc).join('\n')}</div></details>` : ''}
         <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-stop" data-test="record-stop" ${running('record-stop', d.id) ? 'disabled' : ''}>Stop recording</button></div>`;
+    } else if (stop.error) {
+      html += `<div class="notice bad" data-test="record-failed" role="alert"><div><strong>Nothing was recorded.</strong> ${esc(stop.error)}</div></div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-start" data-test="record-start">Record again</button></div>`;
+      return html;
+    } else if (stop.outcome && !stop.outcome.states) {
+      html += `<div class="notice bad" data-test="record-failed" role="alert"><div><strong>Nothing was recorded (0 screens).</strong> Run Check above, then record again.</div></div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-start" data-test="record-start">Record again</button></div>`;
+      return html;
     } else if (stop.outcome) {
       const s = stop.outcome;
       const tt = s.timing || {};
@@ -871,7 +886,7 @@ const ACTIONS = {
   'preflight-fix': () => step('preflight', 'preflight', { fix: true }),
   'record-start': async () => {
     J(S.id)['record-stop'] = {};
-    J(S.id).record = { status: { recording: true, count: 0 } };
+    J(S.id).record = {};
     await step('record', 'record_start', { resume: false });
   },
   'record-stop': () => step('record-stop', 'record_stop', {}, () => { J(S.id).record = {}; }),

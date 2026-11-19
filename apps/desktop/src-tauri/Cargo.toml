@@ -1,7 +1,7 @@
 [package]
 name = "scenecast-desktop"
 description = "Scenecast's desktop app (Tauri, macOS and Windows) on the scenecast-app library"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/jldeen/scenecast"
@@ -25,9 +25,15 @@ tauri-plugin-updater = "2"
 trash = "5"
 # The embedded WebDriver server the UI test drives the app through (macOS, Windows, Linux). Never in an installer.
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+# Local testing only (scripts/auditaur-smoke.mjs): Auditaur's collector, so its CLI sees the app's commands, events,
+# logs and errors. Never in an installer.
+tauri-plugin-auditaur = { version = "0.4", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
 
 [features]
 webdriver = ["dep:tauri-plugin-wdio-webdriver"]
+auditaur = ["dep:tauri-plugin-auditaur", "dep:tracing", "dep:tracing-subscriber"]
 
 # Debug builds (the UI test's) without debug info: the webview stack's makes them gigabytes, on disk and in CI caches.
 [profile.dev]

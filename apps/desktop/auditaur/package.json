@@ -1,0 +1,8 @@
+{
+  "name": "scenecast-auditaur-bridge",
+  "private": true,
+  "type": "module",
+  "description": "Local testing only: the Auditaur frontend collector for a dev build (cargo feature auditaur). Never in an installer.",
+  "scripts": { "build": "esbuild entry.js --bundle --format=iife --outfile=dist/bridge.js" },
+  "devDependencies": { "@auditaur/api": "^0.15.1", "esbuild": "^0.25.0" }
+}

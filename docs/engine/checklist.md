@@ -32,7 +32,7 @@ the checks serve the replica on a free port of their own, so the editor or the s
 | `render` | Every screen of the path renders (`.out/render/<state>.png`) | A screen throws, or doesn't render. | Look at the picture; usually a missing capture or a broken override. |
 | `cold-start` | Three fresh clones (the files git keeps, or would keep), each with its own server and a browser that has never seen the replica | A first run's DOM differs from the warm two-run's, pixels differ by 0.01% or more, or there's an error, console message or failed request (a file that isn't in the repository). Not in `--quick`. | A missing file: commit it (check `.gitignore`). A difference only on a first start: something depends on timing (fonts still loading, styles added at a hover): an engine bug, report it with the demo. `--cold N` sets the number of clones. |
 | `two-run` | The recorded path, twice, in parallel, in headless Chrome at the demo's viewport | A screen's DOM differs between runs, pixels differ by 0.01% or more, a step lands on a different state than recorded, a step's element isn't there, or there's an error, console message or off-site request. | A timer or date in a capture (edit it out), a hover left open (the path parks the pointer), a missing asset (recapture). |
-| `light` | Light mode | A capture was recorded with `prefers-color-scheme: dark`, or a replica screen reads dark. | Set each app's theme to **Light** (not System) and record again. |
+| `light` | Theme | A replica screen doesn't read in the theme it was recorded in, or (with demo.json `"theme"`) a screen was captured in the other one. | Set each app's theme to the demo's (Light or Dark, not System) and record again. |
 | `transitions` | Every recorded control, from its own screen | A click, Enter, typing or Escape lands on another state, or its element isn't on screen. On the recorded path: panes closing and reopening, the send arrow. | A matcher that finds a different element (`nth`, `in`), or a state recorded twice (merge in overrides). |
 | `composer` | Cursor, ⌥P, send | The cursor isn't in the field the real app focuses (`focus`), ⌥P doesn't reach the typed state, or the send arrow sends an empty box. | Add `focus` for screens that put the cursor in a field; check `fill` values. |
 | `keys` | Presenter keys | ⌥0–⌥9 don't land on their beats, or an app key doesn't switch. | Fix `beats` in overrides. |
@@ -65,7 +65,7 @@ The checklist in one line each, for a run sheet:
 - [ ] ⌥0 and jumps put every pane back
 - [ ] virtualized lists captured in full
 - [ ] composer and send behaviour
-- [ ] light mode
+- [ ] theme (each screen as recorded)
 - [ ] secret scan (fail on any token)
 - [ ] two-run identical DOM
 - [ ] cold start: three fresh clones, each identical on its first run

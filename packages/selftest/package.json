@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/selftest",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "description": "End-to-end tests: the fixture app recorded, built, served and checked through the scenecast binary."

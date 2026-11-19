@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/recorder",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "description": "Capture on the presenter's browser: DOM/CSSOM/fonts/shadow DOM/iframes serializer, driver, recorder, side-state audits, receiver, build of raw captures into data/."

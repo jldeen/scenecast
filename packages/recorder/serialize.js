@@ -13,6 +13,10 @@ async (opts) => {
   const DROP = new Set(['script', 'noscript', 'template', 'base']);
   const RAWTEXT = new Set(['style', 'xmp', 'noembed', 'noframes']);
   const doc = document;
+  // The theme as captured, kept: prefers-color-scheme in the page's CSS answered now (true or false), so the replica
+  // looks the same whatever the presenter's system is set to. Light or dark, both are recorded as they are.
+  const DARK = matchMedia('(prefers-color-scheme: dark)').matches;
+  const pin = t => t && t.replace(/\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)/gi, (m, v) => (v.toLowerCase() === 'dark') === DARK ? '(min-width: 0px)' : '(max-width: -1px)');
   const urls = [];
   const index = new Map();
   const inline = {};
@@ -57,11 +61,11 @@ async (opts) => {
     for (const r of rules) {
       if (r.type === 3 /* IMPORT */) {
         const t = r.styleSheet ? sheetCss(r.styleSheet) : null;
-        if (t !== null) { const m = r.media && r.media.mediaText; out += (m ? '@media ' + m + '{' + t + '}' : t) + '\n'; }
+        if (t !== null) { const m = r.media && r.media.mediaText; out += (m ? '@media ' + pin(m) + '{' + t + '}' : t) + '\n'; }
         else out += '/* d1-import ' + tok(r.href, b) + ' */\n';
         continue;
       }
-      out += cssUrls(r.cssText, b) + '\n';
+      out += pin(cssUrls(r.cssText, b)) + '\n';
     }
     return out;
   };
@@ -133,7 +137,7 @@ async (opts) => {
         if (el.sheet && el.sheet.disabled) return '';
         const t = el.sheet ? sheetCss(el.sheet) : null;
         const media = el.getAttribute('media');
-        const m = media && media !== 'all' ? ' media="' + escAttr(media) + '"' : '';
+        const m = media && media !== 'all' ? ' media="' + escAttr(pin(media)) + '"' : '';
         if (t !== null) return '<style data-d1-href=""' + m + '>' + (opts.css === false ? '' : rawCss(t)) + '</style>';
         if (!el.href) return '';
         const r = tok(el.href);
@@ -146,7 +150,7 @@ async (opts) => {
     if (tag === 'meta' && el.getAttribute('http-equiv')) return '';
     if (tag === 'style') {
       if (el.sheet && el.sheet.disabled) return '';
-      const t = el.sheet ? sheetCss(el.sheet) : el.textContent;
+      const t = el.sheet ? sheetCss(el.sheet) : pin(el.textContent);
       return '<style' + attrs(el) + '>' + (opts.css === false ? '' : rawCss(t || '')) + '</style>';
     }
     let s = '<' + tag + attrs(el) + '>';
@@ -191,6 +195,10 @@ async (opts) => {
     let head = '';
     for (const c of doc.head.childNodes) head += ser(c, false);
     head += adopted(doc);
+    // A page that follows the system (color-scheme: light dark) keeps the one it used: form controls, scrollbars and
+    // light-dark() colours too.
+    const rs = getComputedStyle(html).colorScheme || '';
+    if (/light/.test(rs) && /dark/.test(rs)) head += '<style data-sc-scheme="">:root{color-scheme:' + (DARK ? 'dark' : 'light') + '}</style>';
     out = '<!DOCTYPE html><html' + attrs(html) + '><head>' + head + '</head>' + ser(doc.body, false) + '</html>';
   }
   // Font files the page loaded, by any means (a stylesheet's @font-face, or script through the FontFace API, which
@@ -211,7 +219,11 @@ async (opts) => {
       scroll: { top: se.scrollTop, left: se.scrollLeft },
       customElements: [...custom],
       nodes,
-      colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+      colorScheme: DARK ? 'dark' : 'light',
+      // How the page looks (its background where it's opaque), light or dark, whatever the system prefers.
+      theme: (() => { const lum = c => { const m = /rgba?\(([^)]+)\)/.exec(c || ''); if (!m) return null; const v = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); if (v.length > 3 && v[3] < 0.5) return null; return (0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]) / 255; };
+        for (const e of [doc.elementFromPoint(innerWidth / 2, innerHeight / 2), doc.body, html]) for (let x = e; x; x = x.parentElement) { const l = lum(getComputedStyle(x).backgroundColor); if (l !== null) return l < 0.5 ? 'dark' : 'light'; }
+        return DARK && /dark/.test(getComputedStyle(html).colorScheme) ? 'dark' : 'light'; })(),
       fonts: [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family + ' ' + f.weight + ' ' + f.style),
       fontFiles,
       at: new Date().toISOString(),

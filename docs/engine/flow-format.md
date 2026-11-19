@@ -62,8 +62,9 @@ A demo folder holds:
   `leftovers` or `unused` reports. `hookFiles` (what it reads) are part of the build key.
 - `fidelity` (optional): `{ diagnosers: ["file.mjs"] }`, the demo's own diagnosers for `scenecast fidelity`, run
   before the rule-based one (interface in `packages/fixer/index.mjs`).
-- `checks` (optional): `light: "rendered"` judges light mode by the replica's screens only (apps set to Light while
-  the OS was dark); `known: ["text a failure starts with", …]` makes those accepted differences warnings.
+- `theme` (optional): `"light"` or `"dark"`, the theme the demo should be recorded in. Only a note when a screen
+  isn't (preflight, record stop, `fidelity`); either theme records.
+- `checks` (optional): `known: ["text a failure starts with", …]` makes those accepted differences warnings.
 
 ## flow.json
 
