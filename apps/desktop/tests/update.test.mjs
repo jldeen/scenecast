@@ -5,7 +5,7 @@
 // The new update dir holds the N+1 update file and its .sig (macOS *.app.tar.gz, Windows *-setup.exe), signed with
 // the key whose public half both builds have; the app reads latest.json from SCENECAST_UPDATE_URL.
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { realpathSync, cpSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -23,7 +23,8 @@ async function waitFor(what, fn, ms = 60000, every = 500) {
   while (Date.now() - t0 < ms) { try { last = await fn(); if (last) return last; } catch (e) { last = e.message; } await sleep(every); }
   throw new Error(`timed out waiting for ${what}: ${JSON.stringify(last)}`);
 }
-const tmp = mkdtempSync(join(tmpdir(), 'scenecast-update-'));
+// The real path: macOS's temp folder is under /var, a symlink, and the updater won't run an app from there.
+const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'scenecast-update-')));
 const HOOK = join(tmp, 'hook'), LIB = join(tmp, 'Scenecast'), PORT = 47811;
 let n = 0;
 async function hook(action, args = {}, ms = 120000) {

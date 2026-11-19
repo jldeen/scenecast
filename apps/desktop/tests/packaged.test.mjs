@@ -9,7 +9,7 @@
 //   - preflight says the recorder is connected; overlapping checks never leave the demo "busy"
 //   node apps/desktop/tests/packaged.test.mjs <Scenecast.dmg | Scenecast_x.y.z_x64-setup.exe>
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { realpathSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -22,7 +22,8 @@ const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1500)}` : '')); if (!ok) fails.push(name); return ok; };
 const installer = resolve(process.argv[2] || '');
 if (!existsSync(installer)) { console.log(`usage: packaged.test.mjs <installer> (${installer} isn't there)`); process.exit(2); }
-const tmp = mkdtempSync(join(tmpdir(), 'scenecast-packaged-'));
+// The real path: macOS's temp folder is under /var, a symlink, and the updater won't run an app from there.
+const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'scenecast-packaged-')));
 const PORT = 47621;
 const listening = port => new Promise(res => { const c = connect(port, '127.0.0.1').once('connect', () => { c.destroy(); res(true); }).once('error', () => res(false)); });
 const ping = () => fetch(`http://127.0.0.1:${PORT}/ping`).then(r => r.json()).catch(() => null);

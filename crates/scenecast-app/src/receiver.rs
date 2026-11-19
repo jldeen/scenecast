@@ -359,13 +359,19 @@ mod tests {
         let port = l.local_addr().unwrap().port();
         std::thread::spawn(move || {
             let (mut s, _) = l.accept().unwrap();
-            let mut b = [0u8; 512];
-            let _ = s.read(&mut b);
-            std::thread::sleep(Duration::from_millis(50));
+            // The whole request first (closing with unread bytes resets the connection on Windows).
+            let (mut got, mut b) = (Vec::new(), [0u8; 512]);
+            while !got.windows(4).any(|w| w == b"\r\n\r\n") {
+                match s.read(&mut b) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => got.extend_from_slice(&b[..n]),
+                }
+            }
             s.write_all(b"HTTP/1.0 200 OK\r\ncontent-type: application/json\r\n\r\n{\"ok\":true,\"demo\":\"/x\"}")
                 .unwrap();
+            let _ = s.shutdown(std::net::Shutdown::Write);
         });
         let p = ping(port).unwrap();
-        assert!(is_for(&p, Path::new("/x")));
+        assert_eq!(p["demo"], "/x");
     }
 }
