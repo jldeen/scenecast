@@ -76,7 +76,18 @@ try {
   check(`Check for updates finds ${newVersion}`, c.ok && c.value.available === newVersion, JSON.stringify(c));
   const u = await hook('update-install', {}, 300000);
   check('Update: downloads, checks its signature, installs', u.ok && u.value === 'restarting', JSON.stringify(u));
-  // The new version, relaunched by the update, answers the hook (it has the same environment).
+  // Windows: the installer relaunches the app as the signed-in user (through Explorer), so it runs without this
+  // test's environment and can't answer the hook. See that it came back on its own, then start it again with the
+  // test's environment to ask it.
+  if (WIN) {
+    const procs = () => { try { return JSON.parse(execFileSync('powershell', ['-NoProfile', '-Command', `@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '${exe.replace(/'/g, "''")}' } | Select-Object ProcessId) | ConvertTo-Json -Compress`]).toString() || '[]'); } catch { return []; } };
+    const back = await waitFor('the installer to relaunch Scenecast', () => { const p = [].concat(procs()).map(x => x.ProcessId).filter(id => id !== v0.value.pid); return p.length && p; }, 240000, 2000).catch(e => ({ error: e.message }));
+    check('the update relaunched the app', Array.isArray(back), JSON.stringify(back));
+    if (Array.isArray(back)) for (const pid of back) try { process.kill(pid); } catch { /* gone */ }
+    await sleep(2000);
+    app = spawn(exe, [], { env, stdio: 'ignore' });
+  }
+  // The new version answers the hook (relaunched by the update with the same environment, or started again above).
   const v1 = await waitFor(`Scenecast ${newVersion} to come back`, async () => {
     const r = await hook('version', {}, 15000).catch(() => null);
     return r && r.ok && r.value.version === newVersion && r;
