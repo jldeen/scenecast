@@ -23,6 +23,7 @@ pub mod files;
 pub mod guide;
 pub mod keys;
 pub mod library;
+pub mod receiver;
 pub mod record;
 pub mod script;
 pub mod servers;
@@ -129,7 +130,10 @@ impl Update {
 
 /// The engine (`packages/` under Node), checked once so a missing Node reads as one clear message.
 pub fn engine() -> Result<scenecast_build::Engine, AppError> {
-    let engine = scenecast_build::Engine::locate()?;
+    let mut engine = scenecast_build::Engine::locate()?;
     engine.check_node()?;
+    if let Some(port) = record::receiver_port_override() {
+        engine = engine.with_env("REPLICA_RX_PORT", port.to_string());
+    }
     Ok(engine)
 }

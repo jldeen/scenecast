@@ -11,6 +11,9 @@ const S = {
   tab: 'record',
   jobs: {},
   servers: { edit: {}, present: {} },
+  receiver: null,
+  profiles: {},
+  update: null,
 };
 const TABS = [
   ['record', 'Record'],
@@ -144,6 +147,14 @@ listen('job', ({ payload: { demo: id, job, update: u } }) => {
   }
   if (id === S.id) scheduleRegions();
 });
+// The receiver the app keeps running for the open demo, and whether the recorder extension is connected to it.
+listen('receiver', ({ payload }) => {
+  const was = S.receiver?.connected;
+  S.receiver = payload;
+  if (payload.connected && !was && payload.demo === S.id) announce('The recorder is connected');
+  if (S.view === 'demo') renderRegions();
+});
+
 listen('job-state', ({ payload: { demo: id, job, running: on } }) => {
   if (on) J(id).running[job] = true; else delete J(id).running[job];
   if (id === S.id) renderTabsBar();
@@ -315,6 +326,8 @@ async function openDemo(id, tab) {
     <section id="panel" role="tabpanel" aria-labelledby="tab-${S.tab}" tabindex="0"></section>`;
   renderTabsBar();
   await renderPanel();
+  // The receiver runs while a demo is open: started now if it isn't (the extension then connects by itself).
+  if (S.receiver?.demo !== id || !S.receiver?.up) invoke('receiver_ensure', { id }).then(r => { S.receiver = r; renderRegions(); }).catch(e => { S.receiver = { demo: id, error: String(e?.message || e) }; renderRegions(); });
 }
 function rerender() {
   if (S.view !== 'demo') return;
@@ -332,7 +345,7 @@ async function renderPanel() {
 function renderRegions() {
   for (const el of document.querySelectorAll('[data-region]')) {
     const html = REGIONS[el.dataset.region]?.(demo());
-    if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+    if (html !== undefined && el._html !== html) { el._html = html; el.innerHTML = html; }
   }
 }
 
@@ -345,15 +358,59 @@ const icon = (status, label) => `<span class="icon ${esc(status)}" role="img" ar
 // ---- Record ------------------------------------------------------------------------------------------------------
 
 const PREFLIGHT_LABEL = { receiver: 'Receiver', browser: 'Browser', recorder: 'Recorder extension' };
+const browserName = b => b === 'edge' ? 'Microsoft Edge' : 'Google Chrome';
+const avatar = p => p.picture ? `<img class="avatar" src="${esc(p.picture)}" alt="">`
+  : `<span class="avatar" style="background:${esc(p.color || '#8c959f')}" aria-hidden="true">${esc((p.name || '?').trim()[0] || '?')}</span>`;
 const REGIONS = {
+  // The receiver: running for this demo, and the recorder connected to it (green) or not yet.
+  receiver(d) {
+    const r = S.receiver;
+    if (!r || r.demo !== d.id) return `<div class="conn" data-test="receiver" data-up="false" data-connected="false"><span class="dot"></span>Starting the receiver…</div>`;
+    if (r.error && !r.up) return `<div class="conn bad" data-test="receiver" data-up="false" data-connected="false" role="alert"><span class="dot"></span>The receiver isn't running: ${esc(r.error)}
+      <button class="btn small" data-action="receiver-restart">Try again</button></div>`;
+    if (!r.up) return `<div class="conn" data-test="receiver" data-up="false" data-connected="false"><span class="dot"></span>Starting the receiver on port ${esc(r.port)}…</div>`;
+    if (r.connected) return `<div class="conn ok" data-test="receiver" data-up="true" data-connected="true" data-port="${esc(r.port)}"><span class="dot"></span><strong>Recorder connected.</strong> Ready when you are (receiver on port ${esc(r.port)}).</div>`;
+    return `<div class="conn wait" data-test="receiver" data-up="true" data-connected="false" data-port="${esc(r.port)}"><span class="dot"></span>Receiver running on port ${esc(r.port)}. Waiting for the recorder extension in ${esc(browserName(d.browser))}…</div>`;
+  },
+  // The browser profile to record in: by name and picture, the one with the recorder picked unless the demo says.
+  profiles(d) {
+    const p = S.profiles[d.id];
+    if (!p) return '<p class="muted small">Looking at your browser profiles…</p>';
+    if (p.error) return `<p class="muted small">Couldn't read your ${esc(browserName(d.browser))} profiles: ${esc(p.error)}</p>`;
+    if (!p.profiles.length) return `<p class="muted small">No ${esc(browserName(d.browser))} profiles found. Open ${esc(browserName(d.browser))} once, then <button class="link" data-action="profiles-refresh">look again</button>.</p>`;
+    const cur = p.pick.dir;
+    return `<fieldset class="profiles" data-test="profiles"><legend class="small muted">Profile to record in ${p.chosen ? '' : `<span class="pill info">picked for you: ${esc(p.pick.why)}</span>`}</legend>
+      ${p.profiles.map(x => `<label class="profile ${x.dir === cur ? 'on' : ''}" data-test="profile-${esc(x.dir.replace(/\s+/g, '-'))}">
+        <input type="radio" name="profile" value="${esc(x.dir)}" ${x.dir === cur ? 'checked' : ''}>${avatar(x)}
+        <span><span class="pname">${esc(x.name)}</span><span class="small muted">${[x.open ? 'open' : 'not open', x.recorder ? (x.recorderOff ? 'recorder turned off' : 'has the recorder') : ''].filter(Boolean).join(' · ')}</span></span></label>`).join('')}
+      <button class="btn small subtle" data-action="profiles-refresh">Refresh</button>
+      ${p.chosen ? '<button class="btn small subtle" data-action="profile-auto">Pick for me</button>' : ''}</fieldset>`;
+  },
   extension(d) {
-    const ext = J(d.id).extension?.outcome;
-    if (!ext) return '';
-    return `<ol class="steps">${ext.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
+    const j = J(d.id).extension || {};
+    const ext = j.outcome;
+    const on = running('extension', d.id);
+    if (on) return `${progressBar(true)}<p class="muted small">Putting the recorder in its folder and opening ${esc(browserName(d.browser))}'s extensions page…</p>`;
+    if (!ext) return errorBox(j.error);
+    const connected = S.receiver?.demo === d.id && S.receiver?.connected;
+    const page = ext.extensionsPage;
+    const edge = ext.browser === 'edge';
+    return `<div class="install" data-test="install-steps">
+      ${connected ? `<div class="notice ok" data-test="install-done"><div><strong>Done.</strong> The recorder is connected. You won't need to do this again.</div></div>` : ''}
+      <p class="small">${ext.opened ? `Opened <strong>${esc(page)}</strong> in ${esc(ext.browserName)}${ext.profile ? ` (profile ${esc(ext.profile)})` : ''}, and the folder in ${folderWord()}.` : `Open <strong>${esc(page)}</strong> in ${esc(ext.browserName)}; the folder is open in ${folderWord()}.`}</p>
+      <ol class="step-cards">
+        <li class="step-card"><img src="install/developer-mode.png" alt="The extensions page, with the Developer mode switch at the top right turned on">
+          <div><strong>1. Turn on Developer mode</strong><p class="small muted">${edge ? 'In Edge it\'s in the left-hand menu of edge://extensions.' : 'The switch at the top right of chrome://extensions.'}</p></div></li>
+        <li class="step-card"><img src="install/load-unpacked.png" alt="The Load unpacked button, and the Scenecast Recorder card once it's loaded">
+          <div><strong>2. Drag the folder in</strong><p class="small muted">Drag <strong>Recorder Extension</strong> from ${folderWord()} onto the extensions page. Or choose <strong>Load unpacked</strong> and pick it.</p></div></li>
+        <li class="step-card"><div class="big-dot ${connected ? 'on' : ''}" aria-hidden="true"></div>
+          <div><strong>3. Come back here</strong><p class="small muted">${connected ? 'Connected.' : 'This turns green when the recorder connects (a few seconds).'}</p></div></li>
+      </ol>
       <div class="path"><code data-test="extension-dir">${esc(ext.dir)}</code>
         <button class="btn small" data-copy="${esc(ext.dir)}">Copy</button>
-        <button class="btn small" data-reveal="${esc(ext.dir)}">Show</button></div>
-      <p class="muted small" style="margin-top:8px">You only do this once per browser. Scenecast never restarts a browser you already have open.</p>`;
+        <button class="btn small" data-reveal="${esc(ext.dir)}">Show in ${folderWord()}</button>
+        <button class="btn small" data-action="open-extensions">Open ${esc(page)} again</button></div>
+      <p class="muted small" style="margin-top:8px">Once per browser profile. When Scenecast updates, the recorder updates itself from this folder. Scenecast never restarts a browser you already have open.</p></div>`;
   },
   preflight(d) {
     const j = J(d.id).preflight || {};
@@ -365,8 +422,8 @@ const REGIONS = {
     return `${progressBar(on)}<ul class="status-list" aria-label="Preflight">${items.map(i => {
       const label = PREFLIGHT_LABEL[i.id] || (i.id.startsWith('app ') ? `App: ${i.id.slice(4)}` : i.id);
       const fix = i.status === 'fail' ? (i.id === 'recorder'
-        ? `<button class="btn small" data-action="extension" data-test="fix-${esc(i.id)}">Set it up</button>`
-        : `<button class="btn small" data-action="preflight-fix" data-test="fix-${esc(i.id.replace(' ', '-'))}">Fix</button>`) : '';
+        ? `<button class="btn small" data-action="install-recorder" data-test="fix-${esc(i.id)}">Install recorder</button>`
+        : `<button class="btn small" data-action="preflight-fix" data-test="fix-${esc(i.id.replace(' ', '-'))}" ${on ? 'disabled' : ''}>Fix</button>`) : '';
       return `<li data-test="pf-${esc(i.id.replace(' ', '-'))}" data-status="${esc(i.status)}">${icon(i.status)}<span class="id">${esc(label)}</span>
         <span class="small">${esc(i.detail)}</span>${fix}</li>`;
     }).join('')}</ul>
@@ -413,17 +470,21 @@ const REGIONS = {
 
 const PANELS = {};
 PANELS.record = (panel, d) => {
+  const pf = running('preflight', d.id);
   panel.innerHTML = `<div class="card"><h2><span class="step-num">1</span>The recorder</h2>
-      <p class="muted">A small extension in your own browser does the recording. Set it up once; it stays.</p>
-      <div class="row"><button class="btn" data-action="extension" data-test="prepare-extension">Set up the recorder</button>
-        <span class="muted small">Record in</span>
+      <p class="muted">A small extension in your own browser does the recording. Install it once; it stays, and updates with Scenecast.</p>
+      <div data-region="receiver"></div>
+      <div class="row"><span class="muted small">Record in</span>
         <select id="browser" aria-label="Browser to record in" style="width:auto" data-test="browser">
           <option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select></div>
+      <div data-region="profiles"></div>
+      <div class="row"><button class="btn primary" data-action="install-recorder" data-test="install-recorder">Install recorder</button>
+        <button class="btn subtle" data-action="extension" data-test="prepare-extension">Just make the folder</button></div>
       <div data-region="extension"></div></div>
     <div class="card"><h2><span class="step-num">2</span>Ready to record?</h2>
       <p class="muted">Checks the receiver, your browser and profile, the recorder, and each app's tab (open, light theme, on its start screen). It fixes what it can, and never restarts your browser.</p>
-      <div class="row"><button class="btn primary" data-action="preflight" data-test="preflight">Check</button>
-        <button class="btn" data-action="preflight-fix" data-test="preflight-fix">Check and fix</button></div>
+      <div class="row"><button class="btn primary" data-action="preflight" data-test="preflight" ${pf ? 'disabled' : ''}>Check</button>
+        <button class="btn" data-action="preflight-fix" data-test="preflight-fix" ${pf ? 'disabled' : ''}>Check and fix</button></div>
       <div data-region="preflight" style="margin-top:12px"></div></div>
     <div class="card"><h2><span class="step-num">3</span>Record</h2>
       <p class="muted">Run the demo once, the way you'll present it. Wait for each screen to be captured before the next step.</p>
@@ -433,8 +494,22 @@ PANELS.record = (panel, d) => {
   sel.onchange = () => call('set_browser', { id: d.id, browser: sel.value }).then(async () => {
     toast(`Recording in ${sel.selectedOptions[0].text}`);
     await refreshDemo(d.id);
+    await loadProfiles(d.id);
   });
+  if (!S.profiles[d.id]) loadProfiles(d.id);
 };
+async function loadProfiles(id) {
+  try { S.profiles[id] = await invoke('browser_profiles', { id }); } catch (e) { S.profiles[id] = { error: String(e?.message || e) }; }
+  if (S.id === id) renderRegions();
+}
+document.addEventListener('change', async e => {
+  if (e.target.name !== 'profile' || !S.id) return;
+  const id = S.id, p = S.profiles[id];
+  await call('set_profile', { id, profile: e.target.value }).catch(() => {});
+  const x = p?.profiles?.find(q => q.dir === e.target.value);
+  toast(`Recording in profile ${x ? x.name : e.target.value}`);
+  await loadProfiles(id);
+});
 
 // ---- Build and check ---------------------------------------------------------------------------------------------
 
@@ -738,8 +813,14 @@ const ACTIONS = {
   new: renderNew,
   library: renderLibrary,
   extension: () => step('extension', 'prepare_extension', {}),
-  preflight: () => step('preflight', 'preflight', { fix: false }),
-  'preflight-fix': () => step('preflight', 'preflight', { fix: true }),
+  'install-recorder': () => step('extension', 'install_recorder', {}, () => loadProfiles(S.id)),
+  'open-extensions': () => call('install_recorder', { id: S.id }).catch(() => {}),
+  'profiles-refresh': () => loadProfiles(S.id),
+  'profile-auto': async () => { await call('set_profile', { id: S.id, profile: null }); await loadProfiles(S.id); },
+  'receiver-restart': async () => { S.receiver = null; renderRegions(); S.receiver = await invoke('receiver_ensure', { id: S.id }).catch(e => ({ demo: S.id, error: String(e?.message || e) })); renderRegions(); },
+  // One preflight at a time: a second click while one runs does nothing.
+  preflight: () => running('preflight') ? undefined : step('preflight', 'preflight', { fix: false }),
+  'preflight-fix': () => running('preflight') ? undefined : step('preflight', 'preflight', { fix: true }),
   'record-start': async () => {
     J(S.id)['record-stop'] = {};
     J(S.id).record = { status: { recording: true, count: 0 } };

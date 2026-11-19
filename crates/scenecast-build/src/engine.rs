@@ -50,6 +50,8 @@ pub struct Engine {
     pub packages: PathBuf,
     /// The Node executable.
     pub node: PathBuf,
+    /// Environment values every engine command gets (the receiver's port the desktop app picked).
+    pub env: Vec<(OsString, OsString)>,
 }
 
 impl Engine {
@@ -75,7 +77,14 @@ impl Engine {
         Ok(Self {
             packages: dunce(packages),
             node,
+            env: Vec::new(),
         })
+    }
+
+    /// The engine with one more environment value for every command it runs.
+    pub fn with_env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        self.env.push((key.into(), value.into()));
+        self
     }
 
     pub fn entry(&self) -> PathBuf {
@@ -112,7 +121,9 @@ impl Engine {
         S: AsRef<OsStr>,
     {
         let mut cmd = Command::new(&self.node);
-        cmd.arg(self.entry()).args(args);
+        cmd.arg(self.entry())
+            .args(args)
+            .envs(self.env.iter().cloned());
         cmd
     }
 

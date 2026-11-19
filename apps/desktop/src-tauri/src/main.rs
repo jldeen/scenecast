@@ -10,6 +10,7 @@ use std::time::Duration;
 use scenecast_app::export::ExportKind;
 use scenecast_app::files::FileScope;
 use scenecast_app::library::{Demo, Library, NewDemo};
+use scenecast_app::receiver::{Receiver, ReceiverState};
 use scenecast_app::servers::{EditSession, PresentSession};
 use scenecast_app::{AppError, Update};
 use serde::Serialize;
@@ -27,6 +28,9 @@ struct AppState {
     recording: Mutex<HashSet<String>>,
     edits: Mutex<HashMap<String, EditSession>>,
     presents: Mutex<HashMap<String, PresentSession>>,
+    /// The receiver the recorder extension posts to, kept running for the open demo.
+    receiver: Receiver,
+    extensions_refreshed: std::sync::atomic::AtomicBool,
 }
 
 type Shared = Arc<AppState>;
@@ -237,6 +241,77 @@ async fn prepare_extension(
     .await
 }
 
+/// The receiver for this demo, running (the app starts it when a demo opens, and again if it stops). The first time,
+/// the extension folders the presenter loaded get this version's recorder.
+fn ensure_receiver(state: &Shared, app: &AppHandle, id: &str) -> Res<ReceiverState> {
+    let dir = state.library.dir(id)?;
+    let r = state.receiver.ensure(id, &dir);
+    let st = match &r {
+        Ok(st) => st.clone(),
+        Err(_) => state.receiver.state(),
+    };
+    let _ = app.emit("receiver", &st);
+    let port = scenecast_app::record::configured_port(&dir);
+    if st.port.is_some()
+        && !state
+            .extensions_refreshed
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        std::thread::spawn(move || scenecast_app::record::refresh_extensions(port));
+    }
+    r
+}
+
+#[tauri::command]
+async fn receiver_ensure(
+    state: State<'_, Shared>,
+    app: AppHandle,
+    id: String,
+) -> Res<ReceiverState> {
+    let state = state.inner().clone();
+    blocking(move || ensure_receiver(&state, &app, &id)).await
+}
+
+#[tauri::command]
+async fn receiver_state(state: State<'_, Shared>) -> Res<ReceiverState> {
+    let state = state.inner().clone();
+    blocking(move || Ok(state.receiver.state())).await
+}
+
+#[tauri::command]
+async fn browser_profiles(state: State<'_, Shared>, id: String) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::record::profiles(&state.library.dir(&id)?)).await
+}
+
+#[tauri::command]
+async fn set_profile(state: State<'_, Shared>, id: String, profile: Option<String>) -> Res<()> {
+    let state = state.inner().clone();
+    blocking(move || {
+        scenecast_app::record::set_profile(&state.library.dir(&id)?, profile.as_deref())
+    })
+    .await
+}
+
+/// The guided install: the extension in its folder, the browser's extensions page opened in the demo's profile (in
+/// the running browser), and the folder shown, selected, in Finder or File Explorer.
+#[tauri::command]
+async fn install_recorder(
+    state: State<'_, Shared>,
+    app: AppHandle,
+    id: String,
+) -> Res<scenecast_app::record::ExtensionSetup> {
+    let shared = state.inner().clone();
+    let opener = app.clone();
+    job(state, app, id.clone(), "extension", move |dir, _| {
+        let _ = shared.receiver.ensure(&id, dir);
+        let setup = scenecast_app::record::install_recorder(dir)?;
+        let _ = opener.opener().reveal_item_in_dir(&setup.dir);
+        Ok(setup)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn preflight(
     state: State<'_, Shared>,
@@ -244,7 +319,11 @@ async fn preflight(
     id: String,
     fix: bool,
 ) -> Res<scenecast_app::record::PreflightReport> {
-    job(state, app, id, "preflight", move |dir, busy| {
+    let shared = state.inner().clone();
+    let handle = app.clone();
+    job(state, app, id.clone(), "preflight", move |dir, busy| {
+        // The receiver first: started here if it isn't running (preflight then finds it up).
+        let _ = ensure_receiver(&shared, &handle, &id);
         scenecast_app::record::preflight(dir, fix, |u| busy.emit(u))
     })
     .await
@@ -815,6 +894,8 @@ fn main() {
         recording: Mutex::default(),
         edits: Mutex::default(),
         presents: Mutex::default(),
+        receiver: Receiver::default(),
+        extensions_refreshed: Default::default(),
     });
 
     let builder = tauri::Builder::default()
@@ -836,6 +917,11 @@ fn main() {
             duplicate_demo,
             delete_demo,
             set_browser,
+            set_profile,
+            browser_profiles,
+            receiver_ensure,
+            receiver_state,
+            install_recorder,
             prepare_extension,
             preflight,
             record_start,
@@ -869,6 +955,20 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Scenecast app");
+    // The receiver's watchdog: started again if it stops, and the Record step told how it is.
+    {
+        let state = state.clone();
+        let handle = app.handle().clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(3));
+                let st = state.receiver.tick();
+                if st.demo.is_some() {
+                    let _ = handle.emit("receiver", &st);
+                }
+            }
+        });
+    }
     app.run(move |_, event| {
         if let tauri::RunEvent::Exit = event {
             let ids: Vec<String> = state
@@ -882,6 +982,7 @@ fn main() {
             for id in ids {
                 stop_servers(&state, &id);
             }
+            state.receiver.stop();
         }
     });
 }

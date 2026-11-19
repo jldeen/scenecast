@@ -103,7 +103,7 @@ Edit `demo.json` as needed: each app's `match` and `start`, `chrome.browser` and
 ### 2 · Preflight (seconds when it's all set)
 
 1. **Ask first** before taking the presenter's browser (the coordinator, or ask_user), and say for how long.
-2. Once per browser: `scenecast extension`, then load `~/.scenecast/extension` unpacked (`edge://extensions` or
+2. Once per browser: `scenecast extension`, then load `Documents/Scenecast/Recorder Extension` unpacked (`edge://extensions` or
    `chrome://extensions`, Developer mode, Load unpacked). See references/guide.md for the presenter's version.
 3. `scenecast preflight`: receiver, browser and profile, recorder, each app's tab (open, **light**, on its start
    screen). It fixes only what fails and never relaunches a running browser. A dark app needs its theme set to

@@ -9,6 +9,9 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { loadDemo } from '../kit/lib/demo.mjs';
 
+// Which recorder build this receiver goes with: the extension reloads itself from its folder when its version differs.
+const RECORDER_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
+
 const argv = process.argv.slice(2);
 const demo = argv.includes('--demo') || !argv[0] ? loadDemo(argv) : null;
 const RAW = demo ? demo.raw : argv[0];
@@ -38,9 +41,12 @@ const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'applic
 createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x');
+    // Only the recorder (an extension, or a local tool with no Origin) talks to the receiver: never a web page.
+    const origin = req.headers.origin;
+    if (origin && !/^(chrome|moz)-extension:\/\//.test(origin)) { res.writeHead(403); return res.end(); }
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
     // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
-    if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: !!waiter, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });
+    if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, app: 'scenecast-receiver', pid: process.pid, port: PORT, demo: demo ? demo.dir : null, recorderVersion: RECORDER_VERSION, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: !!waiter, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });
     // The recorder's checkpoint, for record start --resume.
     if (req.method === 'GET' && u.pathname === '/recording-partial') { const f = join(RAW, 'recording-partial.json'); return existsSync(f) ? json(res, 200, JSON.parse(readFileSync(f, 'utf8'))) : json(res, 404, { error: 'no checkpoint' }); }
     // Remote control: the driver long-polls for its next command.
@@ -51,6 +57,8 @@ createServer(async (req, res) => {
       waiter = c => { clearTimeout(t); waiter = null; json(res, 200, c); };
       return;
     }
+    // The desktop app stops a receiver it didn't start (left over from a crash) before starting its own.
+    if (req.method === 'POST' && u.pathname === '/shutdown') { log('shutdown asked'); json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 50); return; }
     const buf = await body(req);
     const data = buf.length ? JSON.parse(buf.toString('utf8')) : {};
     switch (u.pathname) {

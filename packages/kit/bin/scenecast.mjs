@@ -4,7 +4,6 @@
 import { spawn } from 'node:child_process';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { KIT, KIT_VERSION, loadDemo, arg } from '../lib/demo.mjs';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -15,7 +14,7 @@ const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(p
 const exit = code => process.exit(code || 0);
 const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary; see docs/cli.md)
 
-  preflight [--check] [--json|--ndjson]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
+  preflight [--check] [--json|--ndjson]  profiles  open-in-browser [<url>]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release] [--no-editor]
   script <file> [--matcher text|<file.mjs>] [--no-write] [--no-pdf] [--strict]  edit [--no-open] [--port N]
   notes [--script <file>] [--check [--as-windows]]  guide-shots
@@ -60,10 +59,21 @@ async function main() {
     case 'new': console.log('scenecast new is in the scenecast binary (Rust): it writes the project and its manifest'); return 1;
     case 'extension': {
       // The recorder extension (MV3, Edge and Chrome), unpacked: ~/.scenecast/extension unless a folder is given.
-      const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo') || join(homedir(), '.scenecast', 'extension');
+      const { extensionDir } = await import('../lib/profiles.mjs');
+      const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo') || extensionDir();
       return node('recorder/build.mjs', ['--extension', out, '--port', String(rx())]);
     }
     case 'agent': { const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo'); return node('recorder/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
+    // The browser's profiles (names, pictures, which are open, which have the recorder) and the one this demo uses.
+    case 'profiles': { const { demoProfiles } = await import('../lib/preflight.mjs'); console.log(JSON.stringify(await demoProfiles(loadDemo(rest)))); return 0; }
+    // Opens a page (edge://extensions) in a window of the demo's profile, in the running browser (never a restart).
+    case 'open-in-browser': {
+      const { demoProfiles, openInBrowser } = await import('../lib/preflight.mjs');
+      const d = await demoProfiles(loadDemo(rest), { pictures: false });
+      const url = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--demo') || `${d.browser}://extensions`;
+      const ok = await openInBrowser(url, { browser: d.browser, profile: d.pick.dir });
+      console.log(JSON.stringify({ ok, browser: d.browser, profile: d.pick.dir, running: d.running, url })); return ok ? 0 : 1;
+    }
     case 'preflight': return (await import('../lib/preflight.mjs')).main(rest, loadDemo);
     case 'receiver': return node('recorder/receiver.mjs', ['--demo', loadDemo(rest).dir]);
     case 'cmd': { const [op, j] = rest; return send(op, j && j.startsWith('{') ? JSON.parse(j) : {}); }

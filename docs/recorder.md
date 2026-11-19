@@ -7,22 +7,28 @@ handles, zoom 50–200%, long virtualized lists), and each AI answer as it strea
 
 ## Install (once, macOS and Windows)
 
-```bash
-scenecast extension            # writes ~/.scenecast/extension (Windows: %USERPROFILE%\.scenecast\extension)
-```
+In the desktop app: open a demo, **Record** → **Install recorder**. It puts the extension in
+`Documents/Scenecast/Recorder Extension` (Windows: `%USERPROFILE%\Documents\Scenecast\Recorder Extension`), opens
+`chrome://extensions` or `edge://extensions` in your running browser and profile (a new window, never a restart),
+and shows the folder, selected, in Finder or File Explorer. Then:
 
-Then in the browser the demo runs in:
+1. Turn on **Developer mode**.
+2. Drag the **Recorder Extension** folder onto the extensions page (or **Load unpacked** → pick it).
 
-1. Open `edge://extensions` (Edge) or `chrome://extensions` (Chrome).
-2. Turn on **Developer mode**.
-3. **Load unpacked** → pick that folder.
+The app turns green when the recorder connects. From the command line: `scenecast extension` writes the same folder.
 
-The extension's popup shows whether it's connected to scenecast and the receiver's port (47621 unless the demo's
-`demo.json` says `receiverPort`; change it in the popup to match). While it records, the browser shows a "started
-debugging this browser" bar: leave it (Cancel stops the recording).
+**The receiver.** The desktop app starts the receiver (with its own Node) when a demo opens, starts it again if it
+stops, and stops it when the app quits. It uses the demo's port (47621 unless `demo.json` says `receiverPort`), or
+the next free one of the ten after it when that's taken; the extension looks on all of them, so there's no port to
+set. From the command line, `scenecast receiver` (or `scenecast preflight`) starts it. The receiver only answers the
+recorder (an extension, or a local tool): requests from web pages are refused.
 
-After a scenecast update, run `scenecast extension` again and press the reload button on the extension's card
-(`scenecast preflight` rebuilds the folder when its version is behind).
+**The profile.** The app reads the browser's own profile list (names and pictures) and picks the one that's open
+with the recorder loaded; pick another on the Record step (saved per demo as `chrome.profile`).
+
+**Updates.** When Scenecast updates, the app writes the new recorder into the folder and the extension reloads
+itself from it. If it doesn't (an extension from before 0.3.1), press its reload button (↻) in the extensions page.
+While it records, the browser shows a "started debugging this browser" bar: leave it (Cancel stops the recording).
 
 ## Before recording: `scenecast preflight`
 
@@ -30,9 +36,9 @@ A fast check, item by item, that fixes only what fails:
 
 | Item | Checks | If it fails |
 |---|---|---|
-| receiver | Up on the demo's port | Starts it in the background |
-| browser | Edge or Chrome running with the demo's user data folder and profile (`chrome.browser`, `chrome.profile`, `chrome.userDataDir` in `demo.json`); with the agent recorder, the debugging port too | Not running: starts it with that profile. Running without the profile open: opens a window of it. **A running browser is never relaunched.** Running without a needed debugging port: says so and leaves it. |
-| recorder | The extension (or agent) is polling the receiver. If it is, the browser check is skipped. | Rebuilds the extension folder if it's out of date and says how to load it |
+| receiver | Up on the demo's port (in the app: the port of the receiver it runs) | Starts it in the background (the app starts its own first) |
+| browser | Edge or Chrome running with the demo's user data folder and profile (`chrome.browser`, `chrome.profile`, `chrome.userDataDir` in `demo.json`; with no `chrome.profile`, the open profile with the recorder loaded, from the running browser's `--profile-directory` and its Local State); with the agent recorder, the debugging port too | Not running: starts it with that profile. Running without the profile open: opens a window of it. **A running browser is never relaunched.** Running without a needed debugging port: says so and leaves it. |
+| recorder | The extension (or agent) is polling the receiver. If it is, the browser check is skipped. | Rebuilds the extension folder if it's out of date and says, in plain words, what's wrong: not loaded, loaded in another profile or browser, turned off, or Developer mode off |
 | app *id* | Its tab is open, reads light, and is on its start screen (`start` in the app's settings) | Opens a missing tab; reloads one that's off its start screen; a dark one needs its theme set by hand |
 
 When everything is set it takes a few seconds (the selftest: 0.7 s). `--check` only checks; `--json` prints the

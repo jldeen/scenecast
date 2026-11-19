@@ -39,7 +39,7 @@ export function registryAppPath(output) {
   return output.split(/\r?\n/).map(line => line.match(/\sREG_SZ\s+(.+)$/i)?.[1]?.trim()).find(Boolean) || null;
 }
 
-async function windowsBrowser(browser) {
+export async function windowsBrowser(browser) {
   const exe = WIN_EXE[browser], key = `Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exe}`;
   for (const root of ['HKCU', 'HKLM']) {
     const output = await new Promise(resolve => execFile('reg.exe', ['query', `${root}\\${key}`, '/ve'], (err, stdout) => resolve(err ? '' : stdout)));

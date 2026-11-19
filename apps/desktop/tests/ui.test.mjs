@@ -29,11 +29,13 @@ const times = {};
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1500)}` : '')); if (!ok) fails.push(name); return ok; };
 
 if (!existsSync(BIN)) { console.log(`no app at ${BIN}: npm run build:test first (or set SCENECAST_APP_BIN)`); process.exit(1); }
-for (const port of [RX_PORT, WD_PORT, 47801, 47802]) {
+for (const port of [RX_PORT, RX_PORT + 1, WD_PORT, 47801, 47802]) {
   const taken = await new Promise(res => { const s = createServer().once('error', () => res(true)).once('listening', () => s.close(() => res(false))).listen(port, '127.0.0.1'); });
   if (taken) { console.log(`port ${port} is in use: stop whatever is on it and run again`); process.exit(1); }
 }
 
+// Something else on the receiver's port (not a receiver): the app has to take the next one.
+const squatter = await new Promise(res => { const s = createServer(c => c.end('HTTP/1.0 404 Not Found\r\n\r\n')).listen(RX_PORT, '127.0.0.1', () => res(s)); });
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-ui-'));
 const LIB = join(tmp, 'Scenecast');
 const EXT = join(tmp, 'extension');
@@ -170,6 +172,9 @@ try {
   Object.assign(cfg, { raw: join(tmp, 'raw'), viewport: { width: 1600, height: 900, dpr: 1 }, zooms: [150] });
   Object.assign(cfg.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200 });
   writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(cfg, null, 2));
+  // The app starts the receiver as the demo opens: on the demo's port, or the next one when that's taken (the test
+  // holds it), and the extension finds it there.
+  check('the app starts the receiver when the demo opens, on the next port (the first is taken)', await waitFor('the receiver', async () => (await attr('receiver', 'data-up')) === 'true', 30000) && +(await attr('receiver', 'data-port')) === RX_PORT + 1, await attr('receiver', 'data-port'));
   lap('create');
 
   // ---- 2 · The recorder: set it up, load it unpacked, preflight with its fixes ---------------------------------
@@ -187,11 +192,13 @@ try {
   for (const p of ctx.pages()) if (p !== chat) await p.close();
   await sizeWindow(chat, 1600, 900);
   await chat.bringToFront();
-  // Check and fix: starts the receiver, opens the missing admin tab; the browser that's running isn't touched.
+  check('the recorder connects by itself, no port to set', await waitFor('the recorder connected', async () => (await attr('receiver', 'data-connected')) === 'true', 30000));
+  await shot('04a-recorder-connected');
+  // Check and fix: opens the missing admin tab; the browser that's running isn't touched.
   await click('preflight-fix');
   await waitFor('preflight ready', async () => (await attr('preflight-result', 'data-ready')) === 'true', 180000);
   // Preflight started the receiver (it stays up for the presenter); the test stops it at the end.
-  receiverPid = +((/pid (\d+)/.exec(await text('pf-receiver')) || [])[1]) || null;
+  receiverPid = await b.execute(() => window.__scenecast.receiver && window.__scenecast.receiver.pid).catch(() => null);
   check('preflight: ready, the admin tab opened', (await attr('pf-app-admin', 'data-status')) === 'fixed' && (await attr('pf-browser', 'data-status')) === 'ok');
   const admin = ctx.pages().find(p => p.url().startsWith(fx.admin));
   check('the admin tab is open in the presenter\'s browser', !!admin);
@@ -420,6 +427,7 @@ try {
   app.kill();
   if (receiverPid) try { process.kill(receiverPid); } catch { /* gone */ }
   fx.close();
+  squatter.close();
   await sleep(500);
   if (process.env.SCENECAST_UI_KEEP) console.log(`kept ${tmp}`);
   else try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }); } catch (e) { console.log(`left ${tmp}: ${e.message}`); }

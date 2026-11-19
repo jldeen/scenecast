@@ -74,7 +74,7 @@ cargo build --release -p scenecast-cli   # target/release/scenecast (scenecast.e
 ```bash
 scenecast new ignite-demo2 --title "Ignite Demo 2" --app teams=https://teams.cloud.microsoft/ --app copilot=https://copilot.cloud.microsoft/
 cd ignite-demo2
-scenecast extension              # once: load ~/.scenecast/extension unpacked in Edge or Chrome (docs/recorder.md)
+scenecast extension              # once: load Documents/Scenecast/Recorder Extension unpacked in Edge or Chrome (docs/recorder.md)
 scenecast preflight              # receiver, browser, recorder, each app's tab; fixes only what fails
 scenecast record start           # run the demo once; side states are captured on the way
 scenecast record stop

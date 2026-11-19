@@ -253,7 +253,7 @@ function startLoop() { (async () => {
   await rlog('agent started; pages ' + ctx.pages().length);
   while (RUNNING) {
     const c = await get('/cmd');
-    if (c.error) { await sleep(2000); continue; }
+    if (c.error) { if (typeof onReceiverLost === 'function') await onReceiverLost(); else await sleep(2000); continue; }
     if (!c.op || c.op === 'idle') continue;
     if (c.op === 'quit') { RUNNING = false; await post('/cmd/result', { id: c.id, ok: true, value: 'bye' }); break; }
     const t0 = Date.now();
