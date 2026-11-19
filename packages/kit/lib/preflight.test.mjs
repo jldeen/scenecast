@@ -20,10 +20,12 @@ test('main browser processes on Windows, quoted paths and flags', () => {
     '7100 "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --profile-directory="Profile 1" --remote-debugging-port=9333',
     '7101 "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --type=gpu-process',
     '7200 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir="C:\\Users\\j\\AppData\\Local\\Google\\Chrome\\User Data"',
+    '7300 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" "--profile-directory=Profile 3" --user-data-dir=C:\\t\\ud "--other=1"',
   ].join('\r\n');
   assert.deepEqual(parseProcs(ps, 'win32'), [
     { pid: 7100, browser: 'edge', userDataDir: null, profile: 'Profile 1', debugPort: 9333 },
     { pid: 7200, browser: 'chrome', userDataDir: 'C:\\Users\\j\\AppData\\Local\\Google\\Chrome\\User Data', profile: null, debugPort: null },
+    { pid: 7300, browser: 'chrome', userDataDir: 'C:\\t\\ud', profile: 'Profile 3', debugPort: null },
   ]);
 });
 

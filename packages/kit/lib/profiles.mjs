@@ -28,7 +28,8 @@ export function parseProcs(text, platform = process.platform) {
     const browser = Object.entries(BIN[platform] || {}).find(([, re]) => re.test(cmd));
     if (!browser) continue;
     // ps doesn't quote: an unquoted value runs to the next flag (--profile-directory=Profile 10 --…).
-    const flag = k => { const f = new RegExp(`--${k}=("([^"]*)"|(.*?))(?= --|$)`).exec(cmd); return f ? (f[2] !== undefined ? f[2] : f[3].trim()) : null; };
+    // Windows quotes either the value (--k="a b") or the whole flag ("--k=a b").
+    const flag = k => { const f = new RegExp(`(?:^|\\s)("?)--${k}=(?:"([^"]*)"|(.*?))\\1(?=\\s+"?--|\\s*$)`).exec(cmd); return f ? (f[2] !== undefined ? f[2] : f[3].trim()) : null; };
     out.push({ pid: +m[1], browser: browser[0], userDataDir: flag('user-data-dir'), profile: flag('profile-directory'), debugPort: flag('remote-debugging-port') && +flag('remote-debugging-port') });
   }
   return out;
