@@ -145,7 +145,11 @@ async fn job<T: Send + 'static>(
     blocking(move || {
         let dir = state.library.dir(&id)?;
         let busy = Busy::take(&state, &app, &id, name)?;
-        f(&dir, &busy)
+        let out = f(&dir, &busy);
+        if let Err(e) = &out {
+            scenecast_app::ai::app_log(&format!("{name} ({id})"), &e.to_string());
+        }
+        out
     })
     .await
 }
@@ -511,6 +515,38 @@ fn selftest_hook(state: Shared, app: AppHandle) {
                                     Ok(serde_json::to_value(state.library.create(&spec)?)?)
                                 })
                         }
+                        // The Copilot page's Sign in, as the window does it: the device code (each event in
+                        // <name>.events.ndjson as it comes), the sign-in page opened as "Copy the code and open
+                        // GitHub" opens it, then the wait for the code to be entered.
+                        "sign-in" => {
+                            let events = dir.join(format!("{name}.events.ndjson"));
+                            let app2 = app.clone();
+                            scenecast_app::ai::run(None, &["sign-in"], move |u| {
+                                if let Update::Event { event, data, .. } = &u {
+                                    if event == "device-code"
+                                        && let Some(url) =
+                                            data.get("verificationUri").and_then(Value::as_str)
+                                        && let Err(e) = open_external(&app2, url)
+                                    {
+                                        scenecast_app::ai::app_log("sign-in open", &e.to_string());
+                                    }
+                                    use std::io::Write;
+                                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                                        .create(true)
+                                        .append(true)
+                                        .open(&events)
+                                    {
+                                        let _ = writeln!(
+                                            f,
+                                            "{}",
+                                            json!({ "event": event, "data": data })
+                                        );
+                                    }
+                                }
+                            })
+                        }
+                        "open-url" => open_external(&app, req["url"].as_str().unwrap_or_default())
+                            .map(|_| Value::Null),
                         "update-check" => serde_json::to_value(tauri::async_runtime::block_on(
                             update_check_now(&app),
                         ))
@@ -754,6 +790,13 @@ async fn ai_sign_in(app: AppHandle) -> Res<Value> {
         scenecast_app::ai::run(None, &["sign-in"], |u| emit(&app, "", "ai-sign-in", u))
     })
     .await
+}
+
+#[tauri::command]
+fn logs_dir() -> PathBuf {
+    let d = scenecast_app::ai::logs_dir();
+    let _ = std::fs::create_dir_all(&d);
+    d
 }
 
 #[tauri::command]
@@ -1245,15 +1288,29 @@ fn reveal(app: AppHandle, path: String) -> Res<()> {
 /// Opens a web page (the replica, a report) in the browser; only http(s) on this machine or the docs.
 #[tauri::command]
 fn open_url(app: AppHandle, url: String) -> Res<()> {
-    let allowed = url.starts_with("http://127.0.0.1:")
-        || url.starts_with("http://localhost:")
-        || url.starts_with("https://github.com/jldeen/scenecast");
-    if !allowed {
+    open_external(&app, &url)
+}
+
+/// Opens an allowed address in the presenter's browser. With `SCENECAST_OPENED=<file>` (the packaged-app test) the
+/// address is written there instead, after the same check, so the test sees exactly what would open.
+fn open_external(app: &AppHandle, url: &str) -> Res<()> {
+    if !scenecast_app::files::may_open_url(url) {
+        scenecast_app::ai::app_log("open-url refused", url);
         return Err(AppError::Invalid(format!("not opening {url}")));
     }
-    app.opener()
-        .open_url(&url, None::<&str>)
-        .map_err(|e| AppError::Invalid(format!("can't open {url}: {e}")))
+    if let Some(f) = std::env::var_os("SCENECAST_OPENED") {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(f)?;
+        writeln!(file, "{url}")?;
+        return Ok(());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| {
+        scenecast_app::ai::app_log("open-url failed", &format!("{url}: {e}"));
+        AppError::Invalid(format!("can't open {url}: {e}"))
+    })
 }
 
 // ---- Updates -----------------------------------------------------------------------------------------------------
@@ -1523,6 +1580,7 @@ fn main() {
             ai_coach,
             ai_coach_window,
             pick_text_file,
+            logs_dir,
             edit_start,
             edit_stop,
             key_reference,

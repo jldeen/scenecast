@@ -7,7 +7,7 @@
 // The SDK's runtime (about 80 MB a system) isn't in the installers: it's fetched the first time someone signs in,
 // from this repository's release (or npm), and checked against the SHA-256 below before it's used.
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -25,6 +25,15 @@ const RELEASE = `https://github.com/jldeen/scenecast/releases/download/copilot-r
 const NPM = 'https://registry.npmjs.org/@github';
 
 export const aiHome = () => process.env.SCENECAST_AI_HOME || join(homedir(), '.scenecast', 'ai');
+// The AI's log (aiHome()/logs/ai.log): every sign-in step and what Copilot answered, never a token.
+export const logFile = () => join(aiHome(), 'logs', 'ai.log');
+export function log(what, data) {
+  try {
+    mkdirSync(join(aiHome(), 'logs'), { recursive: true });
+    const clean = JSON.stringify(data === undefined ? null : data, (k, v) => /token|secret|password/i.test(k) ? '[hidden]' : v);
+    appendFileSync(logFile(), `${new Date().toISOString()} ${what} ${clean}\n`);
+  } catch (e) {}
+}
 const platform = () => `${process.platform}-${process.arch}`;
 
 // The settings the presenter controls (Settings → Copilot in the app).
@@ -107,13 +116,13 @@ async function sdk() {
 
 // A client for this app: its own Copilot data folder (never the presenter's Copilot CLI's), the presenter's stored
 // sign-in, or a token from SCENECAST_COPILOT_TOKEN (tests; never stored).
-export async function client() {
+export async function client({ logLevel } = {}) {
   await ensureRuntime();
   const { CopilotClient } = await sdk();
   const token = process.env.SCENECAST_COPILOT_TOKEN;
   const base = join(aiHome(), 'copilot');
   mkdirSync(base, { recursive: true });
-  const c = new CopilotClient({ mode: 'empty', baseDirectory: base, logLevel: 'error', ...(token ? { gitHubToken: token, useLoggedInUser: false } : { useLoggedInUser: true }) });
+  const c = new CopilotClient({ mode: 'empty', baseDirectory: base, logLevel: logLevel || process.env.SCENECAST_AI_LOG_LEVEL || 'warning', ...(token ? { gitHubToken: token, useLoggedInUser: false } : { useLoggedInUser: true }) });
   await c.start();
   return c;
 }
@@ -135,29 +144,53 @@ export async function models() {
   try { return (await c.listModels()).map(m => ({ id: m.id, name: m.name || m.id })); } finally { await c.stop().catch(() => {}); }
 }
 
+// The steps of a GitHub sign-in, from the runtime's login flow (login: its begin/advance), to "completed":
+//   device-code              the code for the presenter to enter; advance waits until they have
+//   needs-plaintext-consent  GitHub accepted it, but the system keychain can't be reached (the runtime's own Keychain
+//                            access is off in an app it doesn't ship with: "Keytar disabled: system keychain
+//                            unreachable"). "allow" keeps the sign-in in this app's own Copilot folder
+//                            (aiHome()/copilot/config.json, readable by this user only); anything else drops it.
+//   needs-account-selection  the first account
+// Anything else is an error that says what happened.
+export async function loginFlow(login, on = () => {}) {
+  const begun = await login.begin({ kind: 'githubDotCom', method: 'device-code' });
+  let step = begun.step;
+  for (let i = 0; i < 8; i++) {
+    log('sign-in step', step);
+    if (step.kind === 'device-code') on({ event: 'device-code', userCode: step.userCode, verificationUri: step.verificationUri, expiresIn: step.expiresIn });
+    else if (step.kind === 'open-url') on({ event: 'open-url', url: step.url });
+    else if (step.kind === 'error') throw new Error(`GitHub sign-in: ${step.message}`);
+    else if (step.kind === 'completed') {
+      const r = step.result || {};
+      if (r.status === 'completed') return r;
+      if (r.status === 'needs-plaintext-consent') { step = await login.advance({ flowId: begun.flowId, input: 'allow' }); continue; }
+      if (r.status === 'needs-account-selection' && (r.accounts || []).length) { const a = r.accounts[0]; step = await login.advance({ flowId: begun.flowId, input: a.selectionId || a.id }); continue; }
+      throw new Error(`GitHub sign-in ended as "${r.status}"`);
+    }
+    step = await login.advance({ flowId: begun.flowId });
+  }
+  throw new Error('GitHub sign-in didn\'t finish');
+}
+
 // Sign in with GitHub's device flow: on({ event: 'device-code', userCode, verificationUri, expiresIn }) for the app to
 // show, then it waits until the presenter has entered the code (or it runs out).
 export async function signIn(on = () => {}) {
   await ensureRuntime(on);
-  const c = await client();
+  log('sign-in start', { runtime: runtimeState(), home: aiHome() });
+  // Sign-in logs in full (aiHome()/copilot/logs): where the credential went, and why.
+  const c = await client({ logLevel: 'debug' });
   try {
     const s = await c.createSession({ model: 'auto', ...NO_TOOLS });
-    const begun = await s.rpc.accounts.login.begin({ kind: 'githubDotCom', method: 'device-code' });
-    let step = begun.step;
-    for (let i = 0; i < 6; i++) {
-      if (step.kind === 'device-code') on({ event: 'device-code', userCode: step.userCode, verificationUri: step.verificationUri, expiresIn: step.expiresIn });
-      else if (step.kind === 'open-url') on({ event: 'open-url', url: step.url });
-      else if (step.kind === 'error') throw new Error(step.message);
-      else if (step.kind === 'completed') {
-        const r = step.result || {};
-        if (r.status === 'needs-plaintext-consent') { step = await s.rpc.accounts.login.advance({ flowId: begun.flowId, input: 'decline' }).catch(e => ({ kind: 'error', message: String(e.message || e) })); continue; }
-        break;
-      }
-      step = await s.rpc.accounts.login.advance({ flowId: begun.flowId });
-    }
+    await loginFlow(s.rpc.accounts.login, on);
+    const sa = await s.rpc.accounts.get({ query: { kind: 'status' } }).catch(e => ({ error: String(e.message || e) }));
+    const errs = await s.rpc.accounts.get({ query: { kind: 'lastErrors' } }).catch(e => ({ error: String(e.message || e) }));
     const a = await c.getAuthStatus();
-    if (!a.isAuthenticated) throw new Error('not signed in');
+    log('sign-in after', { session: sa, lastErrors: errs, client: a });
+    if (!a.isAuthenticated) throw new Error(`GitHub accepted the code, but Copilot didn't keep the sign-in (${a.statusMessage || 'not authenticated'})`);
     return { signedIn: true, login: a.login };
+  } catch (e) {
+    log('sign-in error', { message: String(e && e.message || e) });
+    throw new Error(`${String(e && e.message || e)}. Details: ${logFile()}`);
   } finally { await c.stop().catch(() => {}); }
 }
 

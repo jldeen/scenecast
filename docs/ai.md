@@ -17,14 +17,21 @@ The AI is **GitHub Copilot**, through your own GitHub account and its Copilot pl
 How: the [GitHub Copilot SDK](https://github.com/github/copilot-sdk) (`@github/copilot-sdk` 1.0.31), GitHub's
 supported way for an app to use Copilot on a user's behalf. The sign-in is its device flow ("GitHub signed-in user"
 in the SDK's [authentication docs](https://github.com/github/copilot-sdk/blob/main/docs/auth/authenticate.md)); the
-credential is kept in the system's own store (Keychain, Credential Manager), in Scenecast's own Copilot folder, never
-the Copilot CLI's. Requests use the model **Automatic** picks, or the one you choose on the Copilot page.
+credential is kept in the system's own store (Keychain, Credential Manager) when the runtime can reach it. In the app
+it often can't ("system keychain unreachable"), so it's kept in Scenecast's own Copilot folder instead
+(`ai/copilot/config.json`, readable only by you), never the Copilot CLI's. **Sign out** removes it. Requests use the model **Automatic** picks, or the one you choose on the Copilot page.
 
 The SDK's runtime (about 80 MB a system) isn't in the installers: the first sign-in fetches it once from this
 repository's [`copilot-runtime-1.0.31`](https://github.com/jldeen/scenecast/releases/tag/copilot-runtime-1.0.31)
 release (GitHub works where npm is blocked; npm is the fallback) and checks its SHA-256 (in `packages/ai/copilot.mjs`)
 before using it. It lives in the app's data folder (`~/Library/Application Support/Scenecast/ai` on the Mac,
 `%LOCALAPPDATA%\Scenecast\ai` on Windows), with your settings.
+
+## When something goes wrong
+
+The Copilot page shows the real error, with **Show the logs**: `scenecast.log` (the app) and `ai.log` (each sign-in
+step and what GitHub answered, never a token) in `…/Scenecast/ai/logs`, and Copilot's own logs in
+`…/Scenecast/ai/copilot/logs`.
 
 ## What Copilot sees (and what stays on your computer)
 

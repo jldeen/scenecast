@@ -10,6 +10,7 @@ import { redact, compactOutline, makeModel } from './model.mjs';
 import { findItem } from './find.mjs';
 import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
+import { loginFlow } from './copilot.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -84,4 +85,24 @@ test('coach: what the recorder saw, matched to the plan', () => {
   assert.ok(matches(parseStep('Press Enter'), { click: { sel: 'button[aria-label="Send"]' }, typedFrom: {} }));
   assert.ok(matches(parseStep('Go to admin'), { app: 'admin' }));
   assert.ok(!matches(parseStep('Click "Plugins"'), { click: { sel: 'a[aria-label="New"]' } }));
+});
+
+test('sign-in: GitHub accepted the code but the keychain is unreachable: the sign-in is kept, not dropped', async () => {
+  process.env.SCENECAST_AI_HOME = mkdtempSync(join(tmpdir(), 'sc-ai-'));
+  const said = [];
+  const steps = [{ kind: 'device-code', userCode: 'AB12-CD34', verificationUri: 'https://github.com/login/device', expiresIn: 900 },
+    { kind: 'completed', result: { status: 'needs-plaintext-consent' } }];
+  const login = {
+    begin: async () => ({ flowId: 'f', step: steps[0] }),
+    advance: async ({ input }) => { said.push(input); return said.length === 1 ? steps[1] : input === 'allow' ? { kind: 'completed', result: { status: 'completed', login: 'someone' } } : { kind: 'completed', result: { status: 'declined' } }; },
+  };
+  const ev = [];
+  const r = await loginFlow(login, e => ev.push(e));
+  assert.equal(r.login, 'someone');
+  assert.deepEqual(said, [undefined, 'allow']);
+  assert.equal(ev[0].userCode, 'AB12-CD34');
+  // Declined (or anything unknown) is an error that says so, never a quiet "not signed in".
+  const no = { begin: async () => ({ flowId: 'f', step: { kind: 'completed', result: { status: 'declined' } } }), advance: async () => ({}) };
+  await assert.rejects(loginFlow(no), /ended as "declined"/);
+  assert.match(readFileSync(join(process.env.SCENECAST_AI_HOME, 'logs', 'ai.log'), 'utf8'), /needs-plaintext-consent/);
 });

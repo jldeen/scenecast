@@ -337,10 +337,10 @@ async function createDemo(form) {
 // ---- Copilot -----------------------------------------------------------------------------------------------------
 
 // The presenter's GitHub Copilot: signed in or not, the code to enter while signing in, the settings.
-const AI = { status: null, checking: false, signing: false, code: null, runtime: null, error: null, models: null, settings: null };
+const AI = { status: null, checking: false, signing: false, code: null, runtime: null, error: null, signInError: null, models: null, settings: null };
 async function refreshAi() {
   AI.checking = true; renderCopilotState();
-  try { AI.status = await invoke('ai_status'); AI.settings = AI.status.settings; AI.error = null; } catch (e) { AI.error = String(e); }
+  try { AI.status = await invoke('ai_status'); AI.settings = AI.status.settings; AI.error = null; if (AI.status.signedIn) AI.signInError = null; } catch (e) { AI.error = String(e); }
   AI.checking = false; renderCopilotState();
   if (S.view === 'copilot') renderCopilot();
   renderRegions();
@@ -362,7 +362,8 @@ const signedInLine = () => {
 Object.assign(REGIONS_LATE, {
   'copilot-mini': () => signedInLine(),
   'copilot-signin'() {
-    if (AI.error && !AI.signing) return errorBox(AI.error);
+    if (!AI.signing && (AI.signInError || AI.error)) return `<div class="notice bad" role="alert" data-test="ai-sign-in-error"><div><strong>Not signed in.</strong> ${esc(AI.signInError || AI.error)}
+      <div class="row" style="margin-top:8px"><button class="btn small" data-action="ai-sign-in">Try again</button><button class="btn small subtle" data-action="show-logs">Show the logs</button></div></div></div>`;
     if (!AI.signing) return '';
     const rt = AI.runtime;
     if (!AI.code) return `${progressBar(true)}<p class="small">${rt && !rt.ready ? `Getting Copilot ready (once): ${Math.round((rt.got || 0) / 1048576)} of ${Math.round((rt.total || 0) / 1048576) || '…'} MB` : 'Starting…'}</p>`;
@@ -1144,11 +1145,12 @@ const ACTIONS = {
   new: renderNew,
   copilot: () => { renderCopilot(); refreshAi(); },
   'ai-sign-in': async () => {
-    AI.signing = true; AI.code = null; AI.runtime = null; AI.error = null; renderCopilotState(); renderCopilot();
-    try { await invoke('ai_sign_in'); toast('Signed in to GitHub Copilot'); } catch (e) { AI.error = typeof e === 'string' ? e : e.message; }
+    AI.signing = true; AI.code = null; AI.runtime = null; AI.error = null; AI.signInError = null; renderCopilotState(); renderCopilot();
+    try { await invoke('ai_sign_in'); toast('Signed in to GitHub Copilot'); } catch (e) { AI.signInError = typeof e === 'string' ? e : e.message; toast('Not signed in: ' + AI.signInError, true); }
     AI.signing = false; AI.code = null;
     await refreshAi();
   },
+  'show-logs': async () => { const d = await call('logs_dir'); call('reveal', { path: d }).catch(() => {}); },
   'ai-sign-out': async () => { await call('ai_sign_out'); await refreshAi(); },
   'ai-models': async () => { AI.models = (await call('ai_models')).models; renderCopilot(); },
   'pick-source': async () => { const f = await call('pick_text_file'); if (f) { $('#new-source').value = f.text; $('#source-name').textContent = f.name; } },

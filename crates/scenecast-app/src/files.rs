@@ -74,6 +74,21 @@ fn percent_encode(part: &str) -> String {
     out
 }
 
+/// The web addresses the app opens in the presenter's browser: its own servers on this computer, this project's
+/// pages, and GitHub's device sign-in page (Copilot's sign-in hands it over as `verificationUri`). Nothing else: a
+/// page shown in the window can't make the app open an arbitrary site.
+pub fn may_open_url(url: &str) -> bool {
+    let local = ["http://127.0.0.1:", "http://localhost:"]
+        .iter()
+        .any(|p| url.starts_with(p));
+    let project = url == "https://github.com/jldeen/scenecast"
+        || url.starts_with("https://github.com/jldeen/scenecast/");
+    let device = url
+        .strip_prefix("https://github.com/login/device")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with('?'));
+    local || project || device
+}
+
 impl FileScope {
     /// Lets the window show files inside `dir`.
     pub fn allow(&self, dir: &Path) {
@@ -126,6 +141,27 @@ impl FileScope {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opens_only_its_own_pages_and_githubs_device_sign_in() {
+        for ok in [
+            "https://github.com/login/device",
+            "https://github.com/login/device?user_code=AB12-CD34",
+            "http://127.0.0.1:4620/",
+            "https://github.com/jldeen/scenecast/releases",
+        ] {
+            assert!(super::may_open_url(ok), "{ok}");
+        }
+        for no in [
+            "https://github.com/login/devicex",
+            "https://github.com.evil.example/login/device",
+            "https://example.com/",
+            "https://github.com/jldeen/scenecastx",
+            "file:///etc/passwd",
+        ] {
+            assert!(!super::may_open_url(no), "{no}");
+        }
+    }
+
     use super::*;
 
     #[test]

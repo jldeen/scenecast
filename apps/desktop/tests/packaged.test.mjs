@@ -17,7 +17,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { realpathSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../../examples/fixture-app/server.mjs';
 
@@ -30,6 +30,7 @@ if (!existsSync(installer)) { console.log(`usage: packaged.test.mjs <installer> 
 if (!process.env.CI && !process.env.SCENECAST_PACKAGED_OK) { console.log('packaged.test.mjs replaces Documents/Scenecast/Recorder Extension and needs port 47621: it runs on CI, or set SCENECAST_PACKAGED_OK=1'); process.exit(2); }
 // The real path: macOS's temp folder is under /var, a symlink, and the updater won't run an app from there.
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'scenecast-packaged-')));
+const OPENED = join(tmp, 'opened.txt');
 const PORT = 47621;
 const listening = port => new Promise(res => { const c = connect(port, '127.0.0.1').once('connect', () => { c.destroy(); res(true); }).once('error', () => res(false)); });
 const ping = () => fetch(`http://127.0.0.1:${PORT}/ping`).then(r => r.json()).catch(() => null);
@@ -79,7 +80,9 @@ try {
   fx = startFixture();
   const extDir = join(homedir(), 'Documents', 'Scenecast', 'Recorder Extension');
   rmSync(extDir, { recursive: true, force: true });
-  const env = { ...process.env, SCENECAST_LIBRARY: LIB, SCENECAST_SELFTEST: HOOK, SCENECAST_AI_HOME: join(tmp, 'ai-home') };
+  const env = { ...process.env, SCENECAST_LIBRARY: LIB, SCENECAST_SELFTEST: HOOK, SCENECAST_AI_HOME: join(tmp, 'ai-home'), SCENECAST_OPENED: OPENED };
+  // Copilot's runtime also takes a GitHub CLI sign-in: none here, so "signed in" means this app's own sign-in.
+  env.PATH = (env.PATH || '').split(delimiter).filter(d => !['gh', 'gh.exe'].some(x => existsSync(join(d, x)))).join(delimiter);
   for (const k of ['SCENECAST_JS', 'SCENECAST_AI_MODEL', 'COPILOT_CLI_PATH', 'GH_TOKEN', 'GITHUB_TOKEN', 'COPILOT_GITHUB_TOKEN', 'SCENECAST_NODE', 'SCENECAST_EXTENSION_DIR', 'REPLICA_RX_PORT', 'REPLICA_NO_OPEN']) delete env[k];
   const log = [];
   app = spawn(exe, [], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -166,6 +169,24 @@ try {
   check('Copilot: the runtime fetched from the release and checked', rt.ok && rt.value.ready === true, JSON.stringify(rt).slice(0, 800));
   const ais = await hook('ai', { args: ['status'] }, 300000);
   check('Copilot: the SDK starts in the installed app (not signed in here)', ais.ok && ais.value.runtime && ais.value.runtime.ready === true && ais.value.signedIn === false, JSON.stringify(ais).slice(0, 800));
+  // Sign in, as the Copilot page does it: the device code, then GitHub's sign-in page opened in the browser (0.4.0
+  // refused to open it). SCENECAST_TEST_SIGN_IN=approve: someone enters the code, and the sign-in must be kept and
+  // still there on the next start (0.4.0 dropped it when the keychain couldn't be reached).
+
+  const signing = hook('sign-in', {}, 1000000).catch(e => ({ ok: false, error: String(e) }));
+  const code = await waitFor('the device code', () => { const f = readdirSync(HOOK).find(n => n.endsWith('.events.ndjson')); if (!f) return null; const e = readFileSync(join(HOOK, f), 'utf8').trim().split('\n').map(l => JSON.parse(l)).find(x => x.event === 'device-code'); return e && e.data; }, 300000, 500).catch(() => null);
+  check('Copilot sign-in: a device code to enter at github.com/login/device', !!code && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code.userCode) && code.verificationUri === 'https://github.com/login/device', JSON.stringify(code));
+  const opened = await waitFor('the sign-in page to open', () => existsSync(OPENED) && readFileSync(OPENED, 'utf8').split(/\r?\n/).includes('https://github.com/login/device'), 20000, 300).catch(() => false);
+  check('Copilot sign-in: opens https://github.com/login/device in the browser', !!opened, existsSync(OPENED) ? readFileSync(OPENED, 'utf8') : 'nothing opened');
+  const refused = await hook('open-url', { url: 'https://example.com/' });
+  check('…and nothing else outside its own pages', !refused.ok && /not opening/.test(refused.error), JSON.stringify(refused));
+  if (process.env.SCENECAST_TEST_SIGN_IN === 'approve') {
+    console.log(`\n>>> Enter ${code && code.userCode} at https://github.com/login/device and approve it.\n`);
+    const done = await signing;
+    check('Copilot sign-in: completes after the code is approved', done.ok && done.value.signedIn === true, JSON.stringify(done).slice(0, 1500));
+    const again = await hook('ai', { args: ['status'] }, 300000);
+    check('…and the sign-in is kept (a new status sees it, with no GitHub CLI)', again.ok && again.value.signedIn === true && again.value.via === 'sign-in', JSON.stringify(again).slice(0, 800));
+  }
 
   // ---- Record through the real extension: live count, then at least 3 screens in recording.json -----------------
   writeFileSync(join(DEMO, 'demo.json'), JSON.stringify({ ...cfg, chrome: { ...cfg.chrome, profile: 'Profile 3' }, record: { ...(cfg.record || {}), auto: false } }, null, 2));

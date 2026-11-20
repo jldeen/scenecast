@@ -40,6 +40,29 @@ pub fn home() -> PathBuf {
         .join("ai")
 }
 
+/// The app's logs (`scenecast.log`, the AI's `ai.log`), next to the AI's data; Copilot's own are in `../copilot/logs`.
+pub fn logs_dir() -> PathBuf {
+    home().join("logs")
+}
+
+/// One line in the app's log (`scenecast.log`), with the time. Never fails.
+pub fn app_log(what: &str, detail: &str) {
+    use std::io::Write;
+    let dir = logs_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("scenecast.log"))
+    {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "{secs} {what}: {}", detail.replace('\n', " | "));
+    }
+}
+
 /// The demo's AI settings: its mode and goal.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -218,15 +241,21 @@ pub fn run(
         }
         on(Update::line(&p));
     })?;
+    let what = format!("ai {}", args.first().copied().unwrap_or(""));
     if let Some(e) = error {
+        app_log(&what, &format!("{e} (stderr: {})", tail.join(" | ")));
         return Err(AppError::Invalid(e));
     }
     match result {
         Some(r) if code == 0 => Ok(r),
-        _ => Err(AppError::Invalid(format!(
-            "the AI step stopped (exit {code}){}",
-            tail.last().map(|l| format!(": {l}")).unwrap_or_default()
-        ))),
+        _ => {
+            let e = format!(
+                "the AI step stopped (exit {code}){}",
+                tail.last().map(|l| format!(": {l}")).unwrap_or_default()
+            );
+            app_log(&what, &format!("{e} (stderr: {})", tail.join(" | ")));
+            Err(AppError::Invalid(e))
+        }
     }
 }
 
