@@ -193,7 +193,9 @@ try {
   // ---- An older recorder in the browser: Record refuses and says to reload it --------------------------------------
   const man = join(extDir, 'sw.js'), manText = readFileSync(man, 'utf8');
   writeFileSync(man, manText.replace(/const RECORDER_VERSION = "[^"]*";/, 'const RECORDER_VERSION = "0.0.9";'));
-  const reload = () => fetch(`http://127.0.0.1:${PORT}/cmd`, { method: 'POST', body: JSON.stringify({ op: 'reload' }) });
+  // Loaded again from its folder, as the extensions page's Reload does (on CI's Chrome an extension loaded through
+  // the DevTools protocol doesn't come back from chrome.runtime.reload).
+  const reload = () => cdp.send('Extensions.loadUnpacked', { path: extDir });
   await reload();
   await sleep(3000);
   const { send } = await import('../../../packages/recorder/cli.mjs');
