@@ -47,6 +47,23 @@ function storeBlob(buf, type, url) {
 const fromDataUrl = d => { const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(d || ''); if (!m) return null; return { type: m[1], buf: m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3])) }; };
 
 const cmds = []; const waiters = []; const drop = w => { const i = waiters.indexOf(w); if (i >= 0) waiters.splice(i, 1); }; let agentAt = 0; const results = {};
+// One recorder per receiver. Every copy of the recorder that finds this receiver says who it is (a browser with the
+// extension, another browser or profile with it too, a test's browser): the first one is this receiver's, and only it
+// gets commands, so a check and the recording that follows always run in the same browser. The others wait (standby)
+// and are listed by /ping, so the app can say there are two. One that's gone (no poll for 30 s, nothing in hand) gives
+// its place to the next.
+const agents = new Map(); let bound = null; const inHand = new Set();
+const ALIVE_MS = 30000;
+const alive = id => { const a = agents.get(id); return !!a && (Date.now() - a.at < ALIVE_MS || (id === bound && inHand.size > 0)); };
+function agentOf(u) {
+  const id = u.searchParams.get('agent') || 'unnamed';
+  const a = agents.get(id) || { id, first: Date.now() };
+  Object.assign(a, { at: Date.now(), browser: u.searchParams.get('browser') || a.browser || '', tabs: +(u.searchParams.get('tabs') || a.tabs || 0), version: u.searchParams.get('v') || a.version || '' });
+  agents.set(id, a);
+  if (!bound || (bound !== id && !alive(bound))) { if (bound !== id) log(`recorder ${id} (${a.browser}, ${a.tabs} tabs) is this receiver's${bound ? ` (${bound} is gone)` : ''}`); bound = id; inHand.clear(); }
+  return a;
+}
+const others = () => [...agents.values()].filter(a => a.id !== bound && Date.now() - a.at < ALIVE_MS).map(a => ({ id: a.id, browser: a.browser, tabs: a.tabs, secsAgo: Math.round((Date.now() - a.at) / 1000) }));
 const SINCE = Date.now(), OWNER = process.env.SCENECAST_RX_OWNER || 'cli', DEMO = demo ? demo.dir : null;
 // Started by the desktop app: go when the app does (it stops this receiver when it quits; this covers a crash).
 const PARENT = +process.env.SCENECAST_RX_PARENT || 0;
@@ -119,16 +136,19 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && u.pathname === '/coach.json') return json(res, 200, coachNow || {});
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
     // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
-    if (req.method === 'GET' && u.pathname === '/ping') return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null } });
+    if (req.method === 'GET' && u.pathname === '/ping') { const b = agents.get(bound) || {}; return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null, id: bound, browser: b.browser, tabs: b.tabs, others: others() } }); }
     // The recorder's checkpoint, for record start --resume.
     if (req.method === 'GET' && u.pathname === '/recording-partial') { const f = join(RAW, 'recording-partial.json'); return existsSync(f) ? json(res, 200, JSON.parse(readFileSync(f, 'utf8'))) : json(res, 404, { error: 'no checkpoint' }); }
     // Remote control: the driver long-polls for its next command.
     if (req.method === 'GET' && u.pathname === '/cmd') {
+      const a = agentOf(u);
+      // Another recorder: no commands, and back in a few seconds (it's listed by /ping).
+      if (a.id !== bound) { const t = setTimeout(() => json(res, 200, { op: 'idle', standby: true }), 5000); res.on('close', () => clearTimeout(t)); return; }
       agentAt = Date.now();
-      if (cmds.length) return json(res, 200, cmds.shift());
+      if (cmds.length) { const c = cmds.shift(); inHand.add(c.id); return json(res, 200, c); }
       // Each waiting recorder in turn; a command goes to the one that asked last (two copies of the extension
       // loaded can't strand a command on a poll that's gone).
-      const w = c => { clearTimeout(t); drop(w); json(res, 200, c); };
+      const w = c => { clearTimeout(t); drop(w); if (c.id) inHand.add(c.id); json(res, 200, c); };
       const t = setTimeout(() => w({ op: 'idle' }), 20000);
       waiters.push(w);
       res.on('close', () => { if (!res.writableEnded) { clearTimeout(t); drop(w); } });
@@ -144,7 +164,7 @@ createServer(async (req, res) => {
         if (waiters.length) waiters[waiters.length - 1](c); else cmds.push(c);
         return json(res, 200, { id: c.id });
       }
-      case '/cmd/result': agentAt = Date.now(); results[data.id] = data; log(`result ${data.id} ${String(data.ok)} ${(data.error || '').slice(0, 200)}`); return json(res, 200, { ok: true });
+      case '/cmd/result': agentAt = Date.now(); inHand.delete(data.id); results[data.id] = data; log(`result ${data.id} ${String(data.ok)} ${(data.error || '').slice(0, 200)}`); return json(res, 200, { ok: true });
       case '/result': { const id = u.searchParams.get('id') || data.id; return json(res, 200, results[id] || { pending: true }); }
       case '/have': return json(res, 200, { missing: (data.urls || []).filter(x => !urlIndex[x] || urlIndex[x].error) });
       case '/res': {

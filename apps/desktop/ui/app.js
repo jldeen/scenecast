@@ -1310,32 +1310,44 @@ $('#new-demo').onclick = renderNew;
 // Busy while the list loads: the table is drawn again when it's in (screen readers wait; so does the UI test).
 $('#nav-copilot').onclick = ACTIONS.copilot;
 $('#nav-library').onclick = async () => { const m = $('#main'); m.setAttribute('aria-busy', 'true'); try { await loadDemos(); renderLibrary(); } finally { m.removeAttribute('aria-busy'); } };
-// ---- Updates: checked at start and every few hours; one click downloads, installs and restarts on the new version.
-const U = { available: null, busy: false, progress: null };
+// ---- Updates: checked at start, every 30 minutes, and when the window comes back to the front (at most every 10
+// minutes); quietly, a failed check is just tried again later. A newer version shows at once: a dot on "Check for
+// updates" and "Update to vX.Y.Z" in the sidebar. Nothing installs until it's clicked, and not while recording or
+// presenting.
+const U = { available: null, busy: false, progress: null, checkedAt: 0 };
+const inTheMiddle = () => Object.values(S.jobs).some(j => j.running.record || j.running['ai-record']) || Object.keys(S.servers.present || {}).length > 0;
 function renderUpdate() {
   const el = $('#update');
-  if (!U.available) { el.hidden = true; return; }
+  const link = $('#check-updates');
+  link.classList.toggle('has-update', !!U.available);
+  link.dataset.available = U.available || '';
+  if (!U.available) { el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
   const p = U.progress;
   const pct = p?.total ? Math.round(100 * p.downloaded / p.total) : null;
+  const hold = inTheMiddle();
   el.innerHTML = U.busy
     ? `<div class="small"><strong>Updating to v${esc(U.available)}…</strong> ${p?.stage === 'install' ? 'Installing; Scenecast restarts in a moment.' : pct !== null ? `${pct}%` : 'Downloading'}</div>
        <div class="progress" role="progressbar" aria-label="Downloading the update" ${pct !== null ? `aria-valuenow="${pct}"` : ''}><div style="${pct !== null ? `width:${pct}%;animation:none` : ''}"></div></div>`
-    : `<div class="small">Update available: <strong>v${esc(U.available)}</strong></div>
-       <button class="btn small primary" id="update-now" data-test="update-now">Update</button>`;
+    : `<div class="small"><span class="update-dot" aria-hidden="true"></span>A new version is ready: <strong>v${esc(U.available)}</strong></div>
+       <button class="btn small primary" id="update-now" data-test="update-now" ${hold ? 'disabled title="After you stop recording or presenting"' : ''}>Update to v${esc(U.available)}</button>
+       ${hold ? '<div class="small muted">After you stop recording or presenting.</div>' : ''}`;
   const b = $('#update-now');
   if (b) b.onclick = installUpdate;
 }
 async function checkUpdates(quiet) {
+  U.checkedAt = Date.now();
   const u = await invoke('check_updates').catch(e => ({ error: String(e) }));
-  U.available = u.available || null;
+  if (!u.error || !quiet) U.available = u.available || null;
   renderUpdate();
+  if (U.available && quiet) announce(`Scenecast ${U.available} is ready to install`);
   if (quiet) return u;
   if (u.error) dialog({ title: 'Updates', body: `<p>Couldn\u2019t check for updates: ${esc(u.error)}</p>`, cancel: null });
   else if (!u.available) dialog({ title: 'Updates', body: `<p>You have the newest Scenecast (v${esc(u.current)}).</p>`, cancel: null });
   return u;
 }
 async function installUpdate() {
+  if (inTheMiddle()) return toast('Stop recording or presenting first, then update', true);
   U.busy = true; U.progress = null; renderUpdate();
   try {
     // Restarts on the new version when it's installed: nothing after this runs.
@@ -1346,6 +1358,9 @@ async function installUpdate() {
   }
 }
 listen('update-progress', ({ payload }) => { U.progress = payload; renderUpdate(); });
+const quietCheck = () => { if (!U.busy && Date.now() - U.checkedAt > 10 * 60 * 1000) checkUpdates(true); };
+window.addEventListener('focus', quietCheck);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) quietCheck(); });
 $('#check-updates').onclick = () => checkUpdates(false);
 
 // ---- Start -------------------------------------------------------------------------------------------------------
@@ -1359,5 +1374,7 @@ renderLibrary();
 if (S.info.engineError) toast(S.info.engineError, true);
 refreshAi();
 checkUpdates(true);
-setInterval(() => { if (!U.busy) checkUpdates(true); }, 4 * 3600 * 1000);
+setInterval(() => { if (!U.busy) checkUpdates(true); }, 30 * 60 * 1000);
+// Recording or presenting started or stopped: the Update button follows.
+setInterval(() => { if (U.available && !U.busy) { const b = $('#update-now'); if (b && b.disabled !== inTheMiddle()) renderUpdate(); } }, 2000);
 window.__scenecast = S;

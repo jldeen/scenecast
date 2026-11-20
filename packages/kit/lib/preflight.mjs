@@ -143,6 +143,9 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
     for (let i = 0; i < waitAgentS * 2 && !connected(up); i++) { await sleep(500); up = (await ping(port, 1500)) || up; }
     if (connected(up)) {
       if (recorder !== 'extension') return { status: 'ok', detail: `${recorder} connected` };
+      // More than one browser has the recorder connected to this receiver: it records in the first; say so, plainly.
+      const more = (up.agent.others || []);
+      if (more.length) return { status: 'fail', detail: `the recorder is in more than one browser window or profile: it records in ${up.agent.browser || 'the first'} (${up.agent.tabs} tabs), and ${more.map(o => `${o.browser || 'another'} (${o.tabs} tabs)`).join(', ')} also has it. Remove the recorder from the one you don't record in (at ${PAGE[browser]}), or close that browser, then check again`, others: more };
       const e = await op(port, { op: 'extension' }, 8);
       const have = e.ok && e.value ? e.value.version : null;
       if (have && have !== ver) {

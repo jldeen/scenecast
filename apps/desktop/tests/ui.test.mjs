@@ -39,6 +39,16 @@ const LIB = join(tmp, 'Scenecast');
 const EXT = join(tmp, 'extension');
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const fx = startFixture();
+// The update feed, played by the test: a version newer than the app, then the app's own.
+const FEED = { version: '9.9.9' };
+const feed = (await import('node:http')).createServer((req, res) => {
+  const entry = { signature: 'dGVzdA==', url: 'http://127.0.0.1:1/none.tar.gz' };
+  const platforms = Object.fromEntries(['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64', 'windows-x86_64-nsis', 'windows-x86_64-msi', 'linux-x86_64'].map(k => [k, entry]));
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ version: FEED.version, notes: 'test', pub_date: '2026-11-20T00:00:00Z', platforms }));
+}).listen(0, '127.0.0.1');
+await new Promise(r => feed.once('listening', r));
+const FEED_URL = `http://127.0.0.1:${feed.address().port}/latest.json`;
 
 // ---- The app -----------------------------------------------------------------------------------------------------
 const appLog = [];
@@ -53,6 +63,7 @@ const app = spawn(BIN, [], {
     // The test's own headless browser plays the presenter's: the app shows each replica's address instead of opening it.
     REPLICA_NO_OPEN: '1',
     REPLICA_CHROME_CHANNEL: process.env.REPLICA_CHROME_CHANNEL || 'chrome',
+    SCENECAST_UPDATE_URL: FEED_URL,
     // The AI modes on the deterministic stand-in model: no network, no GitHub account.
     SCENECAST_AI_MODEL: 'stub',
     SCENECAST_AI_HOME: join(tmp, 'ai-home'),
@@ -153,6 +164,19 @@ try {
   await b.setWindowSize(1360, 900).catch(() => {});
   check('the app opens on the demo library', await waitFor('the library', () => exists('empty-new'), 30000));
   await shot('01-library-empty');
+  // A newer version: it shows by itself (checked at start), with nothing clicked.
+  const avail = await waitFor('the update indicator', async () => (await exists('update-now')) && b.execute(() => document.querySelector('#check-updates').dataset.available), 60000).catch(() => null);
+  check('a newer version shows by itself: "Update to v9.9.9" and a dot', avail === '9.9.9' && /Update to v9\.9\.9/.test(await text('update-now')) && await b.execute(() => document.querySelector('#check-updates').classList.contains('has-update')), String(avail));
+  await shot('01b-update-available');
+  // The same version as the app: no indicator.
+  FEED.version = (await b.execute(() => window.__scenecast.info.version));
+  await click('check-updates');
+  await click('dialog-ok');
+  check('the same version: no indicator', !(await exists('update-now')) && await b.execute(() => document.querySelector('#update').hidden && !document.querySelector('#check-updates').classList.contains('has-update')));
+  FEED.version = '0.0.1';
+  await click('check-updates');
+  await click('dialog-ok');
+  check('an older one: no indicator', !(await exists('update-now')));
   lap('open');
 
   // ---- 1 · A new demo, pointed at the fixture app's two tabs ---------------------------------------------------
@@ -495,6 +519,7 @@ try {
   app.kill();
   if (receiverPid) try { process.kill(receiverPid); } catch { /* gone */ }
   fx.close();
+  feed.close();
   await sleep(500);
   if (process.env.SCENECAST_UI_KEEP) console.log(`kept ${tmp}`);
   else try { rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }); } catch (e) { console.log(`left ${tmp}: ${e.message}`); }

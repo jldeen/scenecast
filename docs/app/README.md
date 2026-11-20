@@ -85,7 +85,9 @@ npm run build:test && npm run test:ui                # the UI test: the whole fl
   `tauri build`. See [signing.md](signing.md).
 - App updates: the Tauri updater plugin reads `latest.json` from the newest GitHub release (signed with the updater
   key; its public half is in `tauri.conf.json`, the private half is the `TAURI_SIGNING_PRIVATE_KEY` secret). The app
-  checks at start and every 4 hours; **Update** downloads, installs and restarts. The release job writes
+  checks at start, every 30 minutes and when its window comes back to the front; a newer version shows at once (a dot
+  on Check for updates, and **Update to vX.Y.Z**), which downloads, installs and restarts (not while recording or
+  presenting). The release job writes
   `latest.json` (`scripts/latest-json.mjs`) when the installers were built with the key.
 - `apps/desktop/tests/packaged.test.mjs`: the installers themselves, installed and started as a presenter would
   (CI, macOS and Windows): receiver, extension connecting in Chrome on a non-Default profile, Fix, Install recorder.

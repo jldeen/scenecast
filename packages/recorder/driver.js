@@ -224,6 +224,13 @@ const H = {
 
 const OPS = {
   async ping() { return { ok: true, pages: ctx.pages().length }; },
+  // What this recorder sees: who it is, every tab it tracks (attached or not, its mark), and the active one.
+  async diag() {
+    const pages = [];
+    for (const p of ctx.pages()) { let mark = null; try { if (p.attached !== false) mark = await p.evaluate(() => sessionStorage.getItem('d1tab')); } catch (e) {} pages.push({ url: p.url().slice(0, 160), title: (await p.title().catch(() => '')).slice(0, 80), attached: p.attached !== false, mark }); }
+    const act = ctx.activePage ? await ctx.activePage().catch(() => null) : null;
+    return { agent: typeof AGENT_ID !== 'undefined' ? AGENT_ID : null, receiver: RX, pages, active: act ? act.url().slice(0, 160) : null, recording: typeof REC !== 'undefined' ? !!REC.on : null };
+  },
   async tabs() { return H.tabs(); },
   async mark(c) { const p = await pageFor(c.url); await H.mark(p, c.kind); return 'ok'; },
   async front(c) { const p = await pageFor(c.tab); await p.bringToFront(); return p.url(); },
@@ -254,7 +261,7 @@ let RUNNING = true;
 function startLoop() { (async () => {
   await rlog('agent started; pages ' + ctx.pages().length);
   while (RUNNING) {
-    const c = await get('/cmd');
+    const c = await get('/cmd' + (typeof AGENT_QS === 'function' ? await AGENT_QS() : ''));
     if (c.error) { await sleep(2000); continue; }
     if (!c.op || c.op === 'idle') continue;
     if (c.op === 'quit') { RUNNING = false; await post('/cmd/result', { id: c.id, ok: true, value: 'bye' }); break; }

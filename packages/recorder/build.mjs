@@ -44,6 +44,8 @@ ${read('recorder.js')}
 export function buildAgent(outDir, port) {
   const code = `async (page0) => {
 const RX = ${JSON.stringify('http://127.0.0.1:' + port)};
+const AGENT_ID = 'agent-' + Math.random().toString(36).slice(2, 10);
+const AGENT_QS = async () => '?agent=' + AGENT_ID + '&browser=agent&tabs=' + page0.context().pages().length;
 ${core()}
 startLoop();
 return 'agent started';

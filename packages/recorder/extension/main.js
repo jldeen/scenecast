@@ -14,7 +14,18 @@ OPS.recordAbort = async c => { const r = await ABORT(c); await chrome.storage.lo
 OPS.reload = async () => { setTimeout(() => chrome.runtime.reload(), 300); return 'reloading'; };
 // The receiver: the one it has while that answers; else the first that does on the default port and the few after
 // it (the app's own first). Looked for every 2 s while there's none, and every 15 s for the app's.
-const PORTS = [...new Set([DEFAULT_PORT, ...Array.from({ length: 10 }, (_, i) => 47621 + i), ...Array.from({ length: 10 }, (_, i) => DEFAULT_PORT + i)])];
+// Built for the app's ports (47621 on) it looks there; built for another port (a test's) only near that one, so a test's
+// browser never finds a presenter's Scenecast.
+const APP_PORTS = Array.from({ length: 10 }, (_, i) => 47621 + i);
+const PORTS = [...new Set([DEFAULT_PORT, ...(APP_PORTS.includes(DEFAULT_PORT) ? APP_PORTS : []), ...Array.from({ length: 10 }, (_, i) => DEFAULT_PORT + i)])];
+// Who this recorder is, to the receiver (one recorder per receiver): an id kept across restarts, the browser, its tabs.
+let AGENT_ID = null;
+const BROWSER = (() => { const b = (navigator.userAgentData && navigator.userAgentData.brands || []).map(x => x.brand).find(x => /Edge|Chrome|Chromium/.test(x) && !/Not/.test(x)); return b || 'Chromium'; })();
+async function AGENT_QS() {
+  if (!AGENT_ID) { const st = await chrome.storage.local.get('agentId'); AGENT_ID = st.agentId || ('ext-' + Math.random().toString(36).slice(2, 10)); if (!st.agentId) await chrome.storage.local.set({ agentId: AGENT_ID }); }
+  const tabs = await chrome.tabs.query({}).then(t => t.length).catch(() => 0);
+  return `?agent=${encodeURIComponent(AGENT_ID)}&browser=${encodeURIComponent(BROWSER)}&tabs=${tabs}&v=${encodeURIComponent(RECORDER_VERSION)}`;
+}
 const pingAt = (port, ms = 1200) => { const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms); return fetch(`http://127.0.0.1:${port}/ping`, { signal: ac.signal }).then(r => r.json()).catch(() => null).finally(() => clearTimeout(t)); };
 let found = null, lastLook = 0;
 async function findReceiver() {
