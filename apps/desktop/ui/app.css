@@ -152,6 +152,10 @@ select.inline { width: auto; padding: 6px 10px; }
 .way b { display: block; font-weight: 700; }
 .way small { display: block; color: var(--muted); font-size: var(--t-label); margin-top: 2px; }
 .way-tag svg { width: 16px; height: 16px; color: var(--muted); }
+.ways.stacked { grid-template-columns: 1fr; gap: 12px; }
+.way.big { padding: 16px 18px; background: var(--paper); }
+.way.big b { font-size: 16px; }
+.way.big:has(input:checked) { border-width: 2px; padding: 15px 17px; background: var(--paper); }
 
 /* ---- The rundown: pre-show and show ---- */
 .card.rundown { overflow: hidden; padding: 0; }

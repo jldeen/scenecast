@@ -84,6 +84,7 @@
       return { source: 'guide', slot: 480, planned: 450, beats, rehearsal: rehearsed ? { at: now - 3 * 3600e3, total: 462 } : null };
     },
     present_start: ({ rehearse }) => ({ url: 'http://127.0.0.1:47811/', opened: true, guide: 'http://127.0.0.1:47811/presenter.html', rehearse }),
+    pending_opens: () => [], pick_share_file: () => null, share_import: () => demo,
     present_stop: () => null, present_guide: () => 'http://127.0.0.1:47811/presenter.html',
     preflight: async ({ id }) => {
       for (const item of preflightItems) { job(id, 'preflight', { type: 'preflight', item }); await wait(60); }

@@ -442,15 +442,31 @@ try {
 
   // ---- 9 · Export (Share) --------------------------------------------------------------------------------------
   await click('tab-share');
-  await click('export-folder');
+  await click('share-kind-folder');
+  await click('export-go');
   const folder = await waitFor('the folder export', async () => (await attr('export-done', 'data-path')) || ((await exists('export-checks-failed')) && 'failed'), 900000, 1000);
   if (folder === 'failed') check('every check passes before the export', false, await text('export-checks-failed'));
-  check('Export runs every check first, then exports a plain folder', (await attr('export-done', 'data-checked')) === 'ran' && existsSync(join(folder, 'index.html')) && existsSync(join(folder, 'manifest.json')), folder);
+  check('Share runs every check first, then makes a plain folder', (await attr('export-done', 'data-checked')) === 'ran' && existsSync(join(folder, 'index.html')) && existsSync(join(folder, 'manifest.json')), folder);
   check('the whole checklist ran (not quick)', JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8')).quick === false);
   await shot('12-export');
-  await click('export-zip');
-  const zip = await waitFor('the zip export', async () => (await attr('export-done', 'data-kind')) === 'zip' && attr('export-done', 'data-path'), 300000);
-  check('exports a zip, without running every check again (nothing changed)', /\.zip$/.test(zip) && statSync(zip).size > 1000 && (await attr('export-done', 'data-checked')) === 'current', zip);
+  // One Scenecast file: made without the checks again (nothing changed), and it opens ready to rehearse.
+  await click('share-kind-file');
+  await click('export-go');
+  const file = await waitFor('the Scenecast file', async () => (await attr('export-done', 'data-kind')) === 'share' && attr('export-done', 'data-path'), 300000);
+  check('makes one .scenecast file, without running every check again', /\.scenecast$/.test(file) && statSync(file).size > 1000 && (await attr('export-done', 'data-checked')) === 'current', file);
+  await b.execute(p => window.__scenecast.openFile(p), file);
+  const OPENED = join(LIB, 'fixture-demo-2');
+  await waitFor('the shared demo, open on Present', async () => (await b.execute(() => window.__scenecast.id)) === 'fixture-demo-2' && (await attr('guide-status', 'data-beats')) === '4', 60000).catch(() => null);
+  check('the file opens into the library on Present, with its guide, and without the presenter\'s own things',
+    (await b.execute(() => window.__scenecast.id)) === 'fixture-demo-2' && (await attr('guide-status', 'data-beats')) === '4'
+    && existsSync(join(OPENED, 'presenter', 'notes.json')) && !existsSync(join(OPENED, 'ai.json')) && !existsSync(join(OPENED, '.out', 'fidelity', 'contact.html')),
+    JSON.stringify({ id: await b.execute(() => window.__scenecast.id), beats: await attr('guide-status', 'data-beats') }));
+  await shot('12b-opened');
+  await click('present-start');
+  const openedUrl = await waitFor('presenting the shared demo', () => attr('presenting', 'data-url'), 120000).catch(() => null);
+  check('the shared demo presents, with its guide', !!openedUrl && !!(await attr('guide-open', 'data-url')), openedUrl);
+  await click('present-stop');
+  await waitFor('stopped', () => exists('present-start'), 30000);
   lap('export');
 
   // ---- Record for me: a goal, the plan, the browser driven while it records, the presenter saying yes ------------

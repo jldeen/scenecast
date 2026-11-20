@@ -14,12 +14,14 @@ use crate::AppError;
 pub enum ExportKind {
     Folder,
     Zip,
+    /// One `.scenecast` file another presenter opens in Scenecast (share.rs).
+    Share,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportOutcome {
-    /// The folder or the zip.
+    /// The folder, the zip or the `.scenecast` file.
     pub path: PathBuf,
     pub kind: ExportKind,
     pub files: usize,
@@ -73,6 +75,25 @@ pub fn export(dir: &Path, dest: &Path, kind: ExportKind) -> Result<ExportOutcome
             let (files, bytes) = tally(&folder)?;
             Ok(ExportOutcome {
                 path: folder,
+                kind,
+                files,
+                bytes,
+            })
+        }
+        ExportKind::Share => {
+            let id = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "demo".into());
+            let file = free_path(dest, &id, &format!(".{}", crate::share::EXT));
+            let made_by = format!(
+                "Scenecast {} on {}",
+                env!("CARGO_PKG_VERSION"),
+                crate::keys::this_os()
+            );
+            let (files, bytes) = crate::share::write(dir, &file, &made_by)?;
+            Ok(ExportOutcome {
+                path: file,
                 kind,
                 files,
                 bytes,

@@ -308,7 +308,7 @@ impl Library {
         Ok(dir)
     }
 
-    fn free_id(&self, base: &str) -> String {
+    pub(crate) fn free_id(&self, base: &str) -> String {
         let base = if base.is_empty() { "demo" } else { base };
         let mut id = base.to_owned();
         let mut n = 2;

@@ -16,6 +16,7 @@
 //! - [`keys`]: the presenter's one-page key reference.
 //! - [`rundown`]: the run of show: beats, keys, planned and rehearsed times, the slot.
 //! - [`export`]: a plain folder or a zip for another presenter.
+//! - [`share`]: one `.scenecast` file another presenter opens in Scenecast, ready to rehearse.
 //! - [`files`]: what the window may show from disk (reports, pictures), on the app's own protocol.
 
 pub mod ai;
@@ -31,6 +32,7 @@ pub mod record;
 pub mod rundown;
 pub mod script;
 pub mod servers;
+pub mod share;
 
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};

@@ -33,6 +33,19 @@
       "nsis"
     ],
     "category": "Productivity",
+    "fileAssociations": [
+      {
+        "ext": ["scenecast"],
+        "name": "Scenecast demo",
+        "description": "Scenecast demo",
+        "role": "Editor",
+        "mimeType": "application/vnd.scenecast+zip",
+        "exportedType": {
+          "identifier": "com.github.jldeen.scenecast.demo",
+          "conformsTo": ["public.zip-archive", "public.data"]
+        }
+      }
+    ],
     "shortDescription": "Live demos, replicated: real pages, every run identical.",
     "longDescription": "Scenecast records a live web demo once and turns it into a high-fidelity, deterministic replica for presenting: real captured pages, real fonts, ZoomIt-style focus points.",
     "copyright": "MIT",

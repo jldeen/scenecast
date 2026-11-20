@@ -34,6 +34,8 @@ struct AppState {
     extension: Mutex<Value>,
     /// Demos the AI coach is coaching now (it runs beside the recording, not as the demo's one job).
     coaches: Mutex<HashSet<String>>,
+    /// `.scenecast` files opened before the window was listening (a double-click that started the app).
+    opens: Mutex<Vec<PathBuf>>,
 }
 
 type Shared = Arc<AppState>;
@@ -1279,6 +1281,88 @@ async fn export_demo(
     .await
 }
 
+// ---- A shared demo file ----------------------------------------------------------------------------------------
+
+/// Opens a `.scenecast` file into the library, ready to rehearse.
+#[tauri::command]
+async fn share_import(state: State<'_, Shared>, path: String) -> Res<scenecast_app::Demo> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::share::import(&state.library, Path::new(&path))).await
+}
+
+/// "Open a demo file…": a `.scenecast` someone sent.
+#[tauri::command]
+async fn pick_share_file(app: AppHandle) -> Res<Option<String>> {
+    blocking(move || {
+        Ok(app
+            .dialog()
+            .file()
+            .set_title("Open a demo file")
+            .add_filter("Scenecast demo", &[scenecast_app::share::EXT])
+            .blocking_pick_file()
+            .and_then(|f| f.into_path().ok())
+            .map(|p| p.display().to_string()))
+    })
+    .await
+}
+
+/// The files opened before the window was listening; each is returned once.
+#[tauri::command]
+fn pending_opens(state: State<'_, Shared>) -> Vec<String> {
+    std::mem::take(&mut *state.opens.lock().expect("opens lock"))
+        .into_iter()
+        .map(|p| p.display().to_string())
+        .collect()
+}
+
+/// A file to open: kept for the window and sent to it, and the window comes to the front.
+fn opened(app: &AppHandle, state: &Shared, path: PathBuf) {
+    state.opens.lock().expect("opens lock").push(path.clone());
+    let _ = app.emit("open-file", path.display().to_string());
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// One Scenecast at a time for opened files: the first listens on a local port; a later one started with files sends
+/// them there and ends. Without files, a later one just runs (a test build next to the installed app).
+fn instance_listener(files: &[PathBuf]) -> Option<std::net::TcpListener> {
+    let port: u16 = std::env::var("SCENECAST_INSTANCE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(47598);
+    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(l) => Some(l),
+        Err(_) if !files.is_empty() => {
+            if let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                use std::io::Write as _;
+                let text: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
+                if s.write_all((text.join("\n") + "\n").as_bytes()).is_ok() {
+                    std::process::exit(0);
+                }
+            }
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+fn serve_instance(listener: std::net::TcpListener, app: AppHandle, state: Shared) {
+    std::thread::spawn(move || {
+        use std::io::BufRead as _;
+        for stream in listener.incoming().flatten() {
+            let lines: Vec<String> = std::io::BufReader::new(stream)
+                .lines()
+                .map_while(Result::ok)
+                .collect();
+            for p in scenecast_app::share::files_in_args(lines) {
+                opened(&app, &state, p);
+            }
+        }
+    });
+}
+
 // ---- Files, folders, links -------------------------------------------------------------------------------------
 
 #[tauri::command]
@@ -1561,7 +1645,12 @@ fn main() {
         preflights: Mutex::default(),
         extension: Mutex::new(Value::Null),
         coaches: Mutex::default(),
+        opens: Mutex::new(scenecast_app::share::files_in_args(
+            std::env::args().skip(1),
+        )),
     });
+    // A second Scenecast started by opening a file (Windows, Linux) hands it to the one that's running, and ends.
+    let instance = instance_listener(&state.opens.lock().expect("opens lock"));
     start_recorder_side(state.clone());
 
     let builder = tauri::Builder::default()
@@ -1621,6 +1710,9 @@ fn main() {
             set_slot,
             displays,
             rundown,
+            share_import,
+            pick_share_file,
+            pending_opens,
             record_start,
             record_status,
             record_stop,
@@ -1674,13 +1766,28 @@ fn main() {
                 app.add_capability(
                     r#"{"identifier":"auditaur","windows":["main"],"permissions":["auditaur:default"]}"#,
                 )?;
-                selftest_hook(state, app.handle().clone());
+                selftest_hook(state.clone(), app.handle().clone());
+                if let Some(l) = instance {
+                    serve_instance(l, app.handle().clone(), state);
+                }
                 Ok(())
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building the Scenecast app");
-    app.run(move |_, event| {
+    app.run(move |app, event| {
+        // macOS: a double-clicked .scenecast, at launch or while running.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = &event {
+            for url in urls {
+                if let Ok(p) = url.to_file_path()
+                    && p.extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case(scenecast_app::share::EXT))
+                {
+                    opened(app, &state, p);
+                }
+            }
+        }
         if let tauri::RunEvent::Exit = event {
             scenecast_app::receiver::host().stop();
             let ids: Vec<String> = state

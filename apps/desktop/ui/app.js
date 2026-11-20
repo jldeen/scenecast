@@ -85,7 +85,7 @@ const tile = (a, i = 0) => {
 // Where a demo stands, in the rail and the library: the step it's at, and when it last moved.
 function where(d) {
   const s = d.status;
-  if (!s.recorded) return { gate: 'record', word: 'Record', note: 'not recorded yet' };
+  if (!s.recorded && !s.built) return { gate: 'record', word: 'Record', note: 'not recorded yet' };
   const when = (what, at) => at ? `${what} ${ago(at)}` : what;
   if (!s.built || !s.fidelity?.pass) return { gate: 'review', word: 'Review', note: when('recorded', s.recordedAt) };
   if (s.rehearsedAt) return { gate: 'present', word: 'Ready', note: when('rehearsed', s.rehearsedAt) };
@@ -613,7 +613,7 @@ function tabDone(t, s) {
 function tabJobs(t) {
   return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-script', 'coach'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
 }
-const gateDone = (g, s) => ({ record: s.recorded, review: s.built && !!s.fidelity?.pass, present: !!s.rehearsedAt, share: !!s.exportedAt })[g];
+const gateDone = (g, s) => ({ record: s.recorded || s.built, review: s.built && !!s.fidelity?.pass, present: !!s.rehearsedAt, share: !!s.exportedAt })[g];
 const gateJobs = g => g === 'review' ? REVIEW.flatMap(([t]) => tabJobs(t)) : tabJobs(gateTab(g));
 // The gates (Record · Review · Present · Share) and, on Review, its tabs.
 function renderTabsBar() {
@@ -1377,49 +1377,58 @@ PANELS.present = async (panel, d) => {
         : '<p class="muted" data-test="guide-none">Your talk track becomes your guide: a window for your laptop screen with what to say, the clicks and the time. Add it on Review.</p>'}</section></div>`}`;
 };
 
-// ---- Export ------------------------------------------------------------------------------------------------------
+// ---- Share -------------------------------------------------------------------------------------------------------
 
+const SHARE_KINDS = {
+  share: { title: 'A Scenecast file', text: 'They double-click it, and it opens ready to rehearse, with your guide.', go: 'Make the file' },
+  folder: { title: 'A folder for any browser', text: 'For someone without Scenecast: it opens in Edge or Chrome.', go: 'Make the folder' },
+};
 Object.assign(REGIONS, {
   export(d) {
     const j = J(d.id).export || {};
     const items = j.items || [];
-    const list = items.length ? `<ul class="status-list" aria-label="Checks before the export">${items.map(i => `<li data-status="${esc(i.status)}">${icon(i.status)}<span class="id mono">${esc(i.id)}</span><span class="small">${esc(String(i.detail).split('\n')[0].slice(0, 220))}</span><span></span></li>`).join('')}</ul>` : '';
+    const list = items.length ? `<ul class="status-list" aria-label="Checks before sharing">${items.map(i => `<li data-status="${esc(i.status)}">${icon(i.status)}<span class="id">${esc(i.id)}</span><span class="small">${esc(String(i.detail).split('\n')[0].slice(0, 220))}</span><span></span></li>`).join('')}</ul>` : '';
     if (running('export', d.id)) {
       const last = j.stages?.at(-1);
-      return progressBar(true) + `<p class="small" data-test="export-running">${esc(last?.label || 'Exporting…')}</p>${list}`;
+      return progressBar(true) + `<p class="small" data-test="export-running">${esc(last?.label || 'Checking every screen first…')}</p>${list}`;
     }
     const r = j.outcome;
     if (!r) return errorBox(j.error, 'export');
     if (!r.exported) {
       const fails = (r.checks?.items || []).filter(i => i.status === 'fail');
-      return `<div class="notice bad" role="alert" data-test="export-checks-failed"><div><strong>Not exported yet:</strong> ${plural(fails.length, 'check')} failing.
-        <ul>${fails.map(i => `<li><span class="mono">${esc(i.id)}</span>: ${esc(String(i.detail).split('\n')[0].slice(0, 220))}</li>`).join('')}</ul>
-        <p class="small">Fix them (Fidelity, Edit, or ask whoever set up the demo), then export again. Or export it as it is.</p>
-        <div class="row" style="margin-top:8px"><button class="btn" data-action="export-anyway" data-test="export-anyway">Export anyway</button>
-        ${r.checks?.report ? `<button class="btn subtle" data-open-file="${esc(r.checks.report)}">Open the full report</button>` : ''}</div></div></div>`;
+      return `<div class="notice bad" role="alert" data-test="export-checks-failed"><div class="grow"><strong>Not shared yet: ${plural(fails.length, 'check')} ${fails.length === 1 ? 'fails' : 'fail'}.</strong>
+        Fix ${fails.length === 1 ? 'it' : 'them'} on Review, then share again. Or share it as it is.
+        <div class="row" style="margin-top:10px"><button class="btn small" data-action="export-anyway" data-test="export-anyway">Share it anyway</button>
+        ${r.checks?.report ? `<button class="btn small subtle" data-open-file="${esc(r.checks.report)}">Open the full report</button>` : ''}</div>
+        <details class="err-detail"><summary>Details</summary><ul class="small">${fails.map(i => `<li><code>${esc(i.id)}</code>: ${esc(String(i.detail).split('\n')[0].slice(0, 220))}</li>`).join('')}</ul></details></div></div>`;
     }
     const o = r.exported;
     const mb = (o.bytes / 1048576).toFixed(1);
-    const checked = { ran: 'Every check passed first.', current: 'Every check had already passed, and nothing has changed since.', skipped: 'Exported without the checks passing.' }[r.checked] || '';
-    return `<div class="notice ${r.checked === 'skipped' ? 'warn' : 'ok'}" data-test="export-done" data-path="${esc(o.path)}" data-kind="${esc(o.kind)}" data-checked="${esc(r.checked)}"><div><strong>Exported</strong> ${o.kind === 'zip' ? 'a zip' : 'a folder'}: ${plural(o.files, 'file')}, ${mb} MB. ${esc(checked)}
-      <div class="path"><code>${esc(o.path)}</code><button class="btn small" data-reveal="${esc(o.path)}">Show in ${folderWord()}</button><button class="btn small" data-copy="${esc(o.path)}">Copy</button></div>
-      <p class="small" style="margin-top:8px">Send it to the other presenter. They open <code>index.html</code> in Edge or Chrome: no install, nothing online.</p></div></div>`;
+    const checked = { ran: 'Every check passed first.', current: 'Every check had passed, and nothing has changed since.', skipped: 'Shared without the checks passing.' }[r.checked] || '';
+    const what = o.kind === 'share' ? 'The Scenecast file is ready' : o.kind === 'zip' ? 'The zip is ready' : 'The folder is ready';
+    const how = o.kind === 'share' ? 'Send it to the other presenter. They double-click it, and it opens in Scenecast on Present.'
+      : 'Send it to the other presenter. They open index.html in Edge or Chrome: no install, nothing online.';
+    return `<div class="notice ${r.checked === 'skipped' ? 'warn' : 'ok'}" data-test="export-done" data-path="${esc(o.path)}" data-kind="${esc(o.kind)}" data-checked="${esc(r.checked)}"><div class="grow"><strong>${what}</strong> (${mb} MB). ${esc(checked)}
+      <p class="small" style="margin-top:4px">${how}</p>
+      <div class="row" style="margin-top:10px"><button class="btn small" data-reveal="${esc(o.path)}">Show in ${folderWord()}</button><button class="btn small subtle" data-copy="${esc(o.path)}">Copy where it is</button></div></div></div>`;
   },
 });
 PANELS.export = async (panel, d) => {
   const dest = J(d.id).dest || await invoke('default_export_dir');
   J(d.id).dest = dest;
-  panel.innerHTML = `<div class="card"><h2>Export for another presenter</h2>
-      <p class="muted">The replica on its own: a plain folder, or the same folder zipped. Built pages only (scrubbed); no editor, no recording. Every check runs first (two identical runs, cold starts, every zoom, focus points, the presenter guide), unless it already passed and nothing has changed since.</p>
-      <label for="export-dest">Save in</label>
-      <div class="row"><input id="export-dest" type="text" value="${esc(dest)}" style="flex:1" data-test="export-dest">
-        <button class="btn" data-action="export-pick">Choose…</button></div>
-      <div class="row" style="margin-top:14px">
-        <button class="btn primary" data-action="export-folder" data-test="export-folder" ${d.status.built && !running('checks') ? '' : 'disabled'}>Export a folder</button>
-        <button class="btn" data-action="export-zip" data-test="export-zip" ${d.status.built && !running('checks') ? '' : 'disabled'}>Export a zip</button>
-        ${d.status.built ? '' : '<span class="muted small">Build the demo first.</span>'}</div>
-      <div data-region="export" style="margin-top:12px"></div></div>`;
-  $('#export-dest', panel).onchange = e => { J(d.id).dest = e.target.value; };
+  const kind = J(d.id).shareKind || 'share';
+  const busyNow = !d.status.built || running('checks') || running('export');
+  panel.innerHTML = `<div class="split">
+    <div><div class="ways stacked" role="radiogroup" aria-label="What to send">${Object.entries(SHARE_KINDS).map(([k, x]) => `<label class="way big" data-test="share-kind-${k === 'share' ? 'file' : 'folder'}">
+        <input type="radio" name="share-kind" value="${k}" ${k === kind ? 'checked' : ''}><span><b>${esc(x.title)}</b><small>${esc(x.text)}</small></span></label>`).join('')}</div>
+      <div class="row" style="margin-top:18px"><button class="btn primary big" data-action="export-go" data-test="export-go" ${busyNow ? 'disabled' : ''}>${esc(SHARE_KINDS[kind].go)} ${I.arrow}</button>
+        <span class="muted small">${d.status.built ? 'Every check runs first: a few minutes.' : 'Record and review the demo first.'}</span></div>
+      <p class="small muted" style="margin-top:10px" data-test="export-dest">Saves to <strong>${esc(dest.split(/[\\/]/).filter(Boolean).pop() || dest)}</strong>. <button class="alink" data-action="export-pick">Change</button></p>
+      <div data-region="export" style="margin-top:14px"></div></div>
+    <aside class="card"><h2>Got a demo file?</h2>
+      <p>Someone sent you a <strong>.scenecast</strong> file? Double-click it, or open it here. It opens on Present, ready to rehearse.</p>
+      <div class="row" style="margin-top:12px"><button class="btn" data-action="share-open" data-test="share-open">Open a demo file…</button></div></aside></div>`;
+  panel.querySelectorAll('[name=share-kind]').forEach(r => { r.onchange = () => { J(d.id).shareKind = r.value; renderPanel(); }; });
 };
 
 // ---- Actions -----------------------------------------------------------------------------------------------------
@@ -1447,7 +1456,20 @@ async function quickChecks(id = S.id) {
 // Export: the whole checklist first (unless it passed and nothing changed since), then the folder or zip.
 async function exportDemo(kind, anyway) {
   J(S.id).exportKind = kind;
-  return step('export', 'export_demo', { kind, dest: $('#export-dest').value, anyway });
+  return step('export', 'export_demo', { kind, dest: J(S.id).dest, anyway });
+}
+// A .scenecast file (double-clicked, or Open a demo file): into the library, opened on Present.
+const recentOpens = new Map();
+async function openShared(path) {
+  // The same file can arrive twice at launch (as it opens, and in the list of files waiting): open it once.
+  if (Date.now() - (recentOpens.get(path) || 0) < 15000) return;
+  recentOpens.set(path, Date.now());
+  try {
+    const d = await call('share_import', { path });
+    await loadDemos();
+    toast(`Opened \u201c${d.title}\u201d: ready to rehearse`);
+    await openDemo(d.id, 'present');
+  } catch { /* call() said what went wrong */ }
 }
 // Present or Rehearse: the stage on the projector and the guide on this screen when there are two.
 async function presentNow(rehearse) {
@@ -1610,11 +1632,11 @@ const ACTIONS = {
   },
   'export-pick': async () => {
     const p = await call('pick_folder');
-    if (p) { J(S.id).dest = p; $('#export-dest').value = p; }
+    if (p) { J(S.id).dest = p; renderPanel(); }
   },
-  'export-folder': () => exportDemo('folder', false),
-  'export-zip': () => exportDemo('zip', false),
-  'export-anyway': () => exportDemo(J(S.id).exportKind || 'folder', true),
+  'export-go': () => exportDemo(J(S.id).shareKind || 'share', false),
+  'export-anyway': () => exportDemo(J(S.id).exportKind || 'share', true),
+  'share-open': async () => { const p = await call('pick_share_file'); if (p) openShared(p); },
 };
 
 document.addEventListener('click', async e => {
@@ -1726,12 +1748,14 @@ $('#check-updates').onclick = () => checkUpdates(false);
 
 // ---- Start -------------------------------------------------------------------------------------------------------
 
+listen('open-file', ({ payload }) => openShared(payload));
 S.info = await call('app_info');
 $('#version').textContent = `v${S.info.version}`;
 document.documentElement.dataset.os = S.info.os;
 await loadDemos();
 await refreshServers();
 renderLibrary();
+for (const p of (await invoke('pending_opens').catch(() => null)) || []) await openShared(p);
 if (S.info.engineError) { const x = why(S.info.engineError); if (x) toast(`${x.title}. ${x.body}`, true); }
 refreshAi();
 checkUpdates(true);
@@ -1739,3 +1763,5 @@ setInterval(() => { if (!U.busy) checkUpdates(true); }, 30 * 60 * 1000);
 // Recording or presenting started or stopped: the Update button follows.
 setInterval(() => { if (U.available && !U.busy) { const b = $('#update-now'); if (b && b.disabled !== inTheMiddle()) renderUpdate(); } }, 2000);
 window.__scenecast = S;
+// The UI test opens a shared file the way a double-click does.
+S.openFile = openShared;
