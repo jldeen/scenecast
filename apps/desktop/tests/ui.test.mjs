@@ -181,10 +181,10 @@ try {
 
   // ---- 1 · A new demo, pointed at the fixture app's two tabs ---------------------------------------------------
   await click('empty-new');
-  // One form: name, apps, an optional talk track, how it's recorded ("I'll click through" is by hand), the slot.
-  check('New demo: the four ways to record it, on the form', await waitFor('the choice', async () => (await exists('mode-record')) && (await exists('mode-script')) && (await exists('mode-coach')) && (await exists('mode-manual')), 20000));
+  // One short form: name, apps, an optional talk track, the slot. How it's recorded is chosen on Record; the browser
+  // and profile are the ones the recorder is in (no question).
+  check('New demo: no question about how to record, or which profile', await waitFor('the form', () => exists('new-title'), 20000) && !(await exists('mode-record')) && !(await exists('new-profiles')));
   await shot('02a-new-demo-choice');
-  await click('mode-manual');
   await type('new-title', 'Fixture demo');
   await type('app-id-0', 'chat');
   await type('app-url-0', fx.chat);
@@ -218,18 +218,27 @@ try {
   const ping = await fetch(`http://127.0.0.1:${RX_PORT}/ping`).then(r => r.json()).catch(() => null);
   check('opening the demo starts the receiver, the app\'s own', +rx === RX_PORT && ping?.owner === 'app' && resolve(ping.demo) === resolve(DEMO), JSON.stringify(ping));
   receiverPid = ping?.pid || null;
+  // An app's address, changed on Record's pre-show (and kept in demo.json, with how its tab is found).
+  await click('edit-app-admin');
+  const addr = await el('app-addr-admin');
+  await addr.waitForDisplayed({ timeout: 15000 });
+  await addr.clearValue(); await addr.setValue(`${fx.admin}?from=ui-test`);
+  await click('app-save-admin');
+  const edited = await waitFor('the new address', () => { const a = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')).apps.find(x => x.id === 'admin'); return a.url.endsWith('?from=ui-test') && a; }, 20000).catch(() => null);
+  check('an app\'s address changes after the demo is made', !!edited && edited.match === new URL(fx.admin).host, JSON.stringify(edited));
   await click('install-recorder');
-  const extDir = await waitFor('the extension folder', async () => (await exists('extension-dir')) && text('extension-dir'), 120000);
+  const extDir = await waitFor('the extension folder', async () => (await exists('extension-dir')) && attr('extension-dir', 'data-dir'), 120000);
   check('Install recorder: the folder, ready to drag in, with the steps', resolve(extDir) === resolve(EXT) && existsSync(join(EXT, 'manifest.json')) && (await exists('install-status')) && (await attr('install-status', 'data-connected')) === 'false', extDir);
   await shot('03-record-setup');
-  // Before the presenter loads it: Check (no fixes) says the recorder isn't there, with Install recorder.
+  // Before the presenter loads it: Check (no fixes; under Details now) says the recorder isn't there.
+  if ((await attr('details', 'aria-expanded')) !== 'true') await click('details');
   await click('preflight');
   // Pressed again at once (and then Check and fix): the newer check takes over; never "busy (preflight)".
   await sleep(300);
   await click('preflight');
   await waitFor('preflight', () => exists('preflight-result'), 120000);
   check('overlapping checks: the newest one finishes, no busy error', !(await b.execute(() => [...document.querySelectorAll('.toast')].some(t => /busy/.test(t.textContent)))) && (await attr('pf-receiver', 'data-status')) === 'ok');
-  check('preflight without the extension: the recorder fails, with Install recorder', (await attr('pf-recorder', 'data-status')) === 'fail' && (await exists('fix-recorder')));
+  check('preflight without the extension: the recorder fails, with Add the recorder', (await attr('pf-recorder', 'data-status')) === 'fail' && (await exists('install-recorder')));
   ctx = await launchWithExtension(EXT, join(tmp, 'profile'));
   // The extension finds the receiver on its own (no port to set), and the app turns green.
   const t0c = Date.now();
@@ -241,19 +250,19 @@ try {
   for (const p of ctx.pages()) if (p !== chat) await p.close();
   await sizeWindow(chat, 1600, 900);
   await chat.bringToFront();
-  // Check and fix: opens the missing admin tab; the browser that's running isn't touched.
-  await click('preflight-fix');
-  await waitFor('preflight ready', async () => (await attr('preflight-result', 'data-ready')) === 'true', 180000);
-  check('preflight: ready, the admin tab opened', (await attr('pf-app-admin', 'data-status')) === 'fixed' && (await attr('pf-browser', 'data-status')) === 'ok');
-  const admin = ctx.pages().find(p => p.url().startsWith(fx.admin));
-  check('the admin tab is open in the presenter\'s browser', !!admin);
+  // No Check and fix: Start runs the same check with its fixes, opens the missing admin tab (the browser that's
+  // running isn't touched), and starts, in one press.
+  if ((await attr('details', 'aria-expanded')) === 'true') await click('details');
   await shot('04-preflight');
   lap('preflight');
 
   // ---- 3 · Record: the person runs the demo once --------------------------------------------------------------
   await chat.bringToFront(); await sleep(300);
   await click('record-start');
-  await waitFor('recording', () => exists('recording'), 60000);
+  await waitFor('recording', () => exists('recording'), 180000);
+  check('Start checked and fixed first: ready, the admin tab opened', (await attr('pf-app-admin', 'data-status')) === 'fixed' && (await attr('pf-browser', 'data-status')) === 'ok', await b.execute(() => [...document.querySelectorAll('[data-test^=pf-]')].map(e => `${e.dataset.test}=${e.dataset.status}`).join(' ')));
+  const admin = ctx.pages().find(p => p.url().startsWith(fx.admin));
+  check('the admin tab is open in the presenter\'s browser', !!admin);
   const settled = async () => {
     await sleep(1500);
     let quiet = 0;
@@ -477,15 +486,12 @@ try {
   check('Copilot: the account and what it sees', await waitFor('the Copilot page', () => exists('ai-signed-in'), 60000) && (await exists('ai-page-text')));
   await shot('14-copilot');
   await click('new-demo');
-  await click('mode-record');
   await type('new-title', 'For me');
   await type('app-id-0', 'chat');
   await type('app-url-0', fx.chat);
   await click('add-app');
   await type('app-id-1', 'admin');
   await type('app-url-1', fx.admin);
-  await type('new-goal', 'Ask "Summarize the supplier delay on PO-450101", then open Plugins. In admin, search "alpha" and open alpha-6. Then go to chat, start a new chat and ask "What will it cost us?" with the send button.');
-  await shot('15-new-record-for-me');
   await click('create-demo');
   await waitFor('the demo', async () => (await exists('demo-title')) && (await text('demo-title')) === 'For me');
   const FM = join(LIB, 'for-me');
@@ -495,14 +501,23 @@ try {
     Object.assign(c.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200, auto: false });
     writeFileSync(join(FM, 'demo.json'), JSON.stringify(c, null, 2));
   }
-  check('Record for me: the goal kept with the demo', /supplier delay/.test(readFileSync(join(FM, 'ai.json'), 'utf8')));
+  // A demo made by hand, recorded by Copilot: both ways from the same Record screen, switched there.
+  await waitFor('Record by hand', () => exists('record-start'), 60000);
+  await click('mode-record');
+  await waitFor('Copilot on Record', () => exists('ai-goal'), 30000);
+  await click('mode-manual');
+  check('Record switches between Copilot and by hand on the same screen', await waitFor('back to by hand', () => exists('record-start'), 30000) && !(await exists('ai-goal')));
+  await click('mode-record');
+  await type('ai-goal', 'Ask "Summarize the supplier delay on PO-450101", then open Plugins. In admin, search "alpha" and open alpha-6. Then go to chat, start a new chat and ask "What will it cost us?" with the send button.');
+  await shot('15-new-record-for-me');
   await chat.goto(fx.chat); await admin.goto(fx.admin); await chat.bringToFront();
   await waitFor('the recorder to connect', async () => (await attr('recorder-state', 'data-connected')) === 'true', 60000);
-  await click('preflight-fix');
-  await waitFor('preflight ready', async () => (await attr('preflight-result', 'data-ready')) === 'true', 180000);
+  // Draft the plan checks the tabs first (it reads each start screen), the same check as Start's.
   await click('ai-plan');
   await waitFor('the plan', () => exists('ai-plan-done'), 180000);
+  check('Record for me: the goal kept with the demo', /supplier delay/.test(readFileSync(join(FM, 'ai.json'), 'utf8')) && /"mode": ?"record"/.test(readFileSync(join(FM, 'ai.json'), 'utf8')));
   const planText = await b.execute(() => document.querySelector('[data-test="ai-plan-text"]').value);
+  check('the plan fills the run of show, with the steps that ask first', await exists('plan-beat-1') && /asks you first/.test(await b.execute(() => document.querySelector('[data-test="run-of-show"]').innerText)));
   check('Record for me: a plan in plain words, sends asking first', /Click "Plugins"/.test(planText) && /Press Enter — ask first/.test(planText) && /Click "Send" — ask first/.test(planText), planText);
   await shot('16-plan');
   await chat.bringToFront();

@@ -898,7 +898,14 @@ async fn ai_save(
 
 #[tauri::command]
 async fn ai_plan(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
-    job(state, app, id, "ai-plan", |dir, busy| {
+    let (to, who) = (app.clone(), id.clone());
+    job(state, app, id, "ai-plan", move |dir, busy| {
+        // The plan reads each app's start screen: the tabs are checked and opened first, the same check as Record's.
+        let report =
+            scenecast_app::record::preflight(dir, true, |u| emit(&to, &who, "preflight", u))?;
+        if !report.ready {
+            return Err(AppError::Invalid(scenecast_app::record::not_ready(&report)));
+        }
         scenecast_app::ai::run(Some(dir), &["plan"], |u| busy.emit(u))
     })
     .await

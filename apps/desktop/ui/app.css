@@ -193,6 +193,22 @@ select.inline { width: auto; padding: 6px 10px; }
 @keyframes land { from { opacity: 0; transform: scale(.6); } }
 .state { font-weight: 700; font-size: var(--t-label); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .state.ok { color: var(--ok); } .state.warn { color: var(--warn); } .state.bad { color: var(--bad); } .state.idle { color: var(--muted); }
+.rd-row .steps { list-style: none; margin: 6px 0 2px; padding: 0; display: grid; gap: 3px; }
+.rd-row .steps li { position: relative; padding-left: 18px; font-size: 14px; color: var(--ink-2); }
+.rd-row .steps li::before { content: ""; position: absolute; left: 3px; top: .55em; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-top: 1.5px solid var(--muted); transform: rotate(45deg); }
+.tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
+.rd-head small details { display: inline; }
+.rd-head small details summary { display: inline; margin-left: 4px; }
+.rd-head .next .alink svg.i { width: 16px; height: 16px; }
+.rd-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--rule); background: var(--paper-2); }
+.rd-foot svg.i { width: 15px; height: 15px; color: var(--muted); }
+.plan-edit { padding: 10px 20px 14px; border-top: 1px solid var(--rule); }
+.ai-run:not(:empty) { padding: 12px 20px; border-bottom: 1px solid var(--rule); }
+.install-steps:not(:empty) { padding: 6px 20px 16px; }
+.goal-row { display: flex; gap: 16px; align-items: flex-end; }
+.goal-row label { margin-bottom: 6px; }
+.card.goal { padding: 16px 20px; }
+details.card.sent summary { margin: 0; }
 .app-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .app-cell span { white-space: nowrap; }
 .tile { width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700; flex: none; background: var(--ink-2); }

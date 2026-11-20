@@ -13,7 +13,7 @@ const pick = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? arg
 const ENGINE = pick('--browser', 'webkit') === 'chromium' ? chromium : webkit;
 const ONLY = pick('--only', '') ? pick('--only', '').split(',') : null;
 // 'details' is the Record screen with Details open: the one place engine words belong.
-const SCENARIOS = ['empty', 'library', 'new', 'record', 'copilot', 'recording', 'record-error', 'recorded', 'review', 'present', 'presenting', 'share', 'details'];
+const SCENARIOS = ['empty', 'library', 'new', 'record', 'record-pick', 'copilot', 'copilot-plan', 'recording', 'record-error', 'recorded', 'review', 'present', 'presenting', 'share', 'details'];
 const ENGINE_WORDS = /\b(port \d+|receiver|preflight|scrub|manifest|unpacked|developer mode|headless|side states?|streamed answers?|threshold|localhost|127\.0\.0\.1|profile \d+)\b|\/Users\/|\b[A-Z]:\\/i;
 
 mkdirSync(OUT, { recursive: true });

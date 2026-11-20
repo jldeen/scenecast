@@ -10,13 +10,35 @@
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const job = (demo, job, update) => emit('job', { demo, job, update });
 
+  const PLAN = `# Innovation Act 1
+## Beat 1 · The late shipment lands in Teams
+- Go to teams
+- Click "Procurement"
+- Click the message from Kestrel
+- You: read the ship date out loud
+> Kestrel just told us PO-450101 will ship six days late.
+## Beat 2 · Ask Copilot about PO-450101
+- Go to copilot
+- Type "What does the delay on PO-450101 hold up?" in "Message"
+- Press Enter — ask first
+- Wait for the answer
+> Copilot pulls it together from Teams, email and the ERP.
+## Beat 3 · Who can approve the expedite
+- Go to iq
+- Click "Approvers"
+> Microsoft IQ knows who can sign off.
+## Beat 4 · IT turns it on for everyone
+- Go to admin
+- Click "Agents"
+- Click "Publish" — ask first
+> And IT rolls it out to everyone.`;
   const apps = [
     { id: 'teams', url: 'https://teams.cloud.microsoft/', key: 't' },
     { id: 'copilot', url: 'https://m365.cloud.microsoft/chat', key: 'c' },
     { id: 'iq', url: 'https://daily.iq.microsoft.com/', key: 'i' },
     { id: 'admin', url: 'https://admin.cloud.microsoft/', key: 'a' },
   ];
-  const stage = { empty: 'new', library: 'checked', record: 'new', copilot: 'new', recording: 'new', recorded: 'recorded', review: 'built', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
+  const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', recording: 'new', recorded: 'recorded', review: 'built', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
   const after = s => ['recorded', 'built', 'checked'].indexOf(stage) >= ['recorded', 'built', 'checked'].indexOf(s);
   const status = {
     recorded: after('recorded'), recordedAt: after('recorded') ? now - 3600e3 : null, screens: after('recorded') ? 22 : 0,
@@ -28,7 +50,7 @@
   const home = OS === 'macos' ? '/Users/jessica/Documents/Scenecast' : 'C:\\Users\\jessica\\Documents\\Scenecast';
   const demo = {
     id: 'innovation-act-1-demo-1', title: 'Innovation Act 1 · Demo 1', dir: `${home}/innovation-act-1-demo-1`, port: 47811,
-    apps, browser: OS === 'macos' ? 'chrome' : 'edge', profile: 'Profile 10', mode: SC === 'copilot' ? 'record' : 'manual', slot: 480, status,
+    apps, browser: OS === 'macos' ? 'chrome' : 'edge', mode: /^copilot/.test(SC) ? 'record' : 'manual', profile: null, slot: 480, status,
   };
   const others = [
     { ...demo, id: 'supplier-delay', title: 'Supplier delay walkthrough', status: { ...status, stage: 'checked', recorded: true, built: true, screens: 14, liveScenes: 14 } },
@@ -56,7 +78,7 @@
     browser_profiles: ({ browser }) => ({ browser: browser || demo.browser, picked: 'Profile 10', running: true, profiles: [
       { dir: 'Profile 10', name: 'Jessica', email: 'jessica@contoso.com', open: true, color: '#6b4fbb', ...(SC === 'empty' ? {} : { extension: { id: 'kfmgcj', enabled: true, devMode: true } }) },
       { dir: 'Default', name: 'Personal', color: '#0f6cbd' } ] }),
-    ai_get: () => ({ goal: 'A buyer finds out PO-450101 is late, asks Copilot what it holds up, finds who can approve the expedite in Microsoft IQ, and IT rolls the agent out.', source: '', plan: '', sent: [], run: null }),
+    ai_get: () => ({ plan: SC === 'copilot-plan' ? PLAN : '', goal: 'A buyer finds out PO-450101 is late, asks Copilot what it holds up, finds who can approve the expedite in Microsoft IQ, and IT rolls the agent out.', source: '', sent: [], run: null }),
     ai_save: a => a, ai_settings: ({ set }) => ({ model: 'auto', pageText: true, ...set }),
     key_reference: () => {
       const m = OS === 'macos' ? '⌥' : 'Ctrl+Alt+';
@@ -80,18 +102,23 @@
       const rehearsed = SC === 'present' || SC === 'presenting' || SC === 'share';
       const took = [80, 130, 140, 112];
       const beats = [['The late shipment lands in Teams', 0, 75, 'teams'], ['Ask Copilot about PO-450101', 75, 210, 'copilot'], ['Who can approve the expedite', 210, 345, 'iq'], ['IT turns it on for everyone', 345, 450, 'admin']]
-        .map(([title, start, end, app], i) => ({ n: i + 1, title, start, end, app, key: `${OS === 'macos' ? '⌥' : 'Ctrl+Alt+'}${i + 1}`, took: rehearsed ? took[i] : null }));
+        .map(([title, start, end, app], i) => ({ n: i + 1, title, start, end, app: after('recorded') ? app : null, key: `${OS === 'macos' ? '⌥' : 'Ctrl+Alt+'}${i + 1}`, took: rehearsed ? took[i] : null }));
       return { source: 'guide', slot: 480, planned: 450, beats, rehearsal: rehearsed ? { at: now - 3 * 3600e3, total: 462 } : null };
     },
     present_start: ({ rehearse }) => ({ url: 'http://127.0.0.1:47811/', opened: true, guide: 'http://127.0.0.1:47811/presenter.html', rehearse }),
     pending_opens: () => [], pick_share_file: () => null, share_import: () => demo,
     present_stop: () => null, present_guide: () => 'http://127.0.0.1:47811/presenter.html',
     preflight: async ({ id }) => {
-      for (const item of preflightItems) { job(id, 'preflight', { type: 'preflight', item }); await wait(60); }
-      return { ready: true, secs: 0.8, items: preflightItems };
+      const items = SC === 'record-pick' ? preflightItems.map(i => i.id === 'app iq' ? { id: 'app iq', status: 'fail', detail: 'no tab for iq (daily.iq.microsoft.com)', missing: true,
+        tabs: [{ title: 'Supply Chain Operations | Microsoft IQ', url: 'https://iq.cloud.microsoft/workspaces/supply', host: 'iq.cloud.microsoft' }, { title: 'Procurement chat | Teams', url: 'https://teams.cloud.microsoft/', host: 'teams.cloud.microsoft' }, { title: 'Inbox | Outlook', url: 'https://outlook.cloud.microsoft/mail/', host: 'outlook.cloud.microsoft' }] } : i) : preflightItems;
+      for (const item of items) { job(id, 'preflight', { type: 'preflight', item }); await wait(60); }
+      return { ready: items.every(i => i.status !== 'fail'), secs: 0.8, items };
     },
     record_start: async ({ id }) => {
-      if (SC === 'record-error') throw 'not open: teams (a tab whose address has teams.cloud.microsoft), admin (a tab whose address has admin.cloud.microsoft). Open them in the browser the recorder is in, then start again';
+      if (SC === 'record-error') {
+        for (const item of preflightItems.map(i => i.id === 'app admin' ? { id: 'app admin', status: 'fail', detail: 'no tab for admin (admin.cloud.microsoft)', missing: true, tabs: [{ title: 'Home | Microsoft 365 admin center', url: 'https://admin.microsoft.com/Adminportal/Home', host: 'admin.microsoft.com' }, { title: 'Procurement chat | Teams', url: 'https://teams.cloud.microsoft/', host: 'teams.cloud.microsoft' }] } : i)) { job(id, 'preflight', { type: 'preflight', item }); await wait(40); }
+        throw 'not ready to record: no tab for admin (admin.cloud.microsoft)';
+      }
       job(id, 'record', { type: 'record', status: { recording: true, busy: false, count: 14, actions: 9, streams: 1, timing: { recorderSecs: 41, productSecs: 120 } } });
       return { ok: true };
     },
@@ -122,7 +149,7 @@
     if (gate) { document.querySelector(`[data-gate="${gate}"]`)?.click(); await wait(200); }
     if (q.get('details') === '1') document.querySelector('[data-action="details"]')?.click();
     if (SC === 'presenting') { await wait(300); document.querySelector('[data-action="present-start"]')?.click(); await wait(300); }
-    if (['record', 'copilot', 'recording', 'record-error'].includes(SC)) document.querySelector('[data-action="preflight"]')?.click();
+    await wait(500);
     if (SC === 'recording' || SC === 'record-error') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
     document.documentElement.dataset.previewReady = '1';
   }, 300));
