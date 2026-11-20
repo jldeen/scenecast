@@ -6,6 +6,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Exit once everything printed is out (a pipe to the app is written asynchronously; exiting at once cut it at 64 KB).
+const exitWhenOut = code => process.stdout.write('', () => process.exit(code));
 
 export async function send(cmd, tmo = 300, port = process.env.REPLICA_RX_PORT || 47621) {
   const RX = `http://127.0.0.1:${port}`;
@@ -31,5 +33,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   else cmd = { op, ...JSON.parse(args) };
   const r = await send(cmd, tmo);
   console.log(JSON.stringify(r.ok ? r.value : { error: r.error }, null, 1));
-  process.exit(r.ok ? 0 : 1);
+  exitWhenOut(r.ok ? 0 : 1);
 }

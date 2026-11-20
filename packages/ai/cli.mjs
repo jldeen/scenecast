@@ -15,6 +15,8 @@ import { loadDemo, arg } from '../kit/lib/demo.mjs';
 import { makeModel } from './model.mjs';
 import { readSettings, writeSettings } from './copilot.mjs';
 import { aiDir, answer, stop } from './run.mjs';
+// Exit once everything printed is out (a pipe to the app is written asynchronously; exiting at once cut it at 64 KB).
+const exitWhenOut = code => process.stdout.write('', () => process.exit(code));
 
 const args = process.argv.slice(2);
 const sub = args[0];
@@ -77,9 +79,9 @@ async function main() {
 try {
   const r = await main();
   if (r !== null) emit({ event: 'done', result: r });
-  process.exit(r === null ? 1 : 0);
+  exitWhenOut(r === null ? 1 : 0);
 } catch (e) {
   emit({ event: 'error', error: String(e && e.message || e) });
   if (process.env.SCENECAST_AI_DEBUG) console.error(e);
-  process.exit(2);
+  exitWhenOut(2);
 }

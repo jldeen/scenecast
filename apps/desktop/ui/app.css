@@ -231,3 +231,7 @@ textarea[rows] { min-height: 0; font-family: inherit; font-size: 13.5px; }
 .update[hidden] { display: none; }
 .update-dot, .has-update::before { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c50f1f; margin-right: 6px; vertical-align: middle; }
 .has-update::before { content: ""; }
+
+/* hidden means hidden, whatever display a class gives it (the new-demo error box and the update box showed empty). */
+[hidden] { display: none !important; }
+.modes { list-style: none; padding: 0; margin: 0; } .modes > li { display: flex; } .modes .mode { width: 100%; }

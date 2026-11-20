@@ -12,7 +12,9 @@ const [cmd, ...rest] = process.argv.slice(2);
 const kids = new Set();
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { for (const k of kids) k.kill(sig); process.exit(130); });
 const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(process.execPath, [join(KIT, script), ...args], { stdio: 'inherit', ...opts }); kids.add(p); p.on('close', code => { kids.delete(p); res(code); }); });
-const exit = code => process.exit(code || 0);
+// Exit once what was printed is out: to a pipe (the app reads every command this way) Node writes asynchronously, and
+// exiting at once cut a long answer at 64 KB (the browser's profiles, with their pictures: the app never showed them).
+const exit = code => { process.exitCode = code || 0; process.stdout.write('', () => process.stderr.write('', () => process.exit(code || 0))); };
 const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary; see docs/cli.md)
 
   preflight [--check] [--json|--ndjson]  profiles [--browser chrome|edge] [--json]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']

@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/player",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "description": "The replica: zero-dependency server, morph engine, stream replay, presenter keys (Alt, or Ctrl+Alt), focus points, app-window launcher for macOS and Windows."

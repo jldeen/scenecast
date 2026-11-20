@@ -269,9 +269,9 @@ function renderNew() {
   renderSidebar();
   $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>New demo</h1>
     <p class="muted">How do you want to make it?</p></div></div>
-    <div class="modes" role="list">${Object.entries(MODES).map(([m, x]) => `<button class="mode card" role="listitem" data-mode="${m}" data-test="mode-${m}">
+    <ul class="modes" aria-label="Ways to make a demo">${Object.entries(MODES).map(([m, x]) => `<li><button class="mode card" data-mode="${m}" data-test="mode-${m}">
       <span class="mode-icon" aria-hidden="true">${x.icon}</span><span class="mode-title">${esc(x.title)}</span>
-      <span class="muted small">${esc(x.text)}</span>${aiMode(m) ? '<span class="pill info">GitHub Copilot</span>' : ''}</button>`).join('')}</div>`;
+      <span class="muted small">${esc(x.text)}</span>${aiMode(m) ? '<span class="pill info">GitHub Copilot</span>' : ''}</button></li>`).join('')}</ul>`;
   $('[data-mode]').focus();
 }
 function renderNewForm(mode) {
@@ -310,7 +310,7 @@ function renderNewForm(mode) {
     const b = form.browser.value;
     const box = $('#new-profiles');
     box.innerHTML = profileOptions(null);
-    const info = await invoke('browser_profiles', { browser: b }).catch(() => null);
+    const info = await invoke('browser_profiles', { browser: b }).catch(e => ({ error: String(e) }));
     if (box.isConnected && form.browser.value === b) box.innerHTML = profileOptions(info, '');
   };
   form.addEventListener('change', e => { if (e.target.name === 'browser') load(); });
@@ -495,6 +495,7 @@ const avatar = p => p.picture ? `<img class="avatar" src="${esc(p.picture)}" alt
   : `<span class="avatar" style="background:${esc(p.color || '#8a8a94')}" aria-hidden="true">${esc((p.name || '?').trim().charAt(0).toUpperCase())}</span>`;
 // The profile picker: the browser's own profiles by name and picture; "" is the one that's open when recording.
 function profileOptions(info, chosen) {
+  if (info && info.error) return `<p class="small" role="alert" data-test="profiles-error">Couldn\u2019t read the browser\u2019s profiles: ${esc(info.error)}. Recording uses the one that\u2019s open.</p>`;
   if (!info) return '<p class="muted small">Looking at the browser\u2019s profiles…</p>';
   if (!info.profiles?.length) return `<p class="muted small">No ${esc(BNAME[info.browser] || info.browser)} profiles on this computer yet: it uses the one you open.</p>`;
   const picked = chosen || '';
@@ -650,7 +651,7 @@ PANELS.record = (panel, d) => {
   const pick = $('#profile-pick', panel);
   const showProfiles = async () => {
     pick.innerHTML = profileOptions(J(d.id).profiles, demo()?.profile);
-    J(d.id).profiles = await invoke('browser_profiles', { id: d.id }).catch(() => null);
+    J(d.id).profiles = await invoke('browser_profiles', { id: d.id }).catch(e => ({ error: String(e) }));
     if (pick.isConnected) pick.innerHTML = profileOptions(J(d.id).profiles, demo()?.profile);
   };
   pick.onchange = e => {
