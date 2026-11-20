@@ -3,7 +3,7 @@
 // window, and a test Chrome (its own profile folder, never yours) with the recorder extension goes through the fixture
 // app in between. Then Auditaur's IPC, errors and logs say what the window asked and what came back.
 // Everything is isolated: a temporary HOME, library and extension folder, and its own receiver port (not 47621), so
-// an installed Scenecast and its receiver are left alone.
+// an installed Scenecast and its receiver are left alone. Ports: SMOKE_RX_PORT (47661), SMOKE_FIXTURE_PORT (47831, +1).
 //   node apps/desktop/tests/auditaur-smoke.mjs [--auditaur <path to the auditaur binary>] [--stale] [--keep]
 //     --stale   the recorder in the browser is older (0.0.9): Record must refuse, saying to reload it
 // Needs: the auditaur CLI (cargo install auditaur-cli, or --auditaur), Google Chrome, and Node 20+.
@@ -59,13 +59,13 @@ const exists = s => !!drive('exists', '--selector', s).payload?.exists;
 const liveCounts = () => au(['events', '--session-file', SESSION]).map(e => JSON.stringify(e))
   .map(t => /\\?"type\\?":\\?"record\\?".*?\\?"count\\?":(\d+)/.exec(t)).filter(Boolean).map(m => +m[1]);
 
-let obs, ctx, fx;
+let obs, ctx, fx, appPid;
 try {
   // ---- The dev app, with Auditaur's collector, under `auditaur observe` --------------------------------------------
   execFileSync('npm', ['run', '-s', 'build'], { cwd: join(DESKTOP, 'auditaur'), stdio: 'inherit', shell: process.platform === 'win32' });
   execFileSync('cargo', ['build', '--features', 'auditaur', '--manifest-path', join(DESKTOP, 'src-tauri', 'Cargo.toml')], { stdio: 'inherit' });
   const exe = join(DESKTOP, 'src-tauri', 'target', 'debug', process.platform === 'win32' ? 'scenecast-desktop.exe' : 'scenecast-desktop');
-  fx = startFixture();
+  fx = startFixture({ chatPort: +(process.env.SMOKE_FIXTURE_PORT || 47831), adminPort: +(process.env.SMOKE_FIXTURE_PORT || 47831) + 1 });
   const env = { ...AUENV, HOME, USERPROFILE: HOME, SCENECAST_LIBRARY: LIB, SCENECAST_EXTENSION_DIR: EXT, SCENECAST_SELFTEST: HOOK, REPLICA_RX_PORT: String(PORT), REPLICA_NO_OPEN: '1' };
   obs = spawn(AUDITAUR, ['observe', '--app', 'scenecast-desktop', '--', exe], { cwd: tmp, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const obsLog = []; obs.stdout.on('data', d => obsLog.push(String(d))); obs.stderr.on('data', d => obsLog.push(String(d)));
@@ -73,6 +73,7 @@ try {
   const s = JSON.parse(readFileSync(SESSION, 'utf8'));
   const pick = (...ks) => { for (const k of ks) { const v = k.split('.').reduce((o, x) => o?.[x], s); if (v !== undefined && v !== null) return String(v); } return null; };
   const sid = pick('app.sessionId', 'sessionId'), iid = pick('app.instanceId', 'instanceId'), pid = pick('app.pid', 'pid');
+  appPid = +pid || null;
   sel = [...(sid ? ['--session-id', sid] : []), ...(iid ? ['--instance-id', iid] : []), ...(pid ? ['--pid', pid] : [])];
   check('auditaur observes the app', !!sid, JSON.stringify(s));
   const v = await hook('version', {}, 90000);
@@ -153,6 +154,7 @@ try {
 } finally {
   try { if (existsSync(SESSION)) execFileSync(AUDITAUR, ['stop', '--session-file', SESSION], { cwd: tmp, env: AUENV, stdio: 'ignore' }); } catch { /* gone */ }
   try { obs?.kill(); } catch { /* gone */ }
+  try { if (appPid) process.kill(appPid); } catch { /* gone */ }
   await ctx?.close().catch(() => {});
   fx?.close?.();
   if (!argv.includes('--keep')) rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }); else console.log('kept', tmp);

@@ -196,7 +196,8 @@ try {
   const reload = () => fetch(`http://127.0.0.1:${PORT}/cmd`, { method: 'POST', body: JSON.stringify({ op: 'reload' }) });
   await reload();
   await sleep(3000);
-  await waitFor('the old recorder to connect', async () => (await hook('state')).value.receiver.connected, 60000, 1000).catch(() => {});
+  const { send } = await import('../../../packages/recorder/cli.mjs');
+  await waitFor('the old recorder to answer', async () => (await send({ op: 'extension' }, 5, PORT)).value?.version === '0.0.9', 60000, 1000).catch(() => {});
   const stale = await hook('record-start', { demo: id }, 180000);
   check('a recorder older than the app: Record refuses, "Reload the recorder extension"', !stale.ok && /Reload the recorder extension/.test(stale.error) && /0\.0\.9/.test(stale.error), JSON.stringify(stale).slice(0, 600));
   writeFileSync(man, manText);
