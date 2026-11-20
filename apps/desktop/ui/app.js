@@ -83,7 +83,8 @@ async function step(job, cmd, args, after) {
   } catch (e) {
     if (!mine()) return;
     const msg = typeof e === 'string' ? e : e?.message || String(e);
-    toast(msg, true);
+    // Shown once: in the step's own place when it's on screen, otherwise as a toast.
+    if (!(S.view === 'demo' && S.id === id && tabJobs(S.tab).includes(job))) toast(msg, true);
     J(id)[job].error = msg;
   } finally {
     if (mine()) delete J(id).running[job];
@@ -96,7 +97,7 @@ function dialog({ title, body, ok = 'OK', cancel = 'Cancel', danger = false }) {
   const d = $('#dialog');
   d.innerHTML = `<form method="dialog"><div class="body"><h2 id="dialog-title">${esc(title)}</h2>${body}</div>
     <div class="foot">${cancel ? `<button class="btn" value="cancel">${esc(cancel)}</button>` : ''}
-    <button class="btn ${danger ? 'primary' : 'primary'}" value="ok" data-test="dialog-ok">${esc(ok)}</button></div></form>`;
+    <button class="btn primary${danger ? ' destructive' : ''}" value="ok" data-test="dialog-ok">${esc(ok)}</button></div></form>`;
   return new Promise(res => {
     d.onclose = () => res(d.returnValue === 'ok' ? Object.fromEntries(new FormData($('form', d))) : null);
     d.showModal();
@@ -381,7 +382,7 @@ function renderCopilot() {
   const st = AI.status, set = AI.settings || { model: 'auto', pageText: true };
   const models = AI.models || [];
   $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>GitHub Copilot</h1>
-    <p class="muted">Record for me, I\u2019ll click you script it, and Coach me use GitHub Copilot through your own GitHub account and its Copilot plan. No keys to set up.</p></div></div>
+    <p class="muted">Copilot can record a demo for you, write the script from your recording, or coach you while you record. It uses your own GitHub account and its Copilot plan: no keys to set up.</p></div></div>
     <div class="card"><h2>Your account</h2>
       <div class="row" style="margin-top:8px">${st?.signedIn ? `<span class="pill ok" data-test="ai-signed-in">Signed in as ${esc(st.login || 'you')}</span>
         <button class="btn" data-action="ai-sign-out" data-test="ai-sign-out">Sign out</button>`
@@ -426,7 +427,7 @@ function renderTabsBar() {
   bar.innerHTML = TABS.map(([t, label]) => {
     const b = tabJobs(t).some(j => running(j));
     return `<button role="tab" id="tab-${t}" aria-controls="panel" aria-selected="${t === S.tab}" tabindex="${t === S.tab ? 0 : -1}" data-tab="${t}" data-test="tab-${t}">
-      <span class="tab-dot ${b ? 'busy' : tabDone(t, d.status) ? 'done' : ''}" aria-hidden="true"></span>${label}${b ? '<span class="visually-hidden"> (working)</span>' : ''}</button>`;
+      <span class="tab-dot ${b ? 'busy' : tabDone(t, d.status) ? 'done' : ''}" aria-hidden="true"></span>${label}${b ? '<span class="visually-hidden"> (working)</span>' : tabDone(t, d.status) ? '<span class="visually-hidden"> (done)</span>' : ''}</button>`;
   }).join('');
 }
 async function openDemo(id, tab) {
