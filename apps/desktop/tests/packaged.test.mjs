@@ -237,7 +237,10 @@ try {
   if (appExit === null) try { app?.kill(); } catch { /* gone */ }
   await ctx?.close().catch(() => {});
   fx?.close?.();
-  if (!process.env.SCENECAST_KEEP) rmSync(tmp, { recursive: true, force: true, maxRetries: 5 });
+  // The sign-in still waiting for its code (no one enters it in CI) runs Copilot's runtime from this test's folder; on
+  // Windows it outlives the app and holds its files.
+  if (WIN) try { execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${tmp.replace(/'/g, "''")}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`], { stdio: 'ignore' }); } catch { /* none */ }
+  if (!process.env.SCENECAST_KEEP) try { rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }); } catch (e) { console.log(`left ${tmp}: ${e.message}`); }
 }
 console.log(fails.length ? `${fails.length} FAILED` : 'ALL PASS');
 process.exit(fails.length ? 1 : 0);
