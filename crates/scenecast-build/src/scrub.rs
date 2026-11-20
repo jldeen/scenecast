@@ -209,7 +209,7 @@ fn credential_key(key: &str) -> bool {
         .is_some_and(|matched| matched.start() == 0 && matched.end() == input.len())
 }
 
-fn contains_script(ext: &str, text: &str) -> bool {
+pub(crate) fn contains_script(ext: &str, text: &str) -> bool {
     static SCRIPT: OnceLock<Regex> = OnceLock::new();
     let pattern = SCRIPT.get_or_init(|| {
         Regex::new(

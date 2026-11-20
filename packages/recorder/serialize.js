@@ -101,6 +101,8 @@ async (opts) => {
       // Sign-in tokens a page keeps in its markup (Power BI's embeds: powerbi-access-token) never reach the capture: a
       // credential in the raw captures stops the build, and the replica doesn't need it.
       if (SECRET_ATTR.test(n)) v = '';
+      // href="javascript:void(0)" (a do-nothing link) is script to the build's scan; it does nothing as "#" either.
+      else if (/^(href|src|action|formaction|xlink:href)$/i.test(n) && /^\s*javascript:/i.test(v)) v = '#';
       else if (v.length > 40 && JWT.test(v)) v = v.replace(JWT_ALL, '');
       if (tag === 'img' && n === 'src') v = el.currentSrc || el.src || v;
       if (urlAttrs.includes(n)) {
