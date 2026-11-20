@@ -3,7 +3,7 @@
 //   node compile/flow.mjs --demo <dir> [--from-raw]
 // --from-raw first copies the recorder's raw recording (raw/recording.json) into the demo folder, without its log
 // and page URLs. The flow format is in docs/flow-format.md.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { statSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadDemo, KIT_VERSION, FLOW_VERSION } from '../lib/demo.mjs';
@@ -19,8 +19,11 @@ export async function compileFlow(demo, { fromRaw = false } = {}) {
     return { flow, problems: validate(flow), handWritten: true };
   }
   const recFile = join(demo.dir, 'recording.json');
-  if (fromRaw || !existsSync(recFile)) {
-    const raw = join(demo.raw, 'recording.json');
+  const rawFile = join(demo.raw, 'recording.json');
+  // A newer take (Record again) replaces the demo's copy; hand edits live in flow.overrides.mjs, not in it.
+  const newerTake = existsSync(rawFile) && existsSync(recFile) && statSync(rawFile).mtimeMs > statSync(recFile).mtimeMs;
+  if (fromRaw || newerTake || !existsSync(recFile)) {
+    const raw = rawFile;
     if (!existsSync(raw)) throw new Error(`no recording: ${raw} (record the demo first: scenecast record start)`);
     const r = JSON.parse(readFileSync(raw, 'utf8'));
     delete r.log;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compileFlow, finishFlow, validate } from './flow.mjs';
@@ -50,4 +50,22 @@ test('focus points follow wording and date edits', async () => {
   assert.equal(only[0].find, 'The earliest is due Friday.');
   assert.equal(only[1].union[0], 'due Monday');
   assert.equal(points[0].find, 'The earliest is due Friday.');
+});
+
+test('a newer take (Record again) replaces the demo\'s copy of the recording', async t => {
+  // Jessica's Mac, Nov 20: the second recording (11 screens) was built as the first (14) because the demo folder's
+  // recording.json from the first build won over the raw one.
+  const dir = mkdtempSync(join(tmpdir(), 'scenecast-flow-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const raw = join(dir, 'raw');
+  mkdirSync(raw);
+  writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name: 'fixture', raw, apps: [{ id: 'a', key: 'A' }] }));
+  const take = id => ({ states: { [id]: { app: 'a', snap: id } }, beats: [{ active: 'a', states: { a: id } }] });
+  writeFileSync(join(raw, 'recording.json'), JSON.stringify(take('first')));
+  assert.ok((await compileFlow(loadDemo(dir))).flow.states.first);
+  const later = new Date(Date.now() + 5000);
+  writeFileSync(join(raw, 'recording.json'), JSON.stringify(take('second')));
+  utimesSync(join(raw, 'recording.json'), later, later);
+  const { flow } = await compileFlow(loadDemo(dir));
+  assert.ok(flow.states.second && !flow.states.first, Object.keys(flow.states).join());
 });
