@@ -9,6 +9,8 @@ import { pathToFileURL } from 'node:url';
 import { loadDemo, KIT_VERSION, FLOW_VERSION } from '../lib/demo.mjs';
 import { applyFixesToFlow, readFixes } from '../../fixer/patches.mjs';
 import { mergeFocus } from '../../player/app/focus-order.js';
+import { plainLabels } from '../lib/beats.mjs';
+import { writeRecordingNotes } from '../lib/notes.mjs';
 import { readEditorOverrides, applyEditorOverrides, readFocusJson } from '../lib/overrides.mjs';
 import { compileEdits } from '../lib/edits.mjs';
 
@@ -135,6 +137,8 @@ export async function finishFlow(demo, flow, rec) {
   const cfg = demo.cfg;
   // The fidelity loop's fixes for this demo (flow.fixes.json, written by scenecast fidelity), before the hand edits.
   applyFixesToFlow(flow, readFixes(demo.dir));
+  // Beat labels in plain words ("3 Copilot: Library"), before the hand edits so those can rename them.
+  plainLabels(flow);
   // Hand edits last.
   const over = join(demo.dir, 'flow.overrides.mjs');
   if (existsSync(over)) {
@@ -225,5 +229,6 @@ if (process.argv[1] && process.argv[1].endsWith('flow.mjs')) {
   console.log(`flow.json: ${Object.keys(flow.states).length} states, ${Object.keys(flow.streams).length} streams, ${flow.beats.length} beats, ${flow.path.length} steps`);
   for (const n of flow.notes) console.log('note: ' + n);
   for (const p of problems) console.log('PROBLEM: ' + p);
+  if (!problems.length && writeRecordingNotes(demo, flow)) console.log('presenter guide: each beat\'s steps from the recording (no script yet)');
   process.exit(problems.length ? 1 : 0);
 }

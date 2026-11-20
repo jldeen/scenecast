@@ -8,6 +8,7 @@
 // the Say, Do and Watch sections, times, parts and watch-outs.)
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, basename, extname, relative } from 'node:path';
+import { scriptFromFlow } from './beats.mjs';
 
 const clean = s => String(s || '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim();
 const SPECIAL = {
@@ -347,4 +348,22 @@ export function writeNotes(demo, flow, file = scriptPath(demo)) {
   mkdirSync(join(demo.dir, 'presenter'), { recursive: true });
   writeFileSync(join(demo.dir, 'presenter', 'notes.json'), JSON.stringify(notes, null, 1) + '\n');
   return notes;
+}
+
+// Before there's a script: the guide from the recording (each beat's plain name and its clicks and prompts), so the
+// presenter can see where a prompt or a click is expected. A script's notes are never replaced.
+export function recordingNotes(demo, flow) {
+  const notes = buildNotes(demo, flow, scriptFromFlow(flow, demo.cfg.title || demo.name), 'recording.md');
+  // No pictures yet: they come with the script (guide-shots); the guide shows the steps without them.
+  for (const b of notes.beats) { b.shot = null; b.shotApp = {}; }
+  return Object.assign(notes, { script: null, fromRecording: true, shots: [], shotLabels: {} });
+}
+export function writeRecordingNotes(demo, flow) {
+  if (existsSync(scriptPath(demo))) return false;
+  const out = join(demo.dir, 'presenter', 'notes.json');
+  if (existsSync(out)) { try { if (!JSON.parse(readFileSync(out, 'utf8')).fromRecording) return false; } catch (e) { return false; } }
+  const notes = recordingNotes(demo, flow);
+  mkdirSync(join(demo.dir, 'presenter'), { recursive: true });
+  writeFileSync(out, JSON.stringify(notes, null, 1) + '\n');
+  return true;
 }

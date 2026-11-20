@@ -17,7 +17,7 @@ import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 import { loadDemo, arg } from '../kit/lib/demo.mjs';
-import { buildNotes } from '../kit/lib/notes.mjs';
+import { buildNotes, recordingNotes } from '../kit/lib/notes.mjs';
 import { replicaServer } from '../kit/lib/server.mjs';
 import { compileFlow } from '../kit/compile/flow.mjs';
 import { comparePngs } from './compare.mjs';
@@ -44,16 +44,18 @@ try {
   const flow = (await compileFlow(demo)).flow;
   // ---- script ↔ notes ------------------------------------------------------------------------------------------------
   const sp = resolve(demo.dir, notes.script || 'presenter/script.md');
-  if (!existsSync(sp)) add('script', false, `${notes.script}: the script notes.json was made from isn't there`);
+  if (!notes.fromRecording && !existsSync(sp)) add('script', false, `${notes.script}: the script notes.json was made from isn't there`);
   else {
-    const fresh = buildNotes(demo, flow, readFileSync(sp, 'utf8'), basename(sp)); fresh.script = notes.script;
+    // Notes from the recording (no script yet): the same beats and steps the recording gives now.
+    const fresh = notes.fromRecording ? recordingNotes(demo, flow) : buildNotes(demo, flow, readFileSync(sp, 'utf8'), basename(sp));
+    if (!notes.fromRecording) fresh.script = notes.script;
     const diff = [];
     if (JSON.stringify(fresh) !== JSON.stringify(notes)) {
       if (fresh.beats.length !== notes.beats.length) diff.push(`the script has ${fresh.beats.length - 2} beats, notes.json ${notes.beats.length - 2}`);
       else fresh.beats.forEach((b, i) => { for (const k of Object.keys(b)) if (JSON.stringify(b[k]) !== JSON.stringify(notes.beats[i][k])) diff.push(`${fresh.names[b.n]}: ${k}`); });
       for (const k of ['title', 'parts', 'keys', 'stage', 'shots']) if (JSON.stringify(fresh[k]) !== JSON.stringify(notes[k])) diff.push(k);
     }
-    add('script', !diff.length, diff.length ? `notes.json is out of date with ${notes.script} (run \`scenecast notes\`): ${[...new Set(diff)].join('; ')}` : `${notes.script}: ${B.length - 2} beats, ${B.reduce((n, b) => n + b.say.length, 0)} lines, word for word`);
+    add('script', !diff.length, diff.length ? `notes.json is out of date with ${notes.script || 'the recording'} (run \`scenecast notes\`): ${[...new Set(diff)].join('; ')}` : `${notes.script || 'from the recording (no script yet)'}: ${B.length - 2} beats, ${B.reduce((n, b) => n + b.say.length, 0)} lines, word for word`);
   }
   const lost = (flow.focus || []).filter(p => !((p.beat || 0) >= 0 && (p.beat || 0) < LAST));
   add('focus-beats', !lost.length, lost.length ? `focus points on no script beat: ${lost.map(p => `${p.id} (beat ${p.beat})`).join(', ')}` : `${(flow.focus || []).length} focus points, each on a script beat`);
