@@ -13,10 +13,10 @@ async (opts) => {
   const DROP = new Set(['script', 'noscript', 'template', 'base']);
   const RAWTEXT = new Set(['style', 'xmp', 'noembed', 'noframes']);
   const doc = document;
-  // The theme as captured, kept: prefers-color-scheme in the page's CSS answered now (true or false), so the replica
-  // looks the same whatever the presenter's system is set to. Light or dark, both are recorded as they are.
+  // prefers-color-scheme in the page's CSS is kept as written, both branches: the build answers it for the theme it
+  // builds (the one captured, meta.colorScheme, unless the demo asks for the other), and playback can switch it.
   const DARK = matchMedia('(prefers-color-scheme: dark)').matches;
-  const pin = t => t && t.replace(/\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)/gi, (m, v) => (v.toLowerCase() === 'dark') === DARK ? '(min-width: 0px)' : '(max-width: -1px)');
+  const pin = t => t;
   const urls = [];
   const index = new Map();
   const inline = {};
