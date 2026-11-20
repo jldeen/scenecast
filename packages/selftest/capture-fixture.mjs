@@ -13,6 +13,8 @@ import { chromium } from 'playwright-core';
 const here = dirname(fileURLToPath(import.meta.url));
 const raw = mkdtempSync(join(tmpdir(), 'd1raw-'));
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+// A JWT-shaped value made from pieces (the repo's own secret scan would rightly flag a literal one).
+const FAKE_JWT = ['eyJ' + 'hbGciOiJub25lIn0', 'eyJ' + 'zdWIiOiJ0ZXN0In0', 'c2lnbmF0dXJlLXRlc3Q'].join('.');
 const page1 = `<!doctype html><html class="light"><head><meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:">
 <title>Fixture</title><link rel="icon" href="/fav.png"><link rel="stylesheet" href="http://127.0.0.1:47702/x.css">
 <style id="g" data-make-styles-bucket="d"></style><script>window.x=1</script></head>
@@ -20,6 +22,7 @@ const page1 = `<!doctype html><html class="light"><head><meta http-equiv="Conten
 <button class="fui" onclick="alert(1)">Show more</button><input id="i" value=""><input type="checkbox" role="switch" id="sw">
 <img id="b"><canvas id="c" width="10" height="10"></canvas><x-card></x-card><x-closed></x-closed>
 <svg width="10" height="10"><linearGradient id="lg"></linearGradient><use href="#lg"></use></svg>
+<div id="embed" data-testid="embed" powerbi-access-token="${FAKE_JWT}" data-note="see ${FAKE_JWT} here"></div>
 <iframe id="f" src="http://127.0.0.1:47702/frame.html" width="300" height="100"></iframe>
 <iframe id="x" src="http://localhost:47703/cross.html" width="300" height="100"></iframe>
 <script>
@@ -89,6 +92,7 @@ check('blob image inlined', main.urls.some(u => u.startsWith('blob:')) && Object
 check('cross-origin sheet', main.html.includes('.ext {') || main.html.includes('data-d1-fetch'));
 check('custom element listed', main.meta.customElements.includes('x-card'));
 check('internal svg use kept', main.html.includes('href="#lg"'));
+check('sign-in tokens in the markup never reach the capture (Power BI\'s powerbi-access-token)', /id="embed"[^>]*powerbi-access-token=""/.test(main.html) && !main.html.includes(FAKE_JWT.slice(0, 20)), (main.html.match(/<div id="embed"[^>]*>/) || [''])[0].slice(0, 300));
 check('iframe tokenised', main.html.includes('src="d1frame://f0"'));
 check('frame captured', fr && fr.html.includes('inside frame') && fr.parent === 'main');
 if (MODE === 'extension') {

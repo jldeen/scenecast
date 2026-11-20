@@ -9,6 +9,10 @@ It comes from the demo's script, the same script that makes the focus points. Th
 `presenter/notes.json`, `scenecast guide-shots` makes the pictures, and `scenecast notes --check` holds the script, the
 guide and the replica to each other. Everything runs offline, from the replica's own server.
 
+Before there's a script, every build makes the guide from the recording: each beat with a plain name ("Copilot: the
+answer to “…”") and its steps ("Type `…` (⌥P types it)", "Press Enter: the answer streams in", "Click Library"), without
+pictures. A script replaces it.
+
 ## Presenting with it
 
 In the app, **Present** shows the run of show: before the show (every screen matches, the guide is made, the

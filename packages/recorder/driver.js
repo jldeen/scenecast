@@ -36,8 +36,12 @@ const exposeShadow = typeof EXPOSE_SHADOW === 'function' ? EXPOSE_SHADOW : async
 // already watches are asked for a mark, and a tab is attached before it's handed back.
 async function pageFor(spec) {
   if (!spec) return (ctx.activePage && await ctx.activePage()) || page0;
-  for (const p of ctx.pages()) { if (p.attached === false) continue; try { if ((await p.evaluate(() => sessionStorage.getItem('d1tab'))) === spec) return p; } catch (e) {} }
-  for (const p of ctx.pages()) if (p.url().includes(spec)) { if (p.attach) await p.attach(); return p; }
+  const markOf = p => Promise.race([p.evaluate(() => sessionStorage.getItem('d1tab')), sleep(3000).then(() => null)]).catch(() => null);
+  for (const p of ctx.pages()) { if (p.attached === false) continue; if ((await markOf(p)) === spec) return p; }
+  // A marked tab among the ones whose address matches wins even if it isn't attached yet (after the recorder reloads).
+  const hits = ctx.pages().filter(p => p.url().includes(spec));
+  for (const p of hits) if (p.attached === false && hits.length > 1) { if (p.attach) await p.attach().catch(() => {}); if ((await markOf(p)) === spec) return p; }
+  for (const p of hits) { if (p.attach) await p.attach(); return p; }
   throw new Error('no tab ' + spec);
 }
 function frameFor(p, spec) {
@@ -124,6 +128,28 @@ async function fetchResources(p, docs) {
   return stats;
 }
 
+// A frame that stops answering (Microsoft apps keep about:blank frames like that; on a presenter's real tabs one held
+// Record on "Starting…" for minutes) gets ms to answer, then is left out until it navigates. The main frame is never
+// left out: a page that doesn't answer is a real failure.
+// noContext: 'skip' for any frame with no script context yet, 'blank' for about:blank ones only. On real tabs most
+// frames are like that (Copilot: 18 of 24, Teams: 9 of 13, all about:blank), and each cost 3 s of waiting for one.
+const STUCK = new Map();
+const noContext = (p, f) => p._ctx instanceof Map && !p._ctx.has(f.id);
+async function frameEval(p, f, fn, arg, ms, o = {}) {
+  const url = f.url(), main = f === p.mainFrame();
+  if (!main && STUCK.get(f) === url) throw new Error('frame left out (it stopped answering)');
+  if (!main && o.noContext && (o.noContext === 'skip' || /^about:/.test(url)) && noContext(p, f)) throw new Error('frame has no script context');
+  let t;
+  const late = new Promise((_, rej) => { t = setTimeout(() => rej(new Error('frame timeout')), ms); });
+  try { return await Promise.race([f.evaluate(fn, arg), late]); } catch (e) {
+    if (e.message === 'frame timeout') {
+      if (!main) STUCK.set(f, url);
+      rlog(`${main ? 'the page' : 'a frame'} (${url.slice(0, 100)}) didn't answer in ${ms / 1000} s${main ? '' : '; left out'}`);
+    }
+    throw e;
+  } finally { clearTimeout(t); }
+}
+
 // Child frames are keyed f0, f1, … on their <iframe> (data-d1-frame). A frame keeps its key from one snapshot to
 // the next, so a flow that names a frame (frame: 'f4') means the same frame on every screen.
 async function frameKeys(p) {
@@ -146,7 +172,7 @@ async function snap(p, id, opts = {}) {
   const docs = [];
   for (const [f, key] of [[p.mainFrame(), 'main'], ...keys]) {
     try {
-      const r = await f.evaluate(SERX({}));
+      const r = await frameEval(p, f, SERX({}), undefined, f === p.mainFrame() ? 120000 : 20000, { noContext: 'blank' });
       docs.push({ key, parent: f === p.mainFrame() ? null : (keys.get(f.parentFrame()) || 'main'), frameUrl: f.url(), frame: f, ...r });
     } catch (e) { await rlog(`snap ${id}: frame ${key} failed: ${e.message}`); }
   }
@@ -227,7 +253,7 @@ const OPS = {
   // What this recorder sees: who it is, every tab it tracks (attached or not, its mark), and the active one.
   async diag() {
     const pages = [];
-    for (const p of ctx.pages()) { let mark = null; try { if (p.attached !== false) mark = await p.evaluate(() => sessionStorage.getItem('d1tab')); } catch (e) {} pages.push({ url: p.url().slice(0, 160), title: (await p.title().catch(() => '')).slice(0, 80), attached: p.attached !== false, mark }); }
+    for (const p of ctx.pages()) { let mark = null; try { if (p.attached !== false) mark = await p.evaluate(() => sessionStorage.getItem('d1tab')); } catch (e) {} const frames = p.attached !== false && p._ctx ? p.frames().map(f => ({ url: f.url().slice(0, 100), context: p._ctx.has(f.id), child: !!f.sessionId })) : undefined; pages.push({ url: p.url().slice(0, 160), title: (await p.title().catch(() => '')).slice(0, 80), attached: p.attached !== false, mark, frames }); }
     const act = ctx.activePage ? await ctx.activePage().catch(() => null) : null;
     return { agent: typeof AGENT_ID !== 'undefined' ? AGENT_ID : null, receiver: RX, pages, active: act ? act.url().slice(0, 160) : null, recording: typeof REC !== 'undefined' ? !!REC.on : null };
   },

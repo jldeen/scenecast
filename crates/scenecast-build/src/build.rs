@@ -100,7 +100,11 @@ fn compile_base(
     {
         return Ok(None);
     }
-    if from_raw || !recording_file.exists() {
+    // A newer take (Record again) replaces the demo's copy; hand edits live in flow.overrides.mjs, not in it.
+    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    let newer_take = raw_recording.is_file()
+        && matches!((modified(&raw_recording), modified(&recording_file)), (Some(r), Some(c)) if r > c);
+    if from_raw || newer_take || !recording_file.exists() {
         if !raw_recording.is_file() {
             return Err(BuildError::MissingRecording(raw_recording));
         }
@@ -462,5 +466,25 @@ mod tests {
         let report = fs::read_to_string(dir.join(".out/scrub.json")).unwrap();
         assert!(!report.contains("synthetic"));
         assert!(report.contains("credential"));
+    }
+
+    #[test]
+    fn a_newer_take_replaces_the_demos_copy_of_the_recording() {
+        // Record again, then Build: the second take is the one built, not the copy from the first build.
+        let temp = tempfile::tempdir().unwrap();
+        let (dir, raw) = (temp.path(), temp.path().join("raw"));
+        fs::create_dir_all(&raw).unwrap();
+        let take = |id: &str| {
+            format!(
+                r#"{{"states":{{"{id}":{{"app":"a","snap":"{id}"}}}},"beats":[{{"active":"a","states":{{"a":"{id}"}}}}]}}"#
+            )
+        };
+        fs::write(dir.join("recording.json"), take("first")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(raw.join("recording.json"), take("second")).unwrap();
+        let config = serde_json::json!({ "name": "fixture", "apps": [{ "id": "a", "key": "A" }] });
+        compile_base(dir, &raw, &config, false, "test").unwrap();
+        let copy = fs::read_to_string(dir.join("recording.json")).unwrap();
+        assert!(copy.contains("second") && !copy.contains("first"), "{copy}");
     }
 }

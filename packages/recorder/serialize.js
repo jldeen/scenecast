@@ -84,6 +84,8 @@ async (opts) => {
     return s;
   };
 
+  const SECRET_ATTR = /(^|[-_:])(access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|client[-_]?secret|password|api[-_]?key|authorization)$/i;
+  const JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, JWT_ALL = new RegExp(JWT.source, 'g');
   const attrs = (el) => {
     const tag = el.localName;
     let s = '';
@@ -96,6 +98,10 @@ async (opts) => {
       if (tag === 'option' && n === 'selected') continue;
       if ((tag === 'iframe' || tag === 'frame') && (n === 'src' || n === 'srcdoc')) continue;
       let v = a.value;
+      // Sign-in tokens a page keeps in its markup (Power BI's embeds: powerbi-access-token) never reach the capture: a
+      // credential in the raw captures stops the build, and the replica doesn't need it.
+      if (SECRET_ATTR.test(n)) v = '';
+      else if (v.length > 40 && JWT.test(v)) v = v.replace(JWT_ALL, '');
       if (tag === 'img' && n === 'src') v = el.currentSrc || el.src || v;
       if (urlAttrs.includes(n)) {
         if (tag === 'use' && v.startsWith('#')) { /* internal reference */ }

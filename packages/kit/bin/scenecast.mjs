@@ -87,7 +87,8 @@ async function main() {
         const ready = await (await import('../lib/preflight.mjs')).recorderReady(demo);
         if (ready.error) { console.log(JSON.stringify({ error: ready.error, version: ready.version, want: ready.want }, null, 1)); return 1; }
       }
-      if (sub === 'start') return send('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: { ...(demo.cfg.record || {}), ...(rest.includes('--no-auto') ? { auto: false } : {}), ...(demo.cfg.theme ? { theme: demo.cfg.theme } : {}) }, zooms: demo.cfg.zooms, first: arg(rest, '--first'), resume: rest.includes('--resume'), ...jsonArg() }, 300);
+      const rec = (await import('../lib/demo.mjs')).recordOpts(demo.cfg);
+      if (sub === 'start') return send('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: { ...rec, ...(rest.includes('--no-auto') ? { auto: false } : {}), ...(demo.cfg.theme ? { theme: demo.cfg.theme } : {}) }, zooms: demo.cfg.zooms, first: arg(rest, '--first'), resume: rest.includes('--resume'), ...jsonArg() }, 300);
       if (sub === 'status') return send('recordStatus', {}, 30);
       if (sub === 'stop') return send('recordStop', {}, 600);
       if (sub === 'side') {
