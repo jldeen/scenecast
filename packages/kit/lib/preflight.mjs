@@ -8,7 +8,7 @@
 // Matches replica-kit's `replica preflight`. Under a minute when everything is set (each probe is bounded).
 // preflight(demo, { fix, onItem }) is the library call (the desktop app shows each item as it lands).
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { connect } from 'node:net';
 import { KIT } from './demo.mjs';
@@ -40,6 +40,19 @@ function listening(port) {
 async function op(port, cmd, tmoS) {
   const { send } = await import('../../recorder/cli.mjs');
   return send(cmd, tmoS, port);
+}
+
+// An app now found at another host (its address redirects there): kept as its match in demo.json, so Record and the
+// next check find the tab by it.
+export function keepMatch(demo, id, host) {
+  const file = join(demo.dir, 'demo.json');
+  const cfg = JSON.parse(readFileSync(file, 'utf8'));
+  const app = (cfg.apps || []).find(a => a.id === id);
+  if (!app || !host || app.match === host) return false;
+  app.match = host;
+  writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
+  const mine = demo.cfg.apps.find(a => a.id === id); if (mine) mine.match = host;
+  return true;
 }
 
 // Before recording: the recorder connected and running this app's version. One the browser still runs from before an
@@ -167,11 +180,18 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   // Each app's tab: open, on its start screen (its theme said, never a reason to stop). Only with the recorder there to look.
   if (rec.status === 'ok') {
     const r = await op(port, { op: 'preflight', apps: cfg.apps, fix, waitS: 20 }, 120);
+    const tabs = r.ok ? r.value._tabs : undefined;
     for (const a of cfg.apps) {
       const o = r.ok ? r.value[a.id] || {} : {};
       await item(`app ${a.id}`, async () => {
         if (!r.ok) return { status: 'fail', detail: r.error };
-        if (o.missing) return { status: 'fail', detail: `no tab for ${a.id} (${a.match || a.url})${a.url ? '' : ': no url in demo.json to open'}` };
+        // Not found, and nothing to open (or it didn't open): which of the open tabs is it? The app asks.
+        if (o.missing) return { status: 'fail', detail: `no tab for ${a.id} (${a.match || a.url})${a.url ? '' : ': no url in demo.json to open'}`, missing: true, tabs };
+        if (o.signIn) return { status: 'fail', detail: `${a.id} opened a sign-in page (${o.signIn}): sign in to it in that tab, then check again`, signIn: o.signIn };
+        if (o.moved) {
+          const kept = fix && keepMatch(demo, a.id, o.moved.host);
+          o.fixed.push(`it lives at ${o.moved.host} now${kept ? ', kept in demo.json' : ''}`);
+        }
         if (o.r && o.r.error) return { status: 'fail', detail: o.r.error };
         if (o.onStart === false) return { status: 'fail', detail: `${a.id} isn't on its start screen (${o.r.url})` };
         // Light or dark both record; demo.json "theme" only adds a word when a tab doesn't match it.
@@ -184,6 +204,16 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
 
   const secs = (Date.now() - t0) / 1000;
   return { ready: items.every(i => i.status === 'ok' || i.status === 'fixed'), secs: +secs.toFixed(1), items };
+}
+
+// A check that isn't ready, as one sentence: "not ready to record: <what failed>". The first failing item leads (its
+// own words, so the app's error catalog can say it plainly); the rest are counted.
+export function notReady(r) {
+  const fails = r.items.filter(i => i.status === 'fail');
+  if (!fails.length) return 'not ready to record';
+  const f = fails[0];
+  const what = f.id.startsWith('app ') ? f.detail : `${f.id}: ${f.detail}`;
+  return `not ready to record: ${what}${fails.length > 1 ? ` (and ${fails.length - 1} more)` : ''}`;
 }
 
 // What to do when the recorder isn't connected, in plain words, from what the browser's profiles say.

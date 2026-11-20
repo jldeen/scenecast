@@ -405,12 +405,54 @@ pub fn preflight_with(
 }
 
 pub fn start(dir: &Path, resume: bool) -> Result<Value, AppError> {
+    start_ready(dir, resume, None, |_| {})
+}
+
+/// Record: the same readiness check as Check and fix, with its fixes, then the start, so "ready" and "not open" can't
+/// disagree. Each item lands through `on` as it's checked. Not ready is an error that starts with "not ready to
+/// record:" and names what failed first. A resume skips the check (a fix could move a tab off its screen).
+pub fn start_ready(
+    dir: &Path,
+    resume: bool,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    on: impl FnMut(Update),
+) -> Result<Value, AppError> {
+    if !resume {
+        let report = preflight_with(dir, true, cancel, on)?;
+        if !report.ready {
+            return Err(AppError::Invalid(not_ready(&report)));
+        }
+    }
     let _ = crate::receiver::host().ensure(dir);
-    let answer = recorder::record_start(&crate::receiver::engine_for(dir)?, dir, resume)?;
+    let answer =
+        recorder::record_start_checked(&crate::receiver::engine_for(dir)?, dir, resume, !resume)?;
     if let Some(error) = answer.get("error").and_then(Value::as_str) {
         return Err(AppError::Invalid(error.to_owned()));
     }
     Ok(answer)
+}
+
+/// What a check that isn't ready says first, as one sentence (the engine's `notReady`, the same words).
+pub fn not_ready(report: &PreflightReport) -> String {
+    let fails: Vec<_> = report
+        .items
+        .iter()
+        .filter(|i| i.status == recorder::ItemStatus::Fail)
+        .collect();
+    let Some(f) = fails.first() else {
+        return "not ready to record".into();
+    };
+    let what = if f.id.starts_with("app ") {
+        f.detail.clone()
+    } else {
+        format!("{}: {}", f.id, f.detail)
+    };
+    let more = if fails.len() > 1 {
+        format!(" (and {} more)", fails.len() - 1)
+    } else {
+        String::new()
+    };
+    format!("not ready to record: {what}{more}")
 }
 
 pub fn status(dir: &Path) -> Result<RecordStatus, AppError> {

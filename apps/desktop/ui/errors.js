@@ -11,10 +11,16 @@ export const CATALOG = [
   // A newer run of the same step took over: nothing went wrong, nothing to show.
   { id: 'superseded', test: /replaced by a newer check|a newer run took its place/i, quiet: true },
 
+  // An app that opened a sign-in page: the presenter signs in, in that tab.
+  { id: 'app-signed-out', test: /opened a sign-in page/i,
+    title: c => `Sign in to ${c.app || 'the app'} first`,
+    body: c => `Its tab in ${c.browser} is asking you to sign in. Sign in there, then start again.`,
+    action: () => A('Check again', { action: 'preflight-fix' }) },
   { id: 'tabs-not-open', test: /not open: .*a tab whose address has|no tab for /i,
-    title: c => c.many ? 'Some app tabs aren\u2019t open' : `The ${c.app || 'app'} tab isn\u2019t open`,
-    body: c => `Scenecast didn\u2019t find ${c.many ? 'them' : 'it'} in ${c.browser}. It can open ${c.many ? 'them' : 'it'} for you.`,
-    action: () => A('Open them for me', { action: 'preflight-fix' }) },
+    title: c => c.checked ? `Scenecast can\u2019t find the ${c.app || 'app'} tab` : c.many ? 'Some app tabs aren\u2019t open' : `The ${c.app || 'app'} tab isn\u2019t open`,
+    body: c => c.checked ? 'Pick it from your open tabs, below. Scenecast remembers it.'
+      : `Scenecast didn\u2019t find ${c.many ? 'them' : 'it'} in ${c.browser}. It can open ${c.many ? 'them' : 'it'} for you.`,
+    action: c => c.checked ? null : A('Open them for me', { action: 'preflight-fix' }) },
   { id: 'two-recorders', test: /recorder is in more than one browser/i,
     title: () => 'The recorder is in two browsers',
     body: c => `Close the other ${c.browser} window that has Scenecast\u2019s recorder, or remove the recorder from it. Then check again.`,
@@ -48,6 +54,11 @@ export const CATALOG = [
     body: () => 'Recording starts from each app\u2019s start screen. Scenecast can take it back there.',
     action: () => A('Take it back', { action: 'preflight-fix' }) },
 
+  // The readiness check found something else first (its own words are under Details; the pre-show has the fix).
+  { id: 'not-ready', test: /^not ready to record/i,
+    title: () => 'Not ready to record yet',
+    body: () => 'The pre-show says what\u2019s left. Put it right, then start again.',
+    action: () => A('Check again', { action: 'preflight-fix' }) },
   { id: 'already-recording', test: /already recording/i,
     title: () => 'Already recording', body: () => 'A recording is still running. Stop it first.',
     action: () => A('Stop recording', { action: 'record-stop' }) },
@@ -119,13 +130,17 @@ const STEP = { preflight: 'Check', record: 'Recording', 'record-stop': 'Recordin
 // to show. ctx: { browser: 'Chrome' | 'Edge', job, retry, appName(id) }.
 export function explain(message, ctx = {}) {
   const detail = String(message ?? '').trim();
-  const entry = CATALOG.find(e => e.test.test(detail));
+  // Record's own check: what failed first, after "not ready to record: <item>:" (the rest are counted at the end).
+  const core = detail.replace(/^not ready to record:\s*(?:(?:receiver|browser|recorder):\s*)?/i, '').replace(/\s*\(and \d+ more\)$/, '');
+  const entry = CATALOG.find(e => e.test.test(core)) || CATALOG.find(e => e.test.test(detail));
   if (entry?.quiet) return null;
-  const appId = firstApp(detail) || (detail.match(/^([a-z0-9-]+) isn.t on its start screen/i) || [])[1];
+  const appId = firstApp(core) || (core.match(/^([a-z0-9-]+) (?:isn.t on its start screen|opened a sign-in page)/i) || [])[1];
   const c = {
     browser: ctx.browser || 'your browser', step: STEP[ctx.job], retry: ctx.retry,
     app: appId ? (ctx.appName ? ctx.appName(appId) : appId) : null,
     many: (detail.match(/a tab whose address has/g) || []).length > 1,
+    // Record's own check already tried to fix it.
+    checked: /^not ready to record/i.test(detail),
     url: (detail.match(/https?:\/\/\S+/) || [])[0]?.replace(/[).,]+$/, ''),
   };
   if (!entry) return { id: 'unknown', title: c.step ? `${c.step}: something went wrong` : 'Something went wrong', body: 'Scenecast couldn\u2019t finish this. The details say what happened.', action: { label: 'Show the logs', action: 'show-logs' }, detail };

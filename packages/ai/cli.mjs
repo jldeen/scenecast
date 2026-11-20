@@ -46,6 +46,13 @@ async function main() {
     case 'plan': { const d = demo(); const { draftPlan } = await import('./draft.mjs'); return draftPlan({ demo: d, model: await model(d), settings, emit }); }
     case 'record': {
       const d = demo();
+      // The same readiness check as Record's (--checked: the app ran it just now).
+      if (!args.includes('--checked')) {
+        const pf = await import('../kit/lib/preflight.mjs');
+        emit({ event: 'stage', name: 'check', label: 'Checking your browser and the app tabs' });
+        const r = await pf.preflight(d, { fix: true });
+        if (!r.ready) throw new Error(pf.notReady(r));
+      }
       const { recordForMe } = await import('./drive.mjs');
       const { writeScript } = await import('./write.mjs');
       const m = await model(d);

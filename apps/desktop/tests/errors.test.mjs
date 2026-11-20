@@ -9,6 +9,11 @@ import { CATALOG, explain } from '../ui/errors.js';
 const KNOWN = [
   ['not open: teams (a tab whose address has teams.cloud.microsoft), copilot (a tab whose address has copilot.cloud.microsoft). Open them in the browser the recorder is in, then start again', 'tabs-not-open'],
   ['no tab for admin (admin.cloud.microsoft)', 'tabs-not-open'],
+  ['not ready to record: no tab for admin (admin.cloud.microsoft)', 'tabs-not-open'],
+  ['not ready to record: admin opened a sign-in page (login.microsoftonline.com): sign in to it in that tab, then check again', 'app-signed-out'],
+  ['not ready to record: browser: Chrome isn\u2019t open. Open it with profile "Jessica", then check again (and 2 more)', 'browser-closed'],
+  ['not ready to record: recorder: The recorder isn\u2019t in Chrome yet. Click Install recorder: it opens chrome://extensions and shows the folder to drag in (/x)', 'recorder-missing'],
+  ['not ready to record: something we have no words for', 'not-ready'],
   ['the recorder is in more than one browser window or profile: it records in chrome (12 tabs), and chrome (3 tabs) also has it. Remove the recorder from the one you don\u2019t record in (at chrome://extensions), or close that browser, then check again', 'two-recorders'],
   ['Reload the recorder extension: Chrome is running recorder 0.4.0, and this app\u2019s is 0.4.1. At chrome://extensions, click Reload (↻) on Scenecast Recorder', 'recorder-old'],
   ['the recorder in Chrome is 0.4.0; this app\u2019s is 0.4.1. Fix reloads it (or click Reload (↻) on Scenecast Recorder at chrome://extensions)', 'recorder-old'],
@@ -51,6 +56,14 @@ const KNOWN = [
 ];
 const ENGINE_WORDS = /\b(port|receiver|preflight|scrub|manifest|unpacked|developer mode|headless|side states?|streamed|threshold|localhost|exit code|stderr|stdout|raw folder|checkpoint|chrome:\/\/|edge:\/\/|demo\.json|profile \d+)\b/i;
 const ctx = { browser: 'Chrome', appName: id => ({ teams: 'Teams', admin: 'the admin center' })[id] || id };
+
+test('after Record\u2019s own check, a missing tab is picked, not opened again', () => {
+  const x = explain('not ready to record: no tab for admin (admin.cloud.microsoft)', { browser: 'Chrome' });
+  assert.equal(x.title, 'Scenecast can\u2019t find the admin tab');
+  assert.equal(x.action, null);
+  assert.equal(explain('no tab for admin (admin.cloud.microsoft)', { browser: 'Chrome' }).action.action, 'preflight-fix');
+  assert.equal(explain('not ready to record: admin opened a sign-in page (login.live.com): sign in', {}).title, 'Sign in to admin first');
+});
 
 test('every known message has a plain-words entry', () => {
   for (const [message, id] of KNOWN) assert.equal(explain(message, ctx).id, id, message);

@@ -1,6 +1,10 @@
 // Preflight, on the recorder (scenecast preflight runs it; the same as replica-kit's replica preflight): each app's tab is open and on its start screen (light or dark).
 // It only reads, and doesn't bring tabs to the front. With ARGS.fix it acts on what failed: a missing tab is opened
 // at the app's URL, and a tab that isn't on its start screen loads the app's URL again. Then it checks again.
+// A tab it opens is found the way Record finds it (pageFor, by the app's match). One that ended up on another host:
+// a sign-in page says so (o.signIn); otherwise the tab is marked as the app's (d1tab) and o.moved has its host, which
+// scenecast preflight keeps as the app's match. A tab it can't find comes back with the open tabs (_tabs), so the
+// app can ask which one it is.
 // ARGS: { apps: [{ id, match, url, start?: { url?, text?, sel? } }], fix, waitS }
 const DARK = 0.35;
 async function probe(p, start) {
@@ -35,21 +39,36 @@ async function waitStart(p, a, s) {
   if (!a.start) await sleep(1500);
   return a.start ? r : await probe(p, a.start);
 }
+const SIGN_IN = /(^|\.)(login|signin|sign-in|auth|sso|accounts|adfs)[.-]|login\.microsoftonline\.com|login\.live\.com|accounts\.google\.com/i;
+const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } };
+// Where a tab it opened or reloaded ended up: still the app's (found by match), moved to another host, or a sign-in.
+async function landed(p, a, o) {
+  const url = p.url(), host = hostOf(url);
+  if (!a.match || url.includes(a.match)) return;
+  if (SIGN_IN.test(host)) { o.signIn = host; return; }
+  try { await H.mark(p, a.match); } catch (e) {}
+  o.moved = { host, url: url.split(/[?#]/)[0] };
+}
 const out = {};
+let missing = false;
 for (const a of ARGS.apps || []) {
   const o = out[a.id] = { fixed: [] };
   let p = null; try { p = await H.pageFor(a.match); } catch (e) {}
   if (!p && ARGS.fix && a.url) {
     p = await ctx.newPage(); await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     o.fixed.push('opened'); o.r = await waitStart(p, a, ARGS.waitS || 20);
+    await landed(p, a, o);
   }
-  if (!p) { o.missing = true; continue; }
+  if (!p) { o.missing = true; missing = true; continue; }
   o.r = o.r || await probe(p, a.start);
   if (ARGS.fix && !o.r.error && startOk(o.r) === false && a.url) {
     await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     o.fixed.push('start'); o.r = await waitStart(p, a, ARGS.waitS || 20);
+    await landed(p, a, o);
   }
   o.light = o.r.error ? null : o.r.lum >= DARK;
   o.onStart = o.r.error ? null : startOk(o.r);
 }
+// Which tab is it? The open tabs, by title and address, for an app it couldn't find.
+if (missing) { try { out._tabs = (await H.tabs()).filter(t => /^https?:/.test(t.url)).map(t => ({ title: t.title, url: t.url.split(/[?#]/)[0], host: hostOf(t.url) })); } catch (e) { out._tabs = []; } }
 return out;

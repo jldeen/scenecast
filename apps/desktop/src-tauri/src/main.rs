@@ -405,6 +405,19 @@ async fn set_profile(state: State<'_, Shared>, id: String, profile: String) -> R
     blocking(move || scenecast_app::record::set_profile(&state.library.dir(&id)?, &profile)).await
 }
 
+/// An app's address (its start page, and how Record finds its tab), changed after the demo was made or picked from
+/// the open tabs.
+#[tauri::command]
+async fn set_app(
+    state: State<'_, Shared>,
+    id: String,
+    app: String,
+    url: String,
+) -> Res<scenecast_app::Demo> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::library::set_app(&state.library.dir(&id)?, &app, &url)).await
+}
+
 /// The slot on stage, in seconds (none: no slot).
 #[tauri::command]
 async fn set_slot(state: State<'_, Shared>, id: String, slot: Option<u32>) -> Res<()> {
@@ -603,8 +616,10 @@ async fn record_start(
     resume: bool,
 ) -> Res<Value> {
     let shared = state.inner().clone();
+    let (to, who) = (app.clone(), id.clone());
+    // The readiness check, with its fixes, then the start: each item lands in the window's pre-show as it's checked.
     let answer = job(state, app.clone(), id.clone(), "record", move |dir, _| {
-        scenecast_app::record::start(dir, resume)
+        scenecast_app::record::start_ready(dir, resume, None, |u| emit(&to, &who, "preflight", u))
     })
     .await?;
     if shared
@@ -893,8 +908,15 @@ async fn ai_plan(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Va
 #[tauri::command]
 async fn ai_record(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
     let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
-    job(state, app, id, "ai-record", |dir, busy| {
-        scenecast_app::ai::run(Some(dir), &["record"], |u| busy.emit(u))
+    let (to, who) = (app.clone(), id.clone());
+    job(state, app, id, "ai-record", move |dir, busy| {
+        // The same readiness check as Record's, first; then Copilot records without checking again.
+        let report =
+            scenecast_app::record::preflight(dir, true, |u| emit(&to, &who, "preflight", u))?;
+        if !report.ready {
+            return Err(AppError::Invalid(scenecast_app::record::not_ready(&report)));
+        }
+        scenecast_app::ai::run(Some(dir), &["record", "--checked"], |u| busy.emit(u))
     })
     .await
 }
@@ -1717,6 +1739,7 @@ fn main() {
             browser_profiles,
             set_profile,
             set_slot,
+            set_app,
             displays,
             rundown,
             share_import,

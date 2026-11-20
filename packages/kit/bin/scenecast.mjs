@@ -83,8 +83,16 @@ async function main() {
       const sub = rest[0];
       const demo = loadDemo(rest);
       if (sub === 'start') {
+        const pf = await import('../lib/preflight.mjs');
+        // One readiness check, the same as Check and fix, so a check that says ready and a start that says "not open"
+        // can't disagree (--no-check: whoever starts it ran it just now; a resume never moves a tab off its screen).
+        if (!rest.includes('--no-check') && !rest.includes('--resume')) {
+          const ndjson = rest.includes('--ndjson');
+          const r = await pf.preflight(demo, { fix: true, onItem: ndjson ? i => console.error('@item ' + JSON.stringify(i)) : undefined });
+          if (!r.ready) { console.log(JSON.stringify({ error: pf.notReady(r), items: r.items }, null, 1)); return 1; }
+        }
         // Only into a recorder running this app's version (an old one in the browser records nothing it can use).
-        const ready = await (await import('../lib/preflight.mjs')).recorderReady(demo);
+        const ready = await pf.recorderReady(demo);
         if (ready.error) { console.log(JSON.stringify({ error: ready.error, version: ready.version, want: ready.want }, null, 1)); return 1; }
       }
       const rec = (await import('../lib/demo.mjs')).recordOpts(demo.cfg);

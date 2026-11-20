@@ -54,6 +54,10 @@ pub struct PreflightItem {
     pub status: ItemStatus,
     pub detail: String,
     pub ms: u64,
+    /// What else the item says, kept as it is: the open tabs for an app it couldn't find (`missing`, `tabs`), a
+    /// sign-in page an app landed on (`signIn`), the profile, the recorder's version.
+    #[serde(flatten, default)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -214,9 +218,23 @@ pub fn record_start(
     dir: &Path,
     resume: bool,
 ) -> Result<serde_json::Value, RecorderError> {
+    record_start_checked(engine, dir, resume, false)
+}
+
+/// Starts recording. Unless `checked` (the caller ran the same check just now), `record start` runs the readiness
+/// check with its fixes first, and answers `{ error: "not ready to record: …", items }` when it isn't.
+pub fn record_start_checked(
+    engine: &Engine,
+    dir: &Path,
+    resume: bool,
+    checked: bool,
+) -> Result<serde_json::Value, RecorderError> {
     let mut rest: Vec<OsString> = vec!["start".into()];
     if resume {
         rest.push("--resume".into());
+    }
+    if checked {
+        rest.push("--no-check".into());
     }
     parse_json(
         "record start",
@@ -245,6 +263,18 @@ pub fn record_stop(engine: &Engine, dir: &Path) -> Result<RecordSummary, Recorde
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_preflight_item_keeps_what_else_it_says() {
+        let i: PreflightItem = serde_json::from_str(
+            r#"{"id":"app admin","status":"fail","detail":"no tab for admin","ms":3,"missing":true,"tabs":[{"title":"Home","url":"https://admin.cloud.microsoft/","host":"admin.cloud.microsoft"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(i.status, ItemStatus::Fail);
+        assert_eq!(i.extra["tabs"][0]["host"], "admin.cloud.microsoft");
+        let back = serde_json::to_value(&i).unwrap();
+        assert_eq!(back["missing"], true);
+    }
 
     #[test]
     fn reads_status_with_the_recorder_and_product_time_apart() {

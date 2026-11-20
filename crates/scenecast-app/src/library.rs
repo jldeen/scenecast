@@ -427,6 +427,45 @@ pub fn load(dir: &Path) -> Result<Demo, AppError> {
     })
 }
 
+/// An app's address, changed after the demo was made (or picked from the open tabs: "Which tab is it?"): its start
+/// page, and its match (how Record finds its tab: the address's host). The manifest's start address follows.
+pub fn set_app(dir: &Path, id: &str, url: &str) -> Result<Demo, AppError> {
+    let url = url.trim();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(AppError::Invalid(format!(
+            "`{url}` isn't a web address (it starts with https://)"
+        )));
+    }
+    let host = url
+        .split_once("://")
+        .map_or(url, |(_, r)| r)
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    if host.is_empty() {
+        return Err(AppError::Invalid(format!("`{url}` has no host")));
+    }
+    let file = dir.join("demo.json");
+    let mut cfg: Value = serde_json::from_slice(&fs::read(&file)?)?;
+    let Some(app) = cfg["apps"]
+        .as_array_mut()
+        .and_then(|a| a.iter_mut().find(|a| a["id"] == id))
+    else {
+        return Err(AppError::Invalid(format!("the demo has no app `{id}`")));
+    };
+    app["url"] = Value::from(url);
+    app["match"] = Value::from(host);
+    fs::write(&file, serde_json::to_string_pretty(&cfg)? + "\n")?;
+    if let Ok(mut m) = read_manifest(dir)
+        && let Some(a) = m.apps.iter_mut().find(|a| a.id == id)
+    {
+        a.url = Some(url.to_owned());
+        scenecast_core::write_manifest(dir, &m)?;
+    }
+    load(dir)
+}
+
 /// The slot on stage (seconds) in demo.json's `presenter.slot`; `None` or 0 clears it. The guide's other settings
 /// there are kept.
 pub fn set_slot(dir: &Path, slot: Option<u32>) -> Result<(), AppError> {
@@ -654,6 +693,23 @@ mod tests {
         assert_eq!(lib.own_recording("b"), None, "no recording yet");
         point(&b, &raw);
         assert_eq!(lib.own_recording("a"), None, "B records there too");
+    }
+
+    #[test]
+    fn an_apps_address_changes_with_its_match() {
+        let (_tmp, lib) = lib();
+        let d = lib.create(&new_demo("Apps")).unwrap();
+        let after = set_app(&d.dir, "admin", "https://admin.cloud.microsoft/?home").unwrap();
+        assert_eq!(after.apps[1].url, "https://admin.cloud.microsoft/?home");
+        let cfg: Value =
+            serde_json::from_slice(&fs::read(d.dir.join("demo.json")).unwrap()).unwrap();
+        assert_eq!(cfg["apps"][1]["match"], "admin.cloud.microsoft");
+        assert_eq!(
+            read_manifest(&d.dir).unwrap().apps[1].url.as_deref(),
+            Some("https://admin.cloud.microsoft/?home")
+        );
+        assert!(set_app(&d.dir, "admin", "admin.cloud.microsoft").is_err());
+        assert!(set_app(&d.dir, "nope", "https://x.example/").is_err());
     }
 
     #[test]
