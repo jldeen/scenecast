@@ -54,7 +54,7 @@ const macPng = await page.screenshot();
 const macFonts = await fonts(), macChords = await chords();
 const t = Date.now();
 const labelsNow = () => page.evaluate(() => [...document.querySelectorAll('[aria-label]')].map(e => e.getAttribute('aria-label')).filter(s => /Command|Cmd|Ctrl|Option|Alt|Shift|⌘|⌥/.test(s)));
-const win = await flipPlatform(page, 'windows', ref ? { pack: ref.pack } : {});
+const win = await flipPlatform(page, 'windows', { ...(ref ? { pack: ref.pack } : {}), fonts: C.fonts !== false });
 await page.evaluate(() => document.fonts.ready);
 await settle(page);
 const winMs = Date.now() - t;

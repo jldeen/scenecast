@@ -9,9 +9,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '../../packages/player/app');
 
 // A captured screen served from its demo's data folder, with variants.js reachable at /__sd/variants.js.
-export async function openScreen(browser, { root, snap, vp, colorScheme, roots = {} }) {
+export async function openScreen(browser, { root, snap, vp, colorScheme, forcedColors, roots = {} }) {
   const srv = await serve({ '/': root, '/__sd/': APP, ...roots });
-  const page = await openSnap(browser, srv.url, snap, vp, { colorScheme });
+  const page = await openSnap(browser, srv.url, snap, vp, { colorScheme, forcedColors });
   await inject(page, srv.url);
   page.__srv = srv;
   return page;
@@ -129,3 +129,23 @@ export async function pixelScore(browser, pngA, pngB, { tol = 24, labels = ['A',
 
 export const readJson = f => JSON.parse(readFileSync(f, 'utf8'));
 export { launch, settle };
+
+// Literal colours from one screen in both themes: elements paired by key and place, each painted colour of the
+// first voted toward the colour the second paints there, by role. -> { bg: {from: to}, fg, stroke }
+const keyRGBA = s => { const m = /rgba?\(([^)]*)\)/.exec(s || ''); if (!m) return null; const v = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); return v.length > 3 && v[3] !== 1 ? `${v[0]},${v[1]},${v[2]},${+v[3].toFixed(3)}` : `${v[0]},${v[1]},${v[2]}`; };
+export function learnLiterals(a, b, { maxDist = 6 } = {}) {
+  const byKey = new Map(); for (const e of b) { if (!byKey.has(e.k)) byKey.set(e.k, []); byKey.get(e.k).push(e); }
+  const votes = { bg: {}, fg: {}, stroke: {} };
+  const role = p => p === 'bg' ? 'bg' : p === 'border' ? 'stroke' : 'fg';
+  for (const e of a) {
+    const c = (byKey.get(e.k) || []).find(x => Math.abs(x.x - e.x) <= maxDist && Math.abs(x.y - e.y) <= maxDist && Math.abs(x.w - e.w) <= maxDist); if (!c) continue;
+    for (const p of Object.keys(e.p)) {
+      if (!c.p[p]) continue;
+      const from = keyRGBA(e.p[p]), to = keyRGBA(c.p[p]); if (!from || !to) continue;
+      const v = votes[role(p)][from] || (votes[role(p)][from] = {}); v[to] = (v[to] || 0) + (p === 'bg' ? Math.min(e.w * e.h, 2e5) : 1);
+    }
+  }
+  const out = {};
+  for (const r of Object.keys(votes)) { out[r] = {}; for (const [k, v] of Object.entries(votes[r])) { const best = Object.entries(v).sort((x, y) => y[1] - x[1])[0]; if (best) out[r][k] = best[0]; } }
+  return out;
+}

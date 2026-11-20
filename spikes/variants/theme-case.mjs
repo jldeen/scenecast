@@ -6,7 +6,7 @@
 // of the same app (then only the shared chrome is comparable: give regions).
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { launch, openScreen, closeScreen, extract, flipTheme, paints, elementScore, pixelScore, readJson } from './harness.mjs';
+import { launch, openScreen, closeScreen, extract, flipTheme, paints, elementScore, pixelScore, readJson, learnLiterals } from './harness.mjs';
 
 const [caseFile, out] = process.argv.slice(2);
 const C = readJson(caseFile);
@@ -17,6 +17,14 @@ const T0 = Date.now();
 
 const packPage = await openScreen(browser, { ...C.pack, vp: C.pack.vp || vp });
 const pack = await extract(packPage, C.app || C.name);
+// packPair: the pack's screen in the source's theme too: literal colours learned from the pair (Fluent v8 apps).
+if (C.packPair) {
+  const packPaints = await paints(packPage);
+  const pairPage = await openScreen(browser, { ...C.packPair, vp: C.pack.vp || vp });
+  const pairPaints = await paints(pairPage); const pairMode = await pairPage.evaluate(() => window.__sd.modeOf(document));
+  await closeScreen(pairPage);
+  pack.literals = { [pairMode]: learnLiterals(pairPaints, packPaints) };
+}
 await closeScreen(packPage);
 writeFileSync(join(out, `pack-${C.name}-${pack.mode}.json`), JSON.stringify(pack, null, 1));
 
