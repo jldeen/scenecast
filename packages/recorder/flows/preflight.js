@@ -33,9 +33,19 @@ async function probe(p, start) {
   return Promise.race([run.catch(e => ({ error: String(e.message || e).slice(0, 160) })), sleep(6000).then(() => ({ error: 'the tab doesn\'t answer (asleep or discarded?): bring it to the front once' }))]);
 }
 const startOk = r => !r.start ? null : Object.values(r.start).every(v => v !== false);
+const say = msg => (typeof rlog === 'function' ? rlog('preflight: ' + msg) : Promise.resolve()).catch(() => {});
+// A tab that's loading: its start screen, for at most s seconds in all (a page that never answers, or an error page,
+// doesn't hold the check up).
 async function waitStart(p, a, s) {
   let r = null;
-  for (let i = 0; i < s * 2; i++) { await sleep(500); r = await probe(p, a.start); if (!r.error && r.ready !== 'loading' && startOk(r) !== false) break; }
+  const until = Date.now() + s * 1000;
+  while (Date.now() < until) {
+    await sleep(500);
+    if (/^chrome-error:|^edge-error:/.test(p.url())) { r = { error: `${a.id} didn't load (${p.url().slice(0, 60)})` }; break; }
+    r = await probe(p, a.start);
+    if (!r.error && r.ready !== 'loading' && startOk(r) !== false) break;
+  }
+  if (r && r.error) { await say(`${a.id}: ${r.error} at ${p.url().slice(0, 120)}`); return r; }
   if (!a.start) await sleep(1500);
   return a.start ? r : await probe(p, a.start);
 }
@@ -44,9 +54,10 @@ const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } }
 // Where a tab it opened or reloaded ended up: still the app's (found by match), moved to another host, or a sign-in.
 async function landed(p, a, o) {
   const url = p.url(), host = hostOf(url);
+  await say(`${a.id}: opened ${a.url}, landed on ${url.slice(0, 120)}`);
   if (!a.match || url.includes(a.match)) return;
   if (SIGN_IN.test(host)) { o.signIn = host; return; }
-  try { await H.mark(p, a.match); } catch (e) {}
+  await Promise.race([H.mark(p, a.match).catch(() => {}), sleep(4000)]);
   o.moved = { host, url: url.split(/[?#]/)[0] };
 }
 const out = {};
@@ -55,7 +66,8 @@ for (const a of ARGS.apps || []) {
   const o = out[a.id] = { fixed: [] };
   let p = null; try { p = await H.pageFor(a.match); } catch (e) {}
   if (!p && ARGS.fix && a.url) {
-    p = await ctx.newPage(); await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    await say(`${a.id}: no tab with ${a.match}; opening ${a.url}`);
+    p = await ctx.newPage(); await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(e => say(`${a.id}: goto: ${e.message || e}`));
     o.fixed.push('opened'); o.r = await waitStart(p, a, ARGS.waitS || 20);
     await landed(p, a, o);
   }

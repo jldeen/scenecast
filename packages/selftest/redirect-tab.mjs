@@ -79,6 +79,8 @@ try {
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {
+  // On a failure: what the recorder said (its preflight steps, the pages it saw).
+  if (fails.length) try { console.log(readFileSync(join(tmp, 'raw', 'receiver.log'), 'utf8').split('\n').filter(l => /preflight|rec:|error|timeout/i.test(l)).slice(-60).join('\n')); } catch (e) {}
   await send({ op: 'recordAbort' }, 30, RX).catch(() => {});
   await ctx?.close().catch(() => {});
   rx.kill(); web.close();
