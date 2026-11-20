@@ -573,7 +573,10 @@ mod tests {
     fn javascript_links_become_plain_links() {
         let html = r#"<a id="x" href="javascript:void(0)" class="m">Download</a><form action='javascript:go()'>"#;
         let out = scrub(html.to_owned());
-        assert_eq!(out, r##"<a id="x" href="#" class="m">Download</a><form action='#'>"##);
+        assert_eq!(
+            out,
+            r##"<a id="x" href="#" class="m">Download</a><form action='#'>"##
+        );
         assert!(!crate::scrub::contains_script("html", &out));
     }
 
