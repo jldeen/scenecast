@@ -32,8 +32,8 @@ export async function serve(roots) {
 export const launch = () => chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
 
 // vp: { w, h, dpr }. Blocks every request that isn't the local server, so a stray absolute URL can't reach a tenant.
-export async function openSnap(browser, base, snap, vp, { colorScheme = 'light' } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, deviceScaleFactor: vp.dpr || 1, colorScheme });
+export async function openSnap(browser, base, snap, vp, { colorScheme = 'light', forcedColors = 'none' } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, deviceScaleFactor: vp.dpr || 1, colorScheme, forcedColors });
   await ctx.route(u => !u.href.startsWith(base) && !u.href.startsWith('data:') && !u.href.startsWith('about:'), r => r.abort());
   const page = await ctx.newPage();
   await page.goto(`${base}/snaps/${snap}.html`, { waitUntil: 'load' });

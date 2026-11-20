@@ -181,8 +181,10 @@ export function extractThemePack(doc, app = '') {
     if (!props.length || !isScope(r) || !mediaOn(W, r.__sdMedia)) continue;
     scopes.add(r.selectorText.replace(/r[0-9a-z]+$/i, '*').slice(0, 80));
     const el = firstMatch(doc, r.selectorText), cs = el && W.getComputedStyle(el);
+    // The value in effect where the rule applies (a theme-keyed rule can override an unthemed one on the same element:
+    // Copilot's :root is light as declared, dark in effect on a dark page).
     for (const p of props) {
-      if (!(p in tokens)) tokens[p] = r.style.getPropertyValue(p).trim();
+      if (!(p in tokens)) tokens[p] = (cs && cs.getPropertyValue(p).trim()) || r.style.getPropertyValue(p).trim();
       if (cs && !(p in colors)) { const k = R.key(cs.getPropertyValue(p)); if (k) colors[p] = k; }
     }
   }
@@ -230,80 +232,99 @@ function recolorValue(pal, R, value, role, stats) {
   const out = value.replace(COLOR_FN, m => { const t = mapColor(pal, R.color(m), role, stats); if (t) { changed = true; return t; } return m; });
   return changed ? out : null;
 }
-const selectorOf = cssText => cssText.replace(/^@media[^{]*\{/, '').split('{')[0].trim();
 
-// Switches doc to the pack's theme. Returns what it did: markers, theme CSS added, tokens set, literal colours
-// recoloured, and the colours no token explains (left as they were).
-// Again on the same document (after a morph brought new rules or nodes) it does only what's new: the theme the
-// document was captured in is kept on it, and rules and nodes already done are marked.
+// Switches doc to the pack's theme, any number of times and back. Each rule, inline style and SVG paint remembers
+// the theme it is in now (the captured one until first switched), and its literal colours map from that theme's
+// colours to the pack's; tokens are set from the pack. After a morph, only what's new is switched.
+function paletteFor(doc, from, pack) {
+  const cache = doc.__sdPals || (doc.__sdPals = new Map());
+  let byFrom = cache.get(pack); if (!byFrom) cache.set(pack, byFrom = new Map());
+  let pal = byFrom.get(from);
+  if (!pal) {
+    pal = buildPalette(from.colors, pack.colors);
+    // Literal colours learned from one screen captured in both themes (pack.literals[fromMode][role][from] = to,
+    // harness learnLiterals): for apps that paint with literals (Fluent v8), they win over the token guess.
+    const lit = pack.literals && pack.literals[from.mode];
+    if (lit) for (const role of Object.keys(lit)) Object.assign(pal[role] || (pal[role] = {}), lit[role]);
+    byFrom.set(from, pal);
+  }
+  return pal;
+}
 export function applyTheme(doc, pack, opts = {}) {
-  const current = doc.__sdThemeFrom || (doc.__sdThemeFrom = opts.current || extractThemePack(doc));
-  const stats = { from: current.theme, to: pack.theme, mode: [current.mode, pack.mode], markers: 0, css: 0, tokens: 0, literal: 0, inline: 0, svg: 0, unmapped: {} };
-  if (current.theme === pack.theme && current.mode === pack.mode && !opts.force) return stats;
+  const captured = doc.__sdThemeCaptured || (doc.__sdThemeCaptured = opts.current || extractThemePack(doc));
+  const shown = doc.__sdShown || captured;
+  const stats = { from: shown.theme, to: pack.theme, mode: [shown.mode, pack.mode], markers: 0, css: 0, tokens: 0, literal: 0, inline: 0, svg: 0, unmapped: {} };
+  if (!doc.__sdShown && pack.theme === captured.theme && pack.mode === captured.mode && !opts.force) return stats;
   const R = resolver(doc);
-  if (doc.__sdPalFor !== pack) { doc.__sdPal = buildPalette(current.colors, pack.colors); doc.__sdPalFor = pack; }
-  const pal = doc.__sdPal;
   // The switch is instant: the apps animate colour changes (Fluent buttons fade their background), which would
   // otherwise show a half-flipped frame.
   const still = doc.createElement('style');
   still.textContent = '*,*::before,*::after{transition:none!important;animation-play-state:paused!important}';
   (doc.head || doc.documentElement).appendChild(still);
   // Markers first: a class like theme-darkV2 or Primer's data-color-mode switches rule sets the page already has.
-  for (const [el, from, to] of [[doc.documentElement, current.markers.html, pack.markers.html], [doc.body, current.markers.body, pack.markers.body]]) {
-    if (!el || !from || !to) continue;
-    for (const c of from.classes) if (!to.classes.includes(c)) { el.classList.remove(c); stats.markers++; }
+  // Every time, not only on a change: a morph brings the captured page's markers and media queries back.
+  for (const [el, k] of [[doc.documentElement, 'html'], [doc.body, 'body']]) {
+    const to = pack.markers[k]; if (!el || !to) continue;
+    for (const from of [shown.markers[k], captured.markers[k]]) if (from) for (const c of from.classes) if (!to.classes.includes(c) && el.classList.contains(c)) { el.classList.remove(c); stats.markers++; }
     for (const c of to.classes) if (!el.classList.contains(c)) { el.classList.add(c); stats.markers++; }
     for (const [a, v] of Object.entries(to.attrs)) if (el.getAttribute(a) !== v) { el.setAttribute(a, v); stats.markers++; }
-    if (to.colorScheme || from.colorScheme) el.style.colorScheme = to.colorScheme || pack.mode;
+    if (to.colorScheme || (shown.markers[k] || {}).colorScheme || (captured.markers[k] || {}).colorScheme) el.style.colorScheme = to.colorScheme || pack.mode;
   }
-  if (current.mode !== pack.mode) {
-    const sel = MARKER_ATTRS.map(a => `[${a}="${current.mode}"]`).join(',');
-    for (const el of doc.querySelectorAll(sel)) for (const a of MARKER_ATTRS) if (el.getAttribute(a) === current.mode) { el.setAttribute(a, pack.mode); stats.markers++; }
+  for (const m of new Set([shown.mode, captured.mode])) if (m !== pack.mode) {
+    const sel = MARKER_ATTRS.map(a => `[${a}="${m}"]`).join(',');
+    for (const el of doc.querySelectorAll(sel)) for (const a of MARKER_ATTRS) if (el.getAttribute(a) === m) { el.setAttribute(a, pack.mode); stats.markers++; }
   }
   doc.documentElement.style.colorScheme = pack.mode;
-  if (current.mode !== pack.mode) stats.schemeQueries = setScheme(doc, pack.mode);
-  // Theme CSS the page never loaded (GitHub fetches only the active Primer theme).
-  const have = new Set(); for (const r of allRules(doc)) if (r.__sdThemed) have.add(r.selectorText.trim());
-  const add = (pack.css || []).filter(t => !have.has(selectorOf(t)));
+  stats.schemeQueries = setScheme(doc, pack.mode);
+  // Theme CSS the page never loaded (GitHub fetches only the active Primer theme). By rule text, not selector: a page
+  // can hold a thinner rule under the same selector (Copilot's light page keeps a few dark tokens on
+  // :root[data-color-scheme=dark]; the dark page has all of them).
+  let st = doc.getElementById('stuntdouble-theme-css');
+  if (st) st.textContent = '';
+  const have = new Set(); for (const r of allRules(doc)) if (r.__sdThemed) have.add(r.__sdMedia ? `@media ${r.__sdMedia}{${r.cssText}}` : r.cssText);
+  const add = pack === captured ? [] : (pack.css || []).filter(t => !have.has(t));
   if (add.length) {
-    let st = doc.getElementById('stuntdouble-theme-css');
     if (!st) { st = doc.createElement('style'); st.id = 'stuntdouble-theme-css'; (doc.head || doc.documentElement).appendChild(st); }
     st.textContent = add.join('\n'); stats.css = add.length;
   }
   for (const r of allRules(doc)) {
-    if (r.__sdThemed || r.__sdDone === pack || r.parentStyleSheet?.ownerNode?.id === 'stuntdouble-theme-css') continue;
-    r.__sdDone = pack;
-    const st = r.style, scope = isScope(r);
-    for (let i = st.length - 1; i >= 0; i--) {
-      const p = st[i], v = st.getPropertyValue(p), prio = st.getPropertyPriority(p);
+    if (r.__sdThemed || r.parentStyleSheet?.ownerNode?.id === 'stuntdouble-theme-css') continue;
+    const from = r.__sdIn || captured; if (from === pack) continue;
+    const pal = paletteFor(doc, from, pack); r.__sdIn = pack;
+    const sty = r.style, scope = isScope(r);
+    for (let i = sty.length - 1; i >= 0; i--) {
+      const p = sty[i], v = sty.getPropertyValue(p), prio = sty.getPropertyPriority(p);
       if (p.startsWith('--')) {
-        if (scope && pack.tokens[p] !== undefined) { if (v.trim() !== pack.tokens[p]) { st.setProperty(p, pack.tokens[p], prio); stats.tokens++; } continue; }
-        const t = recolorValue(pal, R, v, roleOfToken(p), stats); if (t) { st.setProperty(p, t, prio); stats.literal++; }
+        if (scope && pack.tokens[p] !== undefined) { if (v.trim() !== pack.tokens[p]) { sty.setProperty(p, pack.tokens[p], prio); stats.tokens++; } continue; }
+        const t = recolorValue(pal, R, v, roleOfToken(p), stats); if (t) { sty.setProperty(p, t, prio); stats.literal++; }
       } else if (COLOR_PROPS.test(p)) {
-        const t = recolorValue(pal, R, v, roleOfProp(p), stats); if (t) { st.setProperty(p, t, prio); stats.literal++; }
-      } else if (p === 'color-scheme' && /\b(light|dark)\b/.test(v) && !/light\s+dark|dark\s+light/.test(v)) st.setProperty(p, pack.mode, prio);
+        const t = recolorValue(pal, R, v, roleOfProp(p), stats); if (t) { sty.setProperty(p, t, prio); stats.literal++; }
+      } else if (p === 'color-scheme' && /\b(light|dark)\b/.test(v) && !/light\s+dark|dark\s+light/.test(v)) sty.setProperty(p, pack.mode, prio);
     }
   }
   for (const root of rootsOf(doc)) {
     for (const el of root.querySelectorAll('[style]')) {
-      if (el.__sdDone === pack) continue; el.__sdDone = pack;
-      const st = el.style;
-      for (let i = st.length - 1; i >= 0; i--) {
-        const p = st[i];
+      const from = el.__sdIn || captured; if (from === pack) continue;
+      const pal = paletteFor(doc, from, pack); el.__sdIn = pack;
+      const sty = el.style;
+      for (let i = sty.length - 1; i >= 0; i--) {
+        const p = sty[i];
         if (!(COLOR_PROPS.test(p) || p.startsWith('--'))) continue;
-        if (p.startsWith('--') && (el === doc.documentElement || el === doc.body) && pack.tokens[p] !== undefined) { st.setProperty(p, pack.tokens[p]); stats.tokens++; continue; }
-        const t = recolorValue(pal, R, st.getPropertyValue(p), p.startsWith('--') ? roleOfToken(p) : roleOfProp(p), stats);
-        if (t) { st.setProperty(p, t, st.getPropertyPriority(p)); stats.inline++; }
+        if (p.startsWith('--') && (el === doc.documentElement || el === doc.body) && pack.tokens[p] !== undefined) { sty.setProperty(p, pack.tokens[p]); stats.tokens++; continue; }
+        const t = recolorValue(pal, R, sty.getPropertyValue(p), p.startsWith('--') ? roleOfToken(p) : roleOfProp(p), stats);
+        if (t) { sty.setProperty(p, t, sty.getPropertyPriority(p)); stats.inline++; }
       }
     }
     for (const el of root.querySelectorAll('[fill],[stroke],[stop-color]')) {
-      if (el.__sdSvgDone === pack) continue; el.__sdSvgDone = pack;
+      const from = el.__sdSvgIn || captured; if (from === pack) continue;
+      const pal = paletteFor(doc, from, pack); el.__sdSvgIn = pack;
       for (const a of ['fill', 'stroke', 'stop-color']) {
         const v = el.getAttribute(a); if (!v || v === 'none' || /^currentcolor$/i.test(v) || v.startsWith('url(')) continue;
         const t = recolorValue(pal, R, v, a === 'stroke' ? 'stroke' : 'fg', stats); if (t) { el.setAttribute(a, t); stats.svg++; }
       }
     }
   }
+  doc.__sdShown = pack;
   const settleAll = root => { for (const el of root.querySelectorAll('*')) { doc.defaultView.getComputedStyle(el).color; if (el.shadowRoot) settleAll(el.shadowRoot); } };
   settleAll(doc);
   still.remove();
@@ -362,17 +383,23 @@ export function shortcutText(s, platform) {
   return s.replace(WORD_CHORD, (m, mods, sep, key) => wordChord(m, mods, sep, key, platform));
 }
 // aria-keyshortcuts (ARIA names keys Meta/Control/Alt; Teams writes Command/Option): the same chord, other platform.
+const MOD_ORDER = { windows: ['Control', 'Alt', 'Shift', 'Meta'], macos: ['Control', 'Alt', 'Shift', 'Meta'] };
 const keyshortcuts = (v, platform) => v.split(/\s+/).map(ch => {
   const parts = ch.split('+'), key = parts.pop();
   const mods = new Set(parts.map(p => platform === 'windows' ? ({ Command: 'Control', Meta: 'Control', Option: 'Alt' })[p] || p : ({ Control: 'Meta', Alt: 'Alt' })[p] || p));
-  return [...mods, key].join('+');
+  return [...MOD_ORDER[platform].filter(m => mods.has(m)), ...[...mods].filter(m => !MOD_ORDER[platform].includes(m)), key].join('+');
 }).join(' ');
+// An app's own shortcut table (platform pack .shortcuts): what each control says on the other platform, by the
+// control (tag, data-tid or id, and its label with the chord taken out). Learned from one capture on that platform;
+// it wins over the generic conversion (Teams' Mac Control+Shift+1 is Control+1 on Windows).
+const CHORD_TAIL = /\s*[(,]?\s*((Command|Cmd|Option|Control|Ctrl|Alt|Shift|Meta|Win|[⌘⌥⇧⌃])[\s+]*)+\S*\)?\s*$/;
+const controlKey = el => [el.localName, el.getAttribute('data-tid') || el.id || el.getAttribute('role') || '', (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || '').replace(CHORD_TAIL, '').slice(0, 60)].join('|');
 const CHORDISH = /[⌘⌥⇧⌃]|\b(Command|Cmd|Option|Ctrl|Control|Alt|Shift)\s?\+|^\s*(Ctrl|Alt|Shift|Control|Option|Command|Cmd)\s*$/;
 function origins(doc) {
   if (!doc.__sdOrig) doc.__sdOrig = { texts: new Map(), attrs: new Map(), fonts: new Map() };
   return doc.__sdOrig;
 }
-function rewriteShortcuts(doc, platform, captured) {
+function rewriteShortcuts(doc, platform, captured, table) {
   const O = origins(doc); let n = 0;
   for (const root of rootsOf(doc)) {
     const w = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
@@ -390,7 +417,8 @@ function rewriteShortcuts(doc, platform, captured) {
         let rec = O.attrs.get(el); const orig = rec && a in rec ? rec[a] : el.getAttribute(a);
         if (a === 'aria-keyshortcuts' ? !/Meta|Control|Command|Option|Alt/.test(orig) : !CHORDISH.test(orig)) continue;
         if (!rec) O.attrs.set(el, rec = {}); rec[a] = orig;
-        const v = platform === captured ? orig : a === 'aria-keyshortcuts' ? keyshortcuts(orig, platform) : shortcutText(orig, platform);
+        const known = table && (table[controlKey(el)] || {})[a];
+        const v = platform === captured ? orig : known && a === 'aria-keyshortcuts' ? known : a === 'aria-keyshortcuts' ? keyshortcuts(orig, platform) : shortcutText(orig, platform);
         if (v !== el.getAttribute(a)) { el.setAttribute(a, v); n++; }
       }
     }
@@ -510,7 +538,13 @@ export function extractPlatformPack(doc, app = '') {
     const r = el.getBoundingClientRect(); if (!r.width || r.top > BAND) continue;
     const k = labelHead(el); if (k && !(k in controls)) controls[k] = { x: Math.round(r.left), y: Math.round(r.top) };
   }
-  return { kind: 'stuntdouble-platform-pack', version: 1, app, platform: doc.documentElement.getAttribute('data-platform') || null, controls };
+  const shortcuts = {};
+  for (const el of doc.querySelectorAll('[aria-keyshortcuts],[aria-label],[title],[placeholder]')) {
+    const rec = {};
+    for (const a of ['aria-keyshortcuts', 'aria-label', 'title', 'placeholder']) { const v = el.getAttribute(a); if (v && (a === 'aria-keyshortcuts' || CHORDISH.test(v))) rec[a] = v; }
+    if (Object.keys(rec).length) shortcuts[controlKey(el)] = rec;
+  }
+  return { kind: 'stuntdouble-platform-pack', version: 1, app, platform: doc.documentElement.getAttribute('data-platform') || (/Win/.test(doc.defaultView.navigator.platform) ? 'windows' : 'macos'), controls, shortcuts };
 }
 function placeControls(doc, platform, captured, pack) {
   const O = origins(doc);
@@ -559,7 +593,7 @@ export function applyPlatform(doc, platform, opts = {}) {
   // Apps that say their platform on <html> (the Copilot app's data-platform) get it switched: their own CSS follows.
   if (O.platformAttr === undefined) O.platformAttr = html.getAttribute('data-platform');
   if (O.platformAttr !== null) html.setAttribute('data-platform', platform === captured ? O.platformAttr : platform);
-  if (opts.shortcuts !== false) stats.shortcuts = rewriteShortcuts(doc, platform, captured);
+  if (opts.shortcuts !== false) stats.shortcuts = rewriteShortcuts(doc, platform, captured, opts.pack && opts.pack.platform === platform ? opts.pack.shortcuts : null);
   let css = '';
   if (opts.fonts !== false) { const f = rewriteFonts(doc, platform, captured, opts.pack && opts.pack.fonts); stats.fonts = f.n; css += f.aliases; }
   if (opts.scrollbars !== false && platform !== captured) { stats.scrollers = markScrollers(doc); css += platform === 'windows' ? WIN_SCROLLBAR_CSS(opts.mode || modeOf(doc)) : MAC_SCROLLBAR_CSS; }
