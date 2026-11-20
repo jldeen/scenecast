@@ -1,5 +1,6 @@
 // Scenecast's window: the demo library and each step of a demo. Everything goes through the app's commands
 // (window.__TAURI__.core.invoke) and their progress events; nothing here touches files or runs anything itself.
+import { explain } from './errors.js';
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
@@ -41,6 +42,12 @@ const ago = ms => {
   return new Date(ms).toLocaleDateString();
 };
 const isMac = () => S.info.os === 'macos';
+const browserName = () => ({ chrome: 'Chrome', edge: 'Edge' })[demo()?.browser || (isMac() ? 'chrome' : 'edge')];
+const why = (msg, job) => explain(msg, { browser: browserName(), job, retry: job === 'ai-sign-in' ? 'ai-sign-in' : null });
+// An error's one button: an app action, a step to go to, or something to copy.
+const actionButton = (a, primary = true, test = 'error-action') => a.action ? `<button class="btn small ${primary ? 'primary' : ''}" data-action="${esc(a.action)}" data-test="${test}">${esc(a.label)}</button>`
+  : a.goto ? `<button class="btn small ${primary ? 'primary' : ''}" data-goto="${esc(a.goto)}" data-test="${test}">${esc(a.label)}</button>`
+    : a.copy ? `<button class="btn small ${primary ? 'primary' : ''}" data-copy="${esc(a.copy)}" data-test="${test}">${esc(a.label)}</button>` : '';
 const folderWord = () => isMac() ? 'Finder' : 'File Explorer';
 
 function announce(text) {
@@ -60,7 +67,8 @@ async function call(cmd, args = {}) {
     return await invoke(cmd, args);
   } catch (e) {
     const msg = typeof e === 'string' ? e : e?.message || String(e);
-    toast(msg, true);
+    const x = why(msg);
+    if (x) toast(`${x.title}. ${x.body}`, true);
     throw new Error(msg);
   }
 }
@@ -84,7 +92,8 @@ async function step(job, cmd, args, after) {
     if (!mine()) return;
     const msg = typeof e === 'string' ? e : e?.message || String(e);
     // Shown once: in the step's own place when it's on screen, otherwise as a toast.
-    if (!(S.view === 'demo' && S.id === id && tabJobs(S.tab).includes(job))) toast(msg, true);
+    const x = why(msg, job);
+    if (x && !(S.view === 'demo' && S.id === id && tabJobs(S.tab).includes(job))) toast(`${x.title}. ${x.body}`, true);
     J(id)[job].error = msg;
   } finally {
     if (mine()) delete J(id).running[job];
@@ -363,8 +372,7 @@ const signedInLine = () => {
 Object.assign(REGIONS_LATE, {
   'copilot-mini': () => signedInLine(),
   'copilot-signin'() {
-    if (!AI.signing && (AI.signInError || AI.error)) return `<div class="notice bad" role="alert" data-test="ai-sign-in-error"><div><strong>Not signed in.</strong> ${esc(AI.signInError || AI.error)}
-      <div class="row" style="margin-top:8px"><button class="btn small" data-action="ai-sign-in">Try again</button><button class="btn small subtle" data-action="show-logs">Show the logs</button></div></div></div>`;
+    if (!AI.signing && (AI.signInError || AI.error)) return `<div data-test="ai-sign-in-error">${errorBox(AI.signInError || AI.error, 'ai-sign-in', { label: 'Try again', action: 'ai-sign-in' })}</div>`;
     if (!AI.signing) return '';
     const rt = AI.runtime;
     if (!AI.code) return `${progressBar(true)}<p class="small">${rt && !rt.ready ? `Getting Copilot ready (once): ${Math.round((rt.got || 0) / 1048576)} of ${Math.round((rt.total || 0) / 1048576) || '…'} MB` : 'Starting…'}</p>`;
@@ -485,7 +493,15 @@ function renderRegions() {
 const progressBar = on => on ? '<div class="progress" role="progressbar" aria-label="Working"><div></div></div>' : '';
 const logBox = (lines = [], open = false) => lines.length ? `<details ${open ? 'open' : ''}><summary>Details (${lines.length} lines)</summary>
   <div class="log" tabindex="0">${lines.slice(-200).map(l => `<div class="${l.error ? 'err' : ''}">${esc(l.text)}</div>`).join('')}</div></details>` : '';
-const errorBox = e => e ? `<div class="notice bad" role="alert"><div>${esc(e)}</div></div>` : '';
+// An error in plain words (errors.js): what happened, one sentence, at most one button; the engine's words under Details.
+function errorBox(e, job, fallback) {
+  const x = !e ? null : typeof e === 'object' ? e : why(e, job);
+  if (!x) return '';
+  const a = x.action || fallback;
+  return `<div class="notice bad" role="alert" data-test="error" data-error="${esc(x.id)}"><div class="grow"><strong>${esc(x.title)}</strong> ${esc(x.body)}
+    ${a ? `<div class="row" style="margin-top:10px">${actionButton(a)}</div>` : ''}
+    ${x.detail ? `<details class="err-detail"><summary>Details</summary><div class="log">${esc(x.detail)}</div></details>` : ''}</div></div>`;
+}
 const icon = (status, label) => `<span class="icon ${esc(status)}" role="img" aria-label="${esc(label || status)}">${{ ok: '✓', fixed: '✓', pass: '✓', fail: '!', warn: '!', manual: '?', skip: '–', run: '' }[status] ?? ''}</span>`;
 
 // ---- Record ------------------------------------------------------------------------------------------------------
@@ -528,7 +544,7 @@ const REGIONS = {
     const on = running('install', d.id);
     if (!o && !on && !j.error) return '';
     if (on) return progressBar(true) + '<p class="muted small">Getting the recorder ready…</p>';
-    if (j.error) return errorBox(j.error);
+    if (j.error) return errorBox(j.error, 'install');
     const b = o.browser, connected = rxState().connected;
     const shot = n => `img/setup/${b}-${n}.png`;
     const notes = [];
@@ -561,7 +577,7 @@ const REGIONS = {
     const on = running('preflight', d.id);
     const items = j.items || [];
     const report = j.outcome;
-    if (!items.length && !on) return report === undefined && !j.error ? '<p class="muted">Not run yet.</p>' : errorBox(j.error);
+    if (!items.length && !on) return report === undefined && !j.error ? '<p class="muted">Not run yet.</p>' : errorBox(j.error, 'preflight');
     const fails = items.filter(i => i.status === 'fail');
     return `${progressBar(on)}<ul class="status-list" aria-label="Preflight">${items.map(i => {
       const label = PREFLIGHT_LABEL[i.id] || (i.id.startsWith('app ') ? `App: ${i.id.slice(4)}` : i.id);
@@ -574,7 +590,7 @@ const REGIONS = {
     }).join('')}</ul>
     ${report ? `<div class="notice ${report.ready ? 'ok' : 'warn'}" data-test="preflight-result" data-ready="${report.ready}">
       ${report.ready ? `Ready to record (checked in ${secs(report.secs)}).` : `${plural(fails.length, 'thing')} to put right first.`}</div>` : ''}
-    ${errorBox(j.error)}`;
+    ${errorBox(j.error, 'preflight')}`;
   },
   record(d) {
     const j = J(d.id).record || {};
@@ -587,8 +603,9 @@ const REGIONS = {
     if (running('record', d.id) && !recording) {
       html += `<div class="notice info" data-test="record-starting"><div><strong>Starting…</strong> Checking the recorder, then capturing each app’s start screen. Wait for <strong>Recording</strong> before you click anything in ${esc(d.apps.length > 1 ? 'the app tabs' : 'the app')}.</div></div>${progressBar(true)}`;
     } else if (j.error) {
-      html += `<div class="notice bad" data-test="record-failed" role="alert"><div><strong>Recording didn’t start, so nothing was recorded.</strong> ${esc(j.error)}</div></div>
-        <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-start" data-test="record-start">Try again</button></div>`;
+      const x = why(j.error, 'record');
+      html += `<div data-test="record-failed">${errorBox(x || j.error, 'record')}</div>
+        ${x?.action?.action === 'record-start' ? '' : '<div class="row" style="margin-top:12px"><button class="btn" data-action="record-start" data-test="record-start">Try again</button></div>'}`;
       return html;
     } else if (recording) {
       html += `<div class="notice info" data-test="recording" data-busy="${!!st?.busy}" data-count="${st?.count ?? 0}"><div>
@@ -604,12 +621,10 @@ const REGIONS = {
         ${st?.log?.length ? `<details><summary>Recorder log</summary><div class="log">${st.log.map(esc).join('\n')}</div></details>` : ''}
         <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-stop" data-test="record-stop" ${running('record-stop', d.id) ? 'disabled' : ''}>Stop recording</button></div>`;
     } else if (stop.error) {
-      html += `<div class="notice bad" data-test="record-failed" role="alert"><div><strong>Nothing was recorded.</strong> ${esc(stop.error)}</div></div>
-        <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-start" data-test="record-start">Record again</button></div>`;
+      html += `<div data-test="record-failed">${errorBox(stop.error, 'record-stop', { label: 'Record again', action: 'record-start' })}</div>`;
       return html;
     } else if (stop.outcome && !stop.outcome.states) {
-      html += `<div class="notice bad" data-test="record-failed" role="alert"><div><strong>Nothing was recorded (0 screens).</strong> Run Check above, then record again.</div></div>
-        <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-start" data-test="record-start">Record again</button></div>`;
+      html += `<div data-test="record-failed">${errorBox('record stop: 0 states', 'record-stop')}</div>`;
       return html;
     } else if (stop.outcome) {
       const s = stop.outcome;
@@ -624,7 +639,7 @@ const REGIONS = {
       html += `<div class="row"><button class="btn primary" data-action="record-start" data-test="record-start" ${running('record', d.id) ? 'disabled' : ''}>Start recording</button>
         ${d.status.recorded ? `<span class="muted small">Recorded ${esc(ago(d.status.recordedAt))} (${plural(d.status.screens, 'screen')}). Recording again replaces it.</span>` : ''}</div>`;
     }
-    return html + errorBox(j.error || stop.error);
+    return html + errorBox(j.error || stop.error, j.error ? 'record' : 'record-stop');
   },
 };
 Object.assign(REGIONS, REGIONS_LATE);
@@ -734,7 +749,7 @@ Object.assign(REGIONS, {
     if (running('ai-plan', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-planning">Copilot is reading your words and the start screens, and drafting the plan…</p>`;
     const plan = (j.events || []).find(e => e.event === 'plan');
     if (plan && j.outcome) return `<div class="notice ok" data-test="ai-plan-done" data-steps="${plan.data.steps}"><div><strong>Plan drafted:</strong> ${plural(plan.data.beats, 'beat')}, ${plural(plan.data.steps, 'step')}${plan.data.askFirst ? `, ${plan.data.askFirst} asking you first` : ''}. Check it below.</div></div>`;
-    return errorBox(j.error);
+    return errorBox(j.error, 'ai-plan');
   },
   'ai-run'(d) {
     const j = J(d.id)['ai-record'] || {};
@@ -771,7 +786,7 @@ Object.assign(REGIONS, {
       const o = j.outcome;
       html += `<div class="notice ok" data-test="ai-record-done" data-steps="${o.steps}" data-confirmed="${o.confirmed}"><div><strong>Recorded for you:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}${o.confirmed ? `, ${o.confirmed} after you said yes` : ''}${o.stopped ? ' (stopped early)' : ''}. ${o.script ? `The talk track: ${plural(o.script.beats, 'beat')}, ${plural(o.script.lines, 'line')}.` : ''}</div></div>`;
     }
-    return html + errorBox(j.error);
+    return html + errorBox(j.error, 'ai-record');
   },
   'ai-after'(d) {
     const c = J(d.id).aiChain;
@@ -842,7 +857,7 @@ Object.assign(REGIONS, {
     ${o ? (o.ok ? `<div class="notice ok" data-test="build-done"><div><strong>Built:</strong> ${plural(o.liveScenes, 'live page')}, ${plural(o.streams, 'streamed answer')}, ${plural(o.beats, 'beat')}.${o.fallback.length ? ` ${plural(o.fallback.length, 'fallback scene')} (flagged): ${esc(o.fallback.join(', '))}` : ''}</div></div>`
       : `<div class="notice bad" role="alert" data-test="build-failed"><div>${esc(o.stopped || 'The build has errors.')}${o.errors.length ? `<ul>${o.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}</div></div>`) : ''}
     ${o?.warnings?.length ? `<details><summary>${plural(o.warnings.length, 'warning')}</summary><ul>${o.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
-    ${errorBox(j.error)}${logBox(j.lines)}`;
+    ${errorBox(j.error, 'build')}${logBox(j.lines)}`;
   },
   scrub(d) {
     const s = J(d.id).build?.outcome?.scrub || J(d.id).scrub;
@@ -860,12 +875,12 @@ Object.assign(REGIONS, {
     const items = j.outcome?.items?.length ? j.outcome.items : j.items || [];
     if (!items.length && !on) {
       const c = d.status.checks;
-      return c ? `<p class="muted">Last run ${esc(ago(c.at))}: ${c.passed} passed, ${c.failed} failed${c.quick ? ' (quick)' : ''}.</p>` + errorBox(j.error) : errorBox(j.error) || '<p class="muted">Not run yet.</p>';
+      return c ? `<p class="muted">Last run ${esc(ago(c.at))}: ${c.passed} passed, ${c.failed} failed${c.quick ? ' (quick)' : ''}.</p>` + errorBox(j.error, 'checks') : errorBox(j.error, 'checks') || '<p class="muted">Not run yet.</p>';
     }
     const fails = items.filter(i => i.status === 'fail').length;
     return `${progressBar(on)}<ul class="status-list" aria-label="Checks">${items.map(i => `<li data-status="${esc(i.status)}">${icon(i.status)}<span class="id mono">${esc(i.id)}</span><span class="small">${esc(String(i.detail).split('\n')[0].slice(0, 220))}</span><span></span></li>`).join('')}</ul>
       ${j.outcome ? `<div class="notice ${j.outcome.pass ? 'ok' : 'bad'}" data-test="checks-done" data-pass="${j.outcome.pass}" data-quick="${j.outcome.quick}">${j.outcome.pass ? (j.outcome.quick ? 'What changed passes its checks.' : 'Every automatic check passes.') : `${plural(fails, 'check')} failing.`}</div>` : ''}
-      ${errorBox(j.error)}${logBox(j.lines)}`;
+      ${errorBox(j.error, 'checks')}${logBox(j.lines)}`;
   },
 });
 PANELS.build = async (panel, d) => {
@@ -888,7 +903,7 @@ Object.assign(REGIONS, {
   'fidelity-progress'(d) {
     const j = J(d.id).fidelity || {};
     const on = running('fidelity', d.id);
-    if (!on) return errorBox(j.error);
+    if (!on) return errorBox(j.error, 'fidelity');
     const compared = (j.events || []).filter(e => e.event === 'compared').length;
     const last = j.stages?.at(-1)?.label || 'Starting';
     return `${progressBar(true)}<p class="small" data-test="fidelity-running">${esc(last)}${compared ? ` · ${plural(compared, 'state')} compared` : ''}</p>${logBox(j.lines)}`;
@@ -942,7 +957,7 @@ PANELS.fidelity = async (panel, d) => {
 Object.assign(REGIONS, {
   'script-progress'(d) {
     const j = J(d.id).script || {};
-    if (!running('script', d.id)) return errorBox(j.error);
+    if (!running('script', d.id)) return errorBox(j.error, 'script');
     const ev = j.events || [];
     const matched = ev.filter(e => e.event === 'matched').length;
     return `${progressBar(true)}<p class="small" data-test="script-running">${ev.some(e => e.event === 'indexed') ? `Matching lines${matched ? `: ${matched}` : ''}…` : 'Reading each screen…'}</p>${logBox(j.lines)}`;
@@ -1073,7 +1088,7 @@ Object.assign(REGIONS, {
       return progressBar(true) + `<p class="small" data-test="export-running">${esc(last?.label || 'Exporting…')}</p>${list}`;
     }
     const r = j.outcome;
-    if (!r) return errorBox(j.error);
+    if (!r) return errorBox(j.error, 'export');
     if (!r.exported) {
       const fails = (r.checks?.items || []).filter(i => i.status === 'fail');
       return `<div class="notice bad" role="alert" data-test="export-checks-failed"><div><strong>Not exported yet:</strong> ${plural(fails.length, 'check')} failing.
@@ -1148,7 +1163,7 @@ const ACTIONS = {
   copilot: () => { renderCopilot(); refreshAi(); },
   'ai-sign-in': async () => {
     AI.signing = true; AI.code = null; AI.runtime = null; AI.error = null; AI.signInError = null; renderCopilotState(); renderCopilot();
-    try { await invoke('ai_sign_in'); toast('Signed in to GitHub Copilot'); } catch (e) { AI.signInError = typeof e === 'string' ? e : e.message; toast('Not signed in: ' + AI.signInError, true); }
+    try { await invoke('ai_sign_in'); toast('Signed in to GitHub Copilot'); } catch (e) { AI.signInError = typeof e === 'string' ? e : e.message; { const x = why(AI.signInError, 'ai-sign-in'); if (x) toast(`${x.title}. ${x.body}`, true); } }
     AI.signing = false; AI.code = null;
     await refreshAi();
   },
@@ -1356,7 +1371,7 @@ async function installUpdate() {
     await invoke('install_update');
   } catch (e) {
     U.busy = false; renderUpdate();
-    toast(`The update didn\u2019t install: ${typeof e === 'string' ? e : e.message}`, true);
+    toast('The update didn\u2019t install. Scenecast will offer it again; your demos are unchanged.', true);
   }
 }
 listen('update-progress', ({ payload }) => { U.progress = payload; renderUpdate(); });
@@ -1373,7 +1388,7 @@ document.documentElement.dataset.os = S.info.os;
 await loadDemos();
 await refreshServers();
 renderLibrary();
-if (S.info.engineError) toast(S.info.engineError, true);
+if (S.info.engineError) { const x = why(S.info.engineError); if (x) toast(`${x.title}. ${x.body}`, true); }
 refreshAi();
 checkUpdates(true);
 setInterval(() => { if (!U.busy) checkUpdates(true); }, 30 * 60 * 1000);

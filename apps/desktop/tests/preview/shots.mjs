@@ -12,7 +12,7 @@ const OUT = resolve(args.find(a => !a.startsWith('--')) || 'preview-shots');
 const pick = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
 const ENGINE = pick('--browser', 'webkit') === 'chromium' ? chromium : webkit;
 const ONLY = pick('--only', '') ? pick('--only', '').split(',') : null;
-const SCENARIOS = ['empty', 'library', 'record', 'copilot', 'recording', 'recorded', 'review', 'present'];
+const SCENARIOS = ['empty', 'library', 'record', 'copilot', 'recording', 'record-error', 'recorded', 'review', 'present'];
 const ENGINE_WORDS = /\b(port \d+|receiver|preflight|scrub|manifest|unpacked|developer mode|headless|side states?|streamed answers?|threshold|localhost|127\.0\.0\.1|profile \d+)\b/i;
 
 mkdirSync(OUT, { recursive: true });
@@ -35,6 +35,9 @@ for (const os of ['macos', 'windows']) {
     }, ENGINE_WORDS.source);
     const file = join(OUT, `${s}-${os}.png`);
     await page.screenshot({ path: file });
+    // An error on the screen: its own picture too (it may be below the fold).
+    const err = page.locator('[data-test="error"]').first();
+    if (await err.count()) { await err.scrollIntoViewIfNeeded(); await err.screenshot({ path: join(OUT, `${s}-${os}-error.png`) }); }
     report.push({ scenario: s, os, file, ...look });
     console.log(`${s} (${os}): ${look.primaries.length} primary [${look.primaries.join(' | ')}]${look.words.length ? `; engine words: ${[...new Set(look.words)].join(', ')}` : ''}`);
   }

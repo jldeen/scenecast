@@ -1,7 +1,7 @@
 // The window's preview: the real apps/desktop/ui, served with a stand-in for the app's Rust side (mock.js), so each
 // screen can be looked at and screenshotted in any browser without running the app. Scenarios pick the state:
 //   node apps/desktop/tests/preview/serve.mjs [port]      then open http://127.0.0.1:<port>/?s=record&os=macos
-// Scenarios (s=): empty, library, record, recording, recorded, review, present, copilot. os=macos|windows.
+// Scenarios (s=): empty, library, record, copilot, recording, record-error, recorded, review, present. os=macos|windows.
 // For looking only: nothing here records, builds or presents. With PREVIEW_SHOTS=<folder>, a page can POST a PNG data
 // URL to /__shots/<name>.png and it's saved there (screenshots of each screen, as evidence).
 import { createServer } from 'node:http';

@@ -239,3 +239,9 @@ textarea[rows] { min-height: 0; font-family: inherit; font-size: 13.5px; }
 /* A confirm that deletes or can't be undone. */
 .btn.primary.destructive { background: var(--bad); border-color: var(--bad); }
 .btn.primary.destructive:hover:not(:disabled) { background: #8f0b16; }
+
+/* Errors in plain words: the engine's own words fold away under Details. */
+.notice .grow { flex: 1; min-width: 0; }
+.err-detail { margin-top: 8px; }
+.err-detail .log { white-space: pre-wrap; }
+.notice[data-test="error"] strong { display: block; margin-bottom: 2px; }

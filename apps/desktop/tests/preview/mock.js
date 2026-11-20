@@ -77,6 +77,7 @@
       return { ready: true, secs: 0.8, items: preflightItems };
     },
     record_start: async ({ id }) => {
+      if (SC === 'record-error') throw 'not open: teams (a tab whose address has teams.cloud.microsoft), admin (a tab whose address has admin.cloud.microsoft). Open them in the browser the recorder is in, then start again';
       job(id, 'record', { type: 'record', status: { recording: true, busy: false, count: 14, actions: 9, streams: 1, timing: { recorderSecs: 41, productSecs: 120 } } });
       return { ok: true };
     },
@@ -103,8 +104,8 @@
     await wait(200);
     const tab = { review: 'build', present: 'present', recorded: 'record' }[SC];
     if (tab) document.querySelector(`[data-tab="${tab}"]`)?.click();
-    if (['record', 'copilot', 'recording'].includes(SC)) document.querySelector('[data-action="preflight"]')?.click();
-    if (SC === 'recording') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
+    if (['record', 'copilot', 'recording', 'record-error'].includes(SC)) document.querySelector('[data-action="preflight"]')?.click();
+    if (SC === 'recording' || SC === 'record-error') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
     document.documentElement.dataset.previewReady = '1';
   }, 300));
 })();
