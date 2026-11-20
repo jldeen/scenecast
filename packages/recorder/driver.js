@@ -131,10 +131,14 @@ async function fetchResources(p, docs) {
 // A frame that stops answering (Microsoft apps keep about:blank frames like that; on a presenter's real tabs one held
 // Record on "Starting…" for minutes) gets ms to answer, then is left out until it navigates. The main frame is never
 // left out: a page that doesn't answer is a real failure.
+// noContext: 'skip' for any frame with no script context yet, 'blank' for about:blank ones only. On real tabs most
+// frames are like that (Copilot: 18 of 24, Teams: 9 of 13, all about:blank), and each cost 3 s of waiting for one.
 const STUCK = new Map();
-async function frameEval(p, f, fn, arg, ms) {
+const noContext = (p, f) => p._ctx instanceof Map && !p._ctx.has(f.id);
+async function frameEval(p, f, fn, arg, ms, o = {}) {
   const url = f.url(), main = f === p.mainFrame();
   if (!main && STUCK.get(f) === url) throw new Error('frame left out (it stopped answering)');
+  if (!main && o.noContext && (o.noContext === 'skip' || /^about:/.test(url)) && noContext(p, f)) throw new Error('frame has no script context');
   let t;
   const late = new Promise((_, rej) => { t = setTimeout(() => rej(new Error('frame timeout')), ms); });
   try { return await Promise.race([f.evaluate(fn, arg), late]); } catch (e) {
@@ -168,7 +172,7 @@ async function snap(p, id, opts = {}) {
   const docs = [];
   for (const [f, key] of [[p.mainFrame(), 'main'], ...keys]) {
     try {
-      const r = await frameEval(p, f, SERX({}), undefined, f === p.mainFrame() ? 120000 : 20000);
+      const r = await frameEval(p, f, SERX({}), undefined, f === p.mainFrame() ? 120000 : 20000, { noContext: 'blank' });
       docs.push({ key, parent: f === p.mainFrame() ? null : (keys.get(f.parentFrame()) || 'main'), frameUrl: f.url(), frame: f, ...r });
     } catch (e) { await rlog(`snap ${id}: frame ${key} failed: ${e.message}`); }
   }

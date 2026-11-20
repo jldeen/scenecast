@@ -196,6 +196,18 @@ const CDPX = (() => {
     async title() { return this.attached ? this.mainFrame().evaluate(() => document.title).catch(() => this._title) : this._title; }
     mainFrame() { if (!this._main) throw new Error('tab not attached'); return this._main; }
     frames() { const m = this._main; if (!m) return []; return [m, ...[...this._frames.values()].filter(f => f !== m && this.reaches(f))]; }
+    // Frames this page's own process no longer has (on a real Copilot tab, 18 of 24 tracked frames were gone from
+    // the page: about:blank ones with no script context, each costing a wait on every call into the page's frames).
+    async prune() {
+      if (!this.attached) return 0;
+      const tree = await this.cmd(undefined, 'Page.getFrameTree').catch(() => null);
+      if (!tree) return 0;
+      const live = new Set(), walk = n => { live.add(n.frame.id); for (const c of n.childFrames || []) walk(c); };
+      walk(tree.frameTree);
+      let n = 0;
+      for (const [id, f] of this._frames) if (!f.sessionId && !live.has(id)) { this._frames.delete(id); this._ctx.delete(id); n++; }
+      return n;
+    }
     reaches(f) { for (let i = 0; f && i < 20; i++) { if (f === this._main) return true; f = f.parentFrame(); } return false; }
     async evaluate(fn, arg) { await this.attach(); return this.mainFrame().evaluate(fn, arg); }
     async bringToFront() {

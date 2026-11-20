@@ -19,10 +19,11 @@ const recApp = id => { const A = REC.apps.find(a => a.id === id); if (!A) throw 
 
 async function recFrameKey(p, f) { if (f === p.mainFrame()) return null; const keys = await frameKeys(p); return keys.get(f) || null; }
 const withFrame = (m, fk) => fk ? { frame: fk, ...m } : m;
-// The recorder's own small calls into each frame: a frame that doesn't answer in REC_FRAME_MS is left out (frameEval).
+// The recorder's own small calls into each frame: one with no script context yet is skipped (it's asked again next
+// time), and one that doesn't answer in REC_FRAME_MS is left out (frameEval).
 const REC_FRAME_MS = 5000;
-const recEval = (p, f, fn, arg) => frameEval(p, f, fn, arg, REC_FRAME_MS);
-async function recInstall(p) { for (const f of p.frames()) await recEval(p, f, RECX(REC.opts)).catch(() => {}); }
+const recEval = (p, f, fn, arg) => frameEval(p, f, fn, arg, REC_FRAME_MS, { noContext: 'skip' });
+async function recInstall(p) { if (p.prune) await p.prune(); for (const f of p.frames()) await recEval(p, f, RECX(REC.opts)).catch(() => {}); }
 async function recEach(p, fn, arg) { const out = []; for (const f of p.frames()) { const r = await recEval(p, f, fn, arg).catch(() => undefined); if (r !== undefined) out.push([f, r]); } return out; }
 async function recSig(p) {
   const all = await recEach(p, () => window.__rkrec ? window.__rkrec.sig() : null);
@@ -307,7 +308,7 @@ function recSeen(kind, key) { const m = REC.seen[kind] = REC.seen[kind] || {}; r
 //   drags   resize handles, once per kind of screen         zoom    once per kind of screen
 //   list    a list with more rows than it shows (all of them, last: it changes the page)
 // The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen.
-const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 60, chipWidths: [1366, 1100], ...(a || {}) }; };
+const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, chipWidths: [1366, 1100], ...(a || {}) }; };
 async function recAuto(A) {
   const o = recAutoOpts(), state = A.state, st = REC.states[state];
   if (!o || !st || st.typedOf || REC.autoDone.has(state)) return;

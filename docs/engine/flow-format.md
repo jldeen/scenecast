@@ -47,7 +47,7 @@ A demo folder holds:
   `drags`, `zoom` (each `true`/`false`), `maxS` (seconds per screen, all kinds together, before the rest is skipped and
   named in the report, 90), `hoverMax` / `hoverMaxS` (at most this many hover candidates, this long, per screen: 40,
   45), `clickMax` / `clickMaxS` (25, 45), `zoomMinS` (zoom only starts with this many seconds of the screen's budget
-  left: 60), `chipWidths` (window widths tried for "+N": `[1366, 1100]`), `zooms`
+  left: 30), `chipWidths` (window widths tried for "+N": `[1366, 1100]`), `zooms`
   (default: `zooms` below). Hovers and clicks are captured once per control; zoom, chips and drags once per kind
   of screen (its landmarks and layout); groups on every answer; lists on every screen with a scrolling list.
 - `zooms`: what zoom captures and `fidelity` checks.

@@ -1,7 +1,9 @@
 // Record start on tabs like a presenter's real ones (Jessica's Mac, Nov 19):
 //   1. A frame that never answers (Microsoft apps keep about:blank frames like this) made Record sit on "Starting…"
 //      for minutes and the app gave up ("timeout waiting for …"). Start now leaves the frame out after a few seconds.
-//   2. Two tabs for one app, the second marked (a tab opened for the recording next to the presenter's own): the marked
+//   2. Frames with no script context (Copilot had 18 of its 24, all about:blank, never touched): each call into one
+//      waited 3 s for a context, on every check, so Start and each screen's side states took minutes.
+//   3. Two tabs for one app, the second marked (a tab opened for the recording next to the presenter's own): the marked
 //      one is recorded even when the recorder hasn't attached to it yet (as after the recorder reloads).
 //   node packages/selftest/real-tabs.mjs
 import { spawn } from 'node:child_process';
@@ -27,7 +29,8 @@ const web = createServer((q, s) => {
   s.setHeader('content-type', 'text/html');
   if (q.url.startsWith('/stuck')) return s.end('<p>frame</p><script>setTimeout(() => { for (;;) {} }, 6000)</script>');
   const who = new URL(q.url, 'http://x').searchParams.get('who') || 'app';
-  s.end(`<title>${who}</title><h1>${who}</h1><button>Open</button>${q.url.startsWith('/busy') ? `<iframe src="http://localhost:${WEB}/stuck"></iframe>` : ''}`);
+  const blanks = q.url.startsWith('/blanks') ? '<iframe></iframe>'.repeat(16) : '';
+  s.end(`<title>${who}</title><h1>${who}</h1><button>Open</button>${q.url.startsWith('/busy') ? `<iframe src="http://localhost:${WEB}/stuck"></iframe>` : ''}${blanks}`);
 }).listen(WEB, '127.0.0.1');
 const rx = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), raw, String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
 let ctx;
@@ -41,7 +44,8 @@ try {
   const mine = await ctx.newPage(); await mine.goto(`http://127.0.0.1:${WEB}/app?who=mine`);
   // Marked before the recorder has attached to anything: what a tab marked earlier looks like after the recorder reloads.
   await mine.evaluate(k => sessionStorage.setItem('d1tab', k), match);
-  const busy = `127.0.0.1:${WEB}/busy`;
+  const busy = `127.0.0.1:${WEB}/busy`, blanks = `127.0.0.1:${WEB}/blanks`;
+  await (await ctx.newPage()).goto(`http://${blanks}?who=blanks`);
   await (await ctx.newPage()).goto(`http://${busy}?who=busy`);
   for (let i = 0; i < 80; i++) { const p = await ping(); if (p && p.agent && p.agent.id) break; await sleep(250); }
   // The recorder knows the busy tab's frame (it's attached) before the frame stops answering.
@@ -49,10 +53,10 @@ try {
   check('the busy tab is there', seen.ok && seen.value === 'busy', JSON.stringify(seen));
   await sleep(7000);
   const t0 = Date.now();
-  const r = await send({ op: 'recordStart', apps: [{ id: 'app', match }, { id: 'busy', match: busy }], record: { auto: false } }, 120, RX);
+  const r = await send({ op: 'recordStart', apps: [{ id: 'app', match }, { id: 'busy', match: busy }, { id: 'blanks', match: blanks }], record: { auto: false } }, 120, RX);
   const secs = (Date.now() - t0) / 1000;
-  check('record starts though a frame never answers', r.ok && r.value && r.value.recording, JSON.stringify(r));
-  check('and doesn\'t wait on that frame (under 45 s)', secs < 45, `${secs.toFixed(1)} s`);
+  check('record starts though a frame never answers and another tab has 16 empty frames', r.ok && r.value && r.value.recording, JSON.stringify(r));
+  check('and waits on neither (under 30 s)', secs < 30, `${secs.toFixed(1)} s`);
   const title = await send({ op: 'eval', tab: match, expr: 'document.title' }, 30, RX);
   check('a marked tab the recorder hasn\'t attached to yet is the one recorded', title.ok && title.value === 'mine', JSON.stringify(title));
   const log = readFileSync(join(raw, 'receiver.log'), 'utf8');
