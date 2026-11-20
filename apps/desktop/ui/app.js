@@ -934,7 +934,7 @@ async function loadAi(id) {
     renderRegions();
   }
 }
-const recordCard = (n, note) => `<div class="card"><h2><span class="step-num">${n}</span>Record</h2>
+const recordCard = (n, note) => `<div class="card"><h2>Record</h2>
       <p class="muted">${note || 'Run the demo once, the way you\u2019ll present it. Wait for each screen to be captured before the next step.'}</p>
       <div data-region="record"></div></div>`;
 const goalFields = () => `<div><label for="ai-goal">What should the demo show?</label>
@@ -945,12 +945,12 @@ const goalFields = () => `<div><label for="ai-goal">What should the demo show?</
 function recordCards(d) {
   const sent = aiMode(d.mode) ? `<div class="card"><h2>What was sent to Copilot</h2><div data-region="ai-sent"></div></div>` : '';
   if (d.mode === 'record') return `<div data-region="copilot-mini"></div>
-    <div class="card"><h2><span class="step-num">3</span>What to show</h2>
+    <div class="card"><h2>What to show</h2>
       <p class="muted">Copilot reads your words and each app's start screen, and drafts the steps: what to click and type, and what to say.</p>
       ${goalFields()}
       <div class="row" style="margin-top:12px"><button class="btn" data-action="ai-plan" data-test="ai-plan">Draft the plan</button></div>
       <div data-region="ai-plan-progress"></div></div>
-    <div class="card"><h2><span class="step-num">4</span>The plan</h2>
+    <div class="card"><h2>The plan</h2>
       <p class="muted">Read it and change anything: one step per line (<code>- Click "Plugins"</code>, <code>- Type "…" in "Message"</code>, <code>- Press Enter</code>, <code>- Go to admin</code>, <code>- Wait for the answer</code>, <code>- You: …</code> for something only you can do), <code>&gt;</code> lines are what to say. Steps marked <strong>ask first</strong> could send, save or change something: Copilot stops and asks you before each one.</p>
       <label for="ai-plan" class="visually-hidden">Plan</label>
       <textarea id="ai-plan" class="plan" data-test="ai-plan-text" data-save="plan" placeholder="Draft the plan first."></textarea>
@@ -959,7 +959,7 @@ function recordCards(d) {
       <div data-region="ai-run" style="margin-top:12px"></div><div data-region="ai-after"></div></div>
     ${sent}`;
   if (d.mode === 'coach') return `<div data-region="copilot-mini"></div>
-    <div class="card"><h2><span class="step-num">3</span>Your coach</h2>
+    <div class="card"><h2>Your coach</h2>
       <p class="muted">Start the coach, then start recording and click through. It shows the next step and what to say, and keeps up as you go; if you go your own way, it suggests what's next from your goal.</p>
       ${goalFields()}
       <div class="row" style="margin-top:12px"><button class="btn" data-action="coach-start" data-test="coach-start">Start coaching</button>
@@ -1327,7 +1327,7 @@ function showRows(d, p) {
     const planned = b.start != null && b.end != null ? b.end - b.start : null;
     const diff = b.took != null && planned != null ? b.took - planned : null;
     const state = b.took == null ? '<span class="state idle">Not rehearsed</span>'
-      : diff == null || diff <= 2 ? '<span class="state ok">On time</span>' : `<span class="state warn">Ran ${secsWords(diff)} long</span>`;
+      : diff == null ? '<span class="state ok">Rehearsed</span>' : diff <= 2 ? '<span class="state ok">On time</span>' : `<span class="state warn">Ran ${secsWords(diff)} long</span>`;
     const app = d.apps.find(a => a.id === b.app);
     return `<div class="rd-row" data-test="beat-${b.n}">${mk('todo')}
       <div class="t"><b>Beat ${b.n} · ${esc(b.title)}</b>${app ? `<small>${esc(appLabel(app))}</small>` : ''}</div>

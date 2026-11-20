@@ -191,7 +191,8 @@ try {
   await click('add-app');
   await type('app-id-1', 'admin');
   await type('app-url-1', fx.admin);
-  await (await el('new-slot')).selectByAttribute('value', '480');
+  // The slot (8 min): picked as a change does (WebDriver's option click doesn't select in every webview).
+  await b.execute(() => { const s = document.querySelector('[data-test="new-slot"]'); s.scrollIntoView({ block: 'center' }); s.value = '480'; s.dispatchEvent(new Event('change', { bubbles: true })); });
   await shot('02-new-demo');
   await click('create-demo');
   check('creates the demo and opens its Record step', await waitFor('the demo', async () => (await exists('demo-title')) && (await text('demo-title')) === 'Fixture demo'));
@@ -276,7 +277,9 @@ try {
   await shot('05-recording');
   await click('record-stop');
   await waitFor('the recording', () => exists('record-done'), 300000);
-  check('stop: the recording, in plain words (what was made)', /Recorded \d+ screens?/.test(await text('record-done')) && !/streamed|recorder —/.test(await text('record-done')), await text('record-done'));
+  // What shows (innerText): the closed Details under it holds the steps, streams and timings.
+  const done = await b.execute(() => document.querySelector('[data-test="record-done"]').innerText);
+  check('stop: the recording, in plain words (what was made)', /Recorded \d+ screens?/.test(done) && !/streamed|recorder took/.test(done), done);
   await shot('06-recorded');
   lap('record');
 
