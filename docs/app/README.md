@@ -77,8 +77,8 @@ npm run build:test && npm run test:ui                # the UI test: the whole fl
   with a typed result and serializable progress. Unit-tested in the main workspace on Ubuntu, macOS and Windows.
 - `apps/desktop/src-tauri`: the Tauri shell (its own Cargo workspace): commands, `job` events, one job per demo at a
   time. Built with `--features webdriver`, it has an embedded WebDriver server for the UI test; installers never do.
-- `apps/desktop/ui`: the window, plain HTML, CSS and JavaScript (no build step). Light, Fluent and macOS conventions,
-  keyboard reachable (arrow keys between steps), labelled for screen readers, progress announced.
+- `apps/desktop/ui`: the window, plain HTML, CSS and JavaScript (no build step), in the look described in
+  [design.md](design.md): keyboard reachable, labelled for screen readers, progress announced.
 - `apps/desktop/tests/ui.test.mjs`: WebdriverIO against the real app window (the embedded WebDriver server works on
   macOS, Windows and Linux). CI runs it on macOS and Windows; `SCENECAST_UI_SHOTS=<dir>` saves each screen.
 - Installers: `scripts/prepare-bundle.mjs` (Node, checked by SHA-256; signing when its secrets are set), then

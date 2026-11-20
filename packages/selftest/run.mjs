@@ -2,6 +2,7 @@
 // three AI modes (ai-modes.mjs, on the stand-in model), on macOS, Windows and Linux. Builds the
 // scenecast binary first unless SCENECAST_BIN points at one.
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,7 +13,9 @@ const step = (name, cmd, args) => {
   if (r.status !== 0) { console.log(`${name} failed`); process.exit(r.status || 1); }
 };
 if (!process.env.SCENECAST_BIN) step('cargo build', 'cargo', ['build', '-q', '-p', 'scenecast-cli']);
-step('unit', process.execPath, ['--test', 'packages/player/bundle-flow.test.mjs', 'packages/player/launch.test.mjs', 'packages/player/presenter-key.test.mjs', 'packages/player/serve.test.mjs', 'packages/checks/path.test.mjs', 'packages/kit/compile/flow.test.mjs', 'packages/kit/lib/preflight.test.mjs', 'packages/fixer/patches.test.mjs', 'packages/script/script.test.mjs', 'packages/ai/ai.test.mjs', 'packages/kit/lib/exit.test.mjs', 'packages/kit/lib/demo.test.mjs', 'packages/kit/lib/beats.test.mjs']);
+// The unit tests are package.json's test:unit list, so the two can't drift apart.
+const units = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts['test:unit'].split(/\s+/).filter(a => a.endsWith('.test.mjs'));
+step('unit', process.execPath, ['--test', ...units]);
 step('asset build', process.execPath, ['packages/selftest/asset-build.mjs']);
 step('mixed fallback', process.execPath, ['packages/selftest/mixed-fallback.mjs']);
 step('browsers', process.execPath, ['packages/selftest/extension-browsers.mjs']);

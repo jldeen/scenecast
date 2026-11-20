@@ -22,7 +22,7 @@ access if the page says it's not found).
 You only do the "open anyway" step once. (The installers aren't signed yet; when they are, it goes away.) Your demos
 are kept in **Documents/Scenecast**.
 
-**Updates:** when there's a new version, a red dot appears on **Check for updates** and **Update to vX.Y.Z** at the bottom
+**Updates:** when there's a new version, a yellow dot appears on **Check for updates** and **Update to vX.Y.Z** at the bottom
 left (Scenecast checks by itself). Click it: it downloads, installs and restarts, and your demos stay as they are. (**Check for updates** asks now.)
 
 ## 2 · Your first demo

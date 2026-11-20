@@ -3,6 +3,45 @@
 `scenecast` is one binary for macOS and Windows (and Linux). It creates projects, runs the replica engine (the
 JavaScript in `packages/`, under Node) and keeps the bundle manifest in step, and it edits and validates bundles.
 
+## Install
+
+Presenters use the desktop app, which carries everything it needs. For the CLI, or to work on Scenecast: Rust
+(stable), Node 20 or later, and Google Chrome or Microsoft Edge.
+
+```bash
+git clone https://github.com/jldeen/scenecast && cd scenecast
+npm install                      # playwright-core, for capture and the checks (the replica itself needs nothing)
+cargo build --release -p scenecast-cli   # target/release/scenecast (scenecast.exe on Windows)
+```
+
+`scenecast` finds the JS packages next to it (or set `SCENECAST_JS` to the `packages` folder) and runs them with
+`node` (or `SCENECAST_NODE`). For Copilot, `scenecast install-skill` installs the "replicate a demo" skill
+(`skill/SKILL.md` in the repository), which drives this CLI.
+
+## Quick start
+
+```bash
+scenecast new ignite-demo2 --title "Ignite Demo 2" --app teams=https://teams.cloud.microsoft/ --app copilot=https://copilot.cloud.microsoft/
+cd ignite-demo2
+scenecast extension              # once: load Documents/Scenecast/Recorder Extension unpacked in Edge or Chrome (recorder.md)
+scenecast preflight              # receiver, browser, recorder, each app's tab; fixes only what fails
+scenecast record start           # run the demo once; side states are captured on the way
+scenecast record stop
+scenecast build --from-raw       # data/ (scrubbed) and manifest.json (live-page scenes)
+scenecast serve --open           # an app window: Chrome on the Mac, Edge on Windows
+scenecast script script.md       # each line on its screen, its focus points, the line-to-screen and cue sheets
+scenecast notes && scenecast guide-shots   # the presenter guide from the same script (⌥G on the stage)
+scenecast edit                   # adjust in the replica: dots, wording and dates, beat starts (⌥⇧E toggles it)
+scenecast quick                  # after each change: only what it touched
+scenecast release --push         # once: the whole checklist, then commit and push
+```
+
+Presenter keys: ⌥ on the Mac; **Ctrl+Alt** on Windows (where browsers keep Alt for their menus). Modifier+0 resets,
+modifier+1–9 selects a beat, modifier+an app's key switches apps, modifier+P types the scripted text, modifier+N
+advances, modifier+F / modifier+Shift+F moves through focus points, and modifier+G opens the presenter guide.
+Modifier+Shift+E turns the editor on and off (only where the replica is served for authoring; never with `present` or
+in an export).
+
 ## Create a project
 
 ```bash

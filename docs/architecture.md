@@ -1,6 +1,27 @@
 # Architecture
 
-Scenecast starts with a Rust-first foundation for authoring and validating portable interactive demos. The current implementation intentionally focuses on the core bundle model and CLI workflows before adding capture, web authoring, playback, publishing, or analytics.
+## How a replica works
+
+Every screen is the **real page, captured**: its DOM with the live CSS, fonts, shadow DOM, iframes and form, scroll
+and popover state, with no scripts and no sign-in tokens. Clicks, typing, Enter and Escape move between captured
+screens by morphing the page, the way a single-page app re-renders. AI answers replay from their real streamed
+frames. Hidden presenter keys jump between beats, and ZoomIt-style focus points zoom to what each line of the
+script points at. Nothing touches the network, and a determinism checklist (two runs, three cold starts, clicks,
+hovers, drags, zoom 50–200%, focus) proves two runs come out identical.
+
+**`live-page` scenes (captured pages) are the default.** Screenshot and video-frame scenes are kept only as a fallback,
+for a screen that truly can't be captured live or an explicit video import; checks flag every fallback scene.
+
+**macOS and Windows are both first-class.** The CLI, the recorder, the player, the launcher (Chrome or Edge as an app
+window), the desktop app and the checks run on both, and CI tests both (and Linux).
+
+**The desktop app is how presenters use it** ([app/README.md](app/README.md)); the CLI ([cli.md](cli.md)) stays
+underneath for automation and CI, and both drive the same Rust core. **Small fixes are fast:** after each change only
+the checks for what it touched run (`scenecast quick`, a minute or two; the app runs it after a build, a script or an
+edit). The whole checklist runs once, before a release or a share.
+
+Scenecast started as Seth Juarez's `.scenecast` bundle format and CLI, and was rebuilt around the replica engine from
+Ignite '26 Demo 1 (replica-kit 1.4.0).
 
 ## Layout
 
@@ -24,6 +45,11 @@ packages/            npm workspaces: everything that runs in the browser
   ai                 AI-assisted recording with GitHub Copilot (the presenter's own sign-in, through the Copilot SDK) or a
                      deterministic stand-in: plans, Record for me, the talk track from a recording, the coach (docs/ai.md)
   selftest           end-to-end tests against examples/fixture-app (the fidelity loop on its seeded lab app, the AI modes)
+examples/            fixture-app (a local fake product the tests record), sample bundles
+skill/SKILL.md       the "replicate a demo" skill for Copilot, driving the CLI (scenecast install-skill)
+schema/              bundle.v2.schema.json, generated from the Rust types (scenecast schema)
+scripts/             guide-pdf.mjs (docs/guide.pdf from docs/guide.md)
+docs/                the docs (index: docs/README.md)
 ```
 
 **The split.** Rust owns the bundle format, validation, build orchestration and the CLI; JavaScript owns what

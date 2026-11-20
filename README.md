@@ -1,121 +1,81 @@
 # Scenecast
 
-Record a live web demo once, then present it offline, the same way every time.
+Record a live web demo once. Present it the same way every time, offline.
 
-Every screen is the **real page, captured**: its DOM with the live CSS, fonts, shadow DOM, iframes and form, scroll
-and popover state, with no scripts and no sign-in tokens. Clicks, typing, Enter and Escape move between captured
-screens by morphing the page, the way a single-page app re-renders. AI answers replay from their real streamed
-frames. Hidden presenter keys jump between beats, and ZoomIt-style focus points zoom to what each line of the
-script points at. Nothing touches the network, and a determinism checklist (two runs, three cold starts, clicks,
-hovers, drags, zoom 50–200%, focus) proves two runs come out identical.
+![Scenecast's run of show: each beat of the demo with its key and time, ready for the stage](docs/app/run-of-show.png)
 
-Scenecast started as Seth Juarez's `.scenecast` bundle format and CLI. It is being rebuilt around the replica engine
-from Ignite '26 Demo 1 (replica-kit 1.4.0). **`live-page` scenes (captured pages) are the default.** Screenshot and
-video-frame scenes are kept only as a fallback, for a screen that truly can't be captured live or an explicit video
-import; checks flag every fallback scene.
+## Why Scenecast
 
-**macOS and Windows are both first-class.** The CLI, the recorder, the player, the launcher (Chrome or Edge as an app
-window) and the checks run on both, and CI tests both (and Linux).
+Live demos go wrong on stage: the network is slow, a sign-in expires, an AI answer comes out different. Scenecast
+takes that risk away.
 
-**The desktop app is how presenters use it: no terminal.** Make a demo, record it in Edge or Chrome, build and check
-it, compare it with the real product, match the script to focus points, edit, present full screen with the
-**presenter guide** on the laptop screen, and export it for someone else, all in one window (macOS `.dmg`, Windows
-`.msi` or setup `.exe`). **Start here: [the one-page guide](docs/guide.md)** ([PDF](docs/guide.pdf)); the app in
-detail: [docs/app](docs/app/README.md). The CLI stays underneath for automation and CI; both drive the same Rust core.
+- **Record it once**, in your own browser, clicking through the way you'll present it. Or let GitHub Copilot click
+  through for you.
+- **Scenecast makes a replica** from the real pages, so it looks exactly like the product. It needs no network and no
+  sign-ins, and it does the same thing every time.
+- **Present from it**, with a guide on your laptop: what to say, what to click, and the clock against your slot.
 
-**You don't need to know the beats.** New demo asks how: **Record for me** (say what it should show; GitHub Copilot
-plans it, you approve, and it clicks through in your browser while it records, asking before anything that sends or
-changes something), **I'll click, you script it** (Copilot writes the script from your recording), **Coach me** (the
-next step and line, live) or **I know my demo**. Copilot is used through the presenter's own GitHub sign-in: no keys.
-See [docs/ai.md](docs/ai.md).
+It's for anyone who shows a web app on stage or on a call: PMs, marketers, engineers, DevRel. No terminal needed.
 
-**Small fixes are fast.** After each change, only the checks for what it touched run (`scenecast quick`: a minute or
-two; the app runs it on its own after a build, a script or an edit). The whole checklist runs once, before a release
-(`scenecast release`, the app's Export).
+## Get Scenecast
 
-**The presenter guide** (⌥G, Ctrl+Alt+G on Windows; [docs/presenter.md](docs/presenter.md)) is a second window for the
-laptop screen that follows the stage: the talk track word for word, the clicks, the watch-outs, a timer against the
-script's times, and pictures of what's on screen now and next. It's made from the same script as the focus points.
+| | Mac | Windows |
+|---|---|---|
+| **Download** | [Scenecast for Mac](https://github.com/jldeen/scenecast/releases/latest/download/Scenecast-mac.dmg) | [Scenecast for Windows](https://github.com/jldeen/scenecast/releases/latest/download/Scenecast-windows-setup.exe) |
+| **Install** | Open it and drag Scenecast to Applications. | Run it. It installs just for you, no admin needed. |
+| **The first time you open it** | If macOS says it can't check the app, open **System Settings → Privacy & Security** and click **Open Anyway**. | If Windows says it protected your PC, click **More info → Run anyway**. |
 
-## Layout
+You also need Microsoft Edge or Google Chrome, signed in to the apps your demo shows. Other versions are on the
+[releases page](https://github.com/jldeen/scenecast/releases).
 
-| Path | What |
+## Your first demo
+
+1. **New demo.** Name it and add the apps it shows (each one's start page). Paste your talk track if you have one.
+2. **Record.** The first time, Scenecast helps you add its recorder to your browser: one step, once. Then click
+   **Start recording** and go through your demo, or let Copilot click for you.
+3. **Review.** Scenecast checks each screen of the replica against the real product, says why if one differs, and
+   can fix it.
+4. **Present.** **Rehearse** once with the clock running, then **Present**: the demo opens full screen on the
+   projector, and your guide on your laptop.
+5. **Share** (optional). Make one file for another presenter. They double-click it, and it's ready to rehearse.
+
+The [one-page guide](docs/guide.md) ([PDF](docs/guide.pdf)) has every step, with pictures.
+
+## On stage
+
+Hold **⌥** on a Mac, or **Ctrl+Alt** on Windows, and press:
+
+| Key | What it does |
 |---|---|
-| `crates/scenecast-core` | Bundle model (schema v2) and validation; v1 bundles migrate on read. JSON Schema export. |
-| `crates/scenecast-build` | Library: new projects, running the JS engine with progress, `manifest.json` from a build. |
-| `crates/scenecast-cli` | The `scenecast` binary. |
-| `crates/scenecast-app` | What the desktop app calls: the demo library and each step, with serializable progress (no UI toolkit). |
-| `apps/desktop` | The desktop app (Tauri): its window (`ui/`), shell (`src-tauri/`), UI test and installers. |
-| `packages/kit` | The engine's CLI entry (run by `scenecast`), demo settings, flow compiler, workflow, project template. |
-| `packages/recorder` | Capture: the recorder extension (MV3, Edge and Chrome), serializer, driver, recorder, side-state audits (hovers, clicks, drags, lists), receiver, build of raw captures. |
-| `packages/player` | The replica: server, morph engine, streams, presenter keys, focus points, the presenter guide (`presenter/`, `app/presenter-module.js`), app-window launcher. |
-| `packages/checks` | The fidelity checklist, the presenter guide's pictures and its check (`guide-shots.mjs`, `notes-check.mjs`). |
-| `packages/ai` | AI-assisted recording: GitHub Copilot through the presenter's own sign-in (or a deterministic stand-in for tests), plans in plain words, Record for me, the talk track from a recording, the coach ([docs/ai.md](docs/ai.md)). |
-| `packages/script` | Script to focus points: the script parsed, every screen indexed, the pluggable matcher (deterministic by default), the line-to-screen sheet and the cue sheet. |
-| `packages/editor` | The editor inside the replica: focus-point dots, wording and date changes, beat starts, undo. |
-| `packages/fixer` | The fidelity fixer: pluggable diagnosers and the per-demo patches. |
-| `packages/selftest` | End-to-end tests against `examples/fixture-app` (a local fake product). |
-| `skill/SKILL.md` | The "replicate a demo" skill for Copilot, driving the CLI (`scenecast install-skill`). |
-| `schema/bundle.v2.schema.json` | The manifest schema, generated from the Rust types (`scenecast schema`). |
-| `docs/` | [One-page guide](docs/guide.md), [presenter guide](docs/presenter.md), [CLI](docs/cli.md), [bundle format](docs/bundle-format.md), [architecture](docs/architecture.md), [engine flow format](docs/engine/flow-format.md), [checklist](docs/engine/checklist.md), [lessons](docs/engine/lessons.md). |
+| **0** | Back to the start |
+| **1** to **9** | Jump to a beat |
+| An app's letter | Switch to that app (Present lists them) |
+| **F**, **Shift+F** | Zoom to the next thing you talk about, or back one. **Esc** zooms out. |
+| **P** | Type the prompt you typed when you recorded (you press Enter) |
+| **N** | The screen's next step |
+| **G** | Open your guide |
 
-## Setup (macOS or Windows)
+With a clicker, **Page Down** in your guide moves the demo on, and **Page Up** goes back. If anything looks wrong,
+**⌥0** (**Ctrl+Alt+0**) puts everything back to the start.
 
-Presenters: install the app from the [latest release](https://github.com/jldeen/scenecast/releases/latest) (the
-[one-page guide](docs/guide.md) has the one-time "open anyway" step for each system). Everything below is for the CLI
-and for working on Scenecast.
+## Updates
 
-Rust (stable), Node 20 or later, and Google Chrome or Microsoft Edge.
+Scenecast checks for new versions by itself. When there is one, **Update to vX.Y.Z** shows at the bottom left. Click
+it: Scenecast installs it and restarts, and your demos stay as they are. It waits while you're recording or
+presenting.
 
-```bash
-git clone https://github.com/jldeen/scenecast && cd scenecast
-npm install                      # playwright-core, for capture and the checks (the replica itself needs nothing)
-cargo build --release -p scenecast-cli   # target/release/scenecast (scenecast.exe on Windows)
-```
+## Help
 
-`scenecast` finds the JS packages next to it (or set `SCENECAST_JS` to the `packages` folder) and runs them with
-`node` (or `SCENECAST_NODE`).
+- The guide's [when something's wrong](docs/guide.md#4--when-somethings-wrong) table covers the common problems.
+- In Scenecast, **Details → Copy diagnostics** gives you one block of text to paste when you ask for help.
+- [Open an issue](https://github.com/jldeen/scenecast/issues), or message Jessica with the demo's name and a
+  screenshot.
 
-## Make a replica
+## More
 
-```bash
-scenecast new ignite-demo2 --title "Ignite Demo 2" --app teams=https://teams.cloud.microsoft/ --app copilot=https://copilot.cloud.microsoft/
-cd ignite-demo2
-scenecast extension              # once: load Documents/Scenecast/Recorder Extension unpacked in Edge or Chrome (docs/recorder.md)
-scenecast preflight              # receiver, browser, recorder, each app's tab; fixes only what fails
-scenecast record start           # run the demo once; side states are captured on the way
-scenecast record stop
-scenecast build --from-raw       # data/ (scrubbed) and manifest.json (live-page scenes)
-scenecast serve --open           # an app window: Chrome on the Mac, Edge on Windows
-scenecast script script.md       # each line on its screen, its focus points, the line-to-screen and cue sheets
-scenecast notes && scenecast guide-shots   # the presenter guide from the same script (⌥G on the stage)
-scenecast edit                   # adjust in the replica: dots, wording and dates, beat starts (⌥⇧E toggles it)
-scenecast quick                  # after each change: only what it touched
-scenecast release --push         # once: the whole checklist, then commit and push
-```
+- [The presenter guide](docs/presenter.md): your laptop's window while you present
+- [Copilot in Scenecast](docs/ai.md): what it does for you, and what it sees
+- [All the docs](docs/README.md): the command line, how Scenecast works, building and releasing it
+- For AI agents working on this repository: [AGENTS.md](AGENTS.md)
 
-Presenter keys: ⌥ on the Mac; **Ctrl+Alt** on Windows (where browsers keep Alt for their menus). Modifier+0
-resets, modifier+1–9 selects a beat, modifier+an app's key switches apps, modifier+P types the scripted text,
-modifier+N advances, modifier+F / modifier+Shift+F moves through focus points, and modifier+G opens the presenter
-guide. Modifier+Shift+E turns the editor on
-and off (only where the replica is served for authoring; never with `present` or in an export).
-
-Full command reference: [docs/cli.md](docs/cli.md). For Copilot: `scenecast install-skill` installs the "replicate a
-demo" skill ([skill/SKILL.md](skill/SKILL.md)), which drives this CLI.
-
-## Development
-
-```bash
-cargo fmt --all
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-npm test                         # builds the binary, then the JS unit, capture and end-to-end tests (headless)
-```
-
-CI (`.github/workflows/ci.yml`) runs all of it on Ubuntu, macOS and Windows.
-A version tag (`git tag v0.3.0 && git push origin v0.3.0`) runs CI and, when it's green, publishes a GitHub Release
-with the macOS and Windows installers attached (the `release` job). `node scripts/guide-pdf.mjs` makes
-`docs/guide.pdf` from `docs/guide.md`.
-`.github/workflows/repeat.yml` runs `npm test` five times side by side on one OS, then the hover check and the
-checklist again on each run's demo (`gh workflow run repeat.yml -f os=windows-latest`): a check that passes one run
-and not the next is a bug.
+Scenecast grew out of Seth Juarez's `.scenecast` bundle format and CLI.

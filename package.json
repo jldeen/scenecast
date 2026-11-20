@@ -8,7 +8,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "test": "node packages/selftest/run.mjs",
-    "test:unit": "node --test packages/player/bundle-flow.test.mjs packages/player/launch.test.mjs packages/player/presenter-key.test.mjs packages/player/serve.test.mjs packages/checks/path.test.mjs packages/kit/compile/flow.test.mjs packages/kit/lib/preflight.test.mjs packages/kit/lib/profiles.test.mjs packages/fixer/patches.test.mjs packages/script/script.test.mjs packages/ai/ai.test.mjs packages/kit/lib/exit.test.mjs packages/kit/lib/demo.test.mjs apps/desktop/tests/errors.test.mjs",
+    "test:unit": "node --test packages/player/bundle-flow.test.mjs packages/player/launch.test.mjs packages/player/presenter-key.test.mjs packages/player/serve.test.mjs packages/checks/path.test.mjs packages/kit/compile/flow.test.mjs packages/kit/lib/preflight.test.mjs packages/kit/lib/profiles.test.mjs packages/fixer/patches.test.mjs packages/script/script.test.mjs packages/ai/ai.test.mjs packages/kit/lib/exit.test.mjs packages/kit/lib/demo.test.mjs packages/kit/lib/beats.test.mjs apps/desktop/tests/errors.test.mjs",
     "test:browsers": "node packages/selftest/extension-browsers.mjs",
     "test:capture": "node packages/selftest/capture-fixture.mjs",
     "test:e2e": "node packages/selftest/selftest.mjs",
