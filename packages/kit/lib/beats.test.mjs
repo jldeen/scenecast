@@ -10,7 +10,7 @@ const flow = {
   states: { 'chat-start': { app: 'chat' }, 'chat-01-typed': { app: 'chat' }, 'chat-02-answer': { app: 'chat' }, 'admin-start': { app: 'admin' }, 'admin-01-tools': { app: 'admin' } },
   path: [
     { app: 'chat', checkpoint: 'chat-start' },
-    { type: { sel: '[role=textbox]' }, text: 'Summarize the supplier delay on PO-450101', checkpoint: 'chat-01-typed' },
+    { type: { sel: '[role=textbox]' }, text: 'Summarize the supplier delay on PO-450101\u200B\u200C', checkpoint: 'chat-01-typed' },
     { enter: { sel: '[role=textbox]' }, checkpoint: 'chat-02-answer' },
     { app: 'admin', checkpoint: 'admin-start' },
     { click: { sel: 'a[aria-label="Tools"]' }, checkpoint: 'admin-01-tools' },
@@ -27,11 +27,11 @@ test('each beat has a plain name and says where to type and click', () => {
   const s = beatSteps(flow);
   assert.equal(s[1].title, 'Copilot: start');
   assert.deepEqual(s[1].do, ['Type `Summarize the supplier delay on PO-450101` (**⌥P** types it)', 'Press **Enter**: the answer streams in']);
-  assert.equal(s[2].title, 'Copilot: the answer to “Summarize the supplier delay on PO-450101”');
+  assert.equal(s[2].title, 'Copilot: after “Summarize the supplier delay on PO-450101”');
   assert.deepEqual(s[2].do, ['Switch to **Admin** (**⌥A**)']);
   assert.equal(s[3].title, 'Admin: start');
   assert.deepEqual(s[3].do, ['Click **Tools**']);
-  assert.equal(plainLabels(structuredClone(flow)).beats[2].label, '2 Copilot: the answer to “Summarize the supplier delay on PO-450101”');
+  assert.equal(plainLabels(structuredClone(flow)).beats[2].label, '2 Copilot: after “Summarize the supplier delay on PO-450101”');
 });
 
 test('the guide reads them as a script: one beat each, with its steps under Do', () => {

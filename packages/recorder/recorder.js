@@ -273,8 +273,11 @@ async function recHandle(e) {
   if (e.kind === 'esc') return recEsc(A, e);
   if (e.kind === 'drag') { REC.drags.push({ app: A.id, state: A.state, spec: e.spec && e.spec.m, dx: Math.round(e.x1 - e.x0), dy: Math.round(e.y1 - e.y0) }); return rlogr(`drag on "${e.spec && e.spec.desc}" by ${Math.round(e.x1 - e.x0)} px (a pane resize: add a drags rule)`); }
 }
+// Where the loop is, and since when (record status shows it: a loop that's stuck says where).
+const recAt = what => { REC.at = what; REC.atSince = Date.now(); };
 async function recLoop() {
   while (!REC.stop) {
+    recAt('waiting for your next step');
     try {
       // The start screens' side states first (and after a resume, the screens left without them).
       if (!REC.paused && REC.autoQueue.length) {
@@ -285,6 +288,7 @@ async function recLoop() {
       if (!REC.paused) {
         const evs = [];
         for (const A of REC.apps) for (const f of A.page.frames()) {
+          recAt(`reading ${A.id}'s events (${f.url().slice(0, 60)})`);
           // Through recEval: one frame that stops answering held the whole loop (Copilot, Nov 20: every Enter and click
           // after it was held back and never done, while status said not busy).
           const q = await recEval(A.page, f, 'window.__rkrec ? window.__rkrec.drain() : null').catch(() => undefined);
@@ -292,9 +296,9 @@ async function recLoop() {
           if (q && q.length) for (const e of q) evs.push({ ...e, A, f });
         }
         evs.sort((a, b) => a.t - b.t || a.seq - b.seq);
-        for (const e of evs) { if (REC.stop) break; REC.busyNow = true; try { await recHandle(e); REC.actions++; } catch (err) { rlogr('error: ' + String(err.stack || err).slice(0, 300)); } finally { REC.busyNow = false; } }
+        for (const e of evs) { if (REC.stop) break; REC.busyNow = true; recAt(`${e.kind} in ${e.A.id}`); try { await recHandle(e); REC.actions++; } catch (err) { rlogr('error: ' + String(err.stack || err).slice(0, 300)); } finally { REC.busyNow = false; } }
         if (evs.some(e => e.kind !== 'input')) recCheckpoint();
-        for (const A of REC.apps) if (A.typing && !A.typing.done && Date.now() - A.typing.at > REC.opts.typeIdleMs) await recTyped(A);
+        for (const A of REC.apps) if (A.typing && !A.typing.done && Date.now() - A.typing.at > REC.opts.typeIdleMs) { recAt(`capturing what was typed in ${A.id}`); await recTyped(A); }
       }
     } catch (err) { rlogr('loop: ' + String(err.message || err).slice(0, 200)); }
     await sleep(120);
@@ -429,7 +433,7 @@ OPS.recordAbort = async () => { if (!REC.on) return { error: 'not recording' }; 
 // Where the time went: the recorder's own work (side states swept, screens captured, making sure an action was done)
 // apart from the product's (its answers), in seconds.
 const recTiming = () => { const t = REC.time, r = x => Math.round(x / 100) / 10; return { recorderSecs: r(t.sweep + t.capture + t.confirm), productSecs: r(t.product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm) }; };
-OPS.recordStatus = async () => REC.on ? { recording: true, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
+OPS.recordStatus = async () => REC.on ? { recording: true, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
   REC.stop = true; await REC.loopP;
