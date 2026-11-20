@@ -19,8 +19,11 @@ const recApp = id => { const A = REC.apps.find(a => a.id === id); if (!A) throw 
 
 async function recFrameKey(p, f) { if (f === p.mainFrame()) return null; const keys = await frameKeys(p); return keys.get(f) || null; }
 const withFrame = (m, fk) => fk ? { frame: fk, ...m } : m;
-async function recInstall(p) { for (const f of p.frames()) await f.evaluate(RECX(REC.opts)).catch(() => {}); }
-async function recEach(p, fn, arg) { const out = []; for (const f of p.frames()) { const r = await f.evaluate(fn, arg).catch(() => undefined); if (r !== undefined) out.push([f, r]); } return out; }
+// The recorder's own small calls into each frame: a frame that doesn't answer in REC_FRAME_MS is left out (frameEval).
+const REC_FRAME_MS = 5000;
+const recEval = (p, f, fn, arg) => frameEval(p, f, fn, arg, REC_FRAME_MS);
+async function recInstall(p) { for (const f of p.frames()) await recEval(p, f, RECX(REC.opts)).catch(() => {}); }
+async function recEach(p, fn, arg) { const out = []; for (const f of p.frames()) { const r = await recEval(p, f, fn, arg).catch(() => undefined); if (r !== undefined) out.push([f, r]); } return out; }
 async function recSig(p) {
   const all = await recEach(p, () => window.__rkrec ? window.__rkrec.sig() : null);
   return all.filter(([, r]) => r).map(([f, r]) => (f === p.mainFrame() ? 'main' : 'frame') + '=' + r).sort().join(' ');
@@ -304,7 +307,7 @@ function recSeen(kind, key) { const m = REC.seen[kind] = REC.seen[kind] || {}; r
 //   drags   resize handles, once per kind of screen         zoom    once per kind of screen
 //   list    a list with more rows than it shows (all of them, last: it changes the page)
 // The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen.
-const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 240, hoverMax: 40, hoverMaxS: 120, clickMax: 25, clickMaxS: 120, chipWidths: [1366, 1100], ...(a || {}) }; };
+const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 60, chipWidths: [1366, 1100], ...(a || {}) }; };
 async function recAuto(A) {
   const o = recAutoOpts(), state = A.state, st = REC.states[state];
   if (!o || !st || st.typedOf || REC.autoDone.has(state)) return;
@@ -315,7 +318,11 @@ async function recAuto(A) {
   if (!f) return;
   const kinds = recSeen('kinds', A.id), newKind = !kinds.has(f.kind); kinds.add(f.kind);
   const run = async (kind, c = {}) => {
-    if (Date.now() - t0 > o.maxS * 1000) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return; }
+    // One budget for the whole screen (the presenter waits for it): each kind gets what's left, and zoom, which can't
+    // stop part way, only starts with zoomMinS left. On real apps a screen's sweep ran 9 to 13 minutes before this.
+    const left = o.maxS - (Date.now() - t0) / 1000;
+    if (left < 5 || (kind === 'zoom' && left < o.zoomMinS)) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return; }
+    if (kind === 'hovers' || kind === 'clicks') c = { ...c, maxS: Math.min(c.maxS || left, left) };
     REC.side = `${kind} on ${state}`;
     const t1 = Date.now(), s1 = SLEPT.ms;
     try {
@@ -394,8 +401,9 @@ OPS.recordStart = async c => {
     REC.sigs[a.id] = new Map();
   }
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
-  for (const A of REC.apps) { await A.page.bringToFront(); await recInstall(A.page); }
+  for (const A of REC.apps) { rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); }
   for (const A of REC.apps) {
+    rlogr(`start: ${A.id}: capturing its start screen`);
     await A.page.bringToFront();
     if (c.neutral) await A.page.mouse.move(c.neutral[0], c.neutral[1]);
     const sig = await recSettle(A.page, 800, 15000);

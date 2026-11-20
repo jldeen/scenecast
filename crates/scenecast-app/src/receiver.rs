@@ -43,8 +43,15 @@ struct Inner {
     port: Option<u16>,
     child: Option<Child>,
     restarts: u32,
+    /// Pings in a row it didn't answer.
+    misses: u32,
     error: Option<String>,
 }
+
+/// Checks in a row (2 s apart, 1.5 s each) a running receiver may miss before it's restarted. A receiver taking in a
+/// big snapshot can be slow to answer: restarting it then (one missed ping did, on a presenter's real tabs) dropped
+/// the recorder in the middle of a recording.
+const PATIENCE: u32 = 6;
 
 #[derive(Default)]
 pub struct ReceiverHost {
@@ -256,10 +263,16 @@ impl ReceiverHost {
         if g.dir.is_none() {
             return;
         }
-        let up = g.port.and_then(ping).is_some();
-        if up {
+        if g.port.and_then(ping).is_some() {
+            g.misses = 0;
             return;
         }
+        g.misses += 1;
+        let running = child_alive(&mut g.child) || g.port.is_some_and(listening);
+        if running && g.misses < PATIENCE {
+            return;
+        }
+        g.misses = 0;
         g.restarts += 1;
         g.error = self.start_locked(&mut g).err().map(|e| e.to_string());
     }
@@ -343,6 +356,25 @@ pub fn engine_for(dir: &Path) -> Result<scenecast_build::Engine, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slow_receiver_is_not_restarted_at_once() {
+        // Listening, but it doesn't answer (busy): the first checks leave it alone.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let host = ReceiverHost::default();
+        {
+            let mut g = host.inner.lock().unwrap();
+            g.dir = Some(std::env::temp_dir());
+            g.port = Some(port);
+        }
+        for _ in 0..2 {
+            host.keep_alive();
+        }
+        let g = host.inner.lock().unwrap();
+        assert_eq!((g.restarts, g.misses, g.port), (0, 2, Some(port)));
+        drop(l);
+    }
 
     #[test]
     fn nothing_listens_on_a_closed_port() {

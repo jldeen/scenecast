@@ -22,6 +22,13 @@ export const DEFAULTS = {
   zooms: [50, 67, 75, 90, 110, 125, 150, 175, 200],
 };
 
+// The demo's record options for the recorder. Demos made before 0.4.3 carry the template's old side-path budget
+// (auto.maxS 240 a screen, which real apps ran far past): 240 with only the template's keys means the defaults.
+export function recordOpts(cfg) {
+  const rec = { ...(cfg.record || {}) };
+  if (rec.auto && rec.auto.maxS === 240 && Object.keys(rec.auto).sort().join() === 'clickMax,hoverMax,maxS') { const { maxS, ...auto } = rec.auto; rec.auto = auto; }
+  return rec;
+}
 export function arg(args, k, d) { const i = args.indexOf(k); return i >= 0 && i + 1 < args.length ? args[i + 1] : d; }
 
 export function findDemoDir(args = process.argv.slice(2)) {

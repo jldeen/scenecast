@@ -12,12 +12,13 @@ const step = (name, cmd, args) => {
   if (r.status !== 0) { console.log(`${name} failed`); process.exit(r.status || 1); }
 };
 if (!process.env.SCENECAST_BIN) step('cargo build', 'cargo', ['build', '-q', '-p', 'scenecast-cli']);
-step('unit', process.execPath, ['--test', 'packages/player/bundle-flow.test.mjs', 'packages/player/launch.test.mjs', 'packages/player/presenter-key.test.mjs', 'packages/player/serve.test.mjs', 'packages/checks/path.test.mjs', 'packages/kit/compile/flow.test.mjs', 'packages/kit/lib/preflight.test.mjs', 'packages/fixer/patches.test.mjs', 'packages/script/script.test.mjs', 'packages/ai/ai.test.mjs', 'packages/kit/lib/exit.test.mjs']);
+step('unit', process.execPath, ['--test', 'packages/player/bundle-flow.test.mjs', 'packages/player/launch.test.mjs', 'packages/player/presenter-key.test.mjs', 'packages/player/serve.test.mjs', 'packages/checks/path.test.mjs', 'packages/kit/compile/flow.test.mjs', 'packages/kit/lib/preflight.test.mjs', 'packages/fixer/patches.test.mjs', 'packages/script/script.test.mjs', 'packages/ai/ai.test.mjs', 'packages/kit/lib/exit.test.mjs', 'packages/kit/lib/demo.test.mjs']);
 step('asset build', process.execPath, ['packages/selftest/asset-build.mjs']);
 step('mixed fallback', process.execPath, ['packages/selftest/mixed-fallback.mjs']);
 step('browsers', process.execPath, ['packages/selftest/extension-browsers.mjs']);
 step('capture', process.execPath, ['packages/selftest/capture-fixture.mjs']);
 step('two recorders', process.execPath, ['packages/selftest/two-recorders.mjs']);
+step('real tabs', process.execPath, ['packages/selftest/real-tabs.mjs']);
 step('selftest', process.execPath, ['packages/selftest/selftest.mjs']);
 step('fidelity loop', process.execPath, ['packages/selftest/fidelity-loop.mjs']);
 step('ai modes', process.execPath, ['packages/selftest/ai-modes.mjs']);

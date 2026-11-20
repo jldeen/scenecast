@@ -14,7 +14,7 @@
     "typeIdleMs": 1200,
     "streamMinMs": 1500,
     "streamMaxMs": 10000,
-    "auto": { "maxS": 240, "hoverMax": 40, "clickMax": 25 }
+    "auto": { "hoverMax": 40, "clickMax": 25 }
   },
   "zooms": [50, 67, 75, 90, 110, 125, 150, 175, 200]
 }

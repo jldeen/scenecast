@@ -44,9 +44,10 @@ A demo folder holds:
   presence or a typing indicator: not counted as the page changing).
 - `record.auto`: the side states captured on every new screen as the demo is recorded. On by default; `false` (or
   `record start --no-auto`) turns it off. Fields, all optional: `hovers`, `clicks`, `groups`, `chips`, `lists`,
-  `drags`, `zoom` (each `true`/`false`), `maxS` (seconds per screen before the rest is skipped and named in the
-  report, 240), `hoverMax` / `hoverMaxS` (at most this many hover candidates, this long, per screen: 40, 120),
-  `clickMax` / `clickMaxS` (25, 120), `chipWidths` (window widths tried for "+N": `[1366, 1100]`), `zooms`
+  `drags`, `zoom` (each `true`/`false`), `maxS` (seconds per screen, all kinds together, before the rest is skipped and
+  named in the report, 90), `hoverMax` / `hoverMaxS` (at most this many hover candidates, this long, per screen: 40,
+  45), `clickMax` / `clickMaxS` (25, 45), `zoomMinS` (zoom only starts with this many seconds of the screen's budget
+  left: 60), `chipWidths` (window widths tried for "+N": `[1366, 1100]`), `zooms`
   (default: `zooms` below). Hovers and clicks are captured once per control; zoom, chips and drags once per kind
   of screen (its landmarks and layout); groups on every answer; lists on every screen with a scrolling list.
 - `zooms`: what zoom captures and `fidelity` checks.

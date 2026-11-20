@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { parseStep, formatStep, risk, stepCount } from './plan.mjs';
 import { compactOutline } from './model.mjs';
 import { findItem, composer, searchBox } from './find.mjs';
+import { recordOpts } from '../kit/lib/demo.mjs';
 import { rx, observe, settled, presenter, appTab, aiDir, sleep } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 
@@ -26,7 +27,7 @@ export async function recordForMe({ demo, model, settings = {}, emit = () => {} 
   if (status0.recording) throw new Error('the recorder is already recording: stop that recording first');
 
   emit({ event: 'stage', name: 'start', label: 'Starting the recording' });
-  await cmd('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: demo.cfg.record, zooms: demo.cfg.zooms, first: app }, 300);
+  await cmd('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: recordOpts(demo.cfg), zooms: demo.cfg.zooms, first: app }, 300);
   let status = await settled(cmd, { on: s => emit({ event: 'record', status: s }) });
   const wait = async maxS => { status = await settled(cmd, { maxS, on: s => emit({ event: 'record', status: s }) }); return status; };
   let lastField = null;
