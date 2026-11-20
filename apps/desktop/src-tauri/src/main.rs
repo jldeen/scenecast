@@ -1785,6 +1785,9 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building the Scenecast app");
     app.run(move |app, event| {
+        // Windows and Linux get opened files as arguments (instance_listener), not as an event.
+        #[cfg(not(target_os = "macos"))]
+        let _ = app;
         // macOS: a double-clicked .scenecast, at launch or while running.
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Opened { urls } = &event {
