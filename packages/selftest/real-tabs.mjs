@@ -30,7 +30,7 @@ const web = createServer((q, s) => {
   if (q.url.startsWith('/stuck')) return s.end('<p>frame</p><script>setTimeout(() => { for (;;) {} }, 6000)</script>');
   const who = new URL(q.url, 'http://x').searchParams.get('who') || 'app';
   const blanks = q.url.startsWith('/blanks') ? '<iframe></iframe>'.repeat(16) : '';
-  s.end(`<title>${who}</title><h1>${who}</h1><button>Open</button>${q.url.startsWith('/busy') ? `<iframe src="http://localhost:${WEB}/stuck"></iframe>` : ''}${blanks}`);
+  s.end(`<title>${who}</title><h1>${who}</h1><button onclick="document.querySelector('h1').textContent = '${who} opened'">Open</button>${q.url.startsWith('/busy') ? `<iframe src="http://localhost:${WEB}/stuck"></iframe>` : ''}${blanks}`);
 }).listen(WEB, '127.0.0.1');
 const rx = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), raw, String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
 let ctx;
@@ -57,6 +57,15 @@ try {
   const secs = (Date.now() - t0) / 1000;
   check('record starts though a frame never answers and another tab has 16 empty frames', r.ok && r.value && r.value.recording, JSON.stringify(r));
   check('and waits on neither (under 30 s)', secs < 30, `${secs.toFixed(1)} s`);
+  // The busy tab's frame never answers now: a click in another app is still recorded (the loop that reads each frame's
+  // events waited on it for ever before).
+  await sleep(1500);
+  await send({ op: 'front', tab: busy }, 30, RX);
+  const box = await send({ op: 'find', tab: busy, text: 'Open' }, 30, RX);
+  await send({ op: 'click', tab: busy, x: box.value.x, y: box.value.y }, 30, RX);
+  let stepped = false;
+  for (let i = 0; i < 40 && !stepped; i++) { await sleep(500); const st = await send({ op: 'recordStatus' }, 30, RX); stepped = st.ok && (st.value.log || []).some(l => /click "Open"/.test(l)); }
+  check('a click is recorded though a frame never answers', stepped, JSON.stringify((await send({ op: 'recordStatus' }, 30, RX)).value?.log?.slice(-4)));
   const title = await send({ op: 'eval', tab: match, expr: 'document.title' }, 30, RX);
   check('a marked tab the recorder hasn\'t attached to yet is the one recorded', title.ok && title.value === 'mine', JSON.stringify(title));
   const log = readFileSync(join(raw, 'receiver.log'), 'utf8');

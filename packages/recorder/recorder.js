@@ -285,8 +285,10 @@ async function recLoop() {
       if (!REC.paused) {
         const evs = [];
         for (const A of REC.apps) for (const f of A.page.frames()) {
-          const q = await f.evaluate('window.__rkrec ? window.__rkrec.drain() : null').catch(() => undefined);
-          if (q === null) { await f.evaluate(RECX(REC.opts)).catch(() => {}); continue; }
+          // Through recEval: one frame that stops answering held the whole loop (Copilot, Nov 20: every Enter and click
+          // after it was held back and never done, while status said not busy).
+          const q = await recEval(A.page, f, 'window.__rkrec ? window.__rkrec.drain() : null').catch(() => undefined);
+          if (q === null) { await recEval(A.page, f, RECX(REC.opts)).catch(() => {}); continue; }
           if (q && q.length) for (const e of q) evs.push({ ...e, A, f });
         }
         evs.sort((a, b) => a.t - b.t || a.seq - b.seq);
@@ -323,7 +325,7 @@ async function recAuto(A) {
     // stop part way, only starts with zoomMinS left. On real apps a screen's sweep ran 9 to 13 minutes before this.
     const left = o.maxS - (Date.now() - t0) / 1000;
     if (left < 5 || (kind === 'zoom' && left < o.zoomMinS)) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return; }
-    if (kind === 'hovers' || kind === 'clicks') c = { ...c, maxS: Math.min(c.maxS || left, left) };
+    if (kind === 'hovers' || kind === 'clicks' || kind === 'zoom') c = { ...c, maxS: Math.min(c.maxS || left, left) };
     REC.side = `${kind} on ${state}`;
     const t1 = Date.now(), s1 = SLEPT.ms;
     try {
@@ -624,10 +626,12 @@ async function recSide(A, c) {
     if (c.kind === 'zoom') {
       const base = await p.evaluate(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
       const s = await ctx.newCDPSession(p);
-      const out = [];
+      const out = [], t0 = Date.now();
       try {
         for (const z of c.zooms || [110, 125, 150, 175, 200]) {
           if (z === 100) continue;
+          // Each zoom is a full snapshot (half a minute on a heavy Power BI page): stop at the screen's budget.
+          if (c.maxS && Date.now() - t0 > c.maxS * 1000) { REC.notes.push(`${state}: zoom stopped at the screen's time budget before ${z}%; record side zoom on it if it matters`); break; }
           const k = z / 100;
           const vw = Math.round(base.w / k), vh = Math.round(base.h / k);
           await s.send('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: base.dpr * k, mobile: false });

@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-app"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "scenecast-build",
  "scenecast-core",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-build"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "base64",
  "regex",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-cli"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-core"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "schemars",
  "serde",
