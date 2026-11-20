@@ -5,6 +5,7 @@
 import { morphDocument, morphNode, morphChildren, pathOf, atPath, wasInserted } from './morph.js';
 import { presenterKey } from './presenter-key.js';
 import { flowFromBundle, applyFlowOverrides } from './bundle-flow.js';
+import { applyTheme, applyPlatform } from './variants.js';
 
 const baseUrl = new URL('.', location.href);
 const local = path => new URL(path.replace(/^\//, ''), baseUrl).href;
@@ -119,6 +120,20 @@ async function afterFonts(app, redo) {
     }
   } finally { fontWaits.delete(k); }
 }
+// Variants after the fact (d1.variant): the whole recording in another theme or on the other platform, applied to
+// every page as it loads or morphs. variant: { theme: { <app>: pack }, platform: 'windows'|'macos',
+// platformPacks: { <app>: pack }, frame: { <app>: 'app' } }.
+let variant = null;
+function appOfDoc(doc) { let w = doc.defaultView; try { while (w && w.parent && w.parent !== window) w = w.parent; } catch (e) {} return Object.values(apps).find(a => a.iframe.contentWindow === w); }
+function applyVariant(doc) {
+  if (!variant || !doc || !doc.body) return;
+  const app = appOfDoc(doc); if (!app) return;
+  try {
+    const t = variant.theme && variant.theme[app.id];
+    if (t) applyTheme(doc, t);
+    if (variant.platform) applyPlatform(doc, variant.platform, { pack: variant.platformPacks && variant.platformPacks[app.id], frame: variant.frame && variant.frame[app.id], fonts: variant.fonts !== false });
+  } catch (e) { note(e); }
+}
 function scrolled(doc) { const out = []; for (const el of doc.querySelectorAll('*')) if (el.scrollTop || el.scrollLeft) out.push(el); return out; }
 function post(doc, scroll, before) {
   for (const el of doc.querySelectorAll('[data-d1-scroll]')) {
@@ -136,6 +151,7 @@ function post(doc, scroll, before) {
   for (const el of doc.querySelectorAll('[data-d1-popover]')) { try { if (!el.matches(':popover-open')) el.showPopover(); } catch (e) {} }
   for (const el of doc.querySelectorAll('dialog[data-d1-modal]')) { try { if (!el.matches(':modal')) { el.removeAttribute('open'); el.showModal(); } } catch (e) {} }
   for (const el of doc.querySelectorAll('input[data-d1-indeterminate]')) el.indeterminate = true;
+  applyVariant(doc);
 }
 
 // ---- matching ------------------------------------------------------------------------------------------------
@@ -1510,6 +1526,8 @@ window.d1 = {
   get filling() { return Object.values(apps).some(a => a.filling); },
   errors,
   jump, activate, next: () => next(apps[active]), fill: () => fill(apps[active]),
+  // The whole recording in another theme or on the other platform (null: as captured). Reloads each app where it is.
+  variant: async v => { variant = v || null; busy++; try { for (const id of order) await loadApp(apps[id], apps[id].state); activate(active); } finally { busy--; } },
   go: async (id, st) => { const my = ++gen; busy++; try { await loadApp(apps[id], st); if (gen === my) activate(id); } finally { busy--; } },
   // Morphs to a state the way a transition does (panes, sections and sizes she set stay), unlike go.
   morph: async (id, st) => { busy++; try { await go(apps[id], st, { scroll: 'target' }); } finally { busy--; } },

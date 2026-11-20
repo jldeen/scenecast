@@ -16,6 +16,7 @@ import { loadDemo, arg, KIT_VERSION } from '../kit/lib/demo.mjs';
 import { compileEdits, applyEdits } from '../kit/lib/edits.mjs';
 import { buildInputs, buildKey } from '../kit/lib/buildkey.mjs';
 import { assetSubstitute, fontFaceCss, mergeRows, refResolver } from '../fixer/patches.mjs';
+import { pinSchemeText } from '../player/app/variants.js';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
@@ -110,10 +111,13 @@ function cssFile(url, depth = 0) {
   const text = readFileSync(join(RAW, 'blobs', e.file), 'utf8');
   return rewriteCss(text, url, depth);
 }
-// The system theme the screen being processed was captured with: prefers-color-scheme in fetched CSS is answered as
-// it was then (as the serializer does for the page's own CSS), so the replica keeps the theme it was recorded in.
+// prefers-color-scheme, kept by the capture with both branches, is answered here for the theme this build is in: the
+// one the screen was captured with (meta.colorScheme), or demo.json's variant.theme. Answered with queries that still
+// say which branch they were (variants.js), so playback can switch theme without a rebuild.
 let SCHEME = null;
-const pinScheme = t => SCHEME ? t.replace(/\(\s*prefers-color-scheme\s*:\s*(dark|light)\s*\)/gi, (m, v) => (v.toLowerCase() === SCHEME) ? '(min-width: 0px)' : '(max-width: -1px)') : t;
+const BUILD_SCHEME = ((demo.cfg.variant || {}).theme || '').toLowerCase() || null;
+const pinScheme = t => SCHEME ? pinSchemeText(t, SCHEME) : t;
+const pinStyles = h => SCHEME ? h.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, a, css, b) => pinScheme(a) + pinScheme(css) + b).replace(/(<link\b[^>]*\smedia=")([^"]*)"/gi, (m, a, v) => a + pinScheme(v) + '"') : h;
 // url(...) in fetched CSS, resolved against the stylesheet's own URL.
 function rewriteCss(text, base, depth = 0) {
   return pinScheme(text)
@@ -168,7 +172,7 @@ const HOOK = HOOK_SPEC ? (await import(pathToFileURL(join(demo.dir, HOOK_SPEC)).
 const edit = (s, ctx = '', opt) => { s = applyEdits(s, EDITS); return HOOK ? HOOK.html(s, ctx, opt) : s; };
 
 function rewriteDoc(doc, snapId, docsByKey) {
-  if (process.env.SCENECAST_RUST_ASSETS === '1') return edit(rustAsset('document', snapId, JSON.stringify({ doc, keys: Object.keys(docsByKey) })), snapId);
+  if (process.env.SCENECAST_RUST_ASSETS === '1') return edit(pinStyles(rustAsset('document', snapId, JSON.stringify({ doc, keys: Object.keys(docsByKey) }))), snapId);
   let h = doc.html;
   h = h.replace(/<style([^>]*) data-d1-fetch="d1res:\/\/(\d+)"([^>]*)><\/style>/g, (m, a, n, b) => {
     const url = doc.urls[+n]; const t = cssFile(url);
@@ -180,7 +184,7 @@ function rewriteDoc(doc, snapId, docsByKey) {
   h = h.replace(/data-d1-canvas="(canvas\d+)"/g, (m, k) => `data-d1-canvas="${doc.inline[k] ? fromData(doc.inline[k]) : ''}"`);
   h = h.replace(/(<iframe\b[^>]*?)\s(?:sandbox|csp)="[^"]*"/g, '$1').replace(/(<iframe\b[^>]*?)\s(?:sandbox|csp)="[^"]*"/g, '$1');
   h = h.replace(/d1frame:\/\/(f\d+)/g, (m, k) => docsByKey[k] ? `/snaps/${snapId}.${k}.html` : 'about:blank');
-  return edit(scrub(quiet(dropMissingFonts(h))), snapId);
+  return edit(pinStyles(scrub(quiet(dropMissingFonts(h)))), snapId);
 }
 // Declarations Chrome warns about in the console (deprecated values the real apps still ship).
 // focusgroup (an experimental attribute): Chrome warns whenever a morph changes or removes it.
@@ -221,7 +225,7 @@ for (const f of readdirSync(snapsDir)) {
   }
   for (const d of s.docs) d.urls = subUrls(d.urls);
   const byKey = Object.fromEntries(s.docs.map(d => [d.key, d]));
-  SCHEME = (byKey.main && byKey.main.meta.colorScheme) || null;
+  SCHEME = BUILD_SCHEME || (byKey.main && byKey.main.meta.colorScheme) || null;
   for (const d of s.docs) {
     const name = d.key === 'main' ? `${id}.html` : `${id}.${d.key}.html`;
     writeFileSync(join(OUT, 'snaps', name), rewriteDoc(d, id, byKey));
