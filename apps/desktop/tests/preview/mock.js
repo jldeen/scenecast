@@ -16,7 +16,7 @@
     { id: 'iq', url: 'https://daily.iq.microsoft.com/', key: 'i' },
     { id: 'admin', url: 'https://admin.cloud.microsoft/', key: 'a' },
   ];
-  const stage = { empty: 'new', library: 'checked', record: 'new', copilot: 'new', recording: 'new', recorded: 'recorded', review: 'built', present: 'checked', share: 'checked' }[SC] || 'new';
+  const stage = { empty: 'new', library: 'checked', record: 'new', copilot: 'new', recording: 'new', recorded: 'recorded', review: 'built', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
   const after = s => ['recorded', 'built', 'checked'].indexOf(stage) >= ['recorded', 'built', 'checked'].indexOf(s);
   const status = {
     recorded: after('recorded'), recordedAt: after('recorded') ? now - 3600e3 : null, screens: after('recorded') ? 22 : 0,
@@ -73,6 +73,18 @@
     file_url: () => 'about:blank', logs_dir: () => `${home}/../Library/Application Support/Scenecast/logs`,
     reveal: () => null, open_url: () => null, open_file: () => null, set_browser: () => null, set_profile: () => null,
     set_slot: ({ slot }) => { demo.slot = slot; return null; }, script_save: () => 'script.md', create_demo: () => demo,
+    displays: () => ({ displays: [
+      { name: OS === 'macos' ? 'Built-in Retina Display' : 'Laptop screen', x: 0, y: 0, width: 1512, height: 982, work: { x: 0, y: 38, width: 1512, height: 944 }, scale: 2, here: true, primary: true },
+      ...(q.get('screens') === '1' ? [] : [{ name: 'LG HDR 4K', x: 1512, y: -300, width: 1920, height: 1080, work: { x: 1512, y: -300, width: 1920, height: 1080 }, scale: 2, here: false, primary: false }]) ] }),
+    rundown: () => {
+      const rehearsed = SC === 'present' || SC === 'presenting' || SC === 'share';
+      const took = [80, 130, 140, 112];
+      const beats = [['The late shipment lands in Teams', 0, 75, 'teams'], ['Ask Copilot about PO-450101', 75, 210, 'copilot'], ['Who can approve the expedite', 210, 345, 'iq'], ['IT turns it on for everyone', 345, 450, 'admin']]
+        .map(([title, start, end, app], i) => ({ n: i + 1, title, start, end, app, key: `${OS === 'macos' ? '⌥' : 'Ctrl+Alt+'}${i + 1}`, took: rehearsed ? took[i] : null }));
+      return { source: 'guide', slot: 480, planned: 450, beats, rehearsal: rehearsed ? { at: now - 3 * 3600e3, total: 462 } : null };
+    },
+    present_start: ({ rehearse }) => ({ url: 'http://127.0.0.1:47811/', opened: true, guide: 'http://127.0.0.1:47811/presenter.html', rehearse }),
+    present_stop: () => null, present_guide: () => 'http://127.0.0.1:47811/presenter.html',
     preflight: async ({ id }) => {
       for (const item of preflightItems) { job(id, 'preflight', { type: 'preflight', item }); await wait(60); }
       return { ready: true, secs: 0.8, items: preflightItems };
@@ -105,9 +117,10 @@
     if (SC === 'new') { document.querySelector('#new-demo')?.click(); await wait(200); return ready(); }
     document.querySelector(`[data-open="${demo.id}"]`)?.click();
     await wait(200);
-    const gate = { review: 'review', present: 'present', share: 'share' }[SC];
+    const gate = { review: 'review', present: 'present', presenting: 'present', share: 'share' }[SC];
     if (gate) { document.querySelector(`[data-gate="${gate}"]`)?.click(); await wait(200); }
     if (q.get('details') === '1') document.querySelector('[data-action="details"]')?.click();
+    if (SC === 'presenting') { await wait(300); document.querySelector('[data-action="present-start"]')?.click(); await wait(300); }
     if (['record', 'copilot', 'recording', 'record-error'].includes(SC)) document.querySelector('[data-action="preflight"]')?.click();
     if (SC === 'recording' || SC === 'record-error') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
     document.documentElement.dataset.previewReady = '1';

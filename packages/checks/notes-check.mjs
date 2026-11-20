@@ -150,14 +150,28 @@ try {
     const st = await win.evaluate(() => ({ index: window.presenter.index, live: window.presenter.live, banner: !document.querySelector('[data-pn="preview"]').hidden, text: document.querySelector('[data-pn="preview-text"]').textContent }));
     if (st.index !== Math.min(2, LAST) || st.live !== 0) browse.push(`Next twice: the window shows ${st.index}, live ${st.live}`);
     if (!st.banner || !/Previewing/.test(st.text)) browse.push('no "Previewing" banner');
-    await win.click('[data-pn="prev"]'); await win.keyboard.press('ArrowRight'); await win.keyboard.press('PageDown');
+    await win.click('[data-pn="prev"]'); await win.keyboard.press('ArrowRight'); await win.keyboard.press('Space');
     await win.keyboard.press(MOD + 'Digit1'); await win.click(`[data-goto="${LAST}"]`); await sleep(300);
     if ((await win.evaluate(() => window.presenter.index)) !== LAST) browse.push('a circle doesn\'t show its beat');
     if ((await where()) !== before || (await stage.evaluate(() => window.d1.presenter.beat)) !== 0) browse.push('browsing moved the stage');
     await win.keyboard.press('Escape'); await sleep(200);
     if ((await win.evaluate(() => window.presenter.index)) !== 0) browse.push('Esc didn\'t come back to the stage\'s beat');
   }
-  add('window-browses', !browse.length, browse.length ? browse.join('\n') : 'Back, Next, →, Page Down, the circles and ⌥1 browse; the stage stays; Esc comes back');
+  add('window-browses', !browse.length, browse.length ? browse.join('\n') : 'Back, Next, →, Space, the circles and ⌥1 browse; the stage stays; Esc comes back');
+  // A clicker in the window: Page Down moves the stage on (the screen's next step, else the next beat) and the window
+  // follows; back on Start, Reset stops the timer again.
+  const clicker = [];
+  {
+    const b0 = await stage.evaluate(() => window.d1.presenter.beat), at0 = await where();
+    await win.bringToFront(); await win.keyboard.press('PageDown'); await sleep(500); await idle();
+    const moved = await stage.waitForFunction(([b, at]) => { const s = window.d1.state; return !window.d1.presenter.pending && !s.busy && (window.d1.presenter.beat !== b || `${s.active}:${s.states[s.active]}` !== at); }, [b0, at0], { timeout: 15000 }).then(() => true, () => false);
+    if (!moved) clicker.push('Page Down in the window didn\'t move the stage');
+    else if (!(await synced(await stage.evaluate(() => window.d1.presenter.beat)))) clicker.push('the window didn\'t follow the stage after Page Down');
+    await stage.bringToFront(); await stage.keyboard.press(MOD + 'Digit0'); await idle();
+    if (!(await synced(0))) clicker.push('⌥0 after Page Down: the window didn\'t come back to Start');
+    await win.click('[data-pn="reset-timer"]');
+  }
+  add('window-clicker', !clicker.length, clicker.length ? clicker.join('\n') : 'a clicker\'s Page Down in the window moves the stage on; the window follows');
   // "Go to this beat on stage", every beat; the timer.
   const go = [], timer = [];
   if ((await win.evaluate(() => [window.presenter.running, Math.floor(window.presenter.elapsed)])).join() !== 'false,0') timer.push('not stopped at 0:00 on Start');

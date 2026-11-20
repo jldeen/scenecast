@@ -646,8 +646,7 @@ function headFor(d) {
     const n = f.total - f.within;
     return { title: `${plural(n, 'screen')} ${n === 1 ? 'needs' : 'need'} a look`, sub: `${f.within} of ${f.total} match the real product.`, side: slot };
   }
-  if (g === 'present') return s.built ? { title: 'Ready for the stage', sub: 'The stage opens full screen; your guide opens on this screen.', side: slot }
-    : { title: 'Not ready for the stage yet', sub: 'Record and review the demo first.', side: slot };
+  if (g === 'present') return presentHead(d);
   return { title: 'Send it to another presenter', sub: 'They get the replica and your guide. Not your recording, not your sign-ins.' };
 }
 function renderHead() {
@@ -1271,45 +1270,111 @@ PANELS.edit = (panel, d) => {
 
 // ---- Present -----------------------------------------------------------------------------------------------------
 
+// The screens: the guide on this window's screen (the laptop), the stage on the biggest other one (the projector);
+// Swap turns that round. One screen: the stage full screen on it, the guide where it always opened.
+function placement(disp) {
+  const ds = disp?.displays || [];
+  if (ds.length < 2) return { one: ds[0] || null };
+  const here = ds.find(x => x.here) || ds.find(x => x.primary) || ds[0];
+  const other = ds.filter(x => x !== here).sort((a, b) => b.width * b.height - a.width * a.height)[0];
+  const [stage, guide] = localStorage.getItem('scenecast.swap') === '1' ? [here, other] : [other, here];
+  const box = x => ({ x: x.x, y: x.y, width: x.width, height: x.height });
+  return { stage, guide, stagePlace: box(stage), guidePlace: box(guide.work || guide) };
+}
+const secsWords = n => n < 60 ? `${n} s` : `${clock(n)}`;
+// Where the demo stands for the stage, and what's left: the screens match, the guide is made, it's rehearsed.
+function stageReady(d, p) {
+  const f = d.status.fidelity, g = p?.guide, r = p?.rd?.rehearsal;
+  return { matches: !!f?.pass, guide: !!g && !g.missingPictures, rehearsed: !!r, all: !!f?.pass && !!g && !g.missingPictures && !!r };
+}
+function presentHead(d) {
+  const p = J(d.id).pres, rd = p?.rd, r = rd?.rehearsal, slot = d.slot || rd?.slot;
+  const side = r ? `<div class="slot" data-test="last-rehearsal"><b>${clock(r.total)}</b>last rehearsal</div>`
+    : slot ? `<div class="slot" data-test="slot"><b>${clock(slot)}</b>your slot</div>` : '';
+  if (!d.status.built) return { title: 'Not ready for the stage yet', sub: 'Record and review the demo first.', side };
+  const ok = stageReady(d, p);
+  const when = r ? `rehearsed ${ago(r.at)} in ${clock(r.total)}${slot ? ` of your ${clock(slot)} slot` : ''}` : '';
+  if (ok.all) return { title: 'Ready for the stage', sub: `Checked, ${esc(when)}.`, side };
+  const left = [!ok.matches && 'make every screen match', !ok.guide && 'make your guide', !ok.rehearsed && 'rehearse it once'].filter(Boolean);
+  return { title: 'Almost ready for the stage', sub: `${esc(listWords(left).replace(/^./, c => c.toUpperCase()))}, and it\u2019s ready.`, side };
+}
+function readyRows(d, p) {
+  const f = d.status.fidelity, g = p.guide, rd = p.rd, r = rd?.rehearsal, slot = d.slot || rd?.slot;
+  const row = (state, title, small, right, test) => `<div class="rd-row" data-test="${test}" data-status="${state}">${mk(state === 'ok' ? 'ok' : state === 'hold' ? 'hold' : 'todo', state === 'ok' ? 'Ready' : 'Not yet')}
+    <div class="t"><b>${title}</b>${small ? `<small>${small}</small>` : ''}</div><span></span><span></span>${right}</div>`;
+  const ready = '<span class="state ok">Ready</span>';
+  const rows = [];
+  rows.push(f?.pass ? row('ok', 'Every screen matches the real product', `${f.total} of ${f.total}`, ready, 'ready-matches')
+    : f ? row('hold', `${plural(f.total - f.within, 'screen')} ${f.total - f.within === 1 ? 'doesn\u2019t' : 'don\u2019t'} match yet`, `${f.within} of ${f.total} match`, '<button class="alink" data-goto="fidelity">Fix on Review</button>', 'ready-matches')
+      : row('todo', 'Not compared with the real product yet', 'Review compares each screen with what you recorded.', '<button class="alink" data-goto="fidelity">Compare on Review</button>', 'ready-matches'));
+  rows.push(g && !g.missingPictures ? row('ok', 'Presenter guide', 'Talk track, clicks and pictures for each beat', ready, 'ready-guide')
+    : g ? row('hold', 'Presenter guide', `${plural(g.missingPictures, 'picture')} not made yet`, '<button class="alink" data-goto="script">Make them</button>', 'ready-guide')
+      : row('todo', 'No presenter guide yet', 'Add your talk track on Review, and Scenecast makes it.', '<button class="alink" data-goto="script">Add the talk track</button>', 'ready-guide'));
+  const pl = placement(p.disp);
+  rows.push(pl.stage ? row('ok', 'Projector found', `${esc(pl.stage.name)}: the stage goes there. Your guide opens on ${esc(pl.guide.name)}.`, S.servers.present[d.id] ? ready : '<button class="alink" data-action="swap-displays" data-test="swap-displays">Swap them</button>', 'ready-screens')
+    : row('todo', 'One screen', 'Connect the projector and Scenecast puts the stage there. On one screen, the stage opens full screen.', '<span class="state idle">Optional</span>', 'ready-screens'));
+  const over = r && slot ? r.total - slot : null;
+  rows.push(r ? row('ok', 'Rehearsed', `${esc(ago(r.at))}, in ${clock(r.total)}${slot ? ` of your ${clock(slot)} slot` : ''}`,
+    over > 0 ? `<span class="state warn">${secsWords(over)} over</span>` : ready, 'ready-rehearsed')
+    : row('todo', 'Not rehearsed yet', 'Rehearse runs it with the clock going, and keeps each beat\u2019s time.', '<span class="state idle">Not yet</span>', 'ready-rehearsed'));
+  return rows.join('');
+}
+function showRows(d, p) {
+  const beats = p.rd?.beats || [];
+  if (!beats.length) return `<div class="rd-row" data-test="show-empty">${mk('todo')}<div class="t"><b>Your talk track sets the beats</b><small>Add it on Review: each ## heading is a beat, with its time.</small></div><span></span><span></span>
+    <button class="alink" data-goto="script">Add the talk track</button></div>`;
+  return beats.map(b => {
+    const planned = b.start != null && b.end != null ? b.end - b.start : null;
+    const diff = b.took != null && planned != null ? b.took - planned : null;
+    const state = b.took == null ? '<span class="state idle">Not rehearsed</span>'
+      : diff == null || diff <= 2 ? '<span class="state ok">On time</span>' : `<span class="state warn">Ran ${secsWords(diff)} long</span>`;
+    const app = d.apps.find(a => a.id === b.app);
+    return `<div class="rd-row" data-test="beat-${b.n}">${mk('todo')}
+      <div class="t"><b>Beat ${b.n} · ${esc(b.title)}</b>${app ? `<small>${esc(appLabel(app))}</small>` : ''}</div>
+      <span>${b.key ? `<kbd>${esc(b.key)}</kbd>` : ''}</span>
+      <span class="time">${planned != null ? `${clock(b.start)}–${clock(b.end)}` : ''}${b.took != null ? `<small>took ${clock(b.took)}</small>` : ''}</span>${state}</div>`;
+  }).join('');
+}
 PANELS.present = async (panel, d) => {
   const url = S.servers.present[d.id];
   if (!d.status.built) {
-    panel.innerHTML = '<div class="card"><h2>Present</h2><p class="muted">Build the demo first.</p></div>';
+    panel.innerHTML = `<section class="card rundown"><div class="rd-head"><div class="grow"><h2>Run of show</h2><small>Record the demo and review it first: then it\u2019s ready to rehearse.</small></div>
+      <div class="next"><button class="btn primary big" data-gate="${d.status.recorded ? 'review' : 'record'}">${d.status.recorded ? 'Review it' : 'Record it'} ${I.arrow}</button></div></div></section>`;
     return;
   }
-  const keys = url ? null : await invoke('key_reference', { id: d.id }).catch(() => null);
-  const guide = await invoke('guide_status', { id: d.id }).catch(() => null);
+  const [rd, guide, keys, disp] = await Promise.all([invoke('rundown', { id: d.id }).catch(() => null), invoke('guide_status', { id: d.id }).catch(() => null),
+    url ? null : invoke('key_reference', { id: d.id }).catch(() => null), invoke('displays').catch(() => null)]);
+  const p = J(d.id).pres = { rd, guide, keys, disp };
+  renderHead();
+  const guideUrl = J(d.id).guideUrl, rehearsing = !!J(d.id).rehearsing;
   const gk = isMac() ? '⌥G' : 'Ctrl+Alt+G';
-  const f = d.status.fidelity;
-  const guideUrl = J(d.id).guideUrl;
-  panel.innerHTML = `${url ? `<div class="card"><div class="notice ok" data-test="presenting" data-url="${esc(url)}"><div><strong>Presenting.</strong>
-      ${S.info.noOpen ? 'Open it:' : 'The replica is full screen in its own window; this one is out of the way.'}
-      <div class="path"><code>${esc(url)}</code><button class="btn small" data-open-url="${esc(url)}">Open again</button></div></div></div>
-      ${guide ? `<div class="notice info" data-test="guide-open" data-url="${esc(guideUrl || '')}"><div><strong>Presenter guide.</strong> ${guideUrl ? 'It opened on this screen, next to the stage. Its dot reads <strong>In sync</strong> once the stage is up.' : 'Open it on this screen; it follows the stage.'}
-        ${S.info.noOpen && guideUrl ? `<div class="path"><code>${esc(guideUrl)}</code></div>` : ''}</div></div>` : ''}
-      <div class="row"><button class="btn primary" data-action="present-stop" data-test="present-stop">Stop presenting</button>
-        ${guide ? `<button class="btn" data-action="present-guide" data-test="present-guide">Open presenter guide</button>` : ''}</div></div>`
-    : `<div class="card"><div class="row"><div style="flex:1"><h2>Before you start</h2>
-      <p class="muted">The keys, on one page. This page isn't on screen while you present: the replica opens full screen, and Scenecast steps aside.</p></div>
-      <button class="btn primary" data-action="present-start" data-test="present-start">Start presenting</button></div>
-      ${guide ? `<label class="choice" style="margin-top:10px"><input type="checkbox" id="with-guide" data-test="with-guide" checked> Open the presenter guide on this screen too</label>` : ''}
-      ${f && !f.pass ? `<div class="notice warn">Fidelity: ${f.within} of ${f.total} states match the real product. Fix them under Fidelity first, if you can.</div>` : ''}
-      ${d.status.focusPoints ? '' : '<div class="notice info">No focus points yet: run your script under Script, or add them under Edit.</div>'}</div>`}
-    <div class="card" data-test="guide-card"><h2>Presenter guide</h2>
-      ${guide ? `<p>A second window for your laptop screen while the stage is on the projector: your talk track word for word, the clicks, the watch-outs, the time, what's on screen and what's next. It follows the stage as you go.</p>
-        <p class="muted small" data-test="guide-status" data-beats="${guide.beats}" data-pictures="${guide.pictures}">From <span class="mono">${esc(guide.script)}</span>: ${plural(guide.beats, 'beat')}, ${plural(guide.pictures, 'picture')}${guide.missingPictures ? ` (${guide.missingPictures} not made yet: find the focus points again under Script)` : ''}.</p>
-        <table class="data" aria-label="Presenter guide keys"><tbody>
-          <tr><td><kbd>${esc(gk)}</kbd> on the stage</td><td>Opens the guide (if it isn't open).</td></tr>
-          <tr><td><kbd>→</kbd> <kbd>Page Down</kbd>, <kbd>←</kbd> <kbd>Page Up</kbd> in the guide</td><td>Read the next or previous beat. The stage stays put.</td></tr>
-          <tr><td><kbd>Esc</kbd> in the guide</td><td>Back to the beat the stage is on.</td></tr>
-          <tr><td><strong>Go to this beat on stage</strong></td><td>Moves the stage to the beat you're reading.</td></tr>
-          <tr><td><strong>Reset</strong></td><td>The timer back to this beat's start time in the script.</td></tr></tbody></table>
-        <p class="muted small" style="margin-top:10px">If it opens on the projector instead, drag it to your laptop screen.</p>`
-        : '<p class="muted" data-test="guide-none">Your script becomes a presenter guide: a window for your laptop screen with the talk track, clicks and time, that follows the stage. Add your script under Script and press <strong>Find the focus points</strong>.</p>'}</div>
-    ${keys && !url ? `<div class="card" data-test="key-reference"><h2>${esc(keys.title)}: presenter keys</h2>
-      <p class="muted" style="margin-bottom:14px">Hold <kbd>${esc(keys.modifier)}</kbd> with the key.</p>
-      <div class="keys">${keys.groups.map(g => `<div><h3>${esc(g.title)}</h3><table>${g.rows.map(r => `<tr><td><kbd>${esc(r.keys)}</kbd></td><td>${esc(r.what)}</td></tr>`).join('')}</table></div>`).join('')}</div>
-      <p class="muted small" style="margin-top:14px">${esc(keys.exit)}</p></div>` : ''}`;
+  const head = url ? `<div class="rd-head"><div class="grow"><h2>${rehearsing ? 'Rehearsing' : 'Presenting'}</h2>
+      <small data-test="presenting" data-url="${esc(url)}">${S.info.noOpen ? `Open it: <code>${esc(url)}</code>` : `The stage is full screen${placement(disp).stage ? ` on ${esc(placement(disp).stage.name)}` : ''}. Scenecast is out of the way.`}</small></div>
+      <div class="next">${guide ? '<button class="btn" data-action="present-guide" data-test="present-guide">Open the guide again</button>' : ''}
+        <button class="btn primary big" data-action="present-stop" data-test="present-stop">${rehearsing ? 'Stop rehearsing' : 'Stop presenting'}</button></div></div>
+      ${guide ? `<div class="notice info" style="margin:12px 20px" data-test="guide-open" data-url="${esc(guideUrl || '')}"><div>${guideUrl ? 'Your guide opened on your laptop screen. Its dot reads <strong>In sync</strong> once the stage is up.' : `Open your guide with <kbd>${esc(gk)}</kbd> on the stage.`}
+        ${S.info.noOpen && guideUrl ? `<div class="path"><code>${esc(guideUrl)}</code></div>` : ''}</div></div>` : ''}`
+    : `<div class="rd-head"><div class="grow"><h2>Run of show</h2><small>The stage opens full screen on the projector; your guide on this screen.</small></div>
+      <div class="next"><button class="btn" data-action="rehearse" data-test="rehearse">${I.play} Rehearse</button>
+        <button class="btn primary big" data-action="present-start" data-test="present-start">Present ${I.arrow}</button></div></div>`;
+  panel.innerHTML = `<section class="card rundown" aria-label="Run of show">${head}
+      <div class="rd-cols" aria-hidden="true"><span></span><span>Item</span><span>Key</span><span>Time</span><span>State</span></div>
+      <div class="sec">Pre-show</div>${readyRows(d, p)}
+      <div class="sec">Show ${p.rd?.planned ? `<span>${clock(p.rd.planned)} planned${d.slot ? `, your slot is ${clock(d.slot)}` : ''}</span>` : ''}</div>${showRows(d, p)}
+    </section>
+    ${url ? '' : `<div class="grid2" style="margin-top:18px">
+      ${keys ? `<section class="card" data-test="key-reference"><h2>Keys on stage</h2><p class="muted" style="margin-bottom:12px">Your presenter keys: hold <kbd>${esc(keys.modifier)}</kbd> with the key.</p>
+        <div class="keys">${keys.groups.map(g => `<div><h3>${esc(g.title)}</h3><table>${g.rows.map(r => `<tr><td><kbd>${esc(r.keys)}</kbd></td><td>${esc(r.what)}</td></tr>`).join('')}</table></div>`).join('')}</div>
+        <p class="muted small" style="margin-top:12px">${esc(keys.exit)}</p></section>` : ''}
+      <section class="card" data-test="guide-card"><h2>Your guide</h2>
+      ${guide ? `<p class="muted small" data-test="guide-status" data-beats="${guide.beats}" data-pictures="${guide.pictures}">A window for your laptop screen: your talk track, the clicks and the time, following the stage. ${plural(guide.beats, 'beat')}, from ${esc(guide.script)}.</p>
+        <label class="choice" style="margin:10px 0"><input type="checkbox" id="with-guide" data-test="with-guide" checked> Open it when I present</label>
+        <table class="data" aria-label="Guide keys"><tbody>
+          <tr><td><kbd>Page Down</kbd> <kbd>Page Up</kbd></td><td>A clicker: the stage moves on, or back.</td></tr>
+          <tr><td><kbd>→</kbd> <kbd>←</kbd></td><td>Read ahead or back. The stage stays put.</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Back to the beat the stage is on.</td></tr>
+          <tr><td><kbd>${esc(gk)}</kbd> on the stage</td><td>Opens the guide if it isn\u2019t open.</td></tr></tbody></table>`
+        : '<p class="muted" data-test="guide-none">Your talk track becomes your guide: a window for your laptop screen with what to say, the clicks and the time. Add it on Review.</p>'}</section></div>`}`;
 };
 
 // ---- Export ------------------------------------------------------------------------------------------------------
@@ -1383,6 +1448,17 @@ async function quickChecks(id = S.id) {
 async function exportDemo(kind, anyway) {
   J(S.id).exportKind = kind;
   return step('export', 'export_demo', { kind, dest: $('#export-dest').value, anyway });
+}
+// Present or Rehearse: the stage on the projector and the guide on this screen when there are two.
+async function presentNow(rehearse) {
+  const id = S.id, guide = $('#with-guide')?.checked ?? true;
+  const pl = placement(J(id).pres?.disp);
+  const r = await call('present_start', { id, guide, rehearse, stage: pl.stagePlace || null, guidePlace: pl.guidePlace || null });
+  S.servers.present[id] = r.url;
+  J(id).guideUrl = r.guide || null;
+  J(id).rehearsing = rehearse;
+  announce(`${rehearse ? 'Rehearsing' : 'Presenting'}${r.guide ? ', with your guide' : ''}`);
+  rerender();
 }
 async function refreshServers() {
   S.servers = await invoke('servers').catch(() => S.servers);
@@ -1515,20 +1591,23 @@ const ACTIONS = {
     // What the edits touched gets its checks now, and only that.
     if ((J(id).edit?.saved || []).some(x => !x.error)) await quickChecks();
   },
-  'present-start': async () => {
-    const guide = $('#with-guide')?.checked ?? true;
-    const r = await call('present_start', { id: S.id, guide });
-    S.servers.present[S.id] = r.url;
-    J(S.id).guideUrl = r.guide || null;
-    announce(r.guide ? 'Presenting, with the presenter guide' : 'Presenting');
-    rerender();
-  },
+  'present-start': () => presentNow(false),
+  rehearse: () => presentNow(true),
+  'swap-displays': () => { localStorage.setItem('scenecast.swap', localStorage.getItem('scenecast.swap') === '1' ? '0' : '1'); renderPanel(); },
   'present-guide': async () => {
     J(S.id).guideUrl = await call('present_guide', { id: S.id });
     toast('Opened the presenter guide on this screen');
     rerender();
   },
-  'present-stop': async () => { await call('present_stop', { id: S.id }); await refreshServers(); rerender(); },
+  'present-stop': async () => {
+    const id = S.id, was = J(id).rehearsing;
+    await call('present_stop', { id });
+    J(id).rehearsing = false;
+    await refreshServers();
+    await refreshDemo(id);
+    rerender();
+    if (was) announce('Rehearsal kept: each beat\u2019s time is in the run of show');
+  },
   'export-pick': async () => {
     const p = await call('pick_folder');
     if (p) { J(S.id).dest = p; $('#export-dest').value = p; }

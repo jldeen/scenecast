@@ -267,7 +267,8 @@ function keyList(flow) {
   k.push(['**⌥← ⌥→**', 'Previous or next app.'], ['**⌥P**', 'Types the scripted text into the field you\'re in. Press Enter yourself.'], ['**⌥N**', 'The screen\'s next scripted step.']);
   if ((flow.focus || []).length) k.push(['**⌥F**', 'Zooms to the next focus point and draws its mark. **⌥⇧F** goes back one.'], ['**Esc**, **↑ ↓**', 'While zoomed: Esc zooms out; ↑/↓ or the wheel zoom a step.']);
   k.push(['**⌥G**', 'This window (the presenter guide). Put it on the laptop screen. While it\'s open, → also steps through beats with no screen of their own.']);
-  k.push(['**→ Page Down**, **← Page Up**', 'In this window: read the next or previous beat; the stage stays put. **⌥0–⌥9** show that beat. **Esc** comes back to the stage\'s beat. **Go to this beat on stage** moves the stage there.']);
+  k.push(['**Page Down**, **Page Up**', 'In this window (a clicker): move the stage on or back: the screen\'s next step, then the next beat.'],
+    ['**→ ←**, **Space**', 'In this window: read the next or previous beat; the stage stays put. **⌥0–⌥9** show that beat. **Esc** comes back to the stage\'s beat. **Go to this beat on stage** moves the stage there.']);
   return k;
 }
 

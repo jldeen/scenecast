@@ -1487,6 +1487,8 @@ const moduleApi = {
   // What another module exposed (the editor uses the focus engine).
   get: name => exposed[name],
   jump: n => jump(n), activate: id => activate(id),
+  // The screen's next scripted step (⌥N), and whether it has one (the presenter guide's clicker).
+  next: () => next(apps[active]), hasNext: () => { const a = apps[active]; return !!(a && a.state && (S[a.state] || {}).next); },
   // The editor's changes: forget fetched captures (the server serves them with the new edits), and load each app's
   // screen again as it is now.
   invalidate: () => { texts.clear(); parsedSnaps.clear(); },

@@ -11,15 +11,17 @@ guide and the replica to each other. Everything runs offline, from the replica's
 
 ## Presenting with it
 
-In the app:
+In the app, **Present** shows the run of show: before the show (every screen matches, the guide is made, the
+projector is found, it's rehearsed) and the show itself (each beat, its key on stage, its time from the script, and
+how long it took when you rehearsed).
 
-1. **Present** → **Start presenting**, with **Open the presenter guide on this screen too** ticked. The stage opens full
-   screen in Edge or Chrome; the guide opens on the screen the app is on (the laptop's); the app steps aside.
-2. If the stage came up on the laptop, move it: on the Mac, ⌃⌘F to leave full screen, drag it to the projector, ⌃⌘F
-   again; on Windows, Win+Shift+→ moves it to the next screen. If the guide came up on the projector, drag it to the
-   laptop.
+1. **Rehearse** runs it as you will on stage, with the clock going: each beat's time is kept
+   (`.out/rehearsal.json`) and shows next to the plan ("took 1:20 · Ran 5 s long").
+2. **Present**: the stage opens full screen on the projector and the guide on the laptop's screen (the one the app is
+   on); the app steps aside. **Swap them** if Scenecast has the screens the wrong way round. With one screen, the stage
+   opens full screen on it.
 3. **⌥0** (**Ctrl+Alt+0**) on the stage. The guide's dot says **In sync**.
-4. Lost the guide? **Open presenter guide** in the app, or **⌥G** (**Ctrl+Alt+G**) on the stage.
+4. Lost the guide? **Open the guide again** in the app, or **⌥G** (**Ctrl+Alt+G**) on the stage.
 
 From the command line: `scenecast present`, then **⌥G** on the stage, and drag the guide to the laptop screen.
 
@@ -56,12 +58,19 @@ On the stage:
 | **→** or a clicker's **Page Down** | **→** or **Page Down** | While the guide is open, on a screen where the next beat has no screen of its own (a title slide, a closing line): steps the guide to that beat. The stage stays. With no guide open, → does what it always did. |
 | **←** or **Page Up** | **←** or **Page Up** | The same, back. |
 
-In the guide (these only **browse**; the stage stays put):
+In the guide, a clicker moves the stage:
 
 | Mac | Windows | What |
 |---|---|---|
-| **→ Page Down Space**, **Next** | **→ Page Down Space**, **Next** | Read the next beat. |
-| **← Page Up**, **Back** | **← Page Up**, **Back** | Read the beat before. |
+| **Page Down** (a clicker's forward) | **Page Down** | Moves the stage on: a beat with no screen of its own that starts here, else the screen's next scripted step (⌥N), else the next beat. The guide follows. |
+| **Page Up** (a clicker's back) | **Page Up** | Back to the start of this beat, or from there to the beat before. |
+
+The rest only **browse**; the stage stays put:
+
+| Mac | Windows | What |
+|---|---|---|
+| **→ Space**, **Next** | **→ Space**, **Next** | Read the next beat. |
+| **←**, **Back** | **←**, **Back** | Read the beat before. |
 | **⌥0 … ⌥9**, a beat circle | **Ctrl+Alt+0 … 9**, a beat circle | Read that beat. |
 | **Esc**, **Back to live** | **Esc**, **Back to live** | Back to the stage's beat. |
 | **Go to this beat on stage** | **Go to this beat on stage** | Moves the stage to the start of the beat you're reading, the way its beat key does. |

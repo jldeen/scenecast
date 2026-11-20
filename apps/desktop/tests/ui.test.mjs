@@ -422,6 +422,22 @@ try {
   await stageBrowser.close();
   await click('present-stop');
   await waitFor('stopped', () => exists('present-start'), 30000);
+  // Rehearse: the stage keeps each beat's time, and the run of show shows them next to the plan.
+  await click('rehearse');
+  const rehUrl = await waitFor('rehearsing', () => attr('presenting', 'data-url'), 120000);
+  check('Rehearse serves the stage for a rehearsal', /rehearse=1/.test(rehUrl), rehUrl);
+  {
+    const ctx2 = await viewer.newContext({ viewport: { width: 1600, height: 900 } });
+    const st = await ctx2.newPage();
+    await st.goto(rehUrl);
+    await st.waitForFunction(() => window.d1 && window.d1.state.active, null, { timeout: 60000 });
+    for (const k of [1, 2]) { await st.keyboard.press(`Control+Alt+Digit${k}`); await st.evaluate(() => window.d1.idle()); await sleep(1500); }
+    await ctx2.close();
+  }
+  await click('present-stop');
+  await waitFor('the rehearsal in the run of show', async () => (await attr('ready-rehearsed', 'data-status')) === 'ok', 30000).catch(() => null);
+  check('the run of show: rehearsed, with each beat\'s time', (await attr('ready-rehearsed', 'data-status')) === 'ok' && /took \d+:\d\d/.test(await text('beat-1')), await text('beat-1').catch(e => e.message));
+  await shot('11d-rehearsed');
   lap('present');
 
   // ---- 9 · Export (Share) --------------------------------------------------------------------------------------

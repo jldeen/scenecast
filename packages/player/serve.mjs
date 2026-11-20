@@ -1,15 +1,17 @@
 // Replica server. No dependencies, no network: it serves the player, bundle, captured pages and assets on localhost.
-//   node packages/player/serve.mjs --demo <dir> [--port 4620] [--open [--fullscreen]] [--pace N] [--release]
+//   node packages/player/serve.mjs --demo <dir> [--port 4620] [--open [--fullscreen] [--position x,y --size w,h]]
+//     [--pace N] [--release] [--rehearse]
 // --open opens it as an app window (no tabs or address bar; launch.mjs): Chrome on the Mac (⌃⌘F for full screen),
-// Edge on Windows (F11), or demo.json chrome.browser, on chrome.profile. REPLICA_NO_OPEN=1 serves without opening
-// a window (checks while her window is in use).
+// Edge on Windows (F11), or demo.json chrome.browser, on chrome.profile; --position and --size put it on a given
+// screen (the projector). REPLICA_NO_OPEN=1 serves without opening a window (checks while her window is in use).
+// --rehearse: the stage reports each beat it reaches (POST /__replica/rehearsal), kept in .out/rehearsal.json.
 //
 // Tweaks show on reload, without a build: when recording.json, flow.overrides.mjs or demo.json changes, the flow is
 // compiled again (and flow.json written, for the next build); text edits the last build hasn't baked in (data/build.json) are applied to
 // each page, frame and hover as it's served. What only a build can do is listed at /__replica/status and in the log.
 // --release serves the bundle and data exactly as built.
 import { createServer } from 'node:http';
-import { createReadStream, existsSync, statSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { createReadStream, existsSync, statSync, readFileSync, readdirSync, realpathSync, mkdirSync } from 'node:fs';
 import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp } from './launch.mjs';
@@ -28,6 +30,10 @@ const demo = loadDemo(args);
 const PORT = +arg(args, '--port', 0) || demo.port;
 // --pace N opens the replica at N seconds per streamed answer (the bundle's pace otherwise).
 const PACE = +arg(args, '--pace', 0);
+const pair = name => { const v = String(arg(args, name, '')).split(',').map(Number); return v.length === 2 && v.every(Number.isFinite) ? v : undefined; };
+const REHEARSE = args.includes('--rehearse');
+const rehearsal = { at: Date.now(), events: [], end: null, live: true };
+const REHEARSAL_FILE = join(demo.dir, '.out', 'rehearsal.json');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.bin': 'application/octet-stream' };
 const EDITOR = join(dirname(fileURLToPath(import.meta.url)), '..', 'editor', 'app');
 const MAP = [['/app/', APP], ['/editor/', EDITOR], ['/snaps/', join(demo.data, 'snaps')], ['/streams/', join(demo.data, 'streams')], ['/assets/', join(demo.data, 'assets')]];
@@ -221,6 +227,18 @@ createServer(async (req, res) => {
     return res.end(JSON.stringify({ release: RELEASE, error: live.error, needsBuild: live.needsBuild, pendingEdits: live.pending.map(e => e.what), compiledAt: live.at }));
   }
   if (path.startsWith('/__replica/editor')) return editorApi(req, res, path);
+  // While rehearsing: the stage's beat as it changes ({ beat, t }), and when it closes ({ end }).
+  if (path === '/__replica/rehearsal' && req.method === 'POST' && REHEARSE) {
+    let body = '';
+    for await (const c of req) { body += c; if (body.length > 4096) break; }
+    try {
+      const m = JSON.parse(body);
+      if (Number.isInteger(m.beat) && Number.isFinite(m.t)) rehearsal.events.push({ beat: m.beat, t: Math.round(m.t) });
+      if (Number.isFinite(m.end)) { rehearsal.end = Math.round(m.end); rehearsal.live = false; }
+      writeJsonAtomic(REHEARSAL_FILE, rehearsal);
+    } catch (e) { /* not a rehearsal message */ }
+    res.writeHead(204); return res.end();
+  }
   const f = resolve(path);
   if (path.startsWith('/snaps/') || path.startsWith('/streams/')) await refresh();
   if (!f || !existsSync(f) || !statSync(f).isFile()) {
@@ -233,9 +251,11 @@ createServer(async (req, res) => {
   if (body !== null) return res.end(body);
   createReadStream(f).pipe(res);
 }).on('error', e => { console.error(`replica: ${e.code === 'EADDRINUSE' ? `port ${PORT} is in use` : e.message}`); process.exit(1); }).listen(PORT, '127.0.0.1', () => {
-  const url = `http://127.0.0.1:${PORT}/${PACE > 0 ? `?pace=${PACE}` : ''}`;
+  const query = [PACE > 0 ? `pace=${PACE}` : '', REHEARSE ? 'rehearse=1' : ''].filter(Boolean).join('&');
+  const url = `http://127.0.0.1:${PORT}/${query ? `?${query}` : ''}`;
+  if (REHEARSE) { mkdirSync(dirname(REHEARSAL_FILE), { recursive: true }); writeJsonAtomic(REHEARSAL_FILE, rehearsal); }
   console.log(`${demo.cfg.title || demo.name} replica: ${url}${RELEASE ? ' (release: as built)' : ''}`);
   refresh();
   if (EDITING && args.includes('--edit')) console.log('@edit ' + JSON.stringify({ event: 'ready', url: url + (url.includes('?') ? '&' : '?') + 'edit=1' }));
-  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) openApp(args.includes('--edit') ? url + (url.includes('?') ? '&' : '?') + 'edit=1' : url, { ...demo.cfg.chrome, fullscreen: args.includes('--fullscreen') });
+  if (args.includes('--open') && !process.env.REPLICA_NO_OPEN) openApp(args.includes('--edit') ? url + (url.includes('?') ? '&' : '?') + 'edit=1' : url, { ...demo.cfg.chrome, fullscreen: args.includes('--fullscreen'), position: pair('--position'), size: pair('--size') });
 });

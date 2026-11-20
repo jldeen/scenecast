@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 scenecast-build.workspace = true
 scenecast-core.workspace = true
+regex = "1"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

@@ -74,8 +74,8 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
   r = await run('notes', '--check');
   const walkSecs = Math.round((Date.now() - t1) / 1000);
   let rep = JSON.parse(readFileSync(join(DEMO, '.out', 'notes-check.json'), 'utf8'));
-  const ids = ['script', 'focus-beats', 'stage', 'pictures', 'window-opens', 'window-content', 'window-follows', 'window-browses', 'window-goes', 'timer', 'steps', 'errors'];
-  check('presenter walk: ⌥G opens the guide; it follows, browses, goes, steps, times; script, guide and replica agree', r.code === 0 && rep.pass && ids.every(id => (rep.items.find(i => i.id === id) || {}).status === 'pass') && /over \d+ beats?/.test((rep.items.find(i => i.id === 'steps') || {}).detail), r.out);
+  const ids = ['script', 'focus-beats', 'stage', 'pictures', 'window-opens', 'window-content', 'window-follows', 'window-browses', 'window-clicker', 'window-goes', 'timer', 'steps', 'errors'];
+  check('presenter walk: ⌥G opens the guide; it follows, browses, a clicker\'s Page Down moves the stage, goes, steps, times; script, guide and replica agree', r.code === 0 && rep.pass && ids.every(id => (rep.items.find(i => i.id === id) || {}).status === 'pass') && /over \d+ beats?/.test((rep.items.find(i => i.id === 'steps') || {}).detail), r.out);
   // In Edge too, where it's installed (the macOS and Windows runners): on Windows, its real Ctrl+Alt keys.
   if (process.platform === 'win32' || process.platform === 'darwin') {
     r = await run('notes', '--check', { REPLICA_CHROME_CHANNEL: 'msedge' });

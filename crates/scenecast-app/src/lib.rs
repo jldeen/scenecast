@@ -14,6 +14,7 @@
 //! - [`receiver`]: the receiver the recorder extension talks to, kept running for the demo that's open.
 //! - [`servers`]: the replica served for the editor or for presenting.
 //! - [`keys`]: the presenter's one-page key reference.
+//! - [`rundown`]: the run of show: beats, keys, planned and rehearsed times, the slot.
 //! - [`export`]: a plain folder or a zip for another presenter.
 //! - [`files`]: what the window may show from disk (reports, pictures), on the app's own protocol.
 
@@ -27,6 +28,7 @@ pub mod keys;
 pub mod library;
 pub mod receiver;
 pub mod record;
+pub mod rundown;
 pub mod script;
 pub mod servers;
 

@@ -1108,12 +1108,68 @@ async fn present_guide(state: State<'_, Shared>, app: AppHandle, id: String) -> 
 
 /// Serves the replica for presenting and opens it full screen, with the presenter guide on this window's screen when
 /// `guide` and the demo has one; this window steps out of the way.
+/// The screens this computer has, in the points browsers use: each one's bounds and work area, which one this window
+/// is on (the laptop's, where the guide goes) and the primary one.
+#[tauri::command]
+fn displays(app: AppHandle) -> Res<Value> {
+    let monitors = app
+        .available_monitors()
+        .map_err(|e| AppError::Invalid(format!("couldn't list the screens: {e}")))?;
+    let here = app
+        .get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten());
+    let primary = app.primary_monitor().ok().flatten();
+    let same = |a: &tauri::Monitor, b: &Option<tauri::Monitor>| {
+        b.as_ref()
+            .is_some_and(|b| a.name() == b.name() && a.position() == b.position())
+    };
+    let pts = |v: f64, scale: f64| (v / scale).round();
+    let list: Vec<Value> = monitors
+        .iter()
+        .map(|m| {
+            let s = m.scale_factor();
+            let (p, z, w) = (m.position(), m.size(), m.work_area());
+            json!({
+                "name": m.name().cloned().unwrap_or_else(|| "Screen".into()),
+                "x": pts(p.x as f64, s), "y": pts(p.y as f64, s),
+                "width": pts(z.width as f64, s), "height": pts(z.height as f64, s),
+                "work": {
+                    "x": pts(w.position.x as f64, s), "y": pts(w.position.y as f64, s),
+                    "width": pts(w.size.width as f64, s), "height": pts(w.size.height as f64, s),
+                },
+                "scale": s,
+                "here": same(m, &here),
+                "primary": same(m, &primary),
+            })
+        })
+        .collect();
+    Ok(json!({ "displays": list }))
+}
+
+/// The run of show: beats, their keys on this OS, planned and rehearsed times, the slot.
+#[tauri::command]
+async fn rundown(state: State<'_, Shared>, id: String) -> Res<scenecast_app::rundown::Rundown> {
+    let state = state.inner().clone();
+    blocking(move || {
+        Ok(scenecast_app::rundown::read(
+            &state.library.dir(&id)?,
+            scenecast_app::keys::this_os(),
+        ))
+    })
+    .await
+}
+
+/// Present (or Rehearse: each beat's time is kept): the stage full screen on `stage` (the projector) when it's
+/// given, and the guide on `guide_place` (else the screen this window is on).
 #[tauri::command]
 async fn present_start(
     state: State<'_, Shared>,
     app: AppHandle,
     id: String,
     guide: Option<bool>,
+    stage: Option<scenecast_app::guide::Place>,
+    guide_place: Option<scenecast_app::guide::Place>,
+    rehearse: Option<bool>,
 ) -> Res<Value> {
     let state = state.inner().clone();
     blocking(move || {
@@ -1124,7 +1180,8 @@ async fn present_start(
             ));
         }
         stop_servers(&state, &id);
-        let mut session = PresentSession::start(&dir, true)?;
+        let rehearse = rehearse.unwrap_or(false);
+        let mut session = PresentSession::start_at(&dir, true, stage, rehearse)?;
         let guide_url = if guide.unwrap_or(true) && scenecast_app::guide::status(&dir).is_some() {
             // The browser the stage just opened in gets a moment to start: the guide must open in that same browser.
             if session.opened {
@@ -1133,12 +1190,12 @@ async fn present_start(
             Some(scenecast_app::guide::open(
                 &dir,
                 &session.url,
-                laptop_screen(&app),
+                guide_place.or_else(|| laptop_screen(&app)),
             )?)
         } else {
             None
         };
-        let out = json!({ "url": session.url, "opened": session.opened, "guide": guide_url });
+        let out = json!({ "url": session.url, "opened": session.opened, "guide": guide_url, "rehearse": rehearse });
         let updates = session.updates();
         std::thread::spawn(move || for _ in updates {});
         if session.opened
@@ -1162,6 +1219,7 @@ async fn present_stop(state: State<'_, Shared>, app: AppHandle, id: String) -> R
     blocking(move || {
         if let Some(mut s) = state.presents.lock().expect("presents lock").remove(&id) {
             s.stop()?;
+            scenecast_app::rundown::finish(&state.library.dir(&id)?);
         }
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.unminimize();
@@ -1561,6 +1619,8 @@ fn main() {
             browser_profiles,
             set_profile,
             set_slot,
+            displays,
+            rundown,
             record_start,
             record_status,
             record_stop,

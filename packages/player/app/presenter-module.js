@@ -1,7 +1,7 @@
 // The presenter guide (/presenter.html, packages/player/presenter/): ⌥G opens it (Ctrl+Alt+G on Windows). It shows the
 // script beat the stage is on; its Back, Next and circles only browse, and its "Go to this beat on stage" moves the
 // stage. They talk over a BroadcastChannel on the replica's own origin (notes.channel, `scenecast-presenter:<demo>`):
-//   window → stage  { t: 'hello' } (every second), { t: 'goto', beat }
+//   window → stage  { t: 'hello' } (every second), { t: 'goto', beat }, { t: 'next' } / { t: 'prev' } (a clicker)
 //   stage → window  { t: 'state', beat, app, state } (on every change, and in reply to each hello)
 // beat is the script's: 0 is Start (⌥0), 1…N the beats, N+1 the End.
 //
@@ -12,6 +12,13 @@
 // A beat with no screen of its own (a title slide, a closing line) shares the screen before it. While the window is
 // open, → (or a clicker's Page Down) on that screen steps the window there, and ← (Page Up) steps back; the screen
 // stays. With no window open, → does what it always did.
+//
+// A clicker's Page Down in the window moves the stage on ({ t: 'next' }): a beat with no screen of its own that starts
+// here, else the screen's next scripted step (⌥N), else the next beat's start. Page Up ({ t: 'prev' }) goes back to the
+// start of this beat, or from there to the one before.
+//
+// Rehearsing (?rehearse=1, the app's Rehearse): each beat the stage reaches is posted to the server with its time, and
+// the end when the window closes, for the run of show's "took" times.
 import { presenterKey } from './presenter-key.js';
 
 export default async function presenterModule(api) {
@@ -26,6 +33,10 @@ export default async function presenterModule(api) {
   const screens = notes ? notes.stage.screens : {};
   const rules = notes ? (notes.stage.rules || []).map(([app, re, list]) => [app, new RegExp(re), list]) : [];
   const S = { beat: 0, key: '', pending: false, heard: 0, sent: '', moves: 0 };
+  const REHEARSE = new URLSearchParams(location.search).get('rehearse') === '1';
+  let posted = null;
+  const rehearsal = body => fetch('/__replica/rehearsal', { method: 'POST', body: JSON.stringify(body), keepalive: true }).catch(() => {});
+  if (REHEARSE) addEventListener('pagehide', () => navigator.sendBeacon('/__replica/rehearsal', JSON.stringify({ end: Date.now() })));
   const beatsOf = (app, state) => { for (const [a, re, list] of rules) if (a === app && re.test(state || '')) return list; return screens[`${app}:${state}`] || null; };
   const pick = (prev, allowed) => {
     if (!allowed || !allowed.length || allowed.includes(prev)) return prev;
@@ -37,6 +48,7 @@ export default async function presenterModule(api) {
   const open = () => Date.now() - S.heard < 2500;
   const send = force => {
     const cur = api.current(); if (!cur) return;
+    if (REHEARSE && S.beat !== posted) { posted = S.beat; rehearsal({ beat: S.beat, t: Date.now() }); }
     const msg = { t: 'state', beat: S.beat, app: cur.id, state: cur.state };
     const k = JSON.stringify(msg);
     if (!force && k === S.sent) return;
@@ -72,10 +84,25 @@ export default async function presenterModule(api) {
     } catch (e) { /* the screen stays where it got to */ }
     finally { clearTimeout(guard); done(); }
   }
+  function step(dir) {
+    const d1 = window.d1;
+    if (S.pending || !d1 || d1.state.busy) return;
+    const k = here();
+    if (dir > 0) {
+      if (S.beat < LAST && lands(S.beat + 1) === k) { S.beat++; send(true); return; }
+      if (api.hasNext()) { api.next(); return; }
+      if (S.beat < LAST) goto(S.beat + 1);
+      return;
+    }
+    if (S.beat > 0 && lands(S.beat) === k && lands(S.beat - 1) === k) { S.beat--; send(true); return; }
+    if (lands(S.beat) && lands(S.beat) !== k) goto(S.beat);
+    else if (S.beat > 0) goto(S.beat - 1);
+  }
   ch.onmessage = e => {
     const m = e.data || {};
     if (m.t === 'hello') { S.heard = Date.now(); send(true); }
     else if (m.t === 'goto' && Number.isInteger(m.beat) && m.beat >= 0 && m.beat <= LAST) { S.heard = Date.now(); goto(m.beat); }
+    else if (m.t === 'next' || m.t === 'prev') { S.heard = Date.now(); step(m.t === 'next' ? 1 : -1); }
   };
   api.on('jump', n => { if (!S.pending) { S.beat = Math.min(n, LAST); S.key = null; send(true); } });
   api.on('activate', () => setTimeout(poll, 0));

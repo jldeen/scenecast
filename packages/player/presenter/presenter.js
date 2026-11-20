@@ -1,8 +1,8 @@
 // The presenter guide (/presenter.html, scenecast, from replica-kit 1.6.0): ⌥G on the stage opens it (Ctrl+Alt+G on Windows). It follows
 // the stage's beat over a BroadcastChannel (packages/player/app/presenter-module.js has the protocol). Its Back, Next, beat
 // circles and keys only browse: the window shows another beat to read ahead or back ("Previewing beat 7 · stage is on
-// beat 3") and the stage stays put. "Back to live" (or Esc) returns to the stage's beat; only "Go to this beat on
-// stage" moves the stage. Its content is the demo's presenter/notes.json, made from the script by `scenecast notes`
+// beat 3") and the stage stays put. "Back to live" (or Esc) returns to the stage's beat; "Go to this beat on stage"
+// moves the stage there, and a clicker's Page Down and Page Up move it on or back (presenter-module.js). Its content is the demo's presenter/notes.json, made from the script by `scenecast notes`
 // (the desktop app makes it when it finds the focus points).
 import { presenterKey, keyLabel, isWindows } from '/app/presenter-key.js';
 
@@ -183,6 +183,9 @@ document.addEventListener('keydown', e => {
   if (presenterKey(e) && /^Digit\d$/.test(e.code)) { e.preventDefault(); browse(+e.code.slice(5)); return; }
   if (e.altKey || e.shiftKey || e.metaKey || e.ctrlKey) return;
   if (e.code === 'Escape') { e.preventDefault(); backToLive(); }
+  // A clicker sends Page Down and Page Up: they move the stage on (or back), and the window follows it. The arrows and
+  // Space read ahead, as the buttons do.
+  else if ((e.code === 'PageDown' || e.code === 'PageUp') && connected()) { e.preventDefault(); backToLive(); ch.postMessage({ t: e.code === 'PageDown' ? 'next' : 'prev' }); }
   else if (e.code === 'ArrowRight' || e.code === 'PageDown' || e.code === 'Space') { e.preventDefault(); browse(index + 1); }
   else if (e.code === 'ArrowLeft' || e.code === 'PageUp') { e.preventDefault(); browse(index - 1); }
 });

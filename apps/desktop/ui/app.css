@@ -154,7 +154,7 @@ select.inline { width: auto; padding: 6px 10px; }
 .way-tag svg { width: 16px; height: 16px; color: var(--muted); }
 
 /* ---- The rundown: pre-show and show ---- */
-.rundown { overflow: hidden; }
+.card.rundown { overflow: hidden; padding: 0; }
 .rd-head { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--rule); }
 .rd-head h2 { margin: 0; }
 .rd-head small { display: block; color: var(--muted); font-size: var(--t-label); margin-top: 2px; }

@@ -74,6 +74,9 @@ pub struct DemoStatus {
     pub last_checked: Option<u64>,
     /// `new`, `recorded`, `built` or `checked`: the furthest step done.
     pub stage: String,
+    /// When it was last rehearsed (a rehearsal that reached the first beat).
+    #[serde(default)]
+    pub rehearsed_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -507,6 +510,14 @@ pub fn status(dir: &Path, manifest: Option<&scenecast_core::BundleManifest>) -> 
         .or_else(|| manifest.map(|m| m.focus_points.len()))
         .unwrap_or(0);
     s.has_script = crate::script::saved_script(dir).is_some();
+    let rehearsal = crate::rundown::rehearsal_file(dir);
+    if read_json(&rehearsal).is_some_and(|r| {
+        r["events"]
+            .as_array()
+            .is_some_and(|e| e.iter().any(|e| e["beat"].as_u64().is_some_and(|b| b >= 1)))
+    }) {
+        s.rehearsed_at = millis(&rehearsal);
+    }
     s.last_checked = [
         s.fidelity.as_ref().and_then(|f| f.at),
         s.checks.as_ref().and_then(|c| c.at),

@@ -74,6 +74,17 @@ pub fn replica_url(line: &str) -> Option<String> {
 impl PresentSession {
     /// Serves the built replica with no editor in the page, and opens it full screen as an Edge or Chrome app window.
     pub fn start(dir: &Path, fullscreen: bool) -> Result<Self, AppError> {
+        Self::start_at(dir, fullscreen, None, false)
+    }
+
+    /// The same, with the stage on a given screen (the projector), and when rehearsing, each beat's time kept in
+    /// `.out/rehearsal.json` (a rehearsal starts afresh).
+    pub fn start_at(
+        dir: &Path,
+        fullscreen: bool,
+        place: Option<crate::guide::Place>,
+        rehearse: bool,
+    ) -> Result<Self, AppError> {
         let engine = engine()?;
         let mut cmd = Command::new(&engine.node);
         cmd.arg(engine.packages.join("player").join("serve.mjs"))
@@ -82,6 +93,15 @@ impl PresentSession {
             .args(["--no-editor", "--open"]);
         if fullscreen {
             cmd.arg("--fullscreen");
+        }
+        if let Some(p) = place {
+            cmd.arg("--position")
+                .arg(format!("{},{}", p.x, p.y))
+                .arg("--size")
+                .arg(format!("{},{}", p.width, p.height));
+        }
+        if rehearse {
+            cmd.arg("--rehearse");
         }
         let mut child = cmd
             .stdin(Stdio::null())
