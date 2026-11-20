@@ -54,7 +54,9 @@ export async function recorderReady(demo, { waitS = 6 } = {}) {
   for (let i = 0; i < waitS * 2 && !connected(up); i++) { await sleep(500); up = await ping(port, 1500); }
   if (!up) return { error: `The receiver isn't running on port ${port}. Run Check, then start again.` };
   if (!connected(up)) return { error: `The recorder isn't connected. Open ${bname} with the recorder in it (Install recorder shows how), then start again.` };
-  const version = async () => { const e = await op(port, { op: 'extension' }, 8); return e.ok && e.value ? e.value.version : null; };
+  // A recorder that just restarted (reloaded, or Chrome woke it) still counts as connected for a moment while it
+  // isn't answering yet: ask again for a while before calling it old.
+  const version = async () => { for (let i = 0; i < 4; i++) { const e = await op(port, { op: 'extension' }, 6); if (e.ok && e.value) return e.value.version || null; await sleep(1000); } return null; };
   const have = await version();
   if (have === ver) return { ok: true, version: have };
   const r = await op(port, { op: 'reload' }, 5);
