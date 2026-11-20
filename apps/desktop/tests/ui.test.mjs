@@ -181,8 +181,8 @@ try {
 
   // ---- 1 · A new demo, pointed at the fixture app's two tabs ---------------------------------------------------
   await click('empty-new');
-  // Four ways to make a demo; "I know my demo" is the one a presenter who knows the beats picks.
-  check('New demo: the four ways to make one', await waitFor('the choice', async () => (await exists('mode-record')) && (await exists('mode-script')) && (await exists('mode-coach')) && (await exists('mode-manual')), 20000));
+  // One form: name, apps, an optional talk track, how it's recorded ("I'll click through" is by hand), the slot.
+  check('New demo: the four ways to record it, on the form', await waitFor('the choice', async () => (await exists('mode-record')) && (await exists('mode-script')) && (await exists('mode-coach')) && (await exists('mode-manual')), 20000));
   await shot('02a-new-demo-choice');
   await click('mode-manual');
   await type('new-title', 'Fixture demo');
@@ -191,10 +191,18 @@ try {
   await click('add-app');
   await type('app-id-1', 'admin');
   await type('app-url-1', fx.admin);
+  await (await el('new-slot')).selectByAttribute('value', '480');
   await shot('02-new-demo');
   await click('create-demo');
   check('creates the demo and opens its Record step', await waitFor('the demo', async () => (await exists('demo-title')) && (await text('demo-title')) === 'Fixture demo'));
   const DEMO = join(LIB, 'fixture-demo');
+  check('the slot is kept with the demo', JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')).presenter?.slot === 480);
+  // The default view in plain words; the technical view (folder, files, the matching command) one button away.
+  const plain = await b.execute(() => document.querySelector('#main').innerText);
+  check('Record: no ports, receivers, paths or profile folders on screen', !/\b(port \d+|receiver|preflight|unpacked|localhost)\b|\/Users\/|\b[A-Z]:\\/i.test(plain), plain.slice(0, 600));
+  await click('details');
+  check('Details: the folder, the matching command, diagnostics', /scenecast record start --demo/.test(await text('details-drawer')) && await exists('copy-diagnostics'), await text('details-drawer'));
+  await click('details');
   check('a live-page project in the library', existsSync(join(DEMO, 'demo.json')) && JSON.parse(readFileSync(join(DEMO, 'manifest.json'), 'utf8')).graph.scenes.every(s => s.kind === 'live-page'));
   // Test speed only: the recording in the temp folder, the headless window's size, and shorter quiet waits and zooms.
   const cfg = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8'));
@@ -268,11 +276,12 @@ try {
   await shot('05-recording');
   await click('record-stop');
   await waitFor('the recording', () => exists('record-done'), 300000);
-  check('stop: the recording, with the recorder\'s and the product\'s time', /screens?/.test(await text('record-done')) && /recorder/.test(await text('record-done')));
+  check('stop: the recording, in plain words (what was made)', /Recorded \d+ screens?/.test(await text('record-done')) && !/streamed|recorder —/.test(await text('record-done')), await text('record-done'));
   await shot('06-recorded');
   lap('record');
 
-  // ---- 4 · Build and check -------------------------------------------------------------------------------------
+  // ---- 4 · Build and check (Review) ----------------------------------------------------------------------------
+  await click('tab-review');
   await click('tab-build');
   await click('build');
   await waitFor('the build', async () => (await exists('build-done')) || (await exists('build-failed')), 600000);
@@ -415,8 +424,8 @@ try {
   await waitFor('stopped', () => exists('present-start'), 30000);
   lap('present');
 
-  // ---- 9 · Export ----------------------------------------------------------------------------------------------
-  await click('tab-export');
+  // ---- 9 · Export (Share) --------------------------------------------------------------------------------------
+  await click('tab-share');
   await click('export-folder');
   const folder = await waitFor('the folder export', async () => (await attr('export-done', 'data-path')) || ((await exists('export-checks-failed')) && 'failed'), 900000, 1000);
   if (folder === 'failed') check('every check passes before the export', false, await text('export-checks-failed'));
@@ -488,7 +497,7 @@ try {
   await click('nav-library');
   await waitFor('the library row', () => exists('row-fixture-demo'), 20000);
   const row = await text('row-fixture-demo');
-  check('the library: recorded, built, fidelity score, focus points, last checked', /screens/.test(row) && /pages/.test(row) && /%/.test(row) && !/Never/.test(row), row);
+  check('the library: where it is, its screens, whether they match, last checked', /\d+ screens · (every screen matches|\d+ screens? to look at)/.test(row) && !/Not yet/.test(row), row);
   await shot('13-library');
   // Duplicate and delete, from the library. The library is drawn again once its list is in: a button found before
   // that is gone from the page, and a click on it does nothing. So: wait for it, and find the button afresh.

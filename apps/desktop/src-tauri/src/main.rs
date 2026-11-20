@@ -394,6 +394,13 @@ async fn set_profile(state: State<'_, Shared>, id: String, profile: String) -> R
     blocking(move || scenecast_app::record::set_profile(&state.library.dir(&id)?, &profile)).await
 }
 
+/// The slot on stage, in seconds (none: no slot).
+#[tauri::command]
+async fn set_slot(state: State<'_, Shared>, id: String, slot: Option<u32>) -> Res<()> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::library::set_slot(&state.library.dir(&id)?, slot)).await
+}
+
 /// At start: the extension folder current (a loaded recorder whose files changed reloads itself once it connects),
 /// and the receiver up for the demo open last.
 fn start_recorder_side(state: Shared) {
@@ -1553,6 +1560,7 @@ fn main() {
             install_recorder,
             browser_profiles,
             set_profile,
+            set_slot,
             record_start,
             record_status,
             record_stop,

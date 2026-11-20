@@ -91,6 +91,9 @@ pub struct Demo {
     /// How it's made: `record` (Record for me), `script` (I'll click, you script it), `coach` (Coach me) or
     /// `manual` (I know my demo; also every demo from before there was a choice).
     pub mode: String,
+    /// The presenter's slot on stage, in seconds (demo.json `presenter.slot`), when it's set.
+    #[serde(default)]
+    pub slot: Option<u32>,
     pub status: DemoStatus,
 }
 
@@ -114,6 +117,9 @@ pub struct NewDemo {
     /// Material to work from: notes, a doc, an email, a script (Record for me, Coach me).
     #[serde(default)]
     pub source: Option<String>,
+    /// The slot on stage, in seconds.
+    #[serde(default)]
+    pub slot: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -238,6 +244,9 @@ impl Library {
         }
         if let Some(profile) = spec.profile.as_deref().filter(|p| !p.trim().is_empty()) {
             crate::record::set_profile(&self.root.join(&id), profile)?;
+        }
+        if spec.slot.is_some_and(|s| s > 0) {
+            set_slot(&self.root.join(&id), spec.slot)?;
         }
         if spec.mode.is_some() || spec.goal.is_some() || spec.source.is_some() {
             crate::ai::save(
@@ -393,10 +402,34 @@ pub fn load(dir: &Path) -> Result<Demo, AppError> {
         browser: crate::record::browser(dir),
         profile: crate::record::profile(dir),
         mode: crate::ai::read(dir).mode.unwrap_or_else(|| "manual".into()),
+        slot: cfg["presenter"]["slot"]
+            .as_u64()
+            .filter(|s| *s > 0)
+            .map(|s| s as u32),
         status: status(dir, manifest.as_ref()),
         dir: dir.to_path_buf(),
         id,
     })
+}
+
+/// The slot on stage (seconds) in demo.json's `presenter.slot`; `None` or 0 clears it. The guide's other settings
+/// there are kept.
+pub fn set_slot(dir: &Path, slot: Option<u32>) -> Result<(), AppError> {
+    let file = dir.join("demo.json");
+    let mut cfg: Value = serde_json::from_slice(&fs::read(&file)?)?;
+    if !cfg["presenter"].is_object() {
+        cfg["presenter"] = Value::Object(Default::default());
+    }
+    match slot.filter(|s| *s > 0) {
+        Some(s) => cfg["presenter"]["slot"] = Value::from(s),
+        None => {
+            if let Some(p) = cfg["presenter"].as_object_mut() {
+                p.remove("slot");
+            }
+        }
+    }
+    fs::write(&file, serde_json::to_string_pretty(&cfg)? + "\n")?;
+    Ok(())
 }
 
 /// Where a demo stands: recorded, built, its fidelity score, its focus points, when it was last checked.
@@ -578,6 +611,29 @@ mod tests {
             .is_err()
         );
         assert!(lib.get("bad").is_err(), "nothing is made for a bad mode");
+    }
+
+    #[test]
+    fn keeps_the_slot_with_the_guide_settings() {
+        let (_tmp, lib) = lib();
+        assert_eq!(lib.create(&new_demo("No slot")).unwrap().slot, None);
+        let d = lib
+            .create(&NewDemo {
+                slot: Some(480),
+                ..new_demo("Eight minutes")
+            })
+            .unwrap();
+        assert_eq!(d.slot, Some(480));
+        let file = d.dir.join("demo.json");
+        let mut cfg: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        cfg["presenter"]["script"] = Value::from("presenter/script.md");
+        fs::write(&file, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        set_slot(&d.dir, Some(300)).unwrap();
+        assert_eq!(lib.get(&d.id).unwrap().slot, Some(300));
+        set_slot(&d.dir, None).unwrap();
+        let cfg: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(lib.get(&d.id).unwrap().slot, None);
+        assert_eq!(cfg["presenter"]["script"], "presenter/script.md");
     }
 
     #[test]

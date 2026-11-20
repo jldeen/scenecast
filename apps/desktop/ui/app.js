@@ -10,18 +10,19 @@ const S = {
   view: 'library',
   id: null,
   tab: 'record',
+  reviewTab: 'build',
+  details: false,
   jobs: {},
   servers: { edit: {}, present: {} },
 };
-const TABS = [
-  ['record', 'Record'],
-  ['build', 'Build & check'],
-  ['fidelity', 'Fidelity'],
-  ['script', 'Script'],
-  ['edit', 'Edit'],
-  ['present', 'Present'],
-  ['export', 'Export'],
-];
+// Where a demo is: Record · Review · Present · Share. S.tab is the panel on screen; Review holds the replica's own
+// steps (build, real vs replica, talk track, edit) as its tabs.
+const GATES = [['record', 'Record'], ['review', 'Review'], ['present', 'Present'], ['share', 'Share']];
+const REVIEW = [['build', 'Build and check'], ['fidelity', 'Real vs replica'], ['script', 'Talk track'], ['edit', 'Edit']];
+const gateOf = tab => ({ record: 'record', present: 'present', export: 'share' })[tab] || 'review';
+const gateTab = g => ({ record: 'record', present: 'present', share: 'export' })[g] || S.reviewTab || 'build';
+// Regions drawn before REGIONS is defined (the first run, the AI parts), joined to it once it's there.
+const REGIONS_LATE = {};
 
 // ---- Helpers -----------------------------------------------------------------------------------------------------
 
@@ -45,10 +46,122 @@ const isMac = () => S.info.os === 'macos';
 const browserName = () => ({ chrome: 'Chrome', edge: 'Edge' })[demo()?.browser || (isMac() ? 'chrome' : 'edge')];
 const why = (msg, job) => explain(msg, { browser: browserName(), job, retry: job === 'ai-sign-in' ? 'ai-sign-in' : null });
 // An error's one button: an app action, a step to go to, or something to copy.
-const actionButton = (a, primary = true, test = 'error-action') => a.action ? `<button class="btn small ${primary ? 'primary' : ''}" data-action="${esc(a.action)}" data-test="${test}">${esc(a.label)}</button>`
-  : a.goto ? `<button class="btn small ${primary ? 'primary' : ''}" data-goto="${esc(a.goto)}" data-test="${test}">${esc(a.label)}</button>`
-    : a.copy ? `<button class="btn small ${primary ? 'primary' : ''}" data-copy="${esc(a.copy)}" data-test="${test}">${esc(a.label)}</button>` : '';
+const actionButton = (a, primary = true, test = 'error-action') => a.action ? `<button type="button" class="btn small ${primary ? 'primary' : ''}" data-action="${esc(a.action)}" data-test="${test}">${esc(a.label)}</button>`
+  : a.goto ? `<button type="button" class="btn small ${primary ? 'primary' : ''}" data-goto="${esc(a.goto)}" data-test="${test}">${esc(a.label)}</button>`
+    : a.copy ? `<button type="button" class="btn small ${primary ? 'primary' : ''}" data-copy="${esc(a.copy)}" data-test="${test}">${esc(a.label)}</button>` : '';
 const folderWord = () => isMac() ? 'Finder' : 'File Explorer';
+
+// ---- The look's small parts ----------------------------------------------------------------------------------------
+
+const svg = (d, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const I = {
+  arrow: svg('<path d="M4 12h15M13 6l6 6-6 6"/>'),
+  check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', ''),
+  x: svg('<path d="M7 7l10 10M17 7 7 17"/>', ''),
+  term: svg('<path d="M4 7l5 5-5 5M12 18h8"/>'),
+  play: svg('<path d="M7 5l12 7-12 7z"/>'),
+  spark: svg('<path d="M12 3l1.8 6.2L20 11l-6.2 1.8L12 19l-1.8-6.2L4 11l6.2-1.8z"/>'),
+};
+// A row's marker: done, failed, to do, working, or "you are here".
+const mk = (state, label) => `<span class="mk" ${label ? `role="img" aria-label="${esc(label)}"` : 'aria-hidden="true"'}>${{
+  ok: `<span class="ok">${I.check}</span>`, no: `<span class="no">${I.x}</span>`, spin: '<span class="spin"></span>',
+  hold: `<span class="hold">${svg('<path d="M12 6.5v7M12 17v.5"/>', '')}</span>`,
+  here: `<span class="here">${svg('<path d="M4 12h14M12 6l6 6-6 6"/>', '')}</span>`,
+}[state] || '<span class="todo"></span>'}</span>`;
+const listWords = xs => xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
+const clock = n => n == null ? '' : `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, '0')}`;
+// An app by the name the presenter gave it, and a tile in its product's colour (others in turn).
+const appLabel = a => {
+  const s = String(a.id || '').replace(/[-_]+/g, ' ').trim();
+  return s.length <= 3 ? s.toUpperCase() : s.charAt(0).toUpperCase() + s.slice(1);
+};
+const TILE = [[/teams\.(cloud\.)?microsoft|teams\.live\.com/, '#5B5FC7'], [/m365\.cloud\.microsoft|copilot\.(cloud\.)?microsoft/, '#0F6CBD'], [/admin\.(cloud\.)?microsoft/, '#C4420F']];
+const PALETTE = ['#0E7C86', '#5B5FC7', '#0F6CBD', '#C4420F', '#33414E'];
+const tile = (a, i = 0) => {
+  const c = TILE.find(([r]) => r.test(a.url || ''))?.[1] || PALETTE[i % PALETTE.length];
+  const l = appLabel(a);
+  return `<span class="tile" style="background:${c}" aria-hidden="true">${esc(l.length <= 3 ? l : l.charAt(0))}</span>`;
+};
+// Where a demo stands, in the rail and the library: the step it's at, and when it last moved.
+function where(d) {
+  const s = d.status;
+  if (!s.recorded) return { gate: 'record', word: 'Record', note: 'not recorded yet' };
+  const when = (what, at) => at ? `${what} ${ago(at)}` : what;
+  if (!s.built || !s.fidelity?.pass) return { gate: 'review', word: 'Review', note: when('recorded', s.recordedAt) };
+  if (s.rehearsedAt) return { gate: 'present', word: 'Ready', note: when('rehearsed', s.rehearsedAt) };
+  return { gate: 'present', word: 'Present', note: when('checked', s.lastChecked) };
+}
+const sepOf = p => String(p).includes('\\') ? '\\' : '/';
+const within = (dir, file) => `${dir}${sepOf(dir)}${file}`;
+const q = p => /[\s"]/.test(p) ? `"${p}"` : p;
+
+// Each screen's head: what it is, one line under it, and Details (the technical view: folders, files, the matching
+// command, diagnostics) behind a button.
+function pageHead({ title, sub = '', test = '', side = '', details = true }) {
+  document.title = S.view === 'demo' && demo() ? `${demo().title} · Scenecast` : 'Scenecast';
+  return `<div class="page-head"><div class="grow"><h1 ${test ? `data-test="${test}"` : ''}>${esc(title)}</h1>${sub ? `<p>${sub}</p>` : ''}</div>${side}
+    ${details ? `<button class="detailsbtn" data-action="details" aria-expanded="${S.details}" aria-controls="details" data-test="details">${I.term} Details</button>` : ''}</div>
+    ${details ? `<div id="details" class="drawer-wrap" data-test="details-drawer" ${S.details ? '' : 'hidden'}>${detailsBody()}</div>` : ''}`;
+}
+const dRow = (label, value, act = '') => `<div><dt>${esc(label)}</dt><dd>${value}</dd><dd class="act">${act}</dd></div>`;
+const codeV = v => `<code>${esc(v)}</code>`;
+const copyBtn = (v, label = 'Copy') => `<button class="btn small" data-copy="${esc(v)}">${esc(label)}</button>`;
+const revealBtn = p => `<button class="btn small" data-reveal="${esc(p)}">Show in ${folderWord()}</button>`;
+function cliFor(d) {
+  const at = `--demo ${q(d.dir)}`;
+  return {
+    record: `scenecast record start ${at}`, build: `scenecast build ${at}`, fidelity: `scenecast fidelity ${at}`,
+    script: `scenecast script ${q(within(d.dir, 'script.md'))} ${at}`, edit: `scenecast edit ${at}`,
+    present: `scenecast present ${at}`, export: `scenecast check ${at}`,
+  }[S.tab] || `scenecast status ${at}`;
+}
+function detailsBody() {
+  const lib = S.info.library || '';
+  const foot = extra => `<div class="full"><button class="btn small" data-action="diagnostics" data-test="copy-diagnostics">Copy diagnostics</button>
+    <button class="btn small" data-action="show-logs" data-test="show-logs">Show the logs</button>${extra || ''}</div>`;
+  if (S.view === 'demo' && demo()) {
+    const d = demo();
+    const cli = cliFor(d);
+    const slots = [0, 180, 300, 480, 600, 900, 1200, 1800];
+    if (d.slot && !slots.includes(d.slot)) slots.push(d.slot);
+    return `<dl class="drawer">
+      ${dRow('Folder', codeV(d.dir), revealBtn(d.dir) + copyBtn(d.dir))}
+      ${dRow('Settings', codeV(within(d.dir, 'demo.json')), `<button class="btn small" data-open-file="${esc(within(d.dir, 'demo.json'))}">Open</button>`)}
+      ${dRow('Browser', esc(`${BNAME[d.browser] || d.browser} · ${d.profile || 'the profile that\u2019s open'}`))}
+      ${dRow('Recorder', '<span data-region="recorder-details"></span>')}
+      ${dRow('Slot', `<label class="visually-hidden" for="slot-pick">Slot length</label><select id="slot-pick" class="inline" data-test="slot-pick">${slots.sort((a, b) => a - b).map(s => `<option value="${s}" ${(d.slot || 0) === s ? 'selected' : ''}>${s ? `${s / 60} min` : 'No set length'}</option>`).join('')}</select>`)}
+      ${dRow('Command line', codeV(cli), copyBtn(cli))}
+      </dl>${foot(`<span class="spacer"></span><button class="btn small" data-duplicate="${esc(d.id)}">Duplicate this demo</button>
+        <button class="btn small danger" data-delete="${esc(d.id)}">Delete this demo</button>`)}`;
+  }
+  if (S.view === 'new') return `<dl class="drawer">${dRow('Saved in', codeV(lib), revealBtn(lib))}
+    ${dRow('Command line', codeV('scenecast new <folder> --title "<name>" --app <name>=<address>'), copyBtn('scenecast new <folder> --title "<name>" --app <name>=<address>'))}</dl>${foot()}`;
+  if (S.view === 'copilot') return `<dl class="drawer">${dRow('Command line', codeV('scenecast ai status'), copyBtn('scenecast ai status'))}
+    ${dRow('Model', esc(AI.settings?.model || 'auto'))}</dl>${foot()}`;
+  const b = FR.browser || defaultBrowser();
+  return `<dl class="drawer">${dRow('Your demos', codeV(lib), revealBtn(lib) + copyBtn(lib))}
+    ${dRow('Engine', codeV(S.info.engine || S.info.engineError || ''))}
+    ${dRow('Command line', codeV(`scenecast profiles --browser ${b}`), copyBtn(`scenecast profiles --browser ${b}`))}</dl>${foot()}`;
+}
+// One block of text a technical presenter (or whoever helps) can paste: versions, the demo, the recorder, each step's
+// last answer and error, and the end of each step's log.
+function diagnostics() {
+  const out = [`Scenecast ${S.info.version} on ${S.info.os}`, `Library: ${S.info.library}`, `Engine: ${S.info.engine || S.info.engineError || '?'}`,
+    `Copilot: ${AI.status?.signedIn ? 'signed in' : 'not signed in'}`];
+  const d = demo();
+  if (d) {
+    out.push('', `Demo: ${d.title} (${d.id}), made ${d.mode}`, `Folder: ${d.dir}`, `Browser: ${d.browser}, profile ${d.profile || '(the one that\u2019s open)'}`,
+      `Apps: ${d.apps.map(a => `${a.id}=${a.url}`).join(' ')}`, `Status: ${JSON.stringify(d.status)}`, `Recorder: ${JSON.stringify(S.rx || {})}`);
+    for (const [job, j] of Object.entries(J(d.id))) {
+      if (job === 'running' || !j || typeof j !== 'object') continue;
+      if (j.error) out.push(`${job}: error: ${j.error}`);
+      if (j.items?.length) out.push(`${job}: ${j.items.map(i => `${i.id} ${i.status}${i.status !== 'ok' && i.detail ? ` (${i.detail})` : ''}`).join('; ')}`);
+      const tail = (j.lines || []).slice(-20).map(l => `  ${l.text}`);
+      if (tail.length) out.push(`${job} log:`, ...tail);
+    }
+  }
+  return out.join('\n');
+}
 
 function announce(text) {
   const a = $('#announcer');
@@ -174,54 +287,44 @@ function scheduleRegions() {
   requestAnimationFrame(() => { regionsQueued = false; renderRegions(); });
 }
 
-// ---- Sidebar -----------------------------------------------------------------------------------------------------
-
-const stagePill = s => ({
-  new: '<span class="pill">New</span>',
-  recorded: '<span class="pill info">Recorded</span>',
-  built: '<span class="pill info">Built</span>',
-  checked: '<span class="pill ok">Checked</span>',
-})[s.stage] || '';
+// ---- The rail ----------------------------------------------------------------------------------------------------
 
 function renderSidebar() {
   $('#nav-library').setAttribute('aria-current', S.view === 'library' ? 'page' : 'false');
-  $('#demo-list').innerHTML = S.demos.map(d => `<li><button data-open="${esc(d.id)}" data-test="demo-${esc(d.id)}" ${S.view === 'demo' && S.id === d.id ? 'aria-current="page"' : ''}>
-    <span class="title">${esc(d.title)}</span>${stagePill(d.status)}</button></li>`).join('') ||
-    '<li class="muted small" style="padding:4px 10px">None yet</li>';
+  $('#new-demo').setAttribute('aria-current', S.view === 'new' ? 'page' : 'false');
+  $('#nav-copilot').setAttribute('aria-current', S.view === 'copilot' ? 'page' : 'false');
+  $('#demo-list').innerHTML = S.demos.map(d => {
+    const w = where(d);
+    return `<li><button data-open="${esc(d.id)}" data-test="demo-${esc(d.id)}" ${S.view === 'demo' && S.id === d.id ? 'aria-current="page"' : ''}>
+    <span class="title">${esc(d.title)}</span><span class="sub"><em>${esc(w.word)}</em> · ${esc(w.note)}</span></button></li>`;
+  }).join('') || '<li class="none">None yet. Your demos show up here.</li>';
 }
 
-// ---- Library -----------------------------------------------------------------------------------------------------
+// ---- Your demos, and the first run ---------------------------------------------------------------------------------
 
-function fidelityText(f) {
-  if (!f) return '<span class="muted">Not checked</span>';
-  return `<span class="pill ${f.pass ? 'ok' : f.score >= 80 ? 'warn' : 'bad'}" title="${f.within} of ${f.total} states match">${f.score}%</span>`;
+function matchWords(s) {
+  const f = s.fidelity;
+  if (!s.built) return s.recorded ? 'not built yet' : '';
+  if (!f) return 'not compared yet';
+  return f.pass ? 'every screen matches' : `${plural(f.total - f.within, 'screen')} to look at`;
 }
 function renderLibrary() {
   S.view = 'library';
+  S.id = null;
   renderSidebar();
+  if (!S.demos.length) return renderFirstRun();
   const main = $('#main');
-  if (!S.demos.length) {
-    main.innerHTML = `<div class="empty card"><img src="icon.svg" alt="" width="64" height="64">
-      <h1>Make your first demo</h1>
-      <p class="muted">Scenecast records a live web demo once in Edge or Chrome, and turns it into a replica you can present anywhere: real pages, every run identical.</p>
-      <button class="btn primary" data-action="new" data-test="empty-new">New demo</button></div>`;
-    return;
-  }
-  main.innerHTML = `<div class="page-head"><div class="grow"><h1>Your demos</h1>
-    <p class="muted">Kept in <code>${esc(S.info.library)}</code></p></div>
-    <button class="btn primary" data-action="new">New demo</button></div>
+  main.innerHTML = `${pageHead({ title: 'Your demos', sub: 'Pick up where you left off, or make a new one.' })}
     <table class="data" aria-label="Demos">
-    <thead><tr><th scope="col">Demo</th><th scope="col">Recorded</th><th scope="col">Built</th><th scope="col">Fidelity</th><th scope="col">Focus points</th><th scope="col">Last checked</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <thead><tr><th scope="col">Demo</th><th scope="col">Where it is</th><th scope="col">Last checked</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
     <tbody>${S.demos.map(d => {
-      const s = d.status;
+      const s = d.status, w = where(d);
       return `<tr data-test="row-${esc(d.id)}">
         <td class="title-cell"><button class="link" data-open="${esc(d.id)}">${esc(d.title)}</button>
-          <div class="muted small">${d.apps.map(a => esc(a.id)).join(' · ')}</div></td>
-        <td>${s.recorded ? `<span class="pill ok">${plural(s.screens, 'screen')}</span>` : '<span class="muted">Not yet</span>'}</td>
-        <td>${s.built ? `<span class="pill ok">${plural(s.liveScenes, 'page')}</span>` : '<span class="muted">Not yet</span>'}</td>
-        <td>${fidelityText(s.fidelity)}</td>
-        <td>${s.focusPoints || '<span class="muted">0</span>'}</td>
-        <td>${s.lastChecked ? esc(ago(s.lastChecked)) : '<span class="muted">Never</span>'}</td>
+          <div class="app-cell small muted" style="margin-top:6px">${d.apps.map(tile).join('')}<span>${esc(listWords(d.apps.map(appLabel)))}</span></div></td>
+        <td><span class="state ${w.gate === 'present' ? 'ok' : 'idle'}">${esc(w.word)}</span>
+          <div class="small muted">${s.recorded ? `${plural(s.screens, 'screen')}${matchWords(s) ? ` · ${esc(matchWords(s))}` : ''}` : 'Not recorded yet'}</div></td>
+        <td>${s.lastChecked ? esc(ago(s.lastChecked)) : '<span class="muted">Not yet</span>'}</td>
         <td><div class="row" style="justify-content:flex-end">
           <button class="btn small" data-open="${esc(d.id)}" aria-label="Open ${esc(d.title)}">Open</button>
           <button class="btn small subtle" data-duplicate="${esc(d.id)}" aria-label="Duplicate ${esc(d.title)}">Duplicate</button>
@@ -229,6 +332,68 @@ function renderLibrary() {
         </div></td></tr>`;
     }).join('')}</tbody></table>`;
 }
+
+// The first run: Scenecast finds the browser and the profile itself, says what's left, and offers one next step.
+const FR = { info: null, browser: null, picking: false };
+const defaultBrowser = () => localStorage.getItem('scenecast.browser') || (isMac() ? 'chrome' : 'edge');
+const savedProfile = () => localStorage.getItem('scenecast.profile') || '';
+const profileName = (info, dir) => {
+  const p = info?.profiles?.find(x => x.dir === (dir || info.picked));
+  return p ? p.name : '';
+};
+async function loadBrowser(b = defaultBrowser()) {
+  FR.browser = b;
+  FR.info = null;
+  renderRegions();
+  const info = await invoke('browser_profiles', { browser: b }).catch(e => ({ error: String(e), browser: b }));
+  if (FR.browser === b) { FR.info = info; renderRegions(); }
+}
+function renderFirstRun() {
+  $('#main').innerHTML = `${pageHead({ title: 'Let\u2019s get you ready to record', sub: 'Scenecast sets this up for you. It takes about a minute, once.' })}
+    <section class="card rundown compact" aria-labelledby="fr-title" data-test="first-run">
+      <div class="rd-head"><div class="grow"><h2 id="fr-title">Before your first recording</h2><small data-region="first-left"></small></div>
+        <div class="next"><button class="btn primary big" data-action="new" data-test="empty-new">Make your first demo ${I.arrow}</button></div></div>
+      <div data-region="first-run"></div>
+    </section>
+    <p class="muted" style="margin-top:14px">Scenecast never restarts your browser or changes your tabs without asking.</p>`;
+  renderRegions();
+  if (!FR.info) loadBrowser();
+}
+Object.assign(REGIONS_LATE, {
+  'first-left'() {
+    const i = FR.info;
+    const ready = i && !i.error && i.profiles?.length;
+    const rec = i?.profiles?.some(p => p.extension?.id);
+    const left = (ready ? 0 : 1) + (rec ? 0 : 1);
+    return left ? `${plural(left, 'step')} left, and Scenecast does ${left === 1 ? 'it' : 'them'} with your first demo` : 'All set';
+  },
+  'first-run'() {
+    const i = FR.info, b = FR.browser || defaultBrowser(), name = BNAME[b] || b;
+    const other = b === 'chrome' ? 'edge' : 'chrome';
+    let browser;
+    if (!i) browser = `<div class="rd-row">${mk('spin')}<div class="t"><b>Your browser</b><small>Looking for ${esc(name)} and the profile you use for work…</small></div><span class="state idle">Looking</span></div>`;
+    else if (i.error || !i.profiles?.length) browser = `<div class="rd-row" data-test="fr-browser" data-status="fail">${mk('no', 'Not found')}<div class="t"><b>${esc(name)} isn\u2019t set up on this computer</b>
+      <small>Open it once and sign in to your work account, or record in ${esc(BNAME[other])}.</small></div>
+      <button class="alink" data-action="first-browser" data-browser="${other}">Use ${esc(BNAME[other])}</button></div>`;
+    else {
+      const who = profileName(i, savedProfile());
+      browser = `<div class="rd-row" data-test="fr-browser" data-status="ok">${mk('ok', 'Found')}<div class="t"><b>Your browser: ${esc(name)}${who ? `, signed in as ${esc(who)}` : ''}</b>
+        <small>The profile you use for work. <button class="alink" data-action="first-pick" aria-expanded="${FR.picking}">Use a different one</button></small></div><span class="state ok">Found</span></div>
+        ${FR.picking ? `<div class="rd-row"><span></span><div class="more-row"><fieldset><legend class="small">Record in</legend>
+          ${['chrome', 'edge'].map(x => `<label class="choice"><input type="radio" name="fr-browser" value="${x}" ${x === b ? 'checked' : ''}> ${BNAME[x]}</label>`).join('')}</fieldset>
+          <div id="fr-profiles" style="margin-top:8px">${profileOptions(i, savedProfile())}</div></div></div>` : ''}`;
+    }
+    const rec = i?.profiles?.find(p => p.extension?.id);
+    const recorder = rec ? `<div class="rd-row" data-test="fr-recorder" data-status="ok">${mk('ok', 'Added')}<div class="t"><b>The Scenecast recorder</b><small>It\u2019s in ${esc(name)} already${rec.name ? `, in ${esc(rec.name)}` : ''}.</small></div><span class="state ok">Added</span></div>`
+      : `<div class="rd-row" data-test="fr-recorder" data-status="todo">${mk('todo')}<div class="t"><b>The Scenecast recorder</b><small>Scenecast adds it to ${esc(name)} with your first demo: one step, once.</small></div><span class="state idle">With your first demo</span></div>`;
+    const st = AI.status;
+    const copilot = st?.signedIn ? `<div class="rd-row" data-test="fr-copilot" data-status="ok">${mk('ok', 'Signed in')}<div class="t"><b>GitHub Copilot</b><small>Signed in as ${esc(st.login || 'you')}: Copilot can click through a demo for you.</small></div><span class="state ok">Signed in</span></div>`
+      : `<div class="rd-row" data-test="fr-copilot" data-status="todo">${mk(AI.signing ? 'spin' : 'todo')}<div class="t"><b>GitHub Copilot <span class="muted">(optional)</span></b><small>Lets Copilot click through a demo for you. You can sign in when you first use it.</small></div>
+        ${AI.signing ? '<span class="state idle">Signing in</span>' : '<button class="alink" data-action="ai-sign-in" data-test="fr-sign-in">Sign in now</button>'}</div>
+        <div class="rd-row" style="border-top:0;min-height:0;padding-top:0"><span></span><div class="more-row" data-region="copilot-signin"></div></div>`;
+    return browser + recorder + copilot;
+  },
+});
 
 async function duplicateDemo(id) {
   const d = S.demos.find(x => x.id === id);
@@ -258,89 +423,107 @@ async function deleteDemo(id) {
 function appRow(i, app = {}) {
   return `<div class="app-row" data-app-row>
     <div><label class="visually-hidden" for="app-id-${i}">App ${i + 1} name</label>
-      <input id="app-id-${i}" type="text" placeholder="Name (optional)" value="${esc(app.id)}" data-app-id data-test="app-id-${i}"></div>
-    <div><label class="visually-hidden" for="app-url-${i}">App ${i + 1} web address</label>
-      <input id="app-url-${i}" type="url" placeholder="https://…" value="${esc(app.url)}" data-app-url data-test="app-url-${i}"></div>
+      <input id="app-id-${i}" type="text" placeholder="Name, like Teams" value="${esc(app.id)}" data-app-id data-test="app-id-${i}"></div>
+    <div><label class="visually-hidden" for="app-url-${i}">App ${i + 1} start page</label>
+      <input id="app-url-${i}" type="url" placeholder="Its start page: https://…" value="${esc(app.url)}" data-app-url data-test="app-url-${i}"></div>
     <button type="button" class="btn subtle" data-remove-app aria-label="Remove app ${i + 1}">Remove</button></div>`;
 }
-// The four ways to make a demo. The AI ones use GitHub Copilot through the presenter's own GitHub sign-in.
+// How it's recorded: by hand, or with GitHub Copilot through the presenter's own GitHub sign-in.
 const MODES = {
-  record: { title: 'Record for me', icon: '✦', text: 'Say what the demo should show (or give your notes, a doc or a script). Copilot plans the steps, you check the plan, and it clicks through in your browser while it records. It asks you before anything that sends, saves or changes something.' },
-  script: { title: 'I\u2019ll click, you script it', icon: '✎', text: 'Click through once with the recorder on, without knowing the beats. Afterwards Copilot writes the beats, what to say, the focus points and your presenter guide.' },
-  coach: { title: 'Coach me', icon: '➜', text: 'Click through yourself while Copilot shows the next step and what to say, live, here and in a small window for your laptop screen.' },
-  manual: { title: 'I know my demo', icon: '●', text: 'You run the demo the way you\u2019ll present it, and bring your own script later.' },
+  manual: { title: 'I\u2019ll click through', text: 'Run it once, the way you\u2019ll present it.' },
+  record: { title: 'Copilot clicks for me', text: 'Say what to show. Copilot plans it and clicks through while it records, and asks before anything that sends or saves.' },
+  coach: { title: 'Coach me as I click', text: 'Copilot shows the next step and what to say while you record.' },
+  script: { title: 'Write my talk track after', text: 'Click through once; Copilot writes the beats and what to say.' },
 };
-// Regions drawn by the AI parts, joined to REGIONS once it's there.
-const REGIONS_LATE = {};
 const aiMode = m => m === 'record' || m === 'script' || m === 'coach';
+const SLOTS = [[0, 'No set length'], [180, '3 min'], [300, '5 min'], [480, '8 min'], [600, '10 min'], [900, '15 min'], [1200, '20 min'], [1800, '30 min']];
 function renderNew() {
   S.view = 'new';
   S.id = null;
   renderSidebar();
-  $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>New demo</h1>
-    <p class="muted">How do you want to make it?</p></div></div>
-    <ul class="modes" aria-label="Ways to make a demo">${Object.entries(MODES).map(([m, x]) => `<li><button class="mode card" data-mode="${m}" data-test="mode-${m}">
-      <span class="mode-icon" aria-hidden="true">${x.icon}</span><span class="mode-title">${esc(x.title)}</span>
-      <span class="muted small">${esc(x.text)}</span>${aiMode(m) ? '<span class="pill info">GitHub Copilot</span>' : ''}</button></li>`).join('')}</ul>`;
-  $('[data-mode]').focus();
-}
-function renderNewForm(mode) {
-  S.view = 'new';
-  S.newMode = mode;
-  const browser = isMac() ? 'chrome' : 'edge';
-  const m = MODES[mode];
-  const wants = mode === 'record' || mode === 'coach';
-  $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>New demo: ${esc(m.title)}</h1>
-    <p class="muted">${esc(m.text)}</p></div><button class="btn subtle" data-action="new">Choose another way</button></div>
-    ${aiMode(mode) ? `<div data-region="copilot-mini"></div>` : ''}
-    <form id="new-form" class="card stack" novalidate data-mode="${mode}">
-      <div><label for="new-title">Name</label><input id="new-title" type="text" required placeholder="Contoso supplier delay" data-test="new-title"></div>
-      <fieldset><legend>Apps <span class="hint">Its start page's web address; the name is how you'll switch to it (⌥ or Ctrl+Alt and its first letter).</span></legend>
+  const mode = 'manual';
+  $('#main').innerHTML = `${pageHead({ title: 'New demo', sub: 'Name it and add its apps. You can change both later.' })}
+    <div class="split">
+    <form id="new-form" class="card" novalidate data-mode="${mode}">
+      <div class="field"><label for="new-title">Name</label><input id="new-title" type="text" required placeholder="Innovation Act 1 · Demo 1" data-test="new-title"></div>
+      <fieldset class="field"><legend>Which apps does it show? <span class="hint">Each one\u2019s start page. On stage you switch to an app with ${isMac() ? '⌥' : 'Ctrl+Alt+'} and its first letter.</span></legend>
         <div id="apps">${appRow(0)}</div>
-        <button type="button" class="btn small" id="add-app" data-test="add-app">＋ Add another app</button></fieldset>
-      ${wants ? `<div><label for="new-goal">What should the demo show? <span class="hint">In your own words: one line is enough.</span></label>
-        <textarea id="new-goal" rows="3" data-test="new-goal" placeholder="Show how the assistant answers a question about the supplier delay on PO-450101, then where IT manages the tools."></textarea></div>
-        <div><label for="new-source">Material to work from <span class="hint">Optional: notes, a doc, an email, or a script you already have (a RunLines .sk too).</span></label>
-        <textarea id="new-source" rows="4" data-test="new-source" placeholder="Paste it here, or open a file."></textarea>
-        <div class="row" style="margin-top:6px"><button type="button" class="btn small" data-action="pick-source" data-test="pick-source">Open a file…</button><span class="muted small" id="source-name"></span></div></div>` : ''}
-      <fieldset><legend>Record in</legend>
-        <label class="choice"><input type="radio" name="browser" value="edge" ${browser === 'edge' ? 'checked' : ''}> Microsoft Edge</label>
-        <label class="choice"><input type="radio" name="browser" value="chrome" ${browser === 'chrome' ? 'checked' : ''}> Google Chrome</label></fieldset>
-      <fieldset><legend>Profile <span class="hint">The one you’re signed in to the apps with. Change it any time on the Record step.</span></legend>
-        <div id="new-profiles" data-test="new-profiles">${profileOptions(null)}</div></fieldset>
+        <button type="button" class="alink" id="add-app" data-test="add-app">Add another app</button></fieldset>
+      <div class="field"><label for="new-script">Your talk track <span class="hint">Optional. Paste it now or add it later.</span></label>
+        <textarea id="new-script" rows="4" data-test="new-script" placeholder="## The late shipment lands in Teams (0:00–1:15)&#10;&gt; Kestrel just told us PO-450101 will ship six days late."></textarea>
+        <p class="hint" style="margin-top:4px">Each <code>##</code> heading starts a beat; a time like <code>(0:00–1:15)</code> gives it its place in your slot.</p></div>
+      <fieldset class="field"><legend>How will you record it?</legend>
+        <div class="ways" role="radiogroup" aria-label="How will you record it?">${Object.entries(MODES).map(([m, x]) => `<label class="way" data-test="mode-${m}">
+          <input type="radio" name="mode" value="${m}" ${m === mode ? 'checked' : ''}><span><b>${esc(x.title)}</b><small>${esc(x.text)}</small></span>
+          ${aiMode(m) ? `<span class="way-tag">${I.spark}<span class="visually-hidden">Uses GitHub Copilot</span></span>` : ''}</label>`).join('')}</div></fieldset>
+      <div id="new-ai" hidden>
+        <div data-region="copilot-mini"></div>
+        <div class="field"><label for="new-goal">What should the demo show? <span class="hint">In your own words: one line is enough.</span></label>
+          <textarea id="new-goal" rows="3" data-test="new-goal" placeholder="Show how the assistant answers a question about the supplier delay on PO-450101, then where IT manages the tools."></textarea></div>
+        <div class="field"><label for="new-source">Material to work from <span class="hint">Optional: notes, a doc, an email.</span></label>
+          <textarea id="new-source" rows="3" data-test="new-source" placeholder="Paste it here, or open a file."></textarea>
+          <div class="row" style="margin-top:6px"><button type="button" class="btn small" data-action="pick-source" data-test="pick-source">Open a file…</button><span class="muted small" id="source-name"></span></div></div>
+      </div>
+      <div class="field"><p class="small muted" id="new-where" data-test="new-where">Looking at your browser…</p>
+        <div id="new-where-box" hidden>
+          <fieldset><legend class="small">Record in</legend>
+            ${['chrome', 'edge'].map(x => `<label class="choice"><input type="radio" name="browser" value="${x}" ${x === defaultBrowser() ? 'checked' : ''}> ${BNAME[x]}</label>`).join('')}</fieldset>
+          <div id="new-profiles" data-test="new-profiles" style="margin-top:8px">${profileOptions(null)}</div></div></div>
       <p id="new-error" class="notice bad" hidden role="alert"></p>
-      <div class="row"><button class="btn primary" type="submit" data-test="create-demo">Create demo</button>
-        <button class="btn" type="button" data-action="library">Cancel</button></div>
-    </form>`;
+      <div class="form-foot"><label for="new-slot">Slot</label>
+        <select id="new-slot" class="inline" data-test="new-slot">${SLOTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+        <span class="spacer"></span><button class="btn primary big" type="submit" data-test="create-demo">Create demo ${I.arrow}</button></div>
+    </form>
+    <aside class="card"><h2>What happens next</h2>
+      <p>Scenecast opens anything that isn\u2019t open yet, checks each app is on its start screen, and shows you the run of show.</p>
+      <p>Then you click through it once, or let Copilot click for you. Scenecast turns it into a replica that runs the same way every time, with no network.</p></aside>
+    </div>`;
   $('#new-title').focus();
   renderRegions();
-  if (aiMode(mode) && !AI.status) refreshAi();
   const form = $('#new-form');
   const load = async () => {
     const b = form.browser.value;
     const box = $('#new-profiles');
-    box.innerHTML = profileOptions(null);
     const info = await invoke('browser_profiles', { browser: b }).catch(e => ({ error: String(e) }));
-    if (box.isConnected && form.browser.value === b) box.innerHTML = profileOptions(info, '');
+    if (!box.isConnected || form.browser.value !== b) return;
+    const chosen = form.querySelector('[name=profile]:checked')?.value ?? savedProfile();
+    box.innerHTML = profileOptions(info, chosen);
+    const who = info.error ? '' : profileName(info, chosen);
+    $('#new-where').innerHTML = `Records in <strong>${esc(BNAME[b])}</strong>${who ? ` as <strong>${esc(who)}</strong>` : ''}. <button type="button" class="alink" data-action="new-where" aria-expanded="${!$('#new-where-box').hidden}" aria-controls="new-where-box">Change</button>`;
   };
-  form.addEventListener('change', e => { if (e.target.name === 'browser') load(); });
+  form.addEventListener('change', e => {
+    if (e.target.name === 'browser') load();
+    if (e.target.name === 'profile') load();
+    if (e.target.name === 'mode') {
+      form.dataset.mode = e.target.value;
+      $('#new-ai').hidden = !(e.target.value === 'record' || e.target.value === 'coach');
+      if (aiMode(e.target.value) && !AI.status) refreshAi();
+      renderRegions();
+    }
+  });
   load();
 }
 async function createDemo(form) {
   const apps = [...form.querySelectorAll('[data-app-row]')].map(r => ({ id: $('[data-app-id]', r).value.trim(), url: $('[data-app-url]', r).value.trim() }));
   const mode = form.dataset.mode || 'manual';
-  const goal = $('#new-goal')?.value.trim() || null, source = $('#new-source')?.value.trim() || null;
-  const spec = { title: $('#new-title').value, apps, browser: form.browser.value, profile: form.querySelector('[name=profile]:checked')?.value || null, mode, goal, source };
+  const wants = mode === 'record' || mode === 'coach';
+  const goal = wants ? $('#new-goal').value.trim() || null : null, source = wants ? $('#new-source').value.trim() || null : null;
+  const slot = +$('#new-slot').value || null;
+  const spec = { title: $('#new-title').value, apps, browser: form.browser.value, profile: form.querySelector('[name=profile]:checked')?.value ?? (savedProfile() || null), mode, goal, source, slot };
   const err = $('#new-error');
-  if (mode === 'record' && !goal && !source) { err.hidden = false; err.textContent = 'Say what the demo should show, or give it something to work from.'; return; }
+  if (mode === 'record' && !goal && !source) { err.hidden = false; err.textContent = 'Say what the demo should show, or give it something to work from.'; $('#new-goal').focus(); return; }
   try {
     const d = await invoke('create_demo', { spec });
+    const text = $('#new-script').value;
+    if (text.trim()) await invoke('script_save', { id: d.id, text, kind: 'md' }).catch(() => toast('The talk track wasn\u2019t saved: add it again under Review, Talk track', true));
     await loadDemos();
     announce(`Created ${d.title}`);
     openDemo(d.id, 'record');
   } catch (e) {
+    const msg = typeof e === 'string' ? e : e.message;
     err.hidden = false;
-    err.textContent = typeof e === 'string' ? e : e.message;
+    err.textContent = /^`.*` isn't a web address/.test(msg) ? 'Each app needs its start page\u2019s address, starting with https://.'
+      : msg.charAt(0).toUpperCase() + msg.slice(1) + (/[.!?]$/.test(msg) ? '' : '.');
   }
 }
 
@@ -359,15 +542,18 @@ function renderCopilotState() {
   const el = $('#copilot-state');
   if (!el) return;
   const st = AI.status;
-  el.className = 'pill small ' + (st?.signedIn ? 'ok' : AI.checking ? '' : 'warn');
-  el.textContent = AI.signing ? 'Signing in…' : st?.signedIn ? 'On' : AI.checking ? '…' : 'Sign in';
+  el.textContent = AI.signing ? 'Copilot: signing in…' : st?.signedIn ? `Copilot: ${st.login || 'signed in'}` : AI.checking && !st ? 'Copilot' : 'Copilot: not signed in';
   el.dataset.signedIn = String(!!st?.signedIn);
+  $('#nav-copilot').dataset.signedIn = String(!!st?.signedIn);
 }
+// Signed in, or Sign in right here: the form stays as it is, and the code to enter shows below.
 const signedInLine = () => {
   const st = AI.status;
   if (AI.checking && !st) return '<p class="muted small">Checking your GitHub sign-in…</p>';
-  if (st?.signedIn) return `<span class="pill ok" data-test="ai-signed-in">GitHub Copilot: ${esc(st.login || 'signed in')}</span>`;
-  return `<div class="notice warn"><div>These use <strong>GitHub Copilot</strong> through your own GitHub account. <button class="btn small primary" data-action="copilot" data-test="go-sign-in">Sign in with GitHub</button></div></div>`;
+  if (st?.signedIn) return `<p class="state ok" data-test="ai-signed-in">${mk('ok')} GitHub Copilot: ${esc(st.login || 'signed in')}</p>`;
+  return `<div class="notice info"><div class="grow">This uses <strong>GitHub Copilot</strong> through your own GitHub account.
+    ${AI.signing ? '' : '<div class="row" style="margin-top:8px"><button type="button" class="btn small" data-action="ai-sign-in" data-test="go-sign-in">Sign in with GitHub</button></div>'}
+    <div data-region="copilot-signin"></div></div></div>`;
 };
 Object.assign(REGIONS_LATE, {
   'copilot-mini': () => signedInLine(),
@@ -379,7 +565,7 @@ Object.assign(REGIONS_LATE, {
     return `<div class="notice info" data-test="device-code" data-code="${esc(AI.code.userCode)}"><div>
       <p>Enter this code at <strong>${esc(AI.code.verificationUri)}</strong>, signed in to the GitHub account that has Copilot:</p>
       <p class="device-code">${esc(AI.code.userCode)}</p>
-      <div class="row"><button class="btn primary" data-copy-open="${esc(AI.code.userCode)}" data-url="${esc(AI.code.verificationUri)}">Copy the code and open GitHub</button>
+      <div class="row"><button type="button" class="btn primary" data-copy-open="${esc(AI.code.userCode)}" data-url="${esc(AI.code.verificationUri)}">Copy the code and open GitHub</button>
       <span class="muted small">This turns green on its own when you're done.</span></div></div></div>`;
   },
 });
@@ -389,8 +575,7 @@ function renderCopilot() {
   renderSidebar();
   const st = AI.status, set = AI.settings || { model: 'auto', pageText: true };
   const models = AI.models || [];
-  $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1>GitHub Copilot</h1>
-    <p class="muted">Copilot can record a demo for you, write the script from your recording, or coach you while you record. It uses your own GitHub account and its Copilot plan: no keys to set up.</p></div></div>
+  $('#main').innerHTML = `${pageHead({ title: 'GitHub Copilot', sub: 'Copilot can click through a demo for you while it records, write your talk track from a recording, or coach you as you click. It uses your own GitHub account and its Copilot plan: no keys to set up.' })}
     <div class="card"><h2>Your account</h2>
       <div class="row" style="margin-top:8px">${st?.signedIn ? `<span class="pill ok" data-test="ai-signed-in">Signed in as ${esc(st.login || 'you')}</span>
         <button class="btn" data-action="ai-sign-out" data-test="ai-sign-out">Sign out</button>`
@@ -423,40 +608,71 @@ listen('job', ({ payload: { demo: id, job, update: u } }) => {
 // ---- A demo ------------------------------------------------------------------------------------------------------
 
 function tabDone(t, s) {
-  return { record: s.recorded, build: s.built, fidelity: !!s.fidelity, script: s.focusPoints > 0 }[t];
+  return { record: s.recorded, build: s.built, fidelity: !!s.fidelity?.pass, script: s.focusPoints > 0 }[t];
 }
 function tabJobs(t) {
   return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-script', 'coach'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
 }
+const gateDone = (g, s) => ({ record: s.recorded, review: s.built && !!s.fidelity?.pass, present: !!s.rehearsedAt, share: !!s.exportedAt })[g];
+const gateJobs = g => g === 'review' ? REVIEW.flatMap(([t]) => tabJobs(t)) : tabJobs(gateTab(g));
+// The gates (Record · Review · Present · Share) and, on Review, its tabs.
 function renderTabsBar() {
   const d = demo();
-  const bar = $('#tabs');
+  const bar = $('#gates');
   if (!d || !bar) return;
-  bar.innerHTML = TABS.map(([t, label]) => {
-    const b = tabJobs(t).some(j => running(j));
-    return `<button role="tab" id="tab-${t}" aria-controls="panel" aria-selected="${t === S.tab}" tabindex="${t === S.tab ? 0 : -1}" data-tab="${t}" data-test="tab-${t}">
-      <span class="tab-dot ${b ? 'busy' : tabDone(t, d.status) ? 'done' : ''}" aria-hidden="true"></span>${label}${b ? '<span class="visually-hidden"> (working)</span>' : tabDone(t, d.status) ? '<span class="visually-hidden"> (done)</span>' : ''}</button>`;
+  const cur = gateOf(S.tab);
+  bar.innerHTML = GATES.map(([g, label], i) => {
+    const done = gateDone(g, d.status), here = g === cur, b = gateJobs(g).some(j => running(j));
+    return `<button class="gate${done && !here ? ' done' : ''}${b ? ' busy' : ''}" data-gate="${g}" data-test="tab-${g}" ${here ? 'aria-current="step"' : ''}>
+      <i aria-hidden="true">${done && !here ? I.check : i + 1}</i>${label}${b ? '<span class="visually-hidden"> (working)</span>' : done ? '<span class="visually-hidden"> (done)</span>' : ''}</button>`;
+  }).join('<span class="gate-line" aria-hidden="true"></span>');
+  const tabs = $('#tabs');
+  if (tabs) tabs.innerHTML = REVIEW.map(([t, label]) => {
+    const b = tabJobs(t).some(j => running(j)), done = tabDone(t, d.status);
+    return `<button role="tab" id="tab-${t}" aria-controls="subpanel" aria-selected="${t === S.tab}" tabindex="${t === S.tab ? 0 : -1}" data-tab="${t}" data-test="tab-${t}">
+      <span class="tab-dot ${b ? 'busy' : done ? 'done' : ''}" aria-hidden="true"></span>${label}${b ? '<span class="visually-hidden"> (working)</span>' : done ? '<span class="visually-hidden"> (done)</span>' : ''}</button>`;
   }).join('');
+}
+// What each gate says at the top: the demo on Record, where it stands on the others.
+function headFor(d) {
+  const s = d.status, f = s.fidelity, g = gateOf(S.tab);
+  const slot = d.slot ? `<div class="slot" data-test="slot"><b>${clock(d.slot)}</b>your slot</div>` : '';
+  if (g === 'record') return { title: d.title, test: 'demo-title', sub: esc(listWords(d.apps.map(appLabel))), side: slot };
+  if (g === 'review') {
+    if (!s.recorded) return { title: 'Nothing to review yet', sub: 'Record the demo first: each screen shows up here.' };
+    if (!s.built) return { title: 'Build the replica', sub: `${plural(s.screens, 'screen')} recorded ${esc(ago(s.recordedAt))}.`, side: slot };
+    if (!f) return { title: 'Compare it with the real product', sub: `${plural(s.liveScenes, 'screen')} built. Compare checks each one against what you recorded.`, side: slot };
+    if (f.pass) return { title: 'Every screen matches', sub: `${f.total} of ${f.total} match the real product${s.focusPoints ? ` · ${plural(s.focusPoints, 'focus point')}` : ''}.`, side: slot };
+    const n = f.total - f.within;
+    return { title: `${plural(n, 'screen')} ${n === 1 ? 'needs' : 'need'} a look`, sub: `${f.within} of ${f.total} match the real product.`, side: slot };
+  }
+  if (g === 'present') return s.built ? { title: 'Ready for the stage', sub: 'The stage opens full screen; your guide opens on this screen.', side: slot }
+    : { title: 'Not ready for the stage yet', sub: 'Record and review the demo first.', side: slot };
+  return { title: 'Send it to another presenter', sub: 'They get the replica and your guide. Not your recording, not your sign-ins.' };
+}
+function renderHead() {
+  const d = demo(), el = $('#demo-head');
+  if (!d || !el) return;
+  el.innerHTML = pageHead(headFor(d));
+  renderRegions();
 }
 async function openDemo(id, tab) {
   S.view = 'demo';
   S.id = id;
   if (tab) S.tab = tab;
+  if (gateOf(S.tab) === 'review') S.reviewTab = S.tab;
   await refreshDemo(id);
   const d = demo();
   if (!d) return renderLibrary();
-  $('#main').innerHTML = `<div class="page-head"><div class="grow"><h1 data-test="demo-title">${esc(d.title)}</h1>
-      <p class="muted small">${d.apps.map(a => `${esc(a.id)} <span class="mono">${esc(a.url)}</span>`).join(' · ')}</p></div>
-      <button class="btn subtle" data-reveal="${esc(d.dir)}">Show in ${folderWord()}</button>
-      <button class="btn subtle" data-duplicate="${esc(d.id)}">Duplicate</button>
-      <button class="btn subtle danger" data-delete="${esc(d.id)}">Delete</button></div>
-    <div class="tabs" role="tablist" aria-label="Steps" id="tabs"></div>
-    <section id="panel" role="tabpanel" aria-labelledby="tab-${S.tab}" tabindex="0"></section>`;
+  renderSidebar();
+  $('#main').innerHTML = `<nav class="gates" id="gates" aria-label="Steps"></nav><div id="demo-head"></div>
+    <section id="panel" aria-label="${esc(GATES.find(([g]) => g === gateOf(S.tab))[1])}"></section>`;
   renderTabsBar();
+  renderHead();
   invoke('receiver_ensure', { id }).then(r => { if (S.id === id) { S.rx = r; renderRegions(); } }).catch(() => {});
   await renderPanel();
 }
-// The receiver and the recorder, every 1.5 s on the Record step: turns green the moment the extension connects.
+// The recorder, every 1.5 s on Record: turns green the moment the extension connects.
 setInterval(async () => {
   if (S.view !== 'demo' || S.tab !== 'record' || document.hidden) return;
   const was = !!S.rx?.receiver?.connected;
@@ -473,14 +689,23 @@ setInterval(async () => {
 function rerender() {
   if (S.view !== 'demo') return;
   renderTabsBar();
+  renderHead();
   renderPanel();
 }
 async function renderPanel() {
   const panel = $('#panel');
   if (!panel) return;
-  panel.setAttribute('aria-labelledby', `tab-${S.tab}`);
   const d = demo();
-  await PANELS[S.tab](panel, d);
+  const g = gateOf(S.tab);
+  panel.setAttribute('aria-label', GATES.find(([x]) => x === g)[1]);
+  let el = panel;
+  if (g === 'review') {
+    if (!$('#tabs', panel)) panel.innerHTML = '<div class="tabs" role="tablist" aria-label="Review" id="tabs"></div><div id="subpanel" role="tabpanel" tabindex="0"></div>';
+    renderTabsBar();
+    el = $('#subpanel', panel);
+    el.setAttribute('aria-labelledby', `tab-${S.tab}`);
+  } else if ($('#tabs', panel)) panel.innerHTML = '';
+  await PANELS[S.tab](el, d);
   renderRegions();
 }
 function renderRegions() {
@@ -502,11 +727,12 @@ function errorBox(e, job, fallback) {
     ${a ? `<div class="row" style="margin-top:10px">${actionButton(a)}</div>` : ''}
     ${x.detail ? `<details class="err-detail"><summary>Details</summary><div class="log">${esc(x.detail)}</div></details>` : ''}</div></div>`;
 }
-const icon = (status, label) => `<span class="icon ${esc(status)}" role="img" aria-label="${esc(label || status)}">${{ ok: '✓', fixed: '✓', pass: '✓', fail: '!', warn: '!', manual: '?', skip: '–', run: '' }[status] ?? ''}</span>`;
+const ICON_SAYS = { ok: 'done', fixed: 'fixed', pass: 'passed', fail: 'needs fixing', warn: 'worth a look', manual: 'yours to do', skip: 'skipped', run: 'working' };
+const icon = (status, label) => mk({ ok: 'ok', fixed: 'ok', pass: 'ok', fail: 'no', warn: 'hold', manual: 'hold', run: 'spin' }[status] || 'todo', label || ICON_SAYS[status] || status);
 
 // ---- Record ------------------------------------------------------------------------------------------------------
 
-const PREFLIGHT_LABEL = { receiver: 'Receiver', browser: 'Browser', recorder: 'Recorder extension' };
+const PREFLIGHT_LABEL = { receiver: 'Scenecast', browser: 'Browser', recorder: 'Recorder' };
 const BNAME = { chrome: 'Google Chrome', edge: 'Microsoft Edge' };
 const avatar = p => p.picture ? `<img class="avatar" src="${esc(p.picture)}" alt="">`
   : `<span class="avatar" style="background:${esc(p.color || '#8a8a94')}" aria-hidden="true">${esc((p.name || '?').trim().charAt(0).toUpperCase())}</span>`;
@@ -519,7 +745,7 @@ function profileOptions(info, chosen) {
   const auto = info.profiles.find(p => p.dir === info.picked);
   return `<div class="profiles" role="radiogroup" aria-label="Browser profile">
     <label class="profile"><input type="radio" name="profile" value="" ${picked === '' ? 'checked' : ''} data-test="profile-auto">
-      <span class="avatar auto" aria-hidden="true">✓</span><span><span class="pname">The one that\u2019s open</span>
+      <span class="avatar auto" aria-hidden="true">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', '')}</span><span><span class="pname">The one that\u2019s open</span>
       <span class="small muted">${auto ? `now: ${esc(auto.name)}` : 'when you record'}</span></span></label>
     ${info.profiles.map(p => `<label class="profile"><input type="radio" name="profile" value="${esc(p.dir)}" ${picked === p.dir ? 'checked' : ''} data-test="profile-${esc(p.dir.replace(/\s+/g, '-'))}">
       ${avatar(p)}<span><span class="pname">${esc(p.name)}</span>
@@ -530,13 +756,19 @@ const rxState = () => S.rx?.receiver || {};
 const REGIONS = {
   recorder(d) {
     const r = rxState(), x = S.rx?.extension || {};
-    const rxLine = r.running ? `<span class="pill ok" data-test="receiver-state" data-port="${r.port}">Receiver running · port ${r.port}</span>`
-      : r.error ? `<span class="pill bad" data-test="receiver-state">Receiver stopped</span> <span class="small">${esc(r.error)}</span> <button class="btn small" data-action="receiver-fix">Start it</button>`
-        : '<span class="pill" data-test="receiver-state">Receiver starting…</span>';
-    const recLine = r.connected ? `<span class="pill ok" data-test="recorder-state" data-connected="true">Recorder connected</span>`
-      : `<span class="pill warn" data-test="recorder-state" data-connected="false">Recorder not connected</span>`;
+    if (r.error) return `<div class="notice bad" role="alert" data-test="recorder-state" data-connected="false"><div class="grow"><strong>Scenecast can\u2019t hear the recorder.</strong> Something stopped it listening on this computer.
+      <div class="row" style="margin-top:10px"><button class="btn small" data-action="receiver-fix">Try again</button></div></div></div>`;
+    const line = r.connected ? `<p class="state ok" data-test="recorder-state" data-connected="true">${mk('ok')} The recorder is connected</p>`
+      : `<div class="row"><p class="state warn" data-test="recorder-state" data-connected="false">The recorder isn\u2019t connected yet</p>
+        <button class="btn small" data-action="install" data-test="install-recorder">Add the recorder</button></div>`;
     const upd = x.updated ? `<p class="small muted" style="margin-top:6px">The recorder was updated to ${esc(x.version)}. ${x.reloaded ? 'Scenecast reloaded it for you.' : `If it doesn\u2019t connect, click Reload on Scenecast Recorder at ${d.browser}://extensions.`}</p>` : '';
-    return `<div class="row">${rxLine}${recLine}</div>${upd}`;
+    return line + upd;
+  },
+  // Details: the receiver the recorder talks to, its port, and the recorder's version and folder.
+  'recorder-details'() {
+    const r = rxState(), x = S.rx?.extension || {};
+    return `<span data-test="receiver-state" data-port="${esc(r.port ?? '')}">${r.running ? `Receiver on port ${esc(r.port)}` : r.error ? `Receiver stopped: ${esc(r.error)}` : 'Receiver starting'}</span>
+      · ${r.connected ? 'recorder connected' : 'recorder not connected'}${x.version ? ` · recorder ${esc(x.version)}` : ''}${x.dir ? ` · <code>${esc(x.dir)}</code>` : ''}`;
   },
   install(d) {
     const j = J(d.id).install || {};
@@ -613,12 +845,10 @@ const REGIONS = {
         <div class="stats">
           <div class="stat"><div class="n" data-test="screens">${st?.count ?? 0}</div><div class="l">Screens captured</div></div>
           <div class="stat"><div class="n">${st?.actions ?? 0}</div><div class="l">Steps</div></div>
-          <div class="stat"><div class="n">${st?.streams ?? 0}</div><div class="l">Streamed answers</div></div>
-          <div class="stat"><div class="n">${secs(t.recorderSecs)}</div><div class="l">Recorder's time</div></div>
-          <div class="stat"><div class="n">${secs(t.productSecs)}</div><div class="l">Product's time</div></div>
         </div>
         <p class="small muted">Side states (hovers, menus, panes, zoom, long lists) are captured on each new screen as you go${st?.side ? `: now <strong>${esc(st.side)}</strong>` : ''}.</p>
         ${st?.log?.length ? `<details><summary>Recorder log</summary><div class="log">${st.log.map(esc).join('\n')}</div></details>` : ''}
+        ${t.recorderSecs != null ? `<details><summary>Timing</summary><p class="small">The recorder took ${secs(t.recorderSecs)}, the product ${secs(t.productSecs)}.</p></details>` : ''}
         <div class="row" style="margin-top:12px"><button class="btn primary" data-action="record-stop" data-test="record-stop" ${running('record-stop', d.id) ? 'disabled' : ''}>Stop recording</button></div>`;
     } else if (stop.error) {
       html += `<div data-test="record-failed">${errorBox(stop.error, 'record-stop', { label: 'Record again', action: 'record-start' })}</div>`;
@@ -629,14 +859,14 @@ const REGIONS = {
     } else if (stop.outcome) {
       const s = stop.outcome;
       const tt = s.timing || {};
-      html += `<div class="notice ok" data-test="record-done"><div><strong>Recorded:</strong> ${plural(s.states, 'screen')}, ${plural(s.steps, 'step')}, ${plural(s.streams, 'streamed answer')}, ${plural(s.beats, 'beat')} in ${secs(s.secs)}
-        (recorder ${secs(tt.recorderSecs)}, product ${secs(tt.productSecs)}).</div></div>
+      html += `<div class="notice ok" data-test="record-done"><div><strong>Recorded ${plural(s.states, 'screen')}${s.beats ? ` in ${plural(s.beats, 'beat')}` : ''}</strong>, in ${secs(s.secs)}.
+        <details><summary>Details</summary><p class="small">${plural(s.steps, 'step')}, ${plural(s.streams, 'streamed answer')}. The recorder took ${secs(tt.recorderSecs)}, the product ${secs(tt.productSecs)}.</p></details></div></div>
         ${s.notes?.length ? `<h3>Worth a look</h3><ul>${s.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
         ${s.autos?.length ? `<details><summary>Side states per screen</summary><div class="log">${s.autos.map(esc).join('\n')}</div></details>` : ''}
-        <div class="row" style="margin-top:12px"><button class="btn primary" data-goto="build">Next: build the replica</button>
+        <div class="row" style="margin-top:12px"><button class="btn primary big" data-goto="build">Next: review it ${I.arrow}</button>
         <button class="btn" data-action="record-start">Record again</button></div>`;
     } else {
-      html += `<div class="row"><button class="btn primary" data-action="record-start" data-test="record-start" ${running('record', d.id) ? 'disabled' : ''}>Start recording</button>
+      html += `<div class="row"><button class="btn primary big" data-action="record-start" data-test="record-start" ${running('record', d.id) ? 'disabled' : ''}>Start recording ${I.arrow}</button>
         ${d.status.recorded ? `<span class="muted small">Recorded ${esc(ago(d.status.recordedAt))} (${plural(d.status.screens, 'screen')}). Recording again replaces it.</span>` : ''}</div>`;
     }
     return html + errorBox(j.error || stop.error, j.error ? 'record' : 'record-stop');
@@ -646,19 +876,20 @@ Object.assign(REGIONS, REGIONS_LATE);
 
 const PANELS = {};
 PANELS.record = (panel, d) => {
-  panel.innerHTML = `<div class="card"><h2><span class="step-num">1</span>The recorder</h2>
-      <p class="muted">A small extension in your own browser does the recording. Install it once; it stays.</p>
+  panel.innerHTML = `<div class="card"><h2>The recorder</h2>
+      <p class="muted">A small extension in your own browser does the recording. It\u2019s added once, and stays.</p>
       <div data-region="recorder" style="margin:10px 0"></div>
-      <div class="row"><button class="btn primary" data-action="install" data-test="install-recorder">Install recorder</button>
-        <span class="muted small">Record in</span>
-        <select id="browser" aria-label="Browser to record in" style="width:auto" data-test="browser">
-          <option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select></div>
-      <div style="margin-top:12px"><span class="muted small">Profile</span><div id="profile-pick" data-test="profile-pick"></div></div>
+      <div class="row"><span class="small muted" id="record-where">Records in ${esc(BNAME[d.browser] || d.browser)}.</span>
+        <button class="alink small" data-action="record-where" aria-expanded="false" aria-controls="record-where-box">Change</button></div>
+      <div id="record-where-box" hidden style="margin-top:12px">
+        <label for="browser" class="small">Record in</label>
+        <select id="browser" class="inline" data-test="browser"><option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select>
+        <div style="margin-top:10px"><span class="small muted">Profile</span><div id="profile-pick" data-test="profile-pick"></div></div></div>
       <div data-region="install" style="margin-top:12px"></div></div>
-    <div class="card"><h2><span class="step-num">2</span>Ready to record?</h2>
-      <p class="muted">Checks the receiver, your browser and profile, the recorder, and each app's tab (open, light theme, on its start screen). It fixes what it can, and never restarts your browser.</p>
-      <div class="row"><button class="btn primary" data-action="preflight" data-test="preflight">Check</button>
-        <button class="btn" data-action="preflight-fix" data-test="preflight-fix">Check and fix</button></div>
+    <div class="card"><h2>Ready to record?</h2>
+      <p class="muted">Checks your browser and profile, the recorder, and each app\u2019s tab: open, and on its start screen. It fixes what it can, and never restarts your browser.</p>
+      <div class="row"><button class="btn" data-action="preflight-fix" data-test="preflight-fix">Check and fix</button>
+        <button class="btn subtle" data-action="preflight" data-test="preflight">Only check</button></div>
       <div data-region="preflight" style="margin-top:12px"></div></div>
     ${recordCards(d)}`;
   if (aiMode(d.mode)) loadAi(d.id);
@@ -668,13 +899,18 @@ PANELS.record = (panel, d) => {
   const showProfiles = async () => {
     pick.innerHTML = profileOptions(J(d.id).profiles, demo()?.profile);
     J(d.id).profiles = await invoke('browser_profiles', { id: d.id }).catch(e => ({ error: String(e) }));
-    if (pick.isConnected) pick.innerHTML = profileOptions(J(d.id).profiles, demo()?.profile);
+    if (!pick.isConnected) return;
+    pick.innerHTML = profileOptions(J(d.id).profiles, demo()?.profile);
+    const who = profileName(J(d.id).profiles, demo()?.profile);
+    const w = $('#record-where');
+    if (w) w.textContent = `Records in ${BNAME[demo()?.browser] || ''}${who ? ` as ${who}` : ''}.`;
   };
   pick.onchange = e => {
     if (e.target.name !== 'profile') return;
     call('set_profile', { id: d.id, profile: e.target.value }).then(async () => {
       await refreshDemo(d.id);
-      toast(e.target.value ? `Recording in profile ${e.target.closest('label').querySelector('.pname').textContent}` : 'Recording in the profile that\u2019s open');
+      showProfiles();
+      toast(e.target.value ? `Recording as ${e.target.closest('label').querySelector('.pname').textContent}` : 'Recording in the profile that\u2019s open');
     });
   };
   sel.onchange = () => call('set_browser', { id: d.id, browser: sel.value }).then(async () => {
@@ -713,13 +949,13 @@ function recordCards(d) {
     <div class="card"><h2><span class="step-num">3</span>What to show</h2>
       <p class="muted">Copilot reads your words and each app's start screen, and drafts the steps: what to click and type, and what to say.</p>
       ${goalFields()}
-      <div class="row" style="margin-top:12px"><button class="btn primary" data-action="ai-plan" data-test="ai-plan">Draft the plan</button></div>
+      <div class="row" style="margin-top:12px"><button class="btn" data-action="ai-plan" data-test="ai-plan">Draft the plan</button></div>
       <div data-region="ai-plan-progress"></div></div>
     <div class="card"><h2><span class="step-num">4</span>The plan</h2>
       <p class="muted">Read it and change anything: one step per line (<code>- Click "Plugins"</code>, <code>- Type "…" in "Message"</code>, <code>- Press Enter</code>, <code>- Go to admin</code>, <code>- Wait for the answer</code>, <code>- You: …</code> for something only you can do), <code>&gt;</code> lines are what to say. Steps marked <strong>ask first</strong> could send, save or change something: Copilot stops and asks you before each one.</p>
       <label for="ai-plan" class="visually-hidden">Plan</label>
       <textarea id="ai-plan" class="plan" data-test="ai-plan-text" data-save="plan" placeholder="Draft the plan first."></textarea>
-      <div class="row" style="margin-top:10px"><button class="btn primary" data-action="ai-record" data-test="ai-record">Approve and record</button>
+      <div class="row" style="margin-top:10px"><button class="btn primary big" data-action="ai-record" data-test="ai-record">Approve and record ${I.arrow}</button>
         <span class="muted small">Your browser needs to be ready (step 2). Copilot clicks in your app tabs: keep your hands off until it asks.</span></div>
       <div data-region="ai-run" style="margin-top:12px"></div><div data-region="ai-after"></div></div>
     ${sent}`;
@@ -727,7 +963,7 @@ function recordCards(d) {
     <div class="card"><h2><span class="step-num">3</span>Your coach</h2>
       <p class="muted">Start the coach, then start recording and click through. It shows the next step and what to say, and keeps up as you go; if you go your own way, it suggests what's next from your goal.</p>
       ${goalFields()}
-      <div class="row" style="margin-top:12px"><button class="btn primary" data-action="coach-start" data-test="coach-start">Start coaching</button>
+      <div class="row" style="margin-top:12px"><button class="btn" data-action="coach-start" data-test="coach-start">Start coaching</button>
         <button class="btn" data-action="coach-window" data-test="coach-window">Open the coach window</button>
         <button class="btn subtle" data-action="ai-plan" data-test="ai-plan">Draft the plan again</button></div>
       <div data-region="coach" style="margin-top:12px"></div></div>
@@ -1162,12 +1398,30 @@ const ACTIONS = {
   new: renderNew,
   copilot: () => { renderCopilot(); refreshAi(); },
   'ai-sign-in': async () => {
-    AI.signing = true; AI.code = null; AI.runtime = null; AI.error = null; AI.signInError = null; renderCopilotState(); renderCopilot();
-    try { await invoke('ai_sign_in'); toast('Signed in to GitHub Copilot'); } catch (e) { AI.signInError = typeof e === 'string' ? e : e.message; { const x = why(AI.signInError, 'ai-sign-in'); if (x) toast(`${x.title}. ${x.body}`, true); } }
+    // Right where it was pressed: the page and anything typed in it stay; the code shows below the button.
+    AI.signing = true; AI.code = null; AI.runtime = null; AI.error = null; AI.signInError = null; renderCopilotState();
+    if (S.view === 'copilot') renderCopilot(); else renderRegions();
+    try { await invoke('ai_sign_in'); toast('Signed in to GitHub Copilot'); } catch (e) {
+      AI.signInError = typeof e === 'string' ? e : e.message;
+      const x = why(AI.signInError, 'ai-sign-in');
+      if (x && !document.querySelector('[data-region=copilot-signin]')) toast(`${x.title}. ${x.body}`, true);
+    }
     AI.signing = false; AI.code = null;
     await refreshAi();
   },
   'show-logs': async () => { const d = await call('logs_dir'); call('reveal', { path: d }).catch(() => {}); },
+  details: () => {
+    S.details = !S.details;
+    $('#details').hidden = !S.details;
+    $('[data-action=details]').setAttribute('aria-expanded', String(S.details));
+    if (S.details) renderRegions();
+  },
+  diagnostics: async () => { await copyText(diagnostics()); toast('Diagnostics copied: paste them where you\u2019re asking for help'); },
+  help: () => call('open_url', { url: 'https://github.com/jldeen/scenecast/blob/main/docs/guide.md' }).catch(() => {}),
+  'new-where': t => { const box = $('#new-where-box'); box.hidden = !box.hidden; t.setAttribute('aria-expanded', String(!box.hidden)); },
+  'record-where': t => { const box = $('#record-where-box'); box.hidden = !box.hidden; t.setAttribute('aria-expanded', String(!box.hidden)); },
+  'first-pick': () => { FR.picking = !FR.picking; renderRegions(); },
+  'first-browser': t => { localStorage.setItem('scenecast.browser', t.dataset.browser); localStorage.removeItem('scenecast.profile'); loadBrowser(t.dataset.browser); },
   'ai-sign-out': async () => { await call('ai_sign_out'); await refreshAi(); },
   'ai-models': async () => { AI.models = (await call('ai_models')).models; renderCopilot(); },
   'pick-source': async () => { const f = await call('pick_text_file'); if (f) { $('#new-source').value = f.text; $('#source-name').textContent = f.name; } },
@@ -1289,17 +1543,17 @@ document.addEventListener('click', async e => {
   if (!t) return;
   const ds = t.dataset;
   if (ds.open) { e.preventDefault(); return openDemo(ds.open); }
-  if (ds.mode) return renderNewForm(ds.mode);
   if (ds.answer) {
     const text = ds.withText ? $('#ai-instead')?.value.trim() : undefined;
     if (ds.withText && !text) return toast('Say what to do instead', true);
     return call('ai_answer', { id: S.id, question: ds.qid, answer: ds.answer, text: text || null });
   }
   if (ds.copyOpen) { await copyText(ds.copyOpen); toast('Code copied'); return call('open_url', { url: ds.url }).catch(() => {}); }
-  if (ds.action && ACTIONS[ds.action]) { e.preventDefault(); return ACTIONS[ds.action](); }
+  if (ds.action && ACTIONS[ds.action]) { e.preventDefault(); return ACTIONS[ds.action](t); }
+  if (ds.gate) { S.tab = gateTab(ds.gate); return openDemo(S.id).then(() => $(`[data-gate=${ds.gate}]`)?.focus()); }
   if (ds.duplicate) return duplicateDemo(ds.duplicate);
   if (ds.delete) return deleteDemo(ds.delete);
-  if (ds.tab) { S.tab = ds.tab; renderTabsBar(); await renderPanel(); return $(`#tab-${ds.tab}`)?.focus(); }
+  if (ds.tab) { S.tab = S.reviewTab = ds.tab; renderTabsBar(); renderHead(); await renderPanel(); return $(`#tab-${ds.tab}`)?.focus(); }
   if (ds.goto) { S.tab = ds.goto; return openDemo(S.id); }
   if (ds.sheet) { J(S.id).sheetTab = ds.sheet; return renderPanel(); }
   if (ds.reveal) return call('reveal', { path: ds.reveal }).catch(() => {});
@@ -1308,6 +1562,16 @@ document.addEventListener('click', async e => {
   if (ds.openFile) return call('open_file', { path: ds.openFile }).catch(() => {});
   if (ds.removeApp !== undefined) { const rows = document.querySelectorAll('[data-app-row]'); if (rows.length > 1) t.closest('[data-app-row]').remove(); return; }
   if (t.id === 'add-app') { const n = document.querySelectorAll('[data-app-row]').length; $('#apps').insertAdjacentHTML('beforeend', appRow(n)); return $(`#app-id-${n}`).focus(); }
+});
+// The first run's browser and profile, and a demo's slot (Details).
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.name === 'fr-browser') { localStorage.setItem('scenecast.browser', t.value); localStorage.removeItem('scenecast.profile'); return loadBrowser(t.value); }
+  if (t.name === 'profile' && t.closest('#fr-profiles')) { localStorage.setItem('scenecast.profile', t.value); return renderRegions(); }
+  if (t.id === 'slot-pick') {
+    const id = S.id;
+    call('set_slot', { id, slot: +t.value || null }).then(async () => { await refreshDemo(id); renderHead(); toast(+t.value ? `Your slot: ${+t.value / 60} min` : 'No set length'); }).catch(() => {});
+  }
 });
 document.addEventListener('submit', e => {
   if (e.target.id === 'new-form') { e.preventDefault(); createDemo(e.target); }
@@ -1326,6 +1590,7 @@ document.addEventListener('keydown', e => {
 $('#new-demo').onclick = renderNew;
 // Busy while the list loads: the table is drawn again when it's in (screen readers wait; so does the UI test).
 $('#nav-copilot').onclick = ACTIONS.copilot;
+$('#help').onclick = ACTIONS.help;
 $('#nav-library').onclick = async () => { const m = $('#main'); m.setAttribute('aria-busy', 'true'); try { await loadDemos(); renderLibrary(); } finally { m.removeAttribute('aria-busy'); } };
 // ---- Updates: checked at start, every 30 minutes, and when the window comes back to the front (at most every 10
 // minutes); quietly, a failed check is just tried again later. A newer version shows at once: a dot on "Check for

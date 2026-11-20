@@ -16,7 +16,7 @@
     { id: 'iq', url: 'https://daily.iq.microsoft.com/', key: 'i' },
     { id: 'admin', url: 'https://admin.cloud.microsoft/', key: 'a' },
   ];
-  const stage = { empty: 'new', library: 'checked', record: 'new', copilot: 'new', recording: 'new', recorded: 'recorded', review: 'built', present: 'checked' }[SC] || 'new';
+  const stage = { empty: 'new', library: 'checked', record: 'new', copilot: 'new', recording: 'new', recorded: 'recorded', review: 'built', present: 'checked', share: 'checked' }[SC] || 'new';
   const after = s => ['recorded', 'built', 'checked'].indexOf(stage) >= ['recorded', 'built', 'checked'].indexOf(s);
   const status = {
     recorded: after('recorded'), recordedAt: after('recorded') ? now - 3600e3 : null, screens: after('recorded') ? 22 : 0,
@@ -28,7 +28,7 @@
   const home = OS === 'macos' ? '/Users/jessica/Documents/Scenecast' : 'C:\\Users\\jessica\\Documents\\Scenecast';
   const demo = {
     id: 'innovation-act-1-demo-1', title: 'Innovation Act 1 · Demo 1', dir: `${home}/innovation-act-1-demo-1`, port: 47811,
-    apps, browser: OS === 'macos' ? 'chrome' : 'edge', profile: 'Profile 10', mode: SC === 'copilot' ? 'record' : 'manual', status,
+    apps, browser: OS === 'macos' ? 'chrome' : 'edge', profile: 'Profile 10', mode: SC === 'copilot' ? 'record' : 'manual', slot: 480, status,
   };
   const others = [
     { ...demo, id: 'supplier-delay', title: 'Supplier delay walkthrough', status: { ...status, stage: 'checked', recorded: true, built: true, screens: 14, liveScenes: 14 } },
@@ -53,8 +53,8 @@
     check_updates: () => ({ current: '0.5.0', available: null }),
     receiver_ensure: () => ({ receiver: { running: true, port: 47621, connected: true }, extension: { dir: `${home}/Recorder Extension`, version: '0.5.0' } }),
     receiver_status: () => ({ receiver: { running: true, port: 47621, connected: true }, extension: { dir: `${home}/Recorder Extension`, version: '0.5.0' } }),
-    browser_profiles: () => ({ browser: demo.browser, picked: 'Profile 10', running: true, profiles: [
-      { dir: 'Profile 10', name: 'Jessica', email: 'jessica@contoso.com', open: true, color: '#6b4fbb', extension: { id: 'kfmgcj', enabled: true, devMode: true } },
+    browser_profiles: ({ browser }) => ({ browser: browser || demo.browser, picked: 'Profile 10', running: true, profiles: [
+      { dir: 'Profile 10', name: 'Jessica', email: 'jessica@contoso.com', open: true, color: '#6b4fbb', ...(SC === 'empty' ? {} : { extension: { id: 'kfmgcj', enabled: true, devMode: true } }) },
       { dir: 'Default', name: 'Personal', color: '#0f6cbd' } ] }),
     ai_get: () => ({ goal: 'A buyer finds out PO-450101 is late, asks Copilot what it holds up, finds who can approve the expedite in Microsoft IQ, and IT rolls the agent out.', source: '', plan: '', sent: [], run: null }),
     ai_save: a => a, ai_settings: ({ set }) => ({ model: 'auto', pageText: true, ...set }),
@@ -72,6 +72,7 @@
     default_export_dir: () => (OS === 'macos' ? '/Users/jessica/Desktop' : 'C:\\Users\\jessica\\Desktop'),
     file_url: () => 'about:blank', logs_dir: () => `${home}/../Library/Application Support/Scenecast/logs`,
     reveal: () => null, open_url: () => null, open_file: () => null, set_browser: () => null, set_profile: () => null,
+    set_slot: ({ slot }) => { demo.slot = slot; return null; }, script_save: () => 'script.md', create_demo: () => demo,
     preflight: async ({ id }) => {
       for (const item of preflightItems) { job(id, 'preflight', { type: 'preflight', item }); await wait(60); }
       return { ready: true, secs: 0.8, items: preflightItems };
@@ -99,11 +100,14 @@
   // Scenarios that need more than data: open the demo, run its check, start a recording.
   addEventListener('load', () => setTimeout(async () => {
     const S = window.__scenecast;
-    if (!S || SC === 'empty' || SC === 'library') return;
+    const ready = () => { document.documentElement.dataset.previewReady = '1'; };
+    if (!S || SC === 'empty' || SC === 'library') return ready();
+    if (SC === 'new') { document.querySelector('#new-demo')?.click(); await wait(200); return ready(); }
     document.querySelector(`[data-open="${demo.id}"]`)?.click();
     await wait(200);
-    const tab = { review: 'build', present: 'present', recorded: 'record' }[SC];
-    if (tab) document.querySelector(`[data-tab="${tab}"]`)?.click();
+    const gate = { review: 'review', present: 'present', share: 'share' }[SC];
+    if (gate) { document.querySelector(`[data-gate="${gate}"]`)?.click(); await wait(200); }
+    if (q.get('details') === '1') document.querySelector('[data-action="details"]')?.click();
     if (['record', 'copilot', 'recording', 'record-error'].includes(SC)) document.querySelector('[data-action="preflight"]')?.click();
     if (SC === 'recording' || SC === 'record-error') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
     document.documentElement.dataset.previewReady = '1';

@@ -12,8 +12,9 @@ const OUT = resolve(args.find(a => !a.startsWith('--')) || 'preview-shots');
 const pick = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : dflt; };
 const ENGINE = pick('--browser', 'webkit') === 'chromium' ? chromium : webkit;
 const ONLY = pick('--only', '') ? pick('--only', '').split(',') : null;
-const SCENARIOS = ['empty', 'library', 'record', 'copilot', 'recording', 'record-error', 'recorded', 'review', 'present'];
-const ENGINE_WORDS = /\b(port \d+|receiver|preflight|scrub|manifest|unpacked|developer mode|headless|side states?|streamed answers?|threshold|localhost|127\.0\.0\.1|profile \d+)\b/i;
+// 'details' is the Record screen with Details open: the one place engine words belong.
+const SCENARIOS = ['empty', 'library', 'new', 'record', 'copilot', 'recording', 'record-error', 'recorded', 'review', 'present', 'share', 'details'];
+const ENGINE_WORDS = /\b(port \d+|receiver|preflight|scrub|manifest|unpacked|developer mode|headless|side states?|streamed answers?|threshold|localhost|127\.0\.0\.1|profile \d+)\b|\/Users\/|\b[A-Z]:\\/i;
 
 mkdirSync(OUT, { recursive: true });
 const server = await startPreview(0);
@@ -23,8 +24,8 @@ const report = [];
 for (const os of ['macos', 'windows']) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
   for (const s of SCENARIOS.filter(x => !ONLY || ONLY.includes(x))) {
-    await page.goto(`http://127.0.0.1:${port}/?s=${s}&os=${os}`);
-    await page.waitForFunction(sc => ['empty', 'library'].includes(sc) || document.documentElement.dataset.previewReady === '1', s, { timeout: 10000 }).catch(() => {});
+    await page.goto(`http://127.0.0.1:${port}/?s=${s === 'details' ? 'record&details=1' : s}&os=${os}`);
+    await page.waitForFunction(() => document.documentElement.dataset.previewReady === '1', null, { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(700);
     const look = await page.evaluate(re => {
       const main = document.querySelector('#main');
