@@ -268,7 +268,7 @@ try {
   await shot('05-recording');
   await click('record-stop');
   await waitFor('the recording', () => exists('record-done'), 300000);
-  check('stop: the recording, with the recorder\'s and the product\'s time', /screens?/.test(await text('record-done')) && /recorder/.test(await text('record-done')));
+  { const done = await text('record-done'); check('stop: the recording, with the recorder\'s and the product\'s time', /screens?/.test(done) && /recorder/.test(done), done); }
   await shot('06-recorded');
   lap('record');
 
