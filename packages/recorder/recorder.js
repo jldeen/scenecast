@@ -273,8 +273,11 @@ async function recHandle(e) {
   if (e.kind === 'esc') return recEsc(A, e);
   if (e.kind === 'drag') { REC.drags.push({ app: A.id, state: A.state, spec: e.spec && e.spec.m, dx: Math.round(e.x1 - e.x0), dy: Math.round(e.y1 - e.y0) }); return rlogr(`drag on "${e.spec && e.spec.desc}" by ${Math.round(e.x1 - e.x0)} px (a pane resize: add a drags rule)`); }
 }
+// Where the loop is, and since when (record status shows it: a loop that's stuck says where).
+const recAt = what => { REC.at = what; REC.atSince = Date.now(); };
 async function recLoop() {
   while (!REC.stop) {
+    recAt('waiting for your next step');
     try {
       // The start screens' side states first (and after a resume, the screens left without them).
       if (!REC.paused && REC.autoQueue.length) {
@@ -285,14 +288,17 @@ async function recLoop() {
       if (!REC.paused) {
         const evs = [];
         for (const A of REC.apps) for (const f of A.page.frames()) {
-          const q = await f.evaluate('window.__rkrec ? window.__rkrec.drain() : null').catch(() => undefined);
-          if (q === null) { await f.evaluate(RECX(REC.opts)).catch(() => {}); continue; }
+          recAt(`reading ${A.id}'s events (${f.url().slice(0, 60)})`);
+          // Through recEval: one frame that stops answering held the whole loop (Copilot, Nov 20: every Enter and click
+          // after it was held back and never done, while status said not busy).
+          const q = await recEval(A.page, f, 'window.__rkrec ? window.__rkrec.drain() : null').catch(() => undefined);
+          if (q === null) { await recEval(A.page, f, RECX(REC.opts)).catch(() => {}); continue; }
           if (q && q.length) for (const e of q) evs.push({ ...e, A, f });
         }
         evs.sort((a, b) => a.t - b.t || a.seq - b.seq);
-        for (const e of evs) { if (REC.stop) break; REC.busyNow = true; try { await recHandle(e); REC.actions++; } catch (err) { rlogr('error: ' + String(err.stack || err).slice(0, 300)); } finally { REC.busyNow = false; } }
+        for (const e of evs) { if (REC.stop) break; REC.busyNow = true; recAt(`${e.kind} in ${e.A.id}`); try { await recHandle(e); REC.actions++; } catch (err) { rlogr('error: ' + String(err.stack || err).slice(0, 300)); } finally { REC.busyNow = false; } }
         if (evs.some(e => e.kind !== 'input')) recCheckpoint();
-        for (const A of REC.apps) if (A.typing && !A.typing.done && Date.now() - A.typing.at > REC.opts.typeIdleMs) await recTyped(A);
+        for (const A of REC.apps) if (A.typing && !A.typing.done && Date.now() - A.typing.at > REC.opts.typeIdleMs) { recAt(`capturing what was typed in ${A.id}`); await recTyped(A); }
       }
     } catch (err) { rlogr('loop: ' + String(err.message || err).slice(0, 200)); }
     await sleep(120);
@@ -323,7 +329,7 @@ async function recAuto(A) {
     // stop part way, only starts with zoomMinS left. On real apps a screen's sweep ran 9 to 13 minutes before this.
     const left = o.maxS - (Date.now() - t0) / 1000;
     if (left < 5 || (kind === 'zoom' && left < o.zoomMinS)) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return; }
-    if (kind === 'hovers' || kind === 'clicks') c = { ...c, maxS: Math.min(c.maxS || left, left) };
+    if (kind === 'hovers' || kind === 'clicks' || kind === 'zoom') c = { ...c, maxS: Math.min(c.maxS || left, left) };
     REC.side = `${kind} on ${state}`;
     const t1 = Date.now(), s1 = SLEPT.ms;
     try {
@@ -427,7 +433,7 @@ OPS.recordAbort = async () => { if (!REC.on) return { error: 'not recording' }; 
 // Where the time went: the recorder's own work (side states swept, screens captured, making sure an action was done)
 // apart from the product's (its answers), in seconds.
 const recTiming = () => { const t = REC.time, r = x => Math.round(x / 100) / 10; return { recorderSecs: r(t.sweep + t.capture + t.confirm), productSecs: r(t.product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm) }; };
-OPS.recordStatus = async () => REC.on ? { recording: true, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
+OPS.recordStatus = async () => REC.on ? { recording: true, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
   REC.stop = true; await REC.loopP;
@@ -624,10 +630,12 @@ async function recSide(A, c) {
     if (c.kind === 'zoom') {
       const base = await p.evaluate(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
       const s = await ctx.newCDPSession(p);
-      const out = [];
+      const out = [], t0 = Date.now();
       try {
         for (const z of c.zooms || [110, 125, 150, 175, 200]) {
           if (z === 100) continue;
+          // Each zoom is a full snapshot (half a minute on a heavy Power BI page): stop at the screen's budget.
+          if (c.maxS && Date.now() - t0 > c.maxS * 1000) { REC.notes.push(`${state}: zoom stopped at the screen's time budget before ${z}%; record side zoom on it if it matters`); break; }
           const k = z / 100;
           const vw = Math.round(base.w / k), vh = Math.round(base.h / k);
           await s.send('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: base.dpr * k, mobile: false });

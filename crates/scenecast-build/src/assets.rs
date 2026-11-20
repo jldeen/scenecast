@@ -535,8 +535,11 @@ fn scrub(text: String) -> String {
         .replace_all(&text, "");
     let text = re!(r#"(?i)([?&;](?:access_token|id_token|token|sig|signature|code|skypetoken|authorization|auth|session_state|client_info|sv|se|sp|spr|srt|ss|st|skoid|sktid|skt|ske|sks|skv)=)[^&"'\s<>]*"#)
         .replace_all(&text, "$1");
-    re!(r"Bearer\s+[A-Za-z0-9._-]{20,}")
-        .replace_all(&text, "Bearer")
+    let text = re!(r"Bearer\s+[A-Za-z0-9._-]{20,}").replace_all(&text, "Bearer");
+    // A do-nothing link the product writes as href="javascript:void(0)" (the admin center's account menu) is script
+    // to the built-replica scan, which stops the build: it does nothing in the replica either, as "#".
+    re!(r#"(?i)(\s(?:href|src|action|formaction|xlink:href)\s*=\s*)(["'])\s*javascript:[^"']*(["'])"#)
+        .replace_all(&text, "${1}${2}#${3}")
         .into_owned()
 }
 
@@ -565,6 +568,17 @@ fn drop_missing_fonts(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn javascript_links_become_plain_links() {
+        let html = r#"<a id="x" href="javascript:void(0)" class="m">Download</a><form action='javascript:go()'>"#;
+        let out = scrub(html.to_owned());
+        assert_eq!(
+            out,
+            r##"<a id="x" href="#" class="m">Download</a><form action='#'>"##
+        );
+        assert!(!crate::scrub::contains_script("html", &out));
+    }
 
     #[test]
     fn removes_signed_parameters_and_bearer_values_from_capture_text() {

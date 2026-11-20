@@ -1,8 +1,8 @@
-// Each beat in plain words, from the recorded path: a name for what's on screen when it starts ("Copilot: the answer
-// to “Summarize…”", not "copilot: copilot-03-summarize-the-supp") and the steps the presenter does in it ("Click
+// Each beat in plain words, from the recorded path: a name for what's on screen when it starts ("Copilot: after
+// “Summarize…”", not "copilot: copilot-03-summarize-the-supp") and the steps the presenter does in it ("Click
 // **Library**", "Type `…`, then **Enter**"). The beat labels (⌥1–⌥9) and, until there's a script, the presenter guide
 // (presenter/notes.json) come from it, so a fresh recording says where a prompt or a click is expected.
-const clip = (s, n = 60) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
+const clip = (s, n = 60) => { s = String(s || '').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
 const appTitle = (flow, id) => ((flow.apps || []).find(a => a.id === id) || {}).title || id;
 const appKey = (flow, id) => ((flow.apps || []).find(a => a.id === id) || {}).key;
 
@@ -52,7 +52,7 @@ export function beatSteps(flow) {
     const app = beats[i].active, A = appTitle(flow, app), l = b.landing && b.landing.s;
     b.title = i === 0 ? 'Reset'
       : !l || l.app || i === 1 ? `${A}: start`
-      : l.enter ? `${A}: the answer to “${clip(b.landing.typed || controlName(l.enter), 48)}”`
+      : l.enter ? `${A}: after “${clip(b.landing.typed || controlName(l.enter), 48)}”`
       : l.click ? `${A}: ${controlName(l.click) || 'after a click'}`
       : A;
     delete b.landing;

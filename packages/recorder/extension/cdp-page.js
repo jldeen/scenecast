@@ -10,8 +10,12 @@ const CDPX = (() => {
   const b64of = buf => { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
   // What Playwright hands back for a screenshot or a body: something with toString('base64').
   const B64 = b64 => ({ b64, toString(enc) { return enc === 'base64' ? b64 : atob(b64); } });
+  // A renderer that stops answering never calls back: every call gets SEND_MS (a big snapshot takes tens of seconds),
+  // so nothing in the recorder can wait for ever.
+  const SEND_MS = 150000;
   const send = (tabId, sessionId, method, params) => new Promise((res, rej) => {
-    chrome.debugger.sendCommand(sessionId ? { tabId, sessionId } : { tabId }, method, params || {}, r => { const e = chrome.runtime.lastError; if (e) rej(new Error(`${method}: ${e.message}`)); else res(r); });
+    const t = setTimeout(() => rej(new Error(`${method}: no answer in ${SEND_MS / 1000} s`)), SEND_MS);
+    chrome.debugger.sendCommand(sessionId ? { tabId, sessionId } : { tabId }, method, params || {}, r => { clearTimeout(t); const e = chrome.runtime.lastError; if (e) rej(new Error(`${method}: ${e.message}`)); else res(r); });
   });
   const KEYS = {
     Enter: { code: 'Enter', keyCode: 13, text: '\r' }, Escape: { code: 'Escape', keyCode: 27 }, Backspace: { code: 'Backspace', keyCode: 8 },
