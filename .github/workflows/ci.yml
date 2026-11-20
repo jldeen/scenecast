@@ -327,6 +327,13 @@ jobs:
           printf '%s\n' "${files[@]}"
           find dist -name '*.dmg' | grep -q . || { echo "no macOS installer"; exit 1; }
           find dist -name '*.msi' | grep -q . || { echo "no Windows installer"; exit 1; }
+          # The same installers under names that don't change, so one link always gets the newest
+          # (releases/latest/download/Scenecast-mac.dmg; docs/download/index.html).
+          mkdir -p stable
+          cp "$(find dist -name '*.dmg' | head -1)" stable/Scenecast-mac.dmg
+          setup="$(find dist -name '*-setup.exe' | head -1)"
+          [ -n "$setup" ] && cp "$setup" stable/Scenecast-windows-setup.exe
+          files+=(stable/*)
           files+=(docs/guide.pdf)
           notes="docs/releases/$TAG.md"
           if gh release view "$TAG" >/dev/null 2>&1; then

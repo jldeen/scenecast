@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download Scenecast</title>
+<meta name="description" content="Record a live web demo once; present a replica that runs the same every time.">
+<style>
+@font-face { font-family: Barlow; font-weight: 500; font-display: swap; src: url(Barlow-500.woff2) format('woff2'); }
+@font-face { font-family: Barlow; font-weight: 700; font-display: swap; src: url(Barlow-700.woff2) format('woff2'); }
+:root { --ink: #0E1A26; --muted: #56626E; --ground: #F3F5F7; --paper: #fff; --rule: #DCE1E6; --way: #FFD100; color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; font: 500 17px/1.5 Barlow, "Segoe UI", -apple-system, system-ui, sans-serif; color: var(--ink); background: var(--ground); display: grid; grid-template-rows: auto 1fr auto; }
+header { background: var(--ink); color: #fff; padding: 18px 28px; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+.mark { width: 28px; height: 28px; border-radius: 6px; background: var(--way); display: grid; place-items: center; }
+.mark svg { width: 17px; height: 17px; stroke: var(--ink); stroke-width: 2.6; fill: none; }
+main { width: min(720px, 100% - 48px); margin: 64px auto; }
+h1 { font-size: 44px; line-height: 1.1; margin: 0 0 12px; letter-spacing: -.01em; }
+p { margin: 0; }
+.lead { color: var(--muted); font-size: 19px; max-width: 34em; }
+.get { margin-top: 36px; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 12px; background: var(--ink); color: #fff; text-decoration: none; font-weight: 700; font-size: 19px; padding: 16px 26px; border-radius: 10px; }
+.btn:hover { background: #1D2D3D; }
+.btn svg { width: 20px; height: 20px; stroke: var(--way); stroke-width: 2.4; fill: none; }
+a { color: var(--ink); text-underline-offset: 4px; text-decoration-thickness: 1.5px; }
+.other { color: var(--muted); }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 10px; }
+ol { margin: 44px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--rule); }
+ol li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+ol li b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--ink); font-size: 14px; }
+.note { margin-top: 28px; font-size: 15px; color: var(--muted); }
+footer { padding: 20px 28px; font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header><span class="mark" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M2.5 8h10M8.5 3.5 13 8l-4.5 4.5"/></svg></span> Scenecast</header>
+<main>
+  <h1>Present your demo the same way, every time</h1>
+  <p class="lead">Record a live web demo once, in your own browser. Scenecast turns it into a replica that runs offline, with your talk track beside it.</p>
+  <div class="get">
+    <a class="btn" id="get" href="https://github.com/jldeen/scenecast/releases/latest">Download Scenecast <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg></a>
+    <span class="other" id="other"><a href="https://github.com/jldeen/scenecast/releases/latest/download/Scenecast-mac.dmg">For Mac</a> · <a href="https://github.com/jldeen/scenecast/releases/latest/download/Scenecast-windows-setup.exe">For Windows</a></span>
+  </div>
+  <ol>
+    <li><b>1</b><span><strong>Install it.</strong> <span id="how">Open the download and follow it.</span></span></li>
+    <li><b>2</b><span><strong>Open Scenecast.</strong> It finds your browser and your work profile, and says what's left.</span></li>
+    <li><b>3</b><span><strong>Make your first demo.</strong> Name it, add its apps, and click through it once.</span></li>
+  </ol>
+  <p class="note" id="note">The first time it opens, your computer may ask whether you trust it: <a href="https://github.com/jldeen/scenecast/blob/main/docs/guide.md#1--install-once">here's what to click</a>.</p>
+</main>
+<footer>Scenecast · <a href="https://github.com/jldeen/scenecast">Source</a> · <a href="https://github.com/jldeen/scenecast/blob/main/docs/guide.md">The guide</a></footer>
+<script>
+  // One button for this computer; the other system's link stays beside it.
+  const base = 'https://github.com/jldeen/scenecast/releases/latest/download/';
+  const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
+  const os = /mac/i.test(p) ? 'mac' : /win/i.test(p) ? 'windows' : null;
+  if (os) {
+    const get = document.getElementById('get');
+    get.href = base + (os === 'mac' ? 'Scenecast-mac.dmg' : 'Scenecast-windows-setup.exe');
+    get.firstChild.textContent = os === 'mac' ? 'Download for Mac ' : 'Download for Windows ';
+    document.getElementById('other').innerHTML = os === 'mac'
+      ? `<a href="${base}Scenecast-windows-setup.exe">For Windows</a>` : `<a href="${base}Scenecast-mac.dmg">For Mac</a>`;
+    document.getElementById('how').textContent = os === 'mac' ? 'Open the download and drag Scenecast to Applications.' : 'Run the download. It installs just for you; no admin needed.';
+  }
+</script>
+</body>
+</html>

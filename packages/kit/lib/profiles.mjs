@@ -15,6 +15,11 @@ export function extensionDir(env = process.env, home = homedir()) {
 }
 // Where 0.3.0 and earlier put it.
 export const OLD_EXTENSION_DIR = join(homedir(), '.scenecast', 'extension');
+// The recorder's IDs in the Chrome Web Store and Edge Add-ons (packages/recorder/store.json; docs/store/listing.md),
+// once it's published there: a recorder added from a store lives in the profile's own Extensions folder.
+export function storeIds(file = new URL('../../recorder/store.json', import.meta.url)) {
+  try { return Object.values(JSON.parse(readFileSync(file, 'utf8'))).map(s => s && s.id).filter(Boolean); } catch (e) { return []; }
+}
 
 const BIN = { darwin: { chrome: /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome( |$)/, edge: /\/Microsoft Edge\.app\/Contents\/MacOS\/Microsoft Edge( |$)/ }, win32: { chrome: /\\chrome\.exe"?( |$)/i, edge: /\\msedge\.exe"?( |$)/i }, linux: { chrome: /\/(google-chrome|chrome)( |$)/, edge: /\/(microsoft-edge|msedge)( |$)/ } };
 
@@ -55,8 +60,9 @@ const samePath = (a, b) => {
   const n = p => resolve(String(p)).replace(/[\\/]+$/, '');
   return process.platform === 'linux' ? n(a) === n(b) : n(a).toLowerCase() === n(b).toLowerCase();
 };
-// The recorder in one profile: loaded from which folder, on or off, and whether Developer mode is on.
-export function extensionIn(profileDir, dirs) {
+// The recorder in one profile: loaded from which folder (or added from a store), on or off, and whether Developer
+// mode is on.
+export function extensionIn(profileDir, dirs, ids = storeIds()) {
   const prefs = readJson(join(profileDir, 'Preferences')) || {};
   const secure = readJson(join(profileDir, 'Secure Preferences')) || {};
   const settings = { ...((prefs.extensions || {}).settings || {}), ...((secure.extensions || {}).settings || {}) };
@@ -64,7 +70,7 @@ export function extensionIn(profileDir, dirs) {
   for (const [id, e] of Object.entries(settings)) {
     if (!e || !e.path) continue;
     const which = dirs.find(d => d && samePath(e.path, d));
-    if (!which) continue;
+    if (!which && !ids.includes(id)) continue;
     const reasons = e.disable_reasons;
     const off = e.state === 0 || (Array.isArray(reasons) ? reasons.length > 0 : !!reasons);
     return { id, path: e.path, enabled: !off, devMode: devMode === undefined ? null : !!devMode };
