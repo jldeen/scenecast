@@ -5,7 +5,7 @@ same way every time, offline. No sign-ins on stage, no slow answers, no surprise
 app, in about an hour for a first demo. No terminal.
 
 You need: a Mac or a Windows PC, **Microsoft Edge** or **Google Chrome**, and the demo's apps signed in, in that
-browser, in **light** theme.
+browser. Light or dark, each app is recorded as it looks.
 
 ## 1 · Install (once)
 
@@ -42,8 +42,7 @@ left (Scenecast checks by itself). Click it: it downloads, installs and restarts
    on **Developer mode**, and drag the folder onto the page (or **Load unpacked** and pick it). Scenecast turns green as soon as the recorder
    connects: nothing to type, no port to set.
 3. **Record → Check** (or **Check and fix**). Every line should go green: the receiver, your browser, the recorder,
-   each app's tab (open, light, on its start screen). "Fix" puts right what it can; a dark app needs its theme set to
-   **Light** (not System) in its own settings.
+   each app's tab (open, on its start screen). "Fix" puts right what it can.
 
    ![Ready to record](app/record.png)
 
@@ -76,9 +75,12 @@ left (Scenecast checks by itself). Click it: it downloads, installs and restarts
 8. **Edit** (if you need to). **Open the editor**: the replica opens in your browser. Click something to add a focus
    point; drag across words to change wording or a date everywhere it appears; set where a beat starts. **Stop
    editing** when done: Scenecast checks just what you changed, in a minute or two.
-9. **Present → Start presenting.** The replica opens full screen; Scenecast steps out of the way.
-10. **Export** (to hand it to someone else). Every check runs once, here, then you get a folder or a zip. They open
-    `index.html` in Edge or Chrome: no install.
+9. **Present.** The run of show: what's ready before the show, then each beat with its key and its time. **Rehearse**
+   once with the clock going (each beat's time is kept), then **Present**: the stage opens full screen on the
+   projector, your guide on the laptop, and Scenecast steps out of the way.
+10. **Share** (to hand it to someone else). Every check runs once, here. **A Scenecast file**: they double-click it
+    and it opens in Scenecast on Present, ready to rehearse, with your guide. **A folder for any browser**: they open
+    `index.html` in Edge or Chrome, no install. Neither has your recording or your sign-ins.
 
 ## 3 · Presenting, with the presenter guide
 
@@ -88,13 +90,12 @@ The **presenter guide** is a second window for your laptop screen: your talk tra
 watch-outs, a timer against your script's times, and a picture of what's on screen now and what's next. It follows
 the stage as you go.
 
-1. Plug in the projector (extended display, not mirrored).
-2. **Present → Start presenting**, with **Open the presenter guide on this screen too** ticked. The stage goes full
-   screen; the guide opens on the screen Scenecast was on.
-3. If they're on the wrong screens, swap them: drag the guide to your laptop; move the stage to the projector (Mac:
-   ⌃⌘F to leave full screen, drag, ⌃⌘F; Windows: **Win+Shift+→**).
-4. Press **⌥0** (Windows: **Ctrl+Alt+0**) on the stage. The guide's dot reads **In sync**.
-5. In the guide, **← →** read ahead or back without moving the stage; **Esc** comes back; **Go to this beat on
+1. Plug in the projector (extended display, not mirrored). Present says **Projector found** and its name.
+2. **Present.** The stage goes full screen on the projector; the guide opens on your laptop's screen. If Scenecast has
+   them the wrong way round, **Swap them** before you start.
+3. Press **⌥0** (Windows: **Ctrl+Alt+0**) on the stage. The guide's dot reads **In sync**.
+4. With a clicker, **Page Down** in the guide moves the stage on (the screen's next step, then the next beat) and
+   **Page Up** back. **← →** read ahead or back without moving the stage; **Esc** comes back; **Go to this beat on
    stage** moves the stage there. **Reset** restarts the timer for the beat.
 
 | Mac | Windows | On the stage |
@@ -107,7 +108,7 @@ the stage as you go.
 | **⌥N** | **Ctrl+Alt+N** | The screen's next scripted step |
 | **⌥G** | **Ctrl+Alt+G** | Open the presenter guide |
 
-Present → **Before you start** shows these for your demo. Rehearse once on the real display before the session.
+Present shows these for your demo, with each beat's key. **Rehearse** once on the real display before the session.
 
 ## 4 · When something's wrong
 
@@ -115,14 +116,14 @@ Present → **Before you start** shows these for your demo. Rehearse once on the
 |---|---|
 | The app won't open the first time | The "open anyway" step in section 1. |
 | **Check** says the recorder isn't there | **Set it up** and do the three clicks; or press the reload ↻ on the Scenecast card in `edge://extensions`. |
-| **Check** says an app is dark | Set that app's theme to **Light** (not System) in its settings, then **Check** again. |
 | **Check** says the browser isn't running with your profile | Close the stray window it opened, open your browser normally, **Check and fix**. |
 | Recording seems stuck on "capturing this screen" | Wait: hovers and menus on a new screen take a little while. Don't click until it says "Ready for your next step". |
 | The browser paused the recorder for a moment | Nothing to do: it picks the recording up where it left off, by itself. If you clicked **Cancel** on the debugging bar, the recording stopped: **Start recording** and run the demo again. |
 | The build stopped: "credentials found" | A password, key or token was on screen while recording. Record that part again without it. |
 | A check fails after an edit | Its line says what: usually a focus point on words that aren't on that screen. Move the dot under Edit. |
-| Export says "Not exported yet" | The checks it lists failed. Fix them (Fidelity, Edit), or **Export anyway** if you accept them. |
-| The guide says **Not connected** | It has to be in the same browser as the stage. Close it and use **Open presenter guide** in Scenecast, or press **⌥G** / **Ctrl+Alt+G** on the stage. |
+| Share says "Not shared yet" | The checks it lists failed. Fix them on Review, or **Share it anyway** if you accept them. |
+| Someone sent you a `.scenecast` file | Double-click it, or **Share → Open a demo file…**. It opens on Present. |
+| The guide says **Not connected** | It has to be in the same browser as the stage. Close it and use **Open the guide again** in Scenecast, or press **⌥G** / **Ctrl+Alt+G** on the stage. |
 | The guide shows a different beat | You're previewing: press **Esc** in the guide. Or press the beat's key on the stage. |
 | The stage zoomed and won't come back | **Esc**. Still stuck: **⌥0** / **Ctrl+Alt+0**. |
 | Anything else on stage | **⌥0** / **Ctrl+Alt+0** resets everything; then the beat's key. |

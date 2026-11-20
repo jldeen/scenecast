@@ -195,7 +195,7 @@ async fn duplicate_demo(state: State<'_, Shared>, id: String, title: Option<Stri
     blocking(move || state.library.duplicate(&id, title.as_deref())).await
 }
 
-/// Moves the demo to the Trash (Recycle Bin on Windows); removes it if there's no trash to move it to.
+/// Moves the demo and its recording to the Trash (Recycle Bin on Windows); removes them if there's no trash.
 #[tauri::command]
 async fn delete_demo(state: State<'_, Shared>, id: String) -> Res<String> {
     let state = state.inner().clone();
@@ -207,10 +207,19 @@ async fn delete_demo(state: State<'_, Shared>, id: String) -> Res<String> {
         }
         stop_servers(&state, &id);
         let dir = state.library.dir(&id)?;
-        match to_trash(&dir) {
-            Ok(()) => Ok("moved to the Trash".into()),
-            Err(_) => state.library.remove(&id).map(|_| "deleted".into()),
+        // Its recording too (real screens of real tenants), unless another demo records into the same folder.
+        let raw = state.library.own_recording(&id);
+        let how = match to_trash(&dir) {
+            Ok(()) if cfg!(windows) => "moved to the Recycle Bin",
+            Ok(()) => "moved to the Trash",
+            Err(_) => state.library.remove(&id).map(|_| "deleted")?,
+        };
+        if let Some(raw) = raw
+            && to_trash(&raw).is_err()
+        {
+            let _ = std::fs::remove_dir_all(&raw);
         }
+        Ok(how.into())
     })
     .await
 }

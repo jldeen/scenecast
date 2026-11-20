@@ -112,7 +112,7 @@ Edit `demo.json` as needed: each app's `match` and `start`, `chrome.browser` and
 ### 3 · Record: one pass (< 45 min for a Demo 1-size demo)
 
 ```bash
-scenecast record start            # refuses dark pages
+scenecast record start            # light or dark pages, recorded as they look
 scenecast record status           # after every action: wait for busy: false
 scenecast record stop             # lists what each screen got; read its notes
 ```

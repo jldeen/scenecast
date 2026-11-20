@@ -308,6 +308,18 @@ impl Library {
         Ok(dir)
     }
 
+    /// The demo's recording folder, when it has one and no other demo in the library records into it.
+    pub fn own_recording(&self, id: &str) -> Option<PathBuf> {
+        let raw = scenecast_build::build::raw_dir(&self.dir(id).ok()?).ok()?;
+        if !raw.is_dir() {
+            return None;
+        }
+        let shared = self.list().ok()?.iter().any(|d| {
+            d.id != id && scenecast_build::build::raw_dir(&d.dir).ok().as_ref() == Some(&raw)
+        });
+        (!shared).then_some(raw)
+    }
+
     pub(crate) fn free_id(&self, base: &str) -> String {
         let base = if base.is_empty() { "demo" } else { base };
         let mut id = base.to_owned();
@@ -622,6 +634,26 @@ mod tests {
             .is_err()
         );
         assert!(lib.get("bad").is_err(), "nothing is made for a bad mode");
+    }
+
+    #[test]
+    fn a_demos_own_recording_is_found_and_a_shared_one_is_not() {
+        let (tmp, lib) = lib();
+        let a = lib.create(&new_demo("A")).unwrap();
+        let b = lib.create(&new_demo("B")).unwrap();
+        let raw = tmp.path().join("raw-a");
+        fs::create_dir_all(&raw).unwrap();
+        let point = |d: &Demo, to: &Path| {
+            let file = d.dir.join("demo.json");
+            let mut cfg: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+            cfg["raw"] = Value::from(to.display().to_string());
+            fs::write(&file, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        };
+        point(&a, &raw);
+        assert_eq!(lib.own_recording("a"), Some(raw.clone()));
+        assert_eq!(lib.own_recording("b"), None, "no recording yet");
+        point(&b, &raw);
+        assert_eq!(lib.own_recording("a"), None, "B records there too");
     }
 
     #[test]

@@ -409,7 +409,7 @@ async function duplicateDemo(id) {
 async function deleteDemo(id) {
   const d = S.demos.find(x => x.id === id);
   const r = await dialog({ title: `Delete "${d.title}"?`, ok: 'Delete', danger: true,
-    body: `<p>Its folder goes to the ${isMac() ? 'Trash' : 'Recycle Bin'}. The recording itself stays where it was recorded.</p>` });
+    body: `<p>The demo and its recording go to the ${isMac() ? 'Trash' : 'Recycle Bin'}.</p>` });
   if (!r) return;
   const how = await call('delete_demo', { id });
   delete S.jobs[id];
