@@ -146,6 +146,7 @@ async fn job<T: Send + 'static>(
     let state = state.inner().clone();
     blocking(move || {
         let dir = state.library.dir(&id)?;
+        make_way(&state, &id);
         let busy = Busy::take(&state, &app, &id, name)?;
         let out = f(&dir, &busy);
         if let Err(e) = &out {
@@ -261,6 +262,27 @@ async fn prepare_extension(
 
 /// One preflight per demo: a newer one (Check pressed again, Check and fix, a Fix button) stops the one running and
 /// takes its place, so the demo is never left "busy (preflight)".
+/// A check running on this demo (the quiet one Record runs when it opens) gives way to what the presenter just asked
+/// for: it's stopped, and this waits for it (Draft the plan said "this demo is busy (preflight)" when pressed while
+/// it ran). What was asked for runs its own check anyway.
+fn make_way(state: &Shared, id: &str) {
+    if let Some(c) = state.preflights.lock().expect("preflights lock").get(id) {
+        c.store(true, Ordering::SeqCst);
+    }
+    let t = Instant::now();
+    while state
+        .busy
+        .lock()
+        .expect("busy lock")
+        .get(id)
+        .map(String::as_str)
+        == Some("preflight")
+        && t.elapsed() < Duration::from_secs(20)
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn run_preflight(
     state: &Shared,
     app: &AppHandle,
