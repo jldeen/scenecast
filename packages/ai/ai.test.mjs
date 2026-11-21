@@ -106,3 +106,26 @@ test('sign-in: GitHub accepted the code but the keychain is unreachable: the sig
   await assert.rejects(loginFlow(no), /ended as "declined"/);
   assert.match(readFileSync(join(process.env.SCENECAST_AI_HOME, 'logs', 'ai.log'), 'utf8'), /needs-plaintext-consent/);
 });
+
+test('record for me: each click is counted by the recorder before the next step or Stop', async () => {
+  // As on the admin center (Nov 20): the page holds the click until the recorder's loop picks it up, over a second
+  // later, while status already says not busy. Stopping then dropped the last click.
+  const { writeFileSync } = await import('node:fs');
+  const { recordForMe } = await import('./drive.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'sc-drive-'));
+  writeFileSync(join(dir, 'plan.md'), '# T\n\n## Beat 1 · Agents\n\n- Click "All agents"\n');
+  const demo = { dir, out: join(dir, '.out'), cfg: { apps: [{ id: 'admin', match: 'admin.test', url: 'https://admin.test/' }] } };
+  let actions = 0, recording = false, countedAtStop = null;
+  const cmd = async op => {
+    if (op === 'recordStart') { recording = true; return {}; }
+    if (op === 'recordStatus') return recording ? { recording: true, busy: false, typing: [], actions, states: { admin: 'admin-start' } } : { recording: false };
+    if (op === 'observe') return { vw: 1000, vh: 800, items: [{ name: 'All agents', role: 'treeitem', x: 140, y: 296 }] };
+    if (op === 'click') { setTimeout(() => { actions++; }, 1500); return {}; }
+    if (op === 'recordStop') { countedAtStop = actions; recording = false; return { states: 2 }; }
+    return {};
+  };
+  const r = await recordForMe({ demo, model: { ask: async () => ({}) }, cmd });
+  process.stdin.destroy();
+  assert.equal(r.steps, 1);
+  assert.equal(countedAtStop, 1, 'the click was still held when the recording stopped');
+});

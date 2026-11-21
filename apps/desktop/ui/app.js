@@ -157,11 +157,15 @@ listen('job-state', ({ payload: { demo: id, job, running: on } }) => {
   if (id === S.id) renderTabsBar();
 });
 
+// The next frame, or a timer: macOS pauses animation frames while the window is covered (the browser is in front
+// during Record for me), and the progress and "May I?" questions must still be there when the presenter looks.
 let regionsQueued = false;
 function scheduleRegions() {
   if (regionsQueued) return;
   regionsQueued = true;
-  requestAnimationFrame(() => { regionsQueued = false; renderRegions(); });
+  const go = () => { if (!regionsQueued) return; regionsQueued = false; renderRegions(); };
+  requestAnimationFrame(go);
+  setTimeout(go, 250);
 }
 
 // ---- Sidebar -----------------------------------------------------------------------------------------------------
@@ -449,7 +453,9 @@ async function openDemo(id, tab) {
 }
 // The receiver and the recorder, every 1.5 s on the Record step: turns green the moment the extension connects.
 setInterval(async () => {
-  if (S.view !== 'demo' || S.tab !== 'record' || document.hidden) return;
+  // Not skipped while the window is covered (the browser in front, as while recording): it came back saying "Recorder
+  // not connected" when it was.
+  if (S.view !== 'demo' || S.tab !== 'record') return;
   const was = !!S.rx?.receiver?.connected;
   S.rx = await invoke('receiver_status').catch(() => S.rx);
   const now = !!S.rx?.receiver?.connected;

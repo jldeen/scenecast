@@ -462,6 +462,9 @@ try {
   check('Record for me: a plan in plain words, sends asking first', /Click "Plugins"/.test(planText) && /Press Enter — ask first/.test(planText) && /Click "Send" — ask first/.test(planText), planText);
   await shot('16-plan');
   await chat.bringToFront();
+  // As on a Mac with the browser in front: the covered app window gets no animation frames (found on Jessica's Mac,
+  // where the app sat on "Starting…" and the "May I?" never showed). Progress and questions must show anyway.
+  await b.execute(() => { window.__raf = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; });
   await click('ai-record');
   // Each send waits for the presenter: Enter gets "Do it", Send "I'll click it myself" (and the person clicks it).
   const answerNext = async (how, before) => {
@@ -476,6 +479,7 @@ try {
   await sleep(1500);
   await chat.click('[aria-label="Send"]');
   await waitFor('Record for me to finish', () => exists('ai-record-done'), 600000);
+  await b.execute(() => { if (window.__raf) window.requestAnimationFrame = window.__raf; });
   check('Record for me: recorded, two sends after the presenter\'s go-ahead', (await attr('ai-record-done', 'data-confirmed')) === '1' && +(await attr('ai-record-done', 'data-steps')) >= 10, await text('ai-record-done'));
   await waitFor('the demo to be ready', async () => (await exists('ai-after-done')) || (await b.execute(() => /notice bad/.test(document.querySelector('[data-region="ai-after"]')?.innerHTML || ''))), 900000);
   check('Record for me: built, the talk track on its screens, the guide, the checks pass', await exists('ai-after-done'), await b.execute(() => document.querySelector('[data-region="ai-after"]')?.innerText));
