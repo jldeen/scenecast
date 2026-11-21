@@ -13,11 +13,11 @@ import { recordOpts } from '../kit/lib/demo.mjs';
 import { rx, observe, settled, presenter, appTab, aiDir, sleep } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 
-export async function recordForMe({ demo, model, settings = {}, emit = () => {} }) {
+export async function recordForMe({ demo, model, settings = {}, emit = () => {}, cmd: viaCmd }) {
   const plan = readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('draft and approve the plan first');
   const goal = readGoal(demo).goal || '';
-  const cmd = rx(demo);
+  const cmd = viaCmd || rx(demo);
   const P = presenter(demo, emit);
   const apps = demo.cfg.apps.map(a => a.id);
   const appOf = name => apps.find(a => a === name) || apps.find(a => a.startsWith(name) || name.startsWith(a)) || null;
@@ -47,7 +47,19 @@ export async function recordForMe({ demo, model, settings = {}, emit = () => {} 
     }
     return { el: null, o: await observe(cmd, demo, app) };
   };
-  const click = async el => { await cmd('click', { tab: appTab(demo, app), x: el.x, y: el.y }, 60); };
+  // The page holds each click, Enter or keystroke back until the recorder's loop picks it up and does it for real. On
+  // a real app (Nov 20, the admin center: 10 frames) a pass of that loop takes over a second, so "not busy" right
+  // after an action didn't mean it was done: the last click was still held when Stop came, and was dropped. Wait for
+  // the recorder to count it first.
+  // Picked up: counted, or being captured now (a click's new screen is counted only after its side states).
+  const actions = async () => (await cmd('recordStatus', {}, 30)).actions || 0;
+  const seen = async (before, maxS = 30) => {
+    for (let t0 = Date.now(); Date.now() - t0 < maxS * 1000;) { const s = await cmd('recordStatus', {}, 30); if ((s.actions || 0) > before || s.busy || (s.typing || []).length) return true; await sleep(250); }
+    emit({ event: 'note', text: `the recorder didn't see that step within ${maxS} s` });
+    return false;
+  };
+  const rawClick = el => cmd('click', { tab: appTab(demo, app), x: el.x, y: el.y }, 60);
+  const click = async el => { const before = await actions(); await rawClick(el); await seen(before); };
   // The presenter does it: wait for the recorder to see an action, then for it to settle.
   const byPresenter = async () => {
     const before = status.actions || 0;
@@ -126,8 +138,12 @@ export async function recordForMe({ demo, model, settings = {}, emit = () => {} 
           field = o.items.find(it => it.focused && (it.editable || /textbox|searchbox|combobox/.test(it.role))) || composer(o.items) || searchBox(o.items);
           if (!field) return instead(step, o, depth, 'there\'s no box to type in on this screen');
         }
-        if (!field.focused) { await click(field); await sleep(250); }
+        if (!field.focused) { await rawClick(field); await sleep(250); }
+        // Typing replaces what's in the box (Copilot keeps an unsent prompt there).
+        await cmd('clear', { tab: appTab(demo, app) }, 30).catch(() => {});
+        const before = await actions();
         await cmd('type', { tab: appTab(demo, app), text: step.value, delay: 18 }, 120);
+        await seen(before, 15);
         lastField = field;
         await wait(120);
         return { did: 'typed', in: field.name };
@@ -142,7 +158,9 @@ export async function recordForMe({ demo, model, settings = {}, emit = () => {} 
           if (a === 'skip') return { did: 'skipped', why: 'the presenter said no' };
           if (a === 'self') return byPresenter();
         }
+        const before = await actions();
         await cmd('press', { tab: appTab(demo, app), key: step.key }, 30);
+        if (/^(Enter|Escape)$/.test(step.key)) await seen(before);
         if (step.key === 'Enter') lastField = null;
         await wait(900);
         return { did: 'pressed', key: step.key, confirmed: !!why };

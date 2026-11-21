@@ -288,6 +288,7 @@ async function recLoop() {
         try { while (REC.autoQueue.length && !REC.stop) { const A = recApp(REC.autoQueue.shift()); await recAuto(A); recCheckpoint(); } const act = REC.apps.find(a => a.id === REC.active); if (act) await act.page.bringToFront(); }
         finally { REC.busyNow = false; }
       }
+      let got = 0;
       if (!REC.paused) {
         const evs = [];
         for (const A of REC.apps) for (const f of A.page.frames()) {
@@ -299,10 +300,12 @@ async function recLoop() {
           if (q && q.length) for (const e of q) evs.push({ ...e, A, f });
         }
         evs.sort((a, b) => a.t - b.t || a.seq - b.seq);
+        got = evs.length;
         for (const e of evs) { if (REC.stop) break; REC.busyNow = true; recAt(`${e.kind} in ${e.A.id}`); try { await recHandle(e); REC.actions++; } catch (err) { rlogr('error: ' + String(err.stack || err).slice(0, 300)); } finally { REC.busyNow = false; } }
         if (evs.some(e => e.kind !== 'input')) recCheckpoint();
         for (const A of REC.apps) if (A.typing && !A.typing.done && Date.now() - A.typing.at > REC.opts.typeIdleMs) { recAt(`capturing what was typed in ${A.id}`); await recTyped(A); }
       }
+      REC.quiet = got ? 0 : (REC.quiet || 0) + 1;
     } catch (err) { rlogr('loop: ' + String(err.message || err).slice(0, 200)); }
     await sleep(120);
   }
@@ -411,7 +414,9 @@ OPS.recordStart = async c => {
     REC.sigs[a.id] = new Map();
   }
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
-  for (const A of REC.apps) { rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); }
+  // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
+  // reload), and Nov 20's second take began with a click made between takes.
+  for (const A of REC.apps) { rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); }
   for (const A of REC.apps) {
     rlogr(`start: ${A.id}: capturing its start screen`);
     await A.page.bringToFront();
@@ -473,6 +478,12 @@ const recTiming = () => { const t = REC.time, r = x => Math.round(x / 100) / 10;
 OPS.recordStatus = async () => REC.on ? { recording: true, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
+  // What the page still holds (a click it's waiting to do: the loop picks it up a second or more later on a busy app)
+  // is done and captured first. Nov 20: Record for me's last click was dropped here, so its screen never existed.
+  // Paused (Pause, or the debugging bar closed): nothing done since counts, so there's nothing to wait for.
+  REC.quiet = 0;
+  if (REC.held) for (const A of REC.apps) A.typing = null;
+  for (const t0 = Date.now(); !REC.paused && !REC.held && REC.quiet < 2 && Date.now() - t0 < 300000;) await sleep(150);
   REC.stop = true; await REC.loopP;
   for (const A of REC.apps) { if (A.typing && !A.typing.done) await recTyped(A); await recSetBusy(A.page, false); }
   const states = Object.fromEntries(Object.entries(REC.states).map(([k, s]) => { const { typedOf, ...rest } = s; return [k, rest]; }));

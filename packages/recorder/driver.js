@@ -282,6 +282,26 @@ const OPS = {
   async hover(c) { const p = await pageFor(c.tab); const pt = c.x !== undefined ? { x: c.x, y: c.y } : await H.find(p, c); if (!pt) throw new Error('not found'); await p.mouse.move(pt.x, pt.y, { steps: 8 }); return pt; },
   async type(c) { const p = await pageFor(c.tab); await p.keyboard.type(c.text, { delay: c.delay || 15 }); return 'ok'; },
   async press(c) { const p = await pageFor(c.tab); await p.keyboard.press(c.key); return 'ok'; },
+  // Empties the box that has the focus, the way a person would (select its text, Backspace), so typing replaces what
+  // was there: Copilot puts the last unsent prompt back in its box (Nov 20: a prompt typed on top of it, doubled).
+  // Cmd+A as a key event selects nothing on a Mac. Returns how many characters there were.
+  async clear(c) {
+    const p = await pageFor(c.tab);
+    const had = await p.mainFrame().evaluate(() => {
+      let e = document.activeElement;
+      while (e && e.shadowRoot && e.shadowRoot.activeElement) e = e.shadowRoot.activeElement;
+      if (!e) return 0;
+      if (e.localName === 'input' || e.localName === 'textarea') { if (!e.value) return 0; e.select(); return e.value.length; }
+      if (!e.isContentEditable) return 0;
+      while (e.parentElement && e.parentElement.isContentEditable) e = e.parentElement;
+      const n = (e.innerText || '').replace(/[\u200b\u200c\s]+/g, '').length;
+      if (!n) return 0;
+      const r = document.createRange(); r.selectNodeContents(e); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      return n;
+    });
+    if (had) { await sleep(100); await p.keyboard.press('Backspace'); await sleep(200); }
+    return had;
+  },
   async wheel(c) { const p = await pageFor(c.tab); if (c.x !== undefined) await p.mouse.move(c.x, c.y); await p.mouse.wheel(0, c.dy || 0); await sleep(400); return 'ok'; },
   // The page as the AI sees it (outline-page.js): its controls by role and name, where they are, and its words.
   async observe(c) { const p = await pageFor(c.tab); return p.mainFrame().evaluate(`(${OUTLINE_PAGE})(${JSON.stringify(c.opts || {})})`); },

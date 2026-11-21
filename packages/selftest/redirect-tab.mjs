@@ -64,7 +64,7 @@ try {
   const r1 = await start(moved);
   check('an app whose address redirects to another host records on the first Start', r1.recording === true, JSON.stringify(r1));
   const kept = JSON.parse(readFileSync(join(moved, 'demo.json'), 'utf8')).apps.find(a => a.id === 'admin');
-  check('its new host is kept as the app\'s match', kept.match === `localhost:${WEB}`, JSON.stringify(kept));
+  check('its new host and address are kept (the next check finds it there, no redirect again)', kept.match === `localhost:${WEB}` && kept.url === `http://localhost:${WEB}/app`, JSON.stringify(kept));
   const status = await send({ op: 'recordStatus' }, 30, RX);
   check('both tabs are in the recording', status.ok && (status.value.apps || []).length === 2 || status.ok && status.value.recording, JSON.stringify(status.value).slice(0, 400));
   await send({ op: 'recordAbort' }, 60, RX);

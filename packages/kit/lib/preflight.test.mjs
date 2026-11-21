@@ -89,3 +89,15 @@ test('a "Default" profile from the old template means the one that\'s open; a pi
   assert.equal(chosenProfile({ profile: 'Profile 10' }), 'Profile 10');
   assert.equal(chosenProfile({}), null);
 });
+
+test('check and fix: a tab elsewhere in its app goes back to the app\'s address (no start rule)', async () => {
+  // Nov 20: the second take started in the last take's Copilot chat, and the admin center on All agents.
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../recorder/flows/preflight.js', import.meta.url), 'utf8');
+  const atUrl = new Function(/function atUrl[\s\S]*?\n}\n/.exec(src)[0] + 'return atUrl;')();
+  assert.equal(atUrl('https://copilot.cloud.microsoft/cowork/?x#/task/1', 'https://copilot.cloud.microsoft/home'), false);
+  assert.equal(atUrl('https://copilot.cloud.microsoft/home?tab=1', 'https://copilot.cloud.microsoft/home'), true);
+  assert.equal(atUrl('https://admin.cloud.microsoft/#/agents/all', 'https://admin.cloud.microsoft/?#/agents/tools/all/plugins'), false);
+  assert.equal(atUrl('https://admin.cloud.microsoft/#/agents/tools/all/plugins', 'https://admin.cloud.microsoft/?#/agents/tools/all/plugins'), true);
+  assert.equal(atUrl('https://teams.cloud.microsoft/v2/?a=1', 'https://teams.cloud.microsoft/'), true);
+});

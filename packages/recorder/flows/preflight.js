@@ -32,6 +32,17 @@ async function probe(p, start) {
   }, start || null);
   return Promise.race([run.catch(e => ({ error: String(e.message || e).slice(0, 160) })), sleep(6000).then(() => ({ error: 'the tab doesn\'t answer (asleep or discarded?): bring it to the front once' }))]);
 }
+// The tab is at the app's address: the same path (or below it) and, for an address with a #route, the same route.
+function atUrl(href, url) {
+  try {
+    const h = new URL(href), u = new URL(url);
+    if (h.origin !== u.origin) return false;
+    const path = u.pathname.replace(/\/$/, '');
+    if (path && h.pathname.replace(/\/$/, '') !== path && !h.pathname.startsWith(path + '/')) return false;
+    const route = u.hash.replace(/^#/, '').replace(/\/$/, '');
+    return !route || h.hash.replace(/^#/, '').replace(/\/$/, '') === route;
+  } catch (e) { return true; }
+}
 const startOk = r => !r.start ? null : Object.values(r.start).every(v => v !== false);
 const say = msg => (typeof rlog === 'function' ? rlog('preflight: ' + msg) : Promise.resolve()).catch(() => {});
 // A tab that's loading: its start screen, for at most s seconds in all (a page that never answers, or an error page,
@@ -77,6 +88,12 @@ for (const a of ARGS.apps || []) {
   }
   if (!p) { o.missing = true; missing = true; continue; }
   o.r = o.r || await probe(p, a.start);
+  // No start rule (a demo made in the app): Check and fix still brings a tab that's elsewhere in the app (an old
+  // Copilot chat from the last take, Nov 20) back to the app's address. Never a reason to fail: apps redirect.
+  if (ARGS.fix && !a.start && a.url && !o.r.error && !o.fixed.length && !atUrl(await p.url(), a.url)) {
+    await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    o.fixed.push('start'); o.r = await waitStart(p, a, ARGS.waitS || 20);
+  }
   if (ARGS.fix && !o.r.error && startOk(o.r) === false && a.url) {
     await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     o.fixed.push('start'); o.r = await waitStart(p, a, ARGS.waitS || 20);

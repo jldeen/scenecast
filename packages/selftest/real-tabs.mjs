@@ -27,10 +27,13 @@ const ping = () => fetch(`http://127.0.0.1:${RX}/ping`).then(r => r.json()).catc
 // The app on 127.0.0.1; its frame on localhost (another site, so its own process) loads, then never answers again.
 const web = createServer((q, s) => {
   s.setHeader('content-type', 'text/html');
+  if (q.url.startsWith('/boxes')) return s.end('<title>boxes</title><input id="i" value="left over"><div id="ce" contenteditable="true"><p>an unsent prompt\u200b</p></div>');
+  if (q.url.startsWith('/slowframe')) return s.end('<p>slow</p><script>setInterval(() => { const t = Date.now(); while (Date.now() - t < 1500) {} }, 1600)</script>');
   if (q.url.startsWith('/stuck')) return s.end('<p>frame</p><script>setTimeout(() => { for (;;) {} }, 6000)</script>');
   const who = new URL(q.url, 'http://x').searchParams.get('who') || 'app';
   const blanks = q.url.startsWith('/blanks') ? '<iframe></iframe>'.repeat(16) : '';
-  s.end(`<title>${who}</title><h1>${who}</h1><button onclick="document.querySelector('h1').textContent = '${who} opened'">Open</button>${q.url.startsWith('/busy') ? `<iframe src="http://localhost:${WEB}/stuck"></iframe>` : ''}${blanks}`);
+  const slow = q.url.startsWith('/slow') ? `<iframe src="http://localhost:${WEB}/slowframe"></iframe>` : '';
+  s.end(`<title>${who}</title><h1>${who}</h1><button onclick="document.querySelector('h1').textContent = '${who} opened'">Open</button>${q.url.startsWith('/busy') ? `<iframe src="http://localhost:${WEB}/stuck"></iframe>` : ''}${blanks}${slow}`);
 }).listen(WEB, '127.0.0.1');
 const rx = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), raw, String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
 let ctx;
@@ -71,6 +74,44 @@ try {
   const log = readFileSync(join(raw, 'receiver.log'), 'utf8');
   check('the log names the frame that didn\'t answer', /a frame \(http:\/\/localhost:\d+\/stuck\) didn't answer/.test(log), log.split('\n').filter(l => /rec:/.test(l)).slice(-6).join('\n'));
   await send({ op: 'recordAbort' }, 60, RX);
+  // Between takes: a click with no recording on is kept by the page (its queue outlives Stop). The next take must not
+  // replay it (Nov 20: the second take began with a click made while tidying the tabs).
+  await send({ op: 'front', tab: busy }, 30, RX);
+  const box2 = await send({ op: 'find', tab: busy, text: 'Open' }, 30, RX);
+  await send({ op: 'click', tab: busy, x: box2.value.x, y: box2.value.y }, 30, RX);
+  await sleep(500);
+  const r2 = await send({ op: 'recordStart', apps: [{ id: 'app', match }, { id: 'busy', match: busy }], record: { auto: false } }, 120, RX);
+  await sleep(4000);
+  const st2 = (await send({ op: 'recordStatus' }, 30, RX)).value || {};
+  check('a new take doesn\'t replay a click made between takes', r2.ok && st2.recording && !st2.actions && !(st2.log || []).some(l => /click "Open"/.test(l)), JSON.stringify({ actions: st2.actions, log: (st2.log || []).slice(-4) }));
+  await send({ op: 'recordAbort' }, 60, RX);
+  // Stop right after a click: the page still holds it (a pass over a busy tab's frames takes a while). It's done and
+  // captured before the recording ends (Nov 20: Record for me's last click was dropped, its screen never recorded).
+  const slow = `127.0.0.1:${WEB}/slowapp`;
+  await (await ctx.newPage()).goto(`http://${slow}?who=slow`, { waitUntil: "commit" });
+  await sleep(1000);
+  await send({ op: 'recordStart', apps: [{ id: 'slow', match: slow }], record: { auto: false } }, 120, RX);
+  await sleep(2000);
+  await send({ op: 'front', tab: slow }, 30, RX);
+  const box3 = await send({ op: 'find', tab: slow, text: 'Open' }, 30, RX);
+  // As with text in a box not captured yet: the page holds the click for the recorder to do.
+  await send({ op: 'eval', tab: slow, expr: 'window.__rkrec.dirty = true' }, 30, RX);
+  await send({ op: 'click', tab: slow, x: box3.value.x, y: box3.value.y }, 30, RX);
+  const stop3 = await send({ op: 'recordStop' }, 120, RX);
+  const h3 = await send({ op: 'eval', tab: slow, expr: 'document.querySelector("h1").textContent' }, 30, RX);
+  check('Stop right after a click still does it and records it', stop3.ok && stop3.value.steps >= 1 && h3.value === 'slow opened', JSON.stringify({ stop: stop3.value || stop3, h1: h3.value }).slice(0, 400));
+  // Typing replaces what's already in a box: Copilot puts back the last unsent prompt (Nov 20: typed on top, doubled).
+  const boxes = `127.0.0.1:${WEB}/boxes`;
+  const bp = await ctx.newPage(); await bp.goto(`http://${boxes}`);
+  await sleep(500);
+  const cleared = [];
+  for (const sel of ['#i', '#ce']) {
+    await bp.focus(sel);
+    await send({ op: 'clear', tab: boxes }, 30, RX);
+    await send({ op: 'type', tab: boxes, text: 'new', delay: 5 }, 30, RX);
+    cleared.push(await bp.$eval(sel, e => (e.value !== undefined ? e.value : e.innerText).trim()));
+  }
+  check('typing replaces what was in the box (a field and a rich editor)', cleared.join('|') === 'new|new', cleared.join('|'));
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {

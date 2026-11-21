@@ -81,8 +81,12 @@ try {
   await settled();
   check('and the next click records', (await status()).count === 4, (await status()).count);
 
+  // Stop while paused: at once, with every screen (nothing done while paused counts).
+  await send({ op: 'recordPause' }, 30, RX);
+  await page.click('#six');
+  const t0 = Date.now();
   const stop = await send({ op: 'recordStop' }, 300, RX);
-  check('Stop: all four screens', stop.ok && stop.value.states === 4, JSON.stringify(stop.value).slice(0, 300));
+  check('Stop while paused: at once, all four screens, nothing done while paused', stop.ok && stop.value.states === 4 && Date.now() - t0 < 30000, JSON.stringify({ secs: (Date.now() - t0) / 1000, v: stop.value }).slice(0, 300));
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {

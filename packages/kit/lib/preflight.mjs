@@ -44,14 +44,17 @@ async function op(port, cmd, tmoS) {
 
 // An app now found at another host (its address redirects there): kept as its match in demo.json, so Record and the
 // next check find the tab by it.
-export function keepMatch(demo, id, host) {
+// An app that moved (its address redirects to another host): its new host is how its tab is found, and its new
+// address where it starts, so the next check finds it there and doesn't send it through the redirect again.
+export function keepMatch(demo, id, host, url) {
   const file = join(demo.dir, 'demo.json');
   const cfg = JSON.parse(readFileSync(file, 'utf8'));
   const app = (cfg.apps || []).find(a => a.id === id);
   if (!app || !host || app.match === host) return false;
   app.match = host;
+  if (url) app.url = url;
   writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
-  const mine = demo.cfg.apps.find(a => a.id === id); if (mine) mine.match = host;
+  const mine = demo.cfg.apps.find(a => a.id === id); if (mine) { mine.match = host; if (url) mine.url = url; }
   return true;
 }
 
@@ -193,7 +196,7 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
         if (o.missing) return { status: 'fail', detail: `no tab for ${a.id} (${a.match || a.url})${a.url ? '' : ': no url in demo.json to open'}`, missing: true, tabs };
         if (o.signIn) return { status: 'fail', detail: `${a.id} opened a sign-in page (${o.signIn}): sign in to it in that tab, then check again`, signIn: o.signIn };
         if (o.moved) {
-          const kept = fix && keepMatch(demo, a.id, o.moved.host);
+          const kept = fix && keepMatch(demo, a.id, o.moved.host, o.moved.url);
           o.fixed.push(`it lives at ${o.moved.host} now${kept ? ', kept in demo.json' : ''}`);
         }
         if (o.r && o.r.error) return { status: 'fail', detail: o.r.error };
