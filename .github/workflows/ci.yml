@@ -336,10 +336,14 @@ jobs:
           files+=(stable/*)
           files+=(docs/guide.pdf)
           notes="docs/releases/$TAG.md"
+          # A release candidate (a tag with a pre-release part, v0.5.0-rc.1) is a pre-release: never "latest", so
+          # installed apps and the releases/latest/download links don't see it. A version tag (v0.5.0) is as before.
+          pre=()
+          [[ "${TAG#v}" == *-* ]] && pre=(--prerelease --latest=false)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           elif [ -f "$notes" ]; then
-            gh release create "$TAG" "${files[@]}" --title "Scenecast ${TAG#v}" --notes-file "$notes" --verify-tag
+            gh release create "$TAG" "${files[@]}" --title "Scenecast ${TAG#v}" --notes-file "$notes" --verify-tag "${pre[@]}"
           else
-            gh release create "$TAG" "${files[@]}" --title "Scenecast ${TAG#v}" --generate-notes --verify-tag
+            gh release create "$TAG" "${files[@]}" --title "Scenecast ${TAG#v}" --generate-notes --verify-tag "${pre[@]}"
           fi
