@@ -453,7 +453,7 @@ const SLOTS = [[0, 'No set length'], [180, '3 min'], [300, '5 min'], [480, '8 mi
 function renderNew() {
   S.view = 'new';
   S.id = null;
-  Object.assign(NEW, { tabs: null, ticked: new Set(), all: false });
+  Object.assign(NEW, { tabs: null, ticked: new Set(), all: false, tries: 0 });
   renderSidebar();
   const mode = 'manual';
   $('#main').innerHTML = `${pageHead({ title: 'New demo', sub: 'Name it and add its apps. You can change both later.' })}
@@ -522,6 +522,8 @@ const NEW = { tabs: null, ticked: new Set(), all: false };
 async function loadOpenTabs() {
   const tabs = await invoke('open_tabs').catch(() => []);
   if (S.view !== 'new' || !$('#tab-list')) return;
+  // None yet (the recorder busy, reconnecting, or connecting for the first time): ask again in a moment, for a minute.
+  if (!tabs?.length && !NEW.tabs?.length && (NEW.tries = (NEW.tries || 0) + 1) <= 20) setTimeout(() => { if (S.view === 'new') loadOpenTabs(); }, 3000);
   const first = NEW.tabs === null;
   // One row per address (the same page open twice is one app).
   const seen = new Set();
@@ -543,6 +545,8 @@ function renderOpenTabs() {
   box.hidden = !has;
   // No open tabs (or no recorder yet): addresses typed in, as before. Tabs: typing one in is a click away.
   if (!has) { manual.hidden = false; $('#show-manual').hidden = true; return; }
+  // Addresses typed in before the tabs came stay where they are.
+  if ([...document.querySelectorAll('[data-app-url]')].some(i => i.value.trim())) manual.dataset.shown = '1';
   manual.hidden = !manual.dataset.shown;
   $('#show-manual').hidden = !!manual.dataset.shown;
   $('#apps-hint').textContent = `Your open tabs: tick the ones in the demo, on the page it starts from. On stage you switch to an app with ${isMac() ? '⌥' : 'Ctrl+Alt+'} and its first letter.`;

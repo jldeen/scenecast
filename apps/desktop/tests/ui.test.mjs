@@ -520,7 +520,7 @@ try {
   await type('new-title', 'For me');
   // The browser's open tabs, to pick the apps from (the recorder is connected now). The fixture's aren't product
   // pages, so none is ticked; its two apps are typed in, to give them their names.
-  const tabs = await waitFor('the open tabs', async () => (await exists('tab-row')) && b.execute(() => [...document.querySelectorAll('[data-test="tab-row"]')].map(r => r.dataset.url)), 20000).catch(() => null);
+  const tabs = await waitFor('the open tabs', async () => (await exists('tab-row')) && b.execute(() => [...document.querySelectorAll('[data-test="tab-row"]')].map(r => r.dataset.url)), 45000).catch(() => null);
   check('New demo lists the browser\'s open tabs to pick from, none ticked that isn\'t a product page', Array.isArray(tabs) && tabs.some(u => u.startsWith(fx.chat)) && !(await b.execute(() => document.querySelector('[data-tab-url]:checked'))), JSON.stringify(tabs));
   await shot('13b-new-from-tabs');
   if (await b.execute(() => !document.querySelector('[data-test="show-manual"]').hidden)) await click('show-manual');
