@@ -91,6 +91,9 @@ try {
   const t0 = Date.now();
   const stop = await send({ op: 'recordStop' }, 300, RX);
   check('Stop while paused: at once, every screen (five), nothing done while paused', stop.ok && stop.value.states === 5 && Date.now() - t0 < 30000, JSON.stringify({ secs: (Date.now() - t0) / 1000, v: stop.value }).slice(0, 300));
+  // Chrome's "started debugging this browser" bar goes: no tab is attached once the recording's stopped.
+  const ext = (await send({ op: 'extension' }, 30, RX)).value || {};
+  check('after Stop: the recorder lets go of every tab (no debugging bar on the stage)', Array.isArray(ext.watching) && ext.watching.length === 0, JSON.stringify(ext).slice(0, 300));
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {

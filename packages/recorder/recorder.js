@@ -439,6 +439,8 @@ OPS.recordStart = async c => {
 // Paused (by the presenter, or because the browser's "debugging" bar was closed): nothing they do is recorded. Go on
 // picks up where it stopped once each tab is back on the screen it was on (what they did while paused is dropped);
 // a tab that isn't says which (anyway: go on from where it is).
+// In the extension, every tab the recorder attached to (side tabs too); with Playwright (the CLI), nothing to do.
+const CDPX_release = async () => { if (typeof CDPX !== 'undefined') await CDPX.ctx.detachAll(); };
 const recBarClosed = () => REC.apps.some(A => A.page.detachReason === 'canceled_by_user');
 OPS.recordPause = async () => {
   if (!REC.on) return { error: 'not recording' };
@@ -481,7 +483,7 @@ OPS.testCloseBar = async () => {
   return { closed: REC.apps.length };
 };
 // Stops recording without writing the recording, as if the agent had died (for testing record start --resume).
-OPS.recordAbort = async () => { if (!REC.on) return { error: 'not recording' }; REC.stop = true; await REC.loopP; await recSaving; for (const A of REC.apps) await recSetBusy(A.page, false).catch(() => {}); REC.on = false; return { aborted: true }; };
+OPS.recordAbort = async () => { if (!REC.on) return { error: 'not recording' }; REC.stop = true; await REC.loopP; await recSaving; for (const A of REC.apps) await recSetBusy(A.page, false).catch(() => {}); REC.on = false; await CDPX_release(); return { aborted: true }; };
 // Where the time went: the recorder's own work (side states swept, screens captured, making sure an action was done)
 // apart from the product's (its answers), in seconds.
 const recTiming = () => { const t = REC.time, r = x => Math.round(x / 100) / 10; return { recorderSecs: r(t.sweep + t.capture + t.confirm), productSecs: r(t.product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm) }; };
@@ -501,6 +503,8 @@ OPS.recordStop = async () => {
     timing: recTiming(), apps: REC.apps.map(a => ({ id: a.id, match: a.match, start: `${a.id}-start`, end: a.state })), states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log };
   await post('/recording', rec);
   REC.on = false;
+  // The recording's done: let go of every tab, so Chrome's debugging bar isn't on the stage when you rehearse or present.
+  await CDPX_release();
   return { states: Object.keys(states).length, streams: Object.keys(REC.streams).length, beats: REC.beats.length, steps: REC.path.length, notes: REC.notes, blocked: REC.blocked, secs: rec.secs, timing: rec.timing, autoSecs: REC.autos.reduce((n, a) => n + a.secs, 0), autos: REC.autos.map(a => `${a.state} ${a.secs} s: ${a.did.join('; ') || 'nothing new'}`) };
 };
 // Step groups on this screen (record side groups): each closed group is opened (the page's own click), the screen is

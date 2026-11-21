@@ -195,6 +195,12 @@ const CDPX = (() => {
         case 'Network.loadingFinished': case 'Network.loadingFailed': if (this.net.delete(p.requestId)) this.netAt = Date.now(); break;
       }
     }
+    // Let go of the tab: Chrome's "started debugging this browser" bar goes once no tab is attached.
+    async release() {
+      if (!this.attached) return;
+      await chrome.debugger.detach({ tabId: this.tabId }).catch(() => {});
+      this.onDetach(); this.detachReason = 'released';
+    }
     onDetach() { this.attached = false; this._frames.clear(); this._ctx.clear(); this._main = null; this.net.clear(); }
     url() { return this._main ? this._main._url : this._tabUrl; }
     async title() { return this.attached ? this.mainFrame().evaluate(() => document.title).catch(() => this._title) : this._title; }
@@ -310,7 +316,7 @@ const CDPX = (() => {
       if (url) await p.goto(url);
       return p;
     },
-    async detachAll() { for (const p of tabs.values()) if (p.attached) await chrome.debugger.detach({ tabId: p.tabId }).catch(() => {}); },
+    async detachAll() { for (const p of tabs.values()) await p.release(); },
   };
 
   const usable = t => t && t.id !== undefined && t.id >= 0 && /^(https?|file):|^about:blank/i.test(t.url || t.pendingUrl || '');
