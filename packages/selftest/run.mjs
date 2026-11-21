@@ -23,6 +23,7 @@ step('capture', process.execPath, ['packages/selftest/capture-fixture.mjs']);
 step('two recorders', process.execPath, ['packages/selftest/two-recorders.mjs']);
 step('real tabs', process.execPath, ['packages/selftest/real-tabs.mjs']);
 step('redirected tab', process.execPath, ['packages/selftest/redirect-tab.mjs']);
+step('pause and go on', process.execPath, ['packages/selftest/pause-go-on.mjs']);
 step('selftest', process.execPath, ['packages/selftest/selftest.mjs']);
 step('fidelity loop', process.execPath, ['packages/selftest/fidelity-loop.mjs']);
 step('ai modes', process.execPath, ['packages/selftest/ai-modes.mjs']);

@@ -300,7 +300,9 @@ impl ReceiverHost {
             running: p.is_some(),
             owned,
             pid: pid.or_else(|| p.as_ref().and_then(|p| p["pid"].as_u64()).map(|n| n as u32)),
-            connected: agent.is_some_and(|a| a["polling"] == true) || secs.is_some_and(|s| s <= 25),
+            // Polling, or working on a command (a check's): either way it's there.
+            connected: agent.is_some_and(|a| a["polling"] == true || a["busy"] == true)
+                || secs.is_some_and(|s| s <= 25),
             recorder_secs_ago: secs,
             restarts,
             error,

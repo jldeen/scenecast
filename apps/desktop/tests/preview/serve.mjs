@@ -29,6 +29,8 @@ export const startPreview = (port = PORT) => new Promise(done => { const server 
   let file = null, body = null;
   if (url.pathname === '/' || url.pathname === '/index.html') {
     body = (await readFile(join(UI, 'index.html'), 'utf8')).replace('<script type="module" src="app.js"></script>', '<script src="/__preview/mock.js"></script>\n  <script type="module" src="app.js"></script>');
+  } else if (url.pathname === '/capture.html') {
+    body = (await readFile(join(UI, 'capture.html'), 'utf8')).replace('<script type="module" src="capture.js"></script>', '<script src="/__preview/mock.js"></script>\n  <script type="module" src="capture.js"></script>');
   } else if (url.pathname === '/__preview/mock.js') file = join(HERE, 'mock.js');
   else if (url.pathname.startsWith('/__lib/') && process.env.PREVIEW_LIB) file = inside(resolve(process.env.PREVIEW_LIB), url.pathname.slice(7));
   else file = inside(UI, decodeURIComponent(url.pathname));

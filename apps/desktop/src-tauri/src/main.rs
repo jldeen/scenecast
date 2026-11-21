@@ -622,6 +622,7 @@ async fn record_start(
         scenecast_app::record::start_ready(dir, resume, None, |u| emit(&to, &who, "preflight", u))
     })
     .await?;
+    open_capture(&app, &id, false);
     if shared
         .recording
         .lock()
@@ -647,9 +648,74 @@ async fn record_start(
                 std::thread::sleep(Duration::from_millis(1000));
             }
             shared.recording.lock().expect("recording lock").remove(&id);
+            close_capture(&app);
         });
     }
     Ok(answer)
+}
+
+/// The capture window: a small window that stays on top of the browser while recording (Ready or Hold on, the screens
+/// so far, Pause and Stop, and Copilot's questions). It doesn't take the focus from the browser.
+const CAPTURE: &str = "capture";
+fn open_capture(app: &AppHandle, id: &str, copilot: bool) {
+    let init = format!(
+        "window.SCENECAST_CAPTURE = {};",
+        serde_json::json!({ "demo": id, "copilot": copilot })
+    );
+    if let Some(w) = app.get_webview_window(CAPTURE) {
+        let _ = w.eval(format!("{init} window.captureOpen && window.captureOpen();"));
+        return;
+    }
+    let (width, height) = (340.0, 240.0);
+    let mut b = tauri::WebviewWindowBuilder::new(
+        app,
+        CAPTURE,
+        tauri::WebviewUrl::App("capture.html".into()),
+    )
+    .title("Recording")
+    .inner_size(width, height)
+    .resizable(false)
+    .maximizable(false)
+    .minimizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .focused(false)
+    .theme(Some(tauri::Theme::Light))
+    .initialization_script(&init);
+    // The bottom right of the screen the app is on, out of the way of the browser's toolbar and its debugging bar.
+    if let Some(p) = laptop_screen(app) {
+        b = b.position(
+            (p.x + p.width as i32) as f64 - width - 24.0,
+            (p.y + p.height as i32) as f64 - height - 24.0,
+        );
+    }
+    let _ = b.build();
+}
+/// Recording ended: the capture window goes, and the app comes back to the front (what was recorded is there).
+fn close_capture(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(CAPTURE) {
+        let _ = w.close();
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.set_focus();
+        }
+    }
+}
+
+/// Pause: nothing the presenter does is recorded until Go on.
+#[tauri::command]
+async fn record_pause(state: State<'_, Shared>, id: String) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::record::pause(&state.library.dir(&id)?)).await
+}
+
+/// Go on (or pick up where it left off after the browser's debugging bar was closed), every screen kept. A tab that
+/// isn't on the screen it was paused on comes back in `off` unless `anyway`.
+#[tauri::command]
+async fn record_go_on(state: State<'_, Shared>, id: String, anyway: bool) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || scenecast_app::record::go_on(&state.library.dir(&id)?, anyway)).await
 }
 
 #[tauri::command]
@@ -898,6 +964,7 @@ async fn ai_save(
 
 #[tauri::command]
 async fn ai_plan(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
     let (to, who) = (app.clone(), id.clone());
     job(state, app, id, "ai-plan", move |dir, busy| {
         // The plan reads each app's start screen: the tabs are checked and opened first, the same check as Record's.
@@ -916,16 +983,20 @@ async fn ai_plan(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Va
 async fn ai_record(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
     let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
     let (to, who) = (app.clone(), id.clone());
-    job(state, app, id, "ai-record", move |dir, busy| {
+    let done = app.clone();
+    let answer = job(state, app, id, "ai-record", move |dir, busy| {
         // The same readiness check as Record's, first; then Copilot records without checking again.
         let report =
             scenecast_app::record::preflight(dir, true, |u| emit(&to, &who, "preflight", u))?;
         if !report.ready {
             return Err(AppError::Invalid(scenecast_app::record::not_ready(&report)));
         }
+        open_capture(&to, &who, true);
         scenecast_app::ai::run(Some(dir), &["record", "--checked"], |u| busy.emit(u))
     })
-    .await
+    .await;
+    close_capture(&done);
+    answer
 }
 
 /// The talk track from the recording (I'll click, you script it; Coach me).
@@ -1754,6 +1825,8 @@ fn main() {
             pending_opens,
             record_start,
             record_status,
+            record_pause,
+            record_go_on,
             record_stop,
             build,
             last_scrub,

@@ -288,6 +288,22 @@ const CDPX = (() => {
     async activePage() { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return t && tabs.get(t.id); },
     // A new tab, in the background unless active, attached and loaded: for side states swept in parallel.
     async newPage(url, o = {}) {
+      // o.direct: opened at its address, as a person would, and attached once it has loaded, so a redirect to another
+      // site (sign-in, a new host) happens before the debugger is on the tab.
+      if (url && o.direct) {
+        let id = null, done;
+        const loaded = new Promise(res => { done = res; });
+        const on = (tid, ch) => { if (tid === id && ch.status === 'complete') done(); };
+        chrome.tabs.onUpdated.addListener(on);
+        try {
+          const t = await chrome.tabs.create({ url, active: !!o.active, ...(o.windowId ? { windowId: o.windowId } : {}) });
+          id = t.id;
+          if ((await chrome.tabs.get(id).catch(() => ({}))).status !== 'complete') await Promise.race([loaded, new Promise(r => setTimeout(r, o.timeout || 30000))]);
+          let p = tabs.get(id); if (!p) { p = new Page(ctx, t); tabs.set(id, p); }
+          await p.attach();
+          return p;
+        } finally { chrome.tabs.onUpdated.removeListener(on); }
+      }
       const t = await chrome.tabs.create({ url: 'about:blank', active: !!o.active, ...(o.windowId ? { windowId: o.windowId } : {}) });
       let p = tabs.get(t.id); if (!p) { p = new Page(ctx, t); tabs.set(t.id, p); }
       await p.attach();

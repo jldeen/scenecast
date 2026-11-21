@@ -462,6 +462,35 @@ pub fn status(dir: &Path) -> Result<RecordStatus, AppError> {
     )?)
 }
 
+/// Pause: nothing the presenter does is recorded until [`go_on`].
+pub fn pause(dir: &Path) -> Result<Value, AppError> {
+    recorded_answer(recorder::record_pause(
+        &crate::receiver::engine_for(dir)?,
+        dir,
+    )?)
+}
+
+/// Go on from a pause (or from the browser's "debugging" bar being closed), every screen so far kept. A tab that isn't
+/// on the screen it was paused on comes back in `off`, still paused, unless `anyway`.
+pub fn go_on(dir: &Path, anyway: bool) -> Result<Value, AppError> {
+    recorded_answer(recorder::record_go_on(
+        &crate::receiver::engine_for(dir)?,
+        dir,
+        anyway,
+    )?)
+}
+
+fn recorded_answer(answer: Value) -> Result<Value, AppError> {
+    match answer.get("error").and_then(Value::as_str) {
+        Some("not recording") => Err(AppError::Invalid(
+            "the recorder wasn't recording (it never started, or the browser restarted it). Run Check, then start again."
+                .into(),
+        )),
+        Some(error) => Err(AppError::Invalid(error.to_owned())),
+        None => Ok(answer),
+    }
+}
+
 /// Stops recording. Nothing recorded is an error that says why, never an empty success.
 pub fn stop(dir: &Path) -> Result<RecordSummary, AppError> {
     let summary = recorder::record_stop(&crate::receiver::engine_for(dir)?, dir).map_err(|e| {

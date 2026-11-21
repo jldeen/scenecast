@@ -78,7 +78,7 @@ Each runs on the project you're in (or `--demo <dir>`) and passes its other argu
 | `scenecast profiles [--browser chrome\|edge] [--json]` | The browser's profiles by name: which are open, which has the recorder (and Developer mode on or off), and the one preflight uses when `demo.json` names none (the open one with the recorder, else the one used last). |
 | `scenecast receiver` | The local receiver the recorder posts to. Keep it running while recording (preflight starts it). |
 | `scenecast agent [<dir>]` | Builds `agent.js`: the same recorder for a Playwright-driven browser instead of the extension. |
-| `scenecast record start [--resume] [--no-auto]` / `status` / `stop` | Records the demo once; each new screen's side states (hovers, clicks, step groups, "+N", drags, zoom, long lists) are captured on the way. `status` and `stop` report the recorder's own time apart from the product's (`timing`). |
+| `scenecast record start [--resume] [--no-auto]` / `status` / `pause` / `go-on [--anyway]` / `stop` | Records the demo once; each new screen's side states (hovers, clicks, step groups, "+N", drags, zoom, long lists) are captured on the way. `status` and `stop` report the recorder's own time apart from the product's (`timing`). |
 | `scenecast record side hovers\|clicks\|drags\|groups\|chips\|zoom\|list [--app id]` | One side path by hand. |
 | `scenecast cmd <op> ['{json}']`, `scenecast run <script.js>` | One command on the recorder, or a script on the Playwright agent (an MV3 extension can't run scripts it's sent). |
 | `scenecast flow [--from-raw]` | `recording.json` + `flow.overrides.mjs` → `flow.json`. |

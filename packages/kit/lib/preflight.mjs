@@ -62,7 +62,8 @@ export async function recorderReady(demo, { waitS = 6 } = {}) {
   if (cfg.recorder === 'agent') return { ok: true };
   const browser = (cfg.chrome && cfg.chrome.browser) || defaultBrowser(), bname = NAME[browser] || browser, page = PAGE[browser];
   const ver = JSON.parse(readFileSync(join(KIT, 'recorder', 'package.json'), 'utf8')).version;
-  const connected = p => p && p.agent && (p.agent.polling || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
+  // Polling, or working on a command (another check's): either way it's there.
+  const connected = p => p && p.agent && (p.agent.polling || p.agent.busy || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
   let up = await ping(port, 1500);
   for (let i = 0; i < waitS * 2 && !connected(up); i++) { await sleep(500); up = await ping(port, 1500); }
   if (!up) return { error: `The receiver isn't running on port ${port}. Run Check, then start again.` };
@@ -105,7 +106,8 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   });
 
   // Recorder connected? Then the browser is running, whatever it's called: nothing to look at there.
-  const connected = p => p && p.agent && (p.agent.polling || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
+  // Polling, or working on a command (another check's): either way it's there.
+  const connected = p => p && p.agent && (p.agent.polling || p.agent.busy || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
   const browser = cfg.chrome.browser || defaultBrowser();
   const bname = NAME[browser] || browser;
   const userDataDir = cfg.chrome.userDataDir || profileRoot(browser);
@@ -166,7 +168,8 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
         if (!fix) return { status: 'fail', detail: `the recorder in ${bname} is ${have}; this app's is ${ver}. Fix reloads it (or click Reload (↻) on Scenecast Recorder at ${PAGE[browser]})`, version: have };
         const r = await op(port, { op: 'reload' }, 5);
         for (let i = 0; i < 30; i++) { await sleep(500); const p = await ping(port, 1500); if (connected(p)) { const e2 = await op(port, { op: 'extension' }, 8); if (e2.ok && e2.value.version === ver) return { status: 'fixed', detail: `reloaded the recorder: ${have} → ${ver}`, version: ver }; } }
-        return { status: 'fail', detail: `the recorder in ${bname} is ${have}${r.ok ? '' : ' and can\u2019t reload itself'}: at ${PAGE[browser]}, click Reload (↻) on Scenecast Recorder`, version: have };
+        // The same words as Record's own version check (recorderReady), so the app shows the same fix for both.
+        return { status: 'fail', detail: `Reload the recorder extension: ${bname} is running recorder ${have}, and this app's is ${ver}${r.ok ? '' : ' (it can\u2019t reload itself)'}. At ${PAGE[browser]}, click Reload (↻) on Scenecast Recorder`, version: have };
       }
       return { status: 'ok', detail: `extension ${have || ''} connected`.replace('  ', ' '), version: have };
     }
@@ -179,7 +182,8 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
 
   // Each app's tab: open, on its start screen (its theme said, never a reason to stop). Only with the recorder there to look.
   if (rec.status === 'ok') {
-    const r = await op(port, { op: 'preflight', apps: cfg.apps, fix, waitS: 20 }, 120);
+    // Each app it opens can take up to a minute (load, its start screen, marking the tab): the wait grows with them.
+    const r = await op(port, { op: 'preflight', apps: cfg.apps, fix, waitS: 20 }, fix ? Math.max(120, 40 + 70 * cfg.apps.length) : 120);
     const tabs = r.ok ? r.value._tabs : undefined;
     for (const a of cfg.apps) {
       const o = r.ok ? r.value[a.id] || {} : {};

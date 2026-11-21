@@ -38,7 +38,7 @@
     { id: 'iq', url: 'https://daily.iq.microsoft.com/', key: 'i' },
     { id: 'admin', url: 'https://admin.cloud.microsoft/', key: 'a' },
   ];
-  const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', recording: 'new', recorded: 'recorded', review: 'built', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
+  const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', recording: 'new', paused: 'new', recorded: 'recorded', review: 'built', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
   const after = s => ['recorded', 'built', 'checked'].indexOf(stage) >= ['recorded', 'built', 'checked'].indexOf(s);
   const status = {
     recorded: after('recorded'), recordedAt: after('recorded') ? now - 3600e3 : null, screens: after('recorded') ? 22 : 0,
@@ -65,7 +65,17 @@
     { id: 'recorder', status: 'ok', detail: 'extension 0.5.0 connected' },
     ...apps.map(a => ({ id: `app ${a.id}`, status: 'ok', detail: `${a.url} · light` })),
   ];
+  // The capture window (capture.html?cap=…): ready, busy, early (a click came too soon), paused, bar (the debugging bar
+  // was closed), off (a tab isn't where it was paused), copilot, ask (Copilot asks first).
+  const CAP = q.get('cap');
+  const capStatus = { recording: true, busy: CAP === 'busy' || CAP === 'early', count: 14, actions: 9, streams: 1, chromeSecs: 161, blocked: 0,
+    held: CAP === 'paused' ? { why: 'you', secs: 12 } : CAP === 'bar' || CAP === 'off' ? { why: 'bar', secs: 40 } : undefined };
+  if (CAP) window.SCENECAST_CAPTURE = { demo: 'innovation-act-1-demo-1', copilot: CAP === 'copilot' || CAP === 'ask' };
   const H = {
+    record_status: () => CAP ? capStatus : { recording: false },
+    record_pause: () => ({ held: 'you' }),
+    record_go_on: ({ anyway }) => CAP === 'off' && !anyway ? { held: 'bar', off: ['teams'] } : { recording: true, goOn: true },
+    ai_answer: () => null, ai_stop: () => null,
     app_info: () => ({ version: q.get('v') || '0.5.0', os: OS, library: home, engine: '/Applications/Scenecast.app/Contents/Resources/packages', engineError: null, noOpen: false }),
     list_demos: () => demos,
     get_demo: ({ id }) => demos.find(d => d.id === id) || Promise.reject(`no demo ${id}`),
@@ -119,7 +129,7 @@
         for (const item of preflightItems.map(i => i.id === 'app admin' ? { id: 'app admin', status: 'fail', detail: 'no tab for admin (admin.cloud.microsoft)', missing: true, tabs: [{ title: 'Home | Microsoft 365 admin center', url: 'https://admin.microsoft.com/Adminportal/Home', host: 'admin.microsoft.com' }, { title: 'Procurement chat | Teams', url: 'https://teams.cloud.microsoft/', host: 'teams.cloud.microsoft' }] } : i)) { job(id, 'preflight', { type: 'preflight', item }); await wait(40); }
         throw 'not ready to record: no tab for admin (admin.cloud.microsoft)';
       }
-      job(id, 'record', { type: 'record', status: { recording: true, busy: false, count: 14, actions: 9, streams: 1, timing: { recorderSecs: 41, productSecs: 120 } } });
+      job(id, 'record', { type: 'record', status: { recording: true, busy: false, count: 14, actions: 9, streams: 1, timing: { recorderSecs: 41, productSecs: 120 }, ...(SC === 'paused' ? { held: { why: 'bar', secs: 40 } } : {}) } });
       return { ok: true };
     },
     record_stop: async () => ({ states: 22, steps: 41, streams: 2, beats: 4, secs: 370, timing: { recorderSecs: 124, productSecs: 246 }, notes: [], autos: [] }),
@@ -133,12 +143,25 @@
         return h(args);
       },
     },
-    event: { async listen(event, f) { (listeners[event] ||= []).push(f); return () => {}; } },
+    event: { async listen(event, f) { (listeners[event] ||= []).push(f); return () => {}; }, async emitTo() {} },
   };
   window.__preview = { scenario: SC, os: OS, emit, demo };
 
   // Scenarios that need more than data: open the demo, run its check, start a recording.
   addEventListener('load', () => setTimeout(async () => {
+    if (CAP) {
+      const d = 'innovation-act-1-demo-1';
+      if (CAP === 'early') job(d, 'record', { type: 'record', status: { ...capStatus, blocked: 1 } });
+      if (CAP === 'copilot' || CAP === 'ask') {
+        job(d, 'ai-record', { type: 'record', status: { ...capStatus, chromeSecs: 95 } });
+        job(d, 'ai-record', { type: 'event', event: 'step', data: { n: 6, of: 11, text: 'Type "What does the delay on PO-450101 hold up?" in "Message"' } });
+        if (CAP === 'ask') job(d, 'ai-record', { type: 'event', event: 'confirm', data: { id: 'q1', step: 'Press Enter', app: 'copilot', why: 'It sends the message' } });
+      }
+      if (CAP === 'off') { await wait(200); document.querySelector('[data-do="go-on"]')?.click(); }
+      await wait(300);
+      document.documentElement.dataset.previewReady = '1';
+      return;
+    }
     const S = window.__scenecast;
     const ready = () => { document.documentElement.dataset.previewReady = '1'; };
     if (!S || SC === 'empty' || SC === 'library') return ready();
@@ -150,7 +173,7 @@
     if (q.get('details') === '1') document.querySelector('[data-action="details"]')?.click();
     if (SC === 'presenting') { await wait(300); document.querySelector('[data-action="present-start"]')?.click(); await wait(300); }
     await wait(500);
-    if (SC === 'recording' || SC === 'record-error') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
+    if (SC === 'recording' || SC === 'paused' || SC === 'record-error') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
     document.documentElement.dataset.previewReady = '1';
   }, 300));
 })();

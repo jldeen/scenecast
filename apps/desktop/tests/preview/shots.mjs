@@ -13,7 +13,9 @@ const pick = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? arg
 const ENGINE = pick('--browser', 'webkit') === 'chromium' ? chromium : webkit;
 const ONLY = pick('--only', '') ? pick('--only', '').split(',') : null;
 // 'details' is the Record screen with Details open: the one place engine words belong.
-const SCENARIOS = ['empty', 'library', 'new', 'record', 'record-pick', 'copilot', 'copilot-plan', 'recording', 'record-error', 'recorded', 'review', 'present', 'presenting', 'share', 'details'];
+const SCENARIOS = ['empty', 'library', 'new', 'record', 'record-pick', 'copilot', 'copilot-plan', 'recording', 'paused', 'record-error', 'recorded', 'review', 'present', 'presenting', 'share', 'details'];
+// The capture window (on top while recording), at its own size.
+const CAPTURE = ['ready', 'busy', 'early', 'paused', 'bar', 'off', 'copilot', 'ask'];
 const ENGINE_WORDS = /\b(port \d+|receiver|preflight|scrub|manifest|unpacked|developer mode|headless|side states?|streamed answers?|threshold|localhost|127\.0\.0\.1|profile \d+)\b|\/Users\/|\b[A-Z]:\\/i;
 
 mkdirSync(OUT, { recursive: true });
@@ -43,6 +45,24 @@ for (const os of ['macos', 'windows']) {
     console.log(`${s} (${os}): ${look.primaries.length} primary [${look.primaries.join(' | ')}]${look.words.length ? `; engine words: ${[...new Set(look.words)].join(', ')}` : ''}`);
   }
   await page.close();
+  const cap = await browser.newPage({ viewport: { width: 340, height: 240 }, deviceScaleFactor: 2 });
+  for (const c of CAPTURE.filter(x => !ONLY || ONLY.includes('capture') || ONLY.includes(`capture-${x}`))) {
+    await cap.goto(`http://127.0.0.1:${port}/capture.html?cap=${c}&os=${os}`);
+    await cap.waitForFunction(() => document.documentElement.dataset.previewReady === '1', null, { timeout: 10000 }).catch(() => {});
+    await cap.waitForTimeout(500);
+    const look = await cap.evaluate(re => {
+      const vis = e => e.offsetParent !== null;
+      const primaries = [...document.querySelectorAll('.btn.primary')].filter(vis).map(b => b.textContent.trim());
+      const words = (document.body.innerText.match(new RegExp(re, 'gi')) || []);
+      const clipped = [...document.querySelectorAll('.cap-body > *, .cap-foot > *')].some(e => e.getBoundingClientRect().bottom > innerHeight + 1);
+      return { primaries, words, clipped };
+    }, ENGINE_WORDS.source);
+    const file = join(OUT, `capture-${c}-${os}.png`);
+    await cap.screenshot({ path: file });
+    report.push({ scenario: `capture-${c}`, os, file, ...look });
+    console.log(`capture-${c} (${os}): ${look.primaries.length} primary [${look.primaries.join(' | ')}]${look.clipped ? '; CLIPPED' : ''}${look.words.length ? `; engine words: ${[...new Set(look.words)].join(', ')}` : ''}`);
+  }
+  await cap.close();
 }
 await browser.close();
 server.close();

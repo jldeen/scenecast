@@ -86,6 +86,15 @@ stop the extension's service worker at any time; when it starts again, the exten
 checkpoint by itself (the selftest stops it mid-recording to prove this). `scenecast record start --resume` does the
 same by hand, and lists any app tab that isn't on the screen it was on.
 
+### Pause and go on
+
+`scenecast record pause` holds the recording: nothing the presenter does is recorded. Closing the browser's
+"debugging" bar does the same by itself (the recorder sees `canceled_by_user` and pauses; status says `held: {why:
+"bar"}`). `scenecast record go-on` drops whatever was done while paused, attaches again and picks up where it
+stopped, with every screen so far kept, once each app's tab is back on the screen it was on; one that isn't comes back
+as `off` (`--anyway` goes on from where it is). The app's capture window shows both as **Paused**, with **Go on** or
+**Pick up where I left off**.
+
 ## Driven by the AI
 
 Record for me (docs/ai.md) runs the demo through the same command loop: `observe` reads the page as the AI sees it

@@ -98,6 +98,8 @@ async function main() {
       const rec = (await import('../lib/demo.mjs')).recordOpts(demo.cfg);
       if (sub === 'start') return send('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: { ...rec, ...(rest.includes('--no-auto') ? { auto: false } : {}), ...(demo.cfg.theme ? { theme: demo.cfg.theme } : {}) }, zooms: demo.cfg.zooms, first: arg(rest, '--first'), resume: rest.includes('--resume'), ...jsonArg() }, 300);
       if (sub === 'status') return send('recordStatus', {}, 30);
+      if (sub === 'pause') return send('recordPause', {}, 30);
+      if (sub === 'go-on') return send('recordGoOn', { anyway: rest.includes('--anyway') }, 120);
       if (sub === 'stop') return send('recordStop', {}, 600);
       if (sub === 'side') {
         const kind = rest[1];
@@ -105,7 +107,7 @@ async function main() {
         if (kind === 'zoom' && !extra.zooms) extra.zooms = demo.cfg.zooms;
         return send('recordSide', { kind, app: arg(rest, '--app'), ...extra }, 3600);
       }
-      console.log('scenecast record start|status|stop|side'); return 1;
+      console.log('scenecast record start|status|pause|go-on|stop|side'); return 1;
     }
     case 'flow': return node('kit/compile/flow.mjs', rest);
     case 'build': {

@@ -273,10 +273,35 @@ try {
     }, 300000, 700);
   };
   await settled();
+  // The capture window, on top of the browser while recording: what it says, read through the window list (null
+  // when this WebDriver can't switch windows).
+  const capture = async () => {
+    try {
+      const main = await b.getWindowHandle(), other = (await b.getWindowHandles()).find(h => h !== main);
+      if (!other) return { open: false };
+      await b.switchToWindow(other);
+      try { return { open: true, ...(await b.execute(() => ({ state: document.querySelector('[data-test="capture-state"]')?.dataset.state, count: +document.querySelector('[data-test="capture-count"]')?.dataset.count }))) }; }
+      finally { await b.switchToWindow(main); }
+    } catch (e) { return null; }
+  };
+  const before = await capture();
+  if (before) check('the capture window is open while recording, and says Ready', before.open && before.state === 'ready', JSON.stringify(before));
+  else console.log('NOTE: this WebDriver can\'t switch windows; the capture window isn\'t checked here (the preview shows each of its states)');
   await chat.click('[aria-label="Message"]');
   await chat.keyboard.type('Summarize the supplier delay on PO-450101', { delay: 15 });
   await chat.keyboard.press('Enter');
+  if (before) {
+    let seen = null;
+    for (let i = 0; i < 20 && !seen; i++) { const c = await capture(); if (c?.state === 'busy') seen = c; else await sleep(500); }
+    check('a click during capture: the capture window says Hold on', !!seen, 'never busy');
+  }
   await settled();
+  // Pause: nothing recorded until Go on; every screen so far kept.
+  const kept = +(await attr('recording', 'data-count'));
+  await click('record-pause');
+  check('Pause: the recording says Paused, its screens kept', await waitFor('paused', async () => (await attr('recording', 'data-held')) === 'you', 15000).catch(() => false) && +(await attr('recording', 'data-count')) === kept);
+  await click('record-go-on');
+  check('Go on: recording again from where it paused', await waitFor('going on', async () => (await exists('recording')) && (await attr('recording', 'data-held')) === null && (await attr('recording', 'data-busy')) !== null, 30000).catch(() => false));
   await admin.bringToFront(); await sleep(300);
   await admin.click('[aria-label="Search tools by name"]');
   await admin.keyboard.type('alpha', { delay: 30 });

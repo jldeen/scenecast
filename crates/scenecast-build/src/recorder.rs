@@ -99,6 +99,21 @@ pub struct RecordStatus {
     pub resumed: Option<serde_json::Value>,
     /// The last few lines of the recorder's log.
     pub log: Vec<String>,
+    /// Paused: nothing the presenter does is recorded until `record go-on`.
+    pub held: Option<RecordHeld>,
+    /// Clicks held back because they came while a screen was being captured (each needs doing again).
+    pub blocked: u32,
+    /// Seconds since the recording started.
+    pub chrome_secs: Option<u64>,
+}
+
+/// Why a recording is paused, and for how long.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RecordHeld {
+    /// `you` (Pause) or `bar` (the browser's "debugging" bar was closed).
+    pub why: String,
+    pub secs: u64,
 }
 
 /// `record stop`: the recording, written to the raw folder (`recording.json`).
@@ -251,6 +266,31 @@ pub fn record_status(engine: &Engine, dir: &Path) -> Result<RecordStatus, Record
     parse_json("record status", &out)
 }
 
+/// `record pause`: nothing the presenter does is recorded until [`record_go_on`].
+pub fn record_pause(engine: &Engine, dir: &Path) -> Result<serde_json::Value, RecorderError> {
+    let out = run(
+        engine,
+        with_demo("record", &["pause".into()], dir),
+        "record pause",
+    )?;
+    parse_json("record pause", &out)
+}
+
+/// `record go-on`: picks up where it was paused. A tab that isn't on the screen it was paused on comes back in `off`
+/// (and it stays paused) unless `anyway`.
+pub fn record_go_on(
+    engine: &Engine,
+    dir: &Path,
+    anyway: bool,
+) -> Result<serde_json::Value, RecorderError> {
+    let mut rest: Vec<OsString> = vec!["go-on".into()];
+    if anyway {
+        rest.push("--anyway".into());
+    }
+    let out = run(engine, with_demo("record", &rest, dir), "record go-on")?;
+    parse_json("record go-on", &out)
+}
+
 pub fn record_stop(engine: &Engine, dir: &Path) -> Result<RecordSummary, RecorderError> {
     let out = run(
         engine,
@@ -281,10 +321,14 @@ mod tests {
         let out = r#"{
  "recording": true, "busy": false, "count": 6, "streams": 1, "actions": 11, "active": "chat",
  "timing": { "recorderSecs": 48.2, "productSecs": 4.1, "sweepSecs": 40, "captureSecs": 1.2, "confirmSecs": 7 },
- "resumed": { "states": 6 }, "log": ["193.7s resumed: 6 screens, 6 steps"], "chromeSecs": 202 }"#;
+ "resumed": { "states": 6 }, "log": ["193.7s resumed: 6 screens, 6 steps"], "chromeSecs": 202,
+ "held": { "why": "bar", "secs": 4 }, "blocked": 2 }"#;
         let s: RecordStatus = parse_json("record status", out).unwrap();
         assert!(s.recording && !s.busy);
         assert_eq!(s.count, 6);
+        // Paused because the browser's debugging bar was closed; two clicks came too early.
+        assert_eq!(s.held.as_ref().map(|h| h.why.as_str()), Some("bar"));
+        assert_eq!((s.blocked, s.chrome_secs), (2, Some(202)));
         let t = s.timing.unwrap();
         assert_eq!((t.recorder_secs, t.product_secs), (48.2, 4.1));
         assert!(s.resumed.is_some());

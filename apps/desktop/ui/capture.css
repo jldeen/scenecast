@@ -1,0 +1,24 @@
+/* The capture window: on top of the browser while recording. The rail's ink header (drag it to move the window), one
+   state in signage type, and the controls along the bottom. Same tokens as the app (app.css). */
+body.capture { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; overflow: hidden; background: var(--paper); user-select: none; -webkit-user-select: none; cursor: default; }
+.cap-head { display: flex; align-items: center; gap: 9px; background: var(--rail); color: #fff; padding: 9px 14px; font-size: var(--t-label); font-weight: 700; letter-spacing: .02em; cursor: grab; }
+.cap-dot { width: 10px; height: 10px; border-radius: 50%; background: #FF4D4F; animation: cap-blink 1.4s ease-in-out infinite; flex: none; }
+body[data-state="held"] .cap-dot, body[data-state="off"] .cap-dot { background: var(--rail-muted); animation: none; }
+body[data-state="copilot"] .cap-dot, body[data-state="ask"] .cap-dot { background: #FF4D4F; }
+@keyframes cap-blink { 50% { opacity: .35; } }
+.cap-time { margin-left: auto; color: var(--rail-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cap-body { padding: 12px 16px 10px; display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: hidden; outline: none; }
+.cap-what { font-size: var(--t-label); font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cap-big { display: flex; align-items: center; gap: 10px; font-size: var(--t-sub); font-weight: 800; line-height: 1.2; letter-spacing: -.01em; }
+.cap-big .s { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--rail-muted); }
+.cap-big .s.go { background: var(--ok); }
+.cap-big .s.hold { background: #D98E04; }
+.cap-big svg.i { stroke: var(--ink); }
+.cap-sub { font-size: var(--t-label); color: var(--ink-2); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.cap-sub.warn { color: var(--warn); font-weight: 700; }
+.cap-body .progress { margin: 2px 0; }
+.cap-asks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.cap-foot { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--rule); padding: 9px 12px 9px 16px; font-size: var(--t-label); color: var(--muted); font-weight: 600; }
+.cap-foot .grow { flex: 1; font-variant-numeric: tabular-nums; }
+.cap-foot .alink { font-size: var(--t-label); color: var(--ink-2); }
+.cap-foot .btn svg.i { width: 14px; height: 14px; }

@@ -87,7 +87,7 @@ const tile = (a, i = 0) => {
 function where(d) {
   const s = d.status;
   const st = J(d.id).record?.status;
-  if (st?.recording) return { gate: 'record', word: 'Recording', note: `${plural(st.count || 0, 'screen')} so far` };
+  if (st?.recording) return { gate: 'record', word: st.held ? 'Paused' : 'Recording', note: `${plural(st.count || 0, 'screen')} so far` };
   if (!s.recorded && !s.built) return { gate: 'record', word: 'Record', note: 'not recorded yet' };
   const when = (what, at) => at ? `${what} ${ago(at)}` : what;
   if (!s.built || !s.fidelity?.pass) return { gate: 'review', word: 'Review', note: when('recorded', s.recordedAt) };
@@ -267,7 +267,8 @@ listen('job', ({ payload: { demo: id, job, update: u } }) => {
       j.items = j.items.filter(i => i.id !== u.item.id).concat(u.item);
       break;
     case 'record':
-      if ((j.status?.count ?? -1) !== u.status?.count || !!j.status?.recording !== !!u.status?.recording) { j.status = u.status; renderSidebar(); }
+      if (!u.status?.held) J(id).goOnOff = null;
+      if ((j.status?.count ?? -1) !== u.status?.count || !!j.status?.recording !== !!u.status?.recording || !!j.status?.held !== !!u.status?.held) { j.status = u.status; renderSidebar(); }
       j.status = u.status;
       break;
     case 'check':
@@ -282,6 +283,12 @@ listen('job', ({ payload: { demo: id, job, update: u } }) => {
       break;
   }
   if (id === S.id) scheduleRegions();
+});
+// Stop, pressed in the capture window: saved here, on this demo's Record screen (then on to Review).
+listen('capture', async ({ payload: { demo: id, action } }) => {
+  if (action !== 'record-stop' || !S.demos.some(d => d.id === id)) return;
+  if (S.view !== 'demo' || S.id !== id) await openDemo(id, 'record');
+  await ACTIONS['record-stop']();
 });
 listen('job-state', ({ payload: { demo: id, job, running: on } }) => {
   if (on) J(id).running[job] = true; else delete J(id).running[job];
@@ -617,6 +624,7 @@ function renderTabsBar() {
 function headFor(d) {
   const s = d.status, f = s.fidelity, g = gateOf(S.tab);
   const slot = d.slot ? `<div class="slot" data-test="slot"><b>${clock(d.slot)}</b>your slot</div>` : '';
+  if (g === 'record' && recState(d).recording && recState(d).st?.held) return { title: 'Paused', sub: 'Your screens so far are kept. Pick up when you\u2019re ready.', side: slot };
   if (g === 'record' && recState(d).recording) return { title: 'Recording', sub: `Click through in ${esc(BNAME[d.browser] || 'your browser')}. Wait for \u201cReady\u201d before each click.`, side: slot };
   if (g === 'record') return { title: d.title, test: 'demo-title', sub: esc(listWords(d.apps.map(appLabel))), side: slot };
   if (g === 'review') {
@@ -803,10 +811,21 @@ function recHead(d) {
   if (aiOn) return head('Copilot is recording', 'Keep your hands off the browser until it asks.', `<button class="btn primary big" data-action="ai-stop" data-test="ai-stop">${STOP} Stop</button>`);
   if (starting) return head('Getting ready', `<span data-test="record-starting">Checking your browser and the app tabs, then capturing each start screen. Wait for <strong>Recording</strong> before you click.</span>`,
     `<button class="btn primary big" disabled>Starting…</button>`);
+  if (recording && st?.held) {
+    // Paused (Pause, or the browser's debugging bar was closed): every screen so far is kept.
+    const n = st.count ?? 0, bar = st.held.why === 'bar', off = J(d.id).goOnOff;
+    const why = off ? `Bring ${off.map(a => esc(appLabel({ id: a }))).join(' and ')} back to the screen you paused on, then pick up again, or <button class="link" data-action="record-go-on" data-anyway="1" data-test="record-go-on-anyway">go on from here</button>.`
+      : `Your ${plural(n, 'screen')} ${n === 1 ? 'is' : 'are'} kept.${bar ? ' Picking up shows the bar again: leave it open.' : ''}`;
+    const title = bar ? 'The browser\u2019s debugging bar was closed' : 'Nothing you do is recorded';
+    return head(title, `<span data-test="recording" data-held="${esc(st.held.why)}" data-busy="false" data-count="${n}">${why}</span>`,
+      `<button class="alink" data-action="record-stop" data-test="record-stop" ${running('record-stop', d.id) ? 'disabled' : ''}>Stop recording</button>
+       <button class="btn primary big" data-action="record-go-on" data-test="record-go-on" ${running('record-go-on', d.id) ? 'disabled' : ''}>${bar && !off ? 'Pick up where I left off' : 'Go on'} ${I.arrow}</button>`);
+  }
   if (recording) {
     const busyNow = !!st?.busy;
     return head('Recording', `<span data-test="recording" data-busy="${busyNow}" data-count="${st?.count ?? 0}" class="state ${busyNow ? 'warn' : 'ok'}">${busyNow ? `Hold on: capturing this screen${st?.side ? ` (${esc(st.side)})` : ''}` : 'Ready: click next'}</span> · ${plural(st?.count ?? 0, 'screen')} so far`,
-      `<button class="btn primary big" data-action="record-stop" data-test="record-stop" ${running('record-stop', d.id) ? 'disabled' : ''}>${STOP} Stop recording</button>`);
+      `<button class="alink" data-action="record-pause" data-test="record-pause">Pause</button>
+       <button class="btn primary big" data-action="record-stop" data-test="record-stop" ${running('record-stop', d.id) ? 'disabled' : ''}>${STOP} Stop recording</button>`);
   }
   if (running('record-stop', d.id)) return head('Saving the recording', 'A few seconds.', '<button class="btn primary big" disabled>Saving…</button>');
   if (stop.outcome?.states) {
@@ -963,7 +982,7 @@ PANELS.record = (panel, d) => {
       <div data-region="rec-head"></div>
       <div data-region="ai-run" class="ai-run"></div>
       <div class="rd-cols" aria-hidden="true"><span></span><span>Item</span><span>App</span><span>Time</span><span>State</span></div>
-      ${live ? '' : `<div class="sec">Pre-show</div>
+      ${live ? '<div data-region="preshow" hidden></div>' : `<div class="sec">Pre-show</div>
       <div data-region="preshow"></div>
       <div data-region="install" class="install-steps"></div>`}
       <div data-region="show"></div>
@@ -1633,8 +1652,26 @@ const ACTIONS = {
     J(id).profiles = await invoke('browser_profiles', { id }).catch(() => J(id).profiles);
     step('preflight', 'preflight', { fix: false });
   },
+  'record-pause': async () => {
+    const id = S.id;
+    await call('record_pause', { id });
+    const j = J(id).record || {};
+    if (j.status) j.status = { ...j.status, held: { why: 'you', secs: 0 } };
+    renderRegions();
+  },
+  'record-go-on': async t => {
+    const id = S.id;
+    J(id).running['record-go-on'] = true; renderRegions();
+    try {
+      const r = await call('record_go_on', { id, anyway: !!t.dataset.anyway });
+      J(id).goOnOff = r?.off?.length ? r.off : null;
+      const j = J(id).record || {};
+      if (!J(id).goOnOff && j.status) j.status = { ...j.status, held: undefined };
+    } catch { /* said in a toast */ } finally { delete J(id).running['record-go-on']; renderRegions(); }
+  },
   'record-stop': async () => {
     const id = S.id;
+    J(id).goOnOff = null;
     const o = await step('record-stop', 'record_stop', {}, () => { J(id).record = {}; });
     const d = S.demos.find(x => x.id === id);
     if (o && (d?.mode === 'script' || d?.mode === 'coach')) await aiFinish(id, true);

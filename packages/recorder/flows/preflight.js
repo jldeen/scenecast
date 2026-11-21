@@ -67,7 +67,11 @@ for (const a of ARGS.apps || []) {
   let p = null; try { p = await H.pageFor(a.match); } catch (e) {}
   if (!p && ARGS.fix && a.url) {
     await say(`${a.id}: no tab with ${a.match}; opening ${a.url}`);
-    p = await ctx.newPage(); await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(e => say(`${a.id}: goto: ${e.message || e}`));
+    const t0 = Date.now();
+    p = await ctx.newPage(a.url, { direct: true });
+    // Playwright's agent opens a blank page: it goes to the address itself.
+    if (!/^https?:|^file:/.test(p.url())) await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(e => say(`${a.id}: goto: ${e.message || e}`));
+    await say(`${a.id}: tab open in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
     o.fixed.push('opened'); o.r = await waitStart(p, a, ARGS.waitS || 20);
     await landed(p, a, o);
   }

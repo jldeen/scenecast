@@ -91,7 +91,7 @@ button{font:inherit;padding:6px 14px;border-radius:7px;border:1px solid #c9c9cf;
 document.getElementById('copy').onclick = () => navigator.clipboard.writeText(${JSON.stringify(page)}).then(() => { document.getElementById('copy').textContent = 'Copied'; });
 setInterval(async () => {
   const p = await fetch('/ping').then(r => r.json()).catch(() => null);
-  const on = p && p.agent && (p.agent.polling || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
+  const on = p && p.agent && (p.agent.polling || p.agent.busy || (p.agent.secsAgo !== null && p.agent.secsAgo < 30));
   const el = document.getElementById('state');
   el.className = 'state' + (on ? ' ok' : '');
   el.textContent = on ? '✓ The recorder is connected. You can close this tab.' : 'Waiting for the recorder… this page turns green when it connects.';
@@ -136,7 +136,7 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && u.pathname === '/coach.json') return json(res, 200, coachNow || {});
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-private-network': 'true' }); return res.end(); }
     // agent: whether the recorder (extension or agent) is polling now, and when it last asked for a command or answered.
-    if (req.method === 'GET' && u.pathname === '/ping') { const b = agents.get(bound) || {}; return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null, id: bound, browser: b.browser, tabs: b.tabs, others: others() } }); }
+    if (req.method === 'GET' && u.pathname === '/ping') { const b = agents.get(bound) || {}; return json(res, 200, { ok: true, scenecast: 'receiver', pid: process.pid, owner: OWNER, since: SINCE, port: PORT, demo: DEMO, raw: RAW, urls: Object.keys(urlIndex).length, agent: { polling: waiters.length > 0, busy: inHand.size > 0, secsAgo: agentAt ? Math.round((Date.now() - agentAt) / 1000) : null, id: bound, browser: b.browser, tabs: b.tabs, others: others() } }); }
     // The recorder's checkpoint, for record start --resume.
     if (req.method === 'GET' && u.pathname === '/recording-partial') { const f = join(RAW, 'recording-partial.json'); return existsSync(f) ? json(res, 200, JSON.parse(readFileSync(f, 'utf8'))) : json(res, 404, { error: 'no checkpoint' }); }
     // Remote control: the driver long-polls for its next command.

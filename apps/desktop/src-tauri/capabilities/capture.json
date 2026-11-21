@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture",
+  "description": "The capture window (on top while recording): the app's events, and moving it by its header.",
+  "windows": ["capture"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}

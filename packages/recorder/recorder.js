@@ -277,6 +277,9 @@ async function recHandle(e) {
 const recAt = what => { REC.at = what; REC.atSince = Date.now(); };
 async function recLoop() {
   while (!REC.stop) {
+    // The browser's "debugging" bar was closed: nothing is recorded until Go on (the screens so far are kept).
+    if (!REC.held && recBarClosed()) { REC.held = { why: 'bar', since: Date.now() }; rlogr('paused: the browser\'s debugging bar was closed'); }
+    if (REC.held) { recAt('paused'); await sleep(200); continue; }
     recAt('waiting for your next step');
     try {
       // The start screens' side states first (and after a resume, the screens left without them).
@@ -397,7 +400,7 @@ OPS.recordStart = async c => {
   if (REC.on) return { error: 'already recording' };
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
-  Object.assign(REC, { on: true, resumed: undefined, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms });
+  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms });
   if (c.resume) return recResume(c);
   // Every app's tab, or nothing starts: which aren't open, all at once.
   const missing = [];
@@ -428,12 +431,46 @@ OPS.recordStart = async c => {
   REC.loopP = recLoop();
   return { recording: true, states: Object.keys(REC.states), auto: !!recAutoOpts(), go: `${recAutoOpts() ? 'the recorder first captures each start screen\'s side states (status busy); then ' : ''}run the demo in ${first.id}; after each action wait until record status shows busy: false (each new screen's side states are captured then)` };
 };
+// Paused (by the presenter, or because the browser's "debugging" bar was closed): nothing they do is recorded. Go on
+// picks up where it stopped once each tab is back on the screen it was on (what they did while paused is dropped);
+// a tab that isn't says which (anyway: go on from where it is).
+const recBarClosed = () => REC.apps.some(A => A.page.detachReason === 'canceled_by_user');
+OPS.recordPause = async () => {
+  if (!REC.on) return { error: 'not recording' };
+  if (!REC.held) { REC.held = { why: 'you', since: Date.now() }; rlogr('paused'); }
+  return { held: REC.held.why };
+};
+OPS.recordGoOn = async c => {
+  if (!REC.on) return { error: 'not recording' };
+  if (!REC.held) return { recording: true };
+  for (let i = 0; i < 100 && REC.busyNow; i++) await sleep(100);
+  const off = [];
+  for (const A of REC.apps) {
+    A.page.detachReason = null;
+    // After the bar was closed the tab was let go: attaching again shows the bar again.
+    if (A.page.attach) await A.page.attach().catch(e => rlogr(`going on: ${A.id}: ${e.message || e}`));
+    await recInstall(A.page);
+    for (const f of A.page.frames()) await recEval(A.page, f, 'window.__rkrec ? window.__rkrec.drain() : null').catch(() => {});
+    A.typing = null;
+    const sig = await recSettle(A.page, 600, 8000);
+    if (sig !== (REC.states[A.state] || {}).sig && (REC.sigs[A.id] || new Map()).get(sig) !== A.state) off.push(A.id);
+  }
+  if (off.length && !(c && c.anyway)) return { held: REC.held.why, off };
+  rlogr(`going on${off.length ? ` (${off.join(', ')} not on the screen it was paused on)` : ''}`);
+  REC.held = null;
+  return { recording: true, goOn: true, states: Object.keys(REC.states).length };
+};
+// For the selftest: what closing the browser's "debugging" bar does (every tab let go, the reason given).
+OPS.testCloseBar = async () => {
+  for (const A of REC.apps) { await chrome.debugger.detach({ tabId: A.page.tabId }).catch(() => {}); A.page.onDetach(); A.page.detachReason = 'canceled_by_user'; }
+  return { closed: REC.apps.length };
+};
 // Stops recording without writing the recording, as if the agent had died (for testing record start --resume).
 OPS.recordAbort = async () => { if (!REC.on) return { error: 'not recording' }; REC.stop = true; await REC.loopP; await recSaving; for (const A of REC.apps) await recSetBusy(A.page, false).catch(() => {}); REC.on = false; return { aborted: true }; };
 // Where the time went: the recorder's own work (side states swept, screens captured, making sure an action was done)
 // apart from the product's (its answers), in seconds.
 const recTiming = () => { const t = REC.time, r = x => Math.round(x / 100) / 10; return { recorderSecs: r(t.sweep + t.capture + t.confirm), productSecs: r(t.product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm) }; };
-OPS.recordStatus = async () => REC.on ? { recording: true, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
+OPS.recordStatus = async () => REC.on ? { recording: true, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
   REC.stop = true; await REC.loopP;

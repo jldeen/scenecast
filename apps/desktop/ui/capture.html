@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recording · Scenecast</title>
+  <link rel="preload" href="fonts/Barlow-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="capture.css">
+</head>
+<body class="capture">
+  <header class="cap-head" data-tauri-drag-region>
+    <span class="cap-dot" data-tauri-drag-region aria-hidden="true"></span>
+    <span id="cap-title" data-tauri-drag-region data-test="capture-title">Recording</span>
+    <span id="cap-time" class="cap-time" data-tauri-drag-region data-test="capture-time"></span>
+  </header>
+  <main id="cap-body" class="cap-body" aria-live="polite" data-test="capture"></main>
+  <footer id="cap-foot" class="cap-foot"></footer>
+  <script type="module" src="capture.js"></script>
+</body>
+</html>
