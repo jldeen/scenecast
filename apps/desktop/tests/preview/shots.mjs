@@ -13,7 +13,7 @@ const pick = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? arg
 const ENGINE = pick('--browser', 'webkit') === 'chromium' ? chromium : webkit;
 const ONLY = pick('--only', '') ? pick('--only', '').split(',') : null;
 // 'details' is the Record screen with Details open: the one place engine words belong.
-const SCENARIOS = ['empty', 'library', 'new', 'new-typed', 'record', 'record-pick', 'copilot', 'copilot-plan', 'recording', 'paused', 'record-error', 'recorded', 'review', 'present', 'presenting', 'share', 'details'];
+const SCENARIOS = ['empty', 'library', 'new', 'new-typed', 'record', 'record-pick', 'copilot', 'copilot-plan', 'recording', 'paused', 'record-error', 'recorded', 'making', 'review', 'review-ok', 'present', 'presenting', 'share', 'details'];
 // The capture window (on top while recording), at its own size.
 const CAPTURE = ['ready', 'busy', 'early', 'paused', 'bar', 'off', 'copilot', 'ask'];
 const ENGINE_WORDS = /\b(port \d+|receiver|preflight|scrub|manifest|unpacked|developer mode|headless|side states?|streamed answers?|threshold|localhost|127\.0\.0\.1|profile \d+)\b|\/Users\/|\b[A-Z]:\\/i;

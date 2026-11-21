@@ -1,0 +1,386 @@
+//! Review: the show's beats, each with the screens recorded in it (in the order they were reached), and how each one
+//! compares with the real product, in a sentence when it differs. From the run of show (rundown.rs), the recording's
+//! path (`recording.json`), the replica's beats (`manifest.json`: where each beat starts) and the last real-vs-replica
+//! report (`.out/fidelity/report.json`).
+
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// One screen: what was recorded, and how the replica compares.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Screen {
+    /// The recorded state (`copilot-02-message-copilot`).
+    pub id: String,
+    pub app: String,
+    /// What was recorded (the real product), when the recording's pictures are there.
+    pub shot: Option<PathBuf>,
+    /// Real and replica side by side, when it's been compared.
+    pub side_by_side: Option<PathBuf>,
+    /// Compared: every view of it (each zoom, each menu) within the threshold. None: not compared yet.
+    pub pass: Option<bool>,
+    /// The most different of its views, in percent of pixels.
+    pub pct: Option<f64>,
+    /// Why it differs, in a sentence each (what the fixer found).
+    pub why: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewBeat {
+    pub n: u32,
+    pub title: String,
+    pub start: Option<u32>,
+    pub end: Option<u32>,
+    pub app: Option<String>,
+    pub key: Option<String>,
+    pub screens: Vec<Screen>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Review {
+    pub beats: Vec<ReviewBeat>,
+    /// Screens off the recorded path (menus, hovers, side screens) that differ: shown apart, so none is missed.
+    pub others: Vec<Screen>,
+    pub screens: u32,
+    /// Compared with the real product (a report is there).
+    pub compared: bool,
+    pub matching: u32,
+    pub differ: u32,
+    /// Every font the real file.
+    pub fonts_ok: bool,
+    /// The full report, to open.
+    pub report: Option<PathBuf>,
+    /// The folder the pictures are in (for the app to serve them).
+    pub pictures: Vec<PathBuf>,
+}
+
+fn read_json(path: &Path) -> Option<Value> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// The demo's review, with keys spelled for `os`.
+pub fn read(dir: &Path, os: &str) -> Review {
+    let raw = scenecast_build::build::raw_dir(dir).ok();
+    let recording = read_json(&dir.join("recording.json"))
+        .or_else(|| read_json(&raw.as_ref()?.join("recording.json")))
+        .unwrap_or(Value::Null);
+    let shots = raw.as_ref().map(|r| r.join("shots"));
+    let fidelity = crate::fidelity::last(dir);
+    let report = fidelity.as_ref().map(|f| &f.report);
+
+    // Each state's views (zoom, click, the state itself) in the report.
+    let mut views: BTreeMap<String, Vec<&Value>> = BTreeMap::new();
+    for it in report
+        .and_then(|r| r["items"].as_array())
+        .into_iter()
+        .flatten()
+    {
+        let state = it["state"].as_str().or(it["id"].as_str()).unwrap_or("");
+        views.entry(state.to_owned()).or_default().push(it);
+    }
+    let residual: BTreeMap<&str, Vec<String>> = report
+        .and_then(|r| r["residual"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let why = r["why"].as_array()?.iter().filter_map(Value::as_str);
+            Some((r["id"].as_str()?, why.map(str::to_owned).collect()))
+        })
+        .collect();
+    let fid_dir = fidelity.as_ref().map(|f| f.dir.clone());
+    let screen = |id: &str, app: &str| -> Screen {
+        let snap = recording["states"][id]["snap"].as_str().unwrap_or(id);
+        let shot = shots
+            .as_ref()
+            .map(|s| s.join(format!("{snap}.png")))
+            .filter(|p| p.is_file());
+        let mine = views.get(id).cloned().unwrap_or_default();
+        let base = mine
+            .iter()
+            .find(|i| i["kind"] == "state" && i["z"].as_u64().unwrap_or(100) == 100)
+            .or(mine.first());
+        let side_by_side = base
+            .and_then(|i| i["sideBySide"].as_str())
+            .zip(fid_dir.as_ref())
+            .map(|(rel, d)| d.join(rel));
+        let pass = (!mine.is_empty()).then(|| mine.iter().all(|i| i["pass"] == true));
+        let pct = mine
+            .iter()
+            .filter_map(|i| i["pct"].as_f64())
+            .reduce(f64::max);
+        let mut why = Vec::new();
+        for i in mine.iter().filter(|i| i["pass"] != true) {
+            let said: Vec<String> = i["causes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| c["summary"].as_str().map(str::to_owned))
+                .collect();
+            let said = if said.is_empty() {
+                i["id"]
+                    .as_str()
+                    .and_then(|x| residual.get(x).cloned())
+                    .unwrap_or_default()
+            } else {
+                said
+            };
+            for w in said {
+                if !why.contains(&w) {
+                    why.push(w);
+                }
+            }
+        }
+        Screen {
+            id: id.to_owned(),
+            app: app.to_owned(),
+            shot,
+            side_by_side,
+            pass,
+            pct,
+            why,
+        }
+    };
+
+    // The recorded path: each screen once, in the order it was first reached.
+    let mut seen = HashSet::new();
+    let mut path: Vec<(String, String)> = Vec::new();
+    let mut app = String::new();
+    for p in recording["path"].as_array().into_iter().flatten() {
+        if let Some(a) = p["app"].as_str() {
+            app = a.to_owned();
+        }
+        let Some(id) = p["checkpoint"].as_str() else {
+            continue;
+        };
+        let app_of = recording["states"][id]["app"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| app.clone());
+        if seen.insert(id.to_owned()) {
+            path.push((id.to_owned(), app_of));
+        }
+    }
+
+    // Where each beat starts on the path (the replica's beat n starts on its active app's scene).
+    let run = crate::rundown::read(dir, os);
+    let manifest = scenecast_core::read_manifest(dir).ok();
+    let mut starts: Vec<(u32, usize)> = Vec::new();
+    let mut from = 0;
+    for b in &run.beats {
+        let at = manifest
+            .as_ref()
+            .and_then(|m| m.beats.get(b.n as usize))
+            .and_then(|mb| mb.scenes.get(&mb.active))
+            .and_then(|scene| {
+                path.iter()
+                    .skip(from)
+                    .position(|(id, _)| id == scene.as_str())
+                    .map(|i| i + from)
+            });
+        if let Some(i) = at {
+            starts.push((b.n, i));
+            from = i;
+        }
+    }
+    let mut beats: Vec<ReviewBeat> = run
+        .beats
+        .iter()
+        .map(|b| ReviewBeat {
+            n: b.n,
+            title: b.title.clone(),
+            start: b.start,
+            end: b.end,
+            app: b.app.clone(),
+            key: b.key.clone(),
+            screens: Vec::new(),
+        })
+        .collect();
+    if beats.is_empty() || starts.is_empty() {
+        // No beats to cut it by: the whole show is one.
+        beats = vec![ReviewBeat {
+            n: 1,
+            title: "The show".into(),
+            start: None,
+            end: None,
+            app: None,
+            key: None,
+            screens: Vec::new(),
+        }];
+        starts = vec![(1, 0)];
+    }
+    // Screens before the first beat's start belong to it.
+    starts[0].1 = 0;
+    for (k, (n, i)) in starts.iter().enumerate() {
+        let until = starts.get(k + 1).map_or(path.len(), |s| s.1);
+        if let Some(b) = beats.iter_mut().find(|b| b.n == *n) {
+            b.screens = path[*i..until.max(*i)]
+                .iter()
+                .map(|(id, app)| screen(id, app))
+                .collect();
+        }
+    }
+
+    let on_path: HashSet<&str> = path.iter().map(|(id, _)| id.as_str()).collect();
+    let others: Vec<Screen> = views
+        .keys()
+        .filter(|id| !on_path.contains(id.as_str()))
+        .map(|id| {
+            let app = recording["states"][id.as_str()]["app"]
+                .as_str()
+                .unwrap_or_default();
+            screen(id, app)
+        })
+        .filter(|s| s.pass == Some(false))
+        .collect();
+    let all: Vec<&Screen> = beats.iter().flat_map(|b| &b.screens).collect();
+    let fonts_ok = report
+        .and_then(|r| r["fonts"].as_array())
+        .is_none_or(|f| f.iter().all(|x| x["status"] == "match"));
+    Review {
+        screens: all.len() as u32,
+        compared: report.is_some(),
+        matching: all.iter().filter(|s| s.pass == Some(true)).count() as u32,
+        differ: (all.iter().filter(|s| s.pass == Some(false)).count() + others.len()) as u32,
+        fonts_ok,
+        report: fidelity.as_ref().map(|f| f.html.clone()),
+        pictures: [shots, fid_dir].into_iter().flatten().collect(),
+        beats,
+        others,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(path: &Path, v: Value) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, v.to_string()).unwrap();
+    }
+
+    #[test]
+    fn each_beat_has_the_screens_reached_in_it_and_how_they_compare() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let raw = dir.join("raw");
+        write(
+            &dir.join("demo.json"),
+            serde_json::json!({ "name": "r", "title": "R", "raw": raw, "apps": [] }),
+        );
+        write(
+            &dir.join("recording.json"),
+            serde_json::json!({
+                "states": {
+                    "chat-start": { "app": "chat", "snap": "chat-start" },
+                    "chat-01": { "app": "chat", "snap": "chat-01" },
+                    "admin-start": { "app": "admin", "snap": "admin-start" },
+                    "admin-01": { "app": "admin", "snap": "admin-01" },
+                    "admin-01-menu": { "app": "admin", "snap": "admin-01-menu" }
+                },
+                "path": [
+                    { "app": "chat", "checkpoint": "chat-start" },
+                    { "click": {}, "checkpoint": "chat-01" },
+                    { "app": "admin", "checkpoint": "admin-start" },
+                    { "click": {}, "checkpoint": "admin-01" },
+                    { "app": "chat", "checkpoint": "chat-01" }
+                ]
+            }),
+        );
+        std::fs::create_dir_all(raw.join("shots")).unwrap();
+        std::fs::write(raw.join("shots").join("chat-01.png"), b"png").unwrap();
+        // Two beats: the talk track's, the second starting on admin's start screen.
+        std::fs::write(
+            dir.join("script.md"),
+            "## Ask in chat (0:00–1:00)\n> One.\n## Approve in admin (1:00–2:00)\n> Two.\n",
+        )
+        .unwrap();
+        let mut m = scenecast_core::BundleManifest::starter("R");
+        let beat = |label: &str, active: &str, scene: &str| scenecast_core::Beat {
+            label: label.into(),
+            active: active.into(),
+            scenes: [(
+                active.to_owned(),
+                scenecast_core::SceneId::new(scene).unwrap(),
+            )]
+            .into(),
+        };
+        m.beats = vec![
+            beat("0 Reset", "chat", "chat-start"),
+            beat("1", "chat", "chat-start"),
+            beat("2", "admin", "admin-start"),
+        ];
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_string(&m).unwrap(),
+        )
+        .unwrap();
+        write(
+            &dir.join(".out").join("fidelity").join("report.json"),
+            serde_json::json!({
+                "pass": false, "fonts": [{ "status": "match" }],
+                "items": [
+                    { "id": "chat-start", "state": "chat-start", "kind": "state", "z": 100, "pass": true, "pct": 0.0, "sideBySide": "sbs/chat-start.png" },
+                    { "id": "chat-01", "state": "chat-01", "kind": "state", "z": 100, "pass": true, "pct": 0.01 },
+                    { "id": "admin-start", "state": "admin-start", "kind": "state", "z": 100, "pass": true, "pct": 0.0 },
+                    { "id": "admin-01", "state": "admin-01", "kind": "state", "z": 100, "pass": true, "pct": 0.0 },
+                    { "id": "admin-01@150", "state": "admin-01", "kind": "zoom", "z": 150, "pass": false, "pct": 2.8,
+                      "causes": [{ "summary": "A date shows in a different font: the product loads it late." }] },
+                    { "id": "admin-01-menu", "state": "admin-01-menu", "kind": "state", "z": 100, "pass": false, "pct": 1.2 }
+                ],
+                "residual": [{ "id": "admin-01-menu", "why": ["not diagnosed (compare only, or the round limit)"] }]
+            }),
+        );
+        let r = read(dir, "macos");
+        let ids = |b: &ReviewBeat| b.screens.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(r.beats.len(), 2);
+        assert_eq!(ids(&r.beats[0]), ["chat-start", "chat-01"]);
+        assert_eq!(ids(&r.beats[1]), ["admin-start", "admin-01"]);
+        assert_eq!(r.beats[1].key.as_deref(), Some("⌥2"));
+        // The zoom that differs makes its screen differ, with what was found, in a sentence.
+        let admin = &r.beats[1].screens[1];
+        assert_eq!(admin.pass, Some(false));
+        assert_eq!(admin.pct, Some(2.8));
+        assert_eq!(
+            admin.why,
+            ["A date shows in a different font: the product loads it late."]
+        );
+        assert!(r.beats[0].screens[1].shot.is_some());
+        assert!(
+            r.beats[0].screens[0]
+                .side_by_side
+                .as_ref()
+                .is_some_and(|p| p.ends_with("sbs/chat-start.png"))
+        );
+        // A menu off the path that differs is kept apart, so it isn't missed.
+        assert_eq!(r.others.len(), 1);
+        assert_eq!(
+            r.others[0].why,
+            ["not diagnosed (compare only, or the round limit)"]
+        );
+        assert_eq!((r.screens, r.matching, r.differ), (4, 3, 2));
+        assert!(r.compared && r.fonts_ok);
+    }
+
+    #[test]
+    fn before_it_is_compared_every_screen_is_listed_and_none_judged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        write(
+            &dir.join("demo.json"),
+            serde_json::json!({ "name": "r", "title": "R", "raw": dir.join("raw"), "apps": [] }),
+        );
+        write(
+            &dir.join("recording.json"),
+            serde_json::json!({ "states": { "a-start": { "app": "a" } }, "path": [{ "app": "a", "checkpoint": "a-start" }] }),
+        );
+        let r = read(dir, "windows");
+        assert_eq!(r.beats.len(), 1);
+        assert_eq!(r.beats[0].screens[0].pass, None);
+        assert!(!r.compared && r.differ == 0 && r.screens == 1);
+    }
+}

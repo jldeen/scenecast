@@ -10,7 +10,7 @@ const S = {
   view: 'library',
   id: null,
   tab: 'record',
-  reviewTab: 'build',
+  reviewTab: 'review',
   details: false,
   jobs: {},
   servers: { edit: {}, present: {} },
@@ -18,9 +18,11 @@ const S = {
 // Where a demo is: Record · Review · Present · Share. S.tab is the panel on screen; Review holds the replica's own
 // steps (build, real vs replica, talk track, edit) as its tabs.
 const GATES = [['record', 'Record'], ['review', 'Review'], ['present', 'Present'], ['share', 'Share']];
-const REVIEW = [['build', 'Build and check'], ['fidelity', 'Real vs replica'], ['script', 'Talk track'], ['edit', 'Edit']];
+// Review: the show with its screens first; the talk track, the wording and dates, and the build and comparison in
+// full are a tab away.
+const REVIEW = [['review', 'Review'], ['script', 'Talk track'], ['edit', 'Wording and dates'], ['build', 'Build'], ['fidelity', 'Real vs replica']];
 const gateOf = tab => ({ record: 'record', present: 'present', export: 'share' })[tab] || 'review';
-const gateTab = g => ({ record: 'record', present: 'present', share: 'export' })[g] || S.reviewTab || 'build';
+const gateTab = g => ({ record: 'record', present: 'present', share: 'export' })[g] || S.reviewTab || 'review';
 // Regions drawn before REGIONS is defined (the first run, the AI parts), joined to it once it's there.
 const REGIONS_LATE = {};
 
@@ -88,6 +90,8 @@ function where(d) {
   const s = d.status;
   const st = J(d.id).record?.status;
   if (st?.recording) return { gate: 'record', word: st.held ? 'Paused' : 'Recording', note: `${plural(st.count || 0, 'screen')} so far` };
+  const c = J(d.id).aiChain;
+  if (c && !['done', 'error'].includes(c.stage)) return { gate: 'review', word: 'Making', note: c.stage === 'fix' ? 'fixing what differs' : 'the replica' };
   if (!s.recorded && !s.built) return { gate: 'record', word: 'Record', note: 'not recorded yet' };
   const when = (what, at) => at ? `${what} ${ago(at)}` : what;
   if (!s.built || !s.fidelity?.pass) return { gate: 'review', word: 'Review', note: when('recorded', s.recordedAt) };
@@ -195,8 +199,9 @@ async function call(cmd, args = {}) {
 // Runs a step's command with the demo marked busy, re-rendering what depends on it.
 // A newer run of the same job (Check pressed again, then Check and fix) takes its place: the older one's answer is
 // dropped, and only the newest clears the job's busy mark.
+// args.id: a demo other than the one open (the chain after Stop goes on if the presenter opens another).
 async function step(job, cmd, args, after) {
-  const id = S.id;
+  const id = args?.id || S.id;
   const token = {};
   J(id).running[job] = true;
   J(id)[job] = { ...(J(id)[job] || {}), stages: [], lines: [], items: [], events: [], error: null, outcome: null, startedAt: Date.now(), token };
@@ -674,13 +679,13 @@ listen('job', ({ payload: { demo: id, job, update: u } }) => {
 // ---- A demo ------------------------------------------------------------------------------------------------------
 
 function tabDone(t, s) {
-  return { record: s.recorded, build: s.built, fidelity: !!s.fidelity?.pass, script: s.focusPoints > 0 }[t];
+  return { record: s.recorded, review: s.built && !!s.fidelity?.pass, build: s.built, fidelity: !!s.fidelity?.pass, script: s.focusPoints > 0 }[t];
 }
 function tabJobs(t) {
-  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-script', 'coach'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
+  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-script', 'coach'], review: ['build', 'checks', 'fidelity', 'script', 'ai-script'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
 }
 const gateDone = (g, s) => ({ record: s.recorded || s.built, review: s.built && !!s.fidelity?.pass, present: !!s.rehearsedAt, share: !!s.exportedAt })[g];
-const gateJobs = g => g === 'review' ? REVIEW.flatMap(([t]) => tabJobs(t)) : tabJobs(gateTab(g));
+const gateJobs = g => g === 'review' ? [...new Set(REVIEW.flatMap(([t]) => tabJobs(t)))] : tabJobs(gateTab(g));
 // The gates (Record · Review · Present · Share) and, on Review, its tabs.
 function renderTabsBar() {
   const d = demo();
@@ -695,7 +700,7 @@ function renderTabsBar() {
   const tabs = $('#tabs');
   if (tabs) tabs.innerHTML = REVIEW.map(([t, label]) => {
     const b = tabJobs(t).some(j => running(j)), done = tabDone(t, d.status);
-    return `<button role="tab" id="tab-${t}" aria-controls="subpanel" aria-selected="${t === S.tab}" tabindex="${t === S.tab ? 0 : -1}" data-tab="${t}" data-test="tab-${t}">
+    return `<button role="tab" id="tab-${t}" aria-controls="subpanel" aria-selected="${t === S.tab}" tabindex="${t === S.tab ? 0 : -1}" data-tab="${t}" data-test="${t === 'review' ? 'subtab-review' : `tab-${t}`}">
       <span class="tab-dot ${b ? 'busy' : done ? 'done' : ''}" aria-hidden="true"></span>${label}${b ? '<span class="visually-hidden"> (working)</span>' : done ? '<span class="visually-hidden"> (done)</span>' : ''}</button>`;
   }).join('');
 }
@@ -707,7 +712,16 @@ function headFor(d) {
   if (g === 'record' && recState(d).recording) return { title: 'Recording', sub: `Click through in ${esc(BNAME[d.browser] || 'your browser')}. Wait for \u201cReady\u201d before each click.`, side: slot };
   if (g === 'record') return { title: d.title, test: 'demo-title', sub: esc(listWords(d.apps.map(appLabel))), side: slot };
   if (g === 'review') {
+    const c = J(d.id).aiChain;
+    if (c && !['done', 'error'].includes(c.stage)) return { title: c.stage === 'fix' ? 'Fixing what differs' : 'Making your replica', sub: 'Scenecast is building it and checking it against the real product.', side: slot };
     if (!s.recorded) return { title: 'Nothing to review yet', sub: 'Record the demo first: each screen shows up here.' };
+    const r = J(d.id).review;
+    if (r?.compared && S.tab === 'review') {
+      const beats = r.beats.length > 1 ? ` in ${plural(r.beats.length, 'beat')}` : '';
+      const talk = s.focusPoints ? ' \u00b7 talk track on its screens' : '';
+      if (!r.differ) return { title: 'Your replica matches the real product', sub: `${plural(r.screens, 'screen')}${beats} \u00b7 every one matches${talk}`, side: slot };
+      return { title: `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'needs' : 'need'} a look`, sub: `${plural(r.screens, 'screen')}${beats} \u00b7 ${r.matching} match the real product${talk}`, side: slot };
+    }
     if (!s.built) return { title: 'Build the replica', sub: `${plural(s.screens, 'screen')} recorded ${esc(ago(s.recordedAt))}.`, side: slot };
     if (!f) return { title: 'Compare it with the real product', sub: `${plural(s.liveScenes, 'screen')} built. Compare checks each one against what you recorded.`, side: slot };
     if (f.pass) return { title: 'Every screen matches', sub: `${f.total} of ${f.total} match the real product${s.focusPoints ? ` · ${plural(s.focusPoints, 'focus point')}` : ''}.`, side: slot };
@@ -910,7 +924,7 @@ function recHead(d) {
   if (stop.outcome?.states) {
     const s = stop.outcome, tt = s.timing || {};
     return head('Recorded', `<span data-test="record-done">Recorded ${plural(s.states, 'screen')}${s.beats ? ` in ${plural(s.beats, 'beat')}` : ''}, in ${secs(s.secs)}.<details><summary>Details</summary>${plural(s.steps, 'step')}, ${plural(s.streams, 'streamed answer')}. The recorder took ${secs(tt.recorderSecs)}, the product ${secs(tt.productSecs)}.${s.notes?.length ? `<br>${s.notes.map(esc).join('<br>')}` : ''}</details></span>`,
-      `<button class="alink" data-action="record-start" data-test="record-again">Record again</button><button class="btn primary big" data-goto="build" data-test="go-review">Next: review it ${I.arrow}</button>`);
+      `<button class="alink" data-action="record-start" data-test="record-again">Record again</button><button class="btn primary big" data-goto="review" data-test="go-review">Next: review it ${I.arrow}</button>`);
   }
   const again = d.status.recorded ? ` Recorded ${esc(ago(d.status.recordedAt))}; recording again replaces it.` : '';
   if (copilotMode(d)) {
@@ -1148,10 +1162,9 @@ Object.assign(REGIONS, {
   'ai-after'(d) {
     const c = J(d.id).aiChain;
     if (!c) return '';
-    const labels = { script: 'Copilot is writing the beats and what to say…', build: 'Building the replica…', focus: 'Putting each line on its screen: focus points and the presenter guide…', checks: 'Checking what changed…' };
-    if (c.error) return errorBox(c.error);
-    if (c.stage !== 'done') return `${progressBar(true)}<p class="small" data-test="ai-after" data-stage="${c.stage}">${labels[c.stage]}</p>`;
-    return `<div class="notice ok" data-test="ai-after-done"><div><strong>Your demo is ready.</strong> The script is under <button class="link" data-goto="script">Script</button> (edit it any time), the focus points and presenter guide are made, and the checks for them pass. <button class="link" data-goto="present">Present it</button>.</div></div>`;
+    if (c.stage === 'error') return errorBox(c.error);
+    if (c.stage !== 'done') return `${progressBar(true)}<p class="small" data-test="ai-after" data-stage="${c.stage}">Making your replica: <button class="link" data-goto="review">see it in Review</button>.</p>`;
+    return `<div class="notice ok" data-test="ai-after-done" data-checks="${J(d.id).checks?.outcome?.pass ?? ''}" data-compared="${!!J(d.id).review?.compared}"><div><strong>Your replica is made.</strong> <button class="link" data-goto="review">Review it</button>: every screen next to the real product, with your talk track on its screens.</div></div>`;
   },
   coach(d) {
     const j = J(d.id).coach || {};
@@ -1177,24 +1190,137 @@ Object.assign(REGIONS, {
   },
 });
 // After the talk track exists: the replica, its focus points and guide, the checks for what changed.
-async function aiFinish(id, write) {
-  const set = stage => { J(id).aiChain = { stage }; renderRegions(); };
+// After every recording (slice 12): the replica made and checked on its own, then Review. Copilot writes the talk
+// track first when it's Copilot's to write; the talk track goes on its screens when there is one; the quick checks; and
+// every screen compared with the real product. A step that fails stops the chain and says so in Review.
+async function makeReplica(id, { write = false } = {}) {
+  const set = stage => { J(id).aiChain = { ...(J(id).aiChain || {}), stage, write }; renderRegions(); if (id === S.id) renderHead(); };
+  J(id).aiChain = { stage: 'start', write, recorded: J(id)['record-stop']?.outcome || J(id)['ai-record']?.outcome?.summary || null };
+  J(id).review = null;
   try {
-    if (write) { set('script'); const w = await step('ai-script', 'ai_script', {}); if (!w) throw new Error(J(id)['ai-script']?.error || 'the talk track wasn\u2019t written'); }
+    if (write) { set('script'); const w = await step('ai-script', 'ai_script', { id }); if (!w) throw new Error(J(id)['ai-script']?.error || 'the talk track wasn\u2019t written'); }
     set('build');
-    const b = await step('build', 'build', { force: false });
-    if (!b?.ok) throw new Error(b?.stopped || J(id).build?.error || 'the build stopped: see Build & check');
-    set('focus');
-    const sc = await step('script', 'script_run', {});
-    if (!sc) throw new Error(J(id).script?.error || 'the focus points weren\u2019t made: see Script');
+    const b = await step('build', 'build', { force: false, id });
+    if (!b?.ok) throw new Error(b?.stopped || J(id).build?.error || 'the build stopped: see Build');
+    J(id).scrub = b.scrub;
+    if (write || S.demos.find(x => x.id === id)?.status.hasScript) {
+      set('focus');
+      const sc = await step('script', 'script_run', { id });
+      if (!sc) throw new Error(J(id).script?.error || 'the talk track wasn\u2019t put on its screens: see Talk track');
+    }
     set('checks');
-    const q = await quickChecks(id);
-    if (q && !q.pass) throw new Error('some checks fail: see Build & check');
+    await quickChecks(id);
+    set('compare');
+    const f = await step('fidelity', 'fidelity_run', { fix: false, id });
+    if (!f) throw new Error(J(id).fidelity?.error || 'the comparison stopped: see Real vs replica');
     set('done');
-    toast('Your demo is ready');
-  } catch (e) { J(id).aiChain = { stage: 'error', error: e.message }; renderRegions(); }
-  loadAi(id);
+    toast('Your replica is ready to review');
+  } catch (e) { J(id).aiChain = { ...(J(id).aiChain || {}), stage: 'error', error: e.message }; }
+  await loadReview(id);
+  if (aiMode(S.demos.find(x => x.id === id)?.mode)) loadAi(id);
+  if (id === S.id) rerender(); else renderRegions();
 }
+
+// ---- Review: the show, each beat with its screens, and how each compares with the real product ----------------------
+
+async function loadReview(id) {
+  J(id).review = await invoke('review_get', { id }).catch(() => null);
+  const r = J(id).review;
+  // The screen picked: kept while it's still there, else the first that differs, else the first.
+  const all = r ? [...r.beats.flatMap(b => b.screens), ...r.others] : [];
+  if (!all.some(x => x.id === J(id).pick)) J(id).pick = (all.find(x => x.pass === false) || all[0])?.id || null;
+  return r;
+}
+const MAKING = [
+  ['script', 'Copilot is writing your talk track'],
+  ['build', 'Building the replica, and taking out email addresses, names and IDs'],
+  ['focus', 'Putting your talk track on its screens'],
+  ['checks', 'Checking the keys, the focus points and the menus'],
+  ['compare', 'Comparing every screen with the real product'],
+];
+function makingCard(d, c) {
+  if (c.stage === 'fix') return `<section class="card making" data-test="making" data-stage="fix" aria-live="polite">
+    <p class="sub">Scenecast finds why each screen differs, changes this demo (never with a screenshot), builds it and compares again. A few minutes.</p>
+    <div class="line">${mk('spin')}<span>${esc(J(d.id).fidelity?.stages?.at(-1)?.label || 'Starting')}</span></div></section>`;
+  const steps = MAKING.filter(([k]) => k !== 'script' || c.write).filter(([k]) => k !== 'focus' || c.write || d.status.hasScript);
+  const at = steps.findIndex(([k]) => k === c.stage);
+  const rec = c.recorded;
+  return `<section class="card making" data-test="making" data-stage="${esc(c.stage)}" aria-live="polite">
+    <p class="sub">A few minutes. You can leave this window; Review fills in when it\u2019s done.</p>
+    ${rec?.states ? `<div class="line">${mk('ok', 'done')}<span data-test="record-done">Recorded ${plural(rec.states, 'screen')}${rec.beats > 1 ? ` in ${plural(rec.beats, 'beat')}` : ''}${rec.secs ? `, in ${secs(rec.secs)}` : ''}</span></div>` : ''}
+    ${steps.map(([k, label], i) => `<div class="line">${mk(i < at ? 'ok' : i === at ? 'spin' : 'todo', i < at ? 'done' : i === at ? 'working' : 'to do')}<span${i > at ? ' class="muted"' : ''}>${label}${i === at ? '\u2026' : ''}</span></div>`).join('')}</section>`;
+}
+const pctWords = p => p == null ? '' : p < 0.01 ? 'identical' : `${(+p).toFixed(p < 1 ? 2 : 1)}% different`;
+function screenState(sc) {
+  return sc.pass === true ? ['ok', 'Matches'] : sc.pass === false ? ['hold', 'Needs a look'] : ['todo', 'Not compared'];
+}
+const thumbBtn = (d, sc, label) => {
+  const [st, says] = screenState(sc);
+  return `<button class="thumb ${st === 'hold' ? 'differs' : ''}" data-pick="${esc(sc.id)}" aria-pressed="${J(d.id).pick === sc.id}" aria-label="${esc(label)}: ${says.toLowerCase()}" data-test="screen">
+    ${sc.shot ? `<img src="${esc(sc.shot)}" alt="" loading="lazy">` : '<span class="noshot"></span>'}${st === 'hold' ? `<span class="badge">${svg('<path d="M12 6.5v7M12 17v.5"/>', '')}</span>` : ''}</button>`;
+};
+Object.assign(REGIONS, {
+  review(d) {
+    const c = J(d.id).aiChain, r = J(d.id).review;
+    if (c && !['done', 'error'].includes(c.stage)) return makingCard(d, c);
+    const err = c?.stage === 'error' ? `<div class="notice bad" role="alert" data-test="making-failed"><div class="grow"><strong>The replica wasn\u2019t finished.</strong> ${esc(c.error)}
+      <div class="row" style="margin-top:10px"><button class="btn" data-action="make-replica">Try again</button></div></div></div>` : '';
+    if (!d.status.recorded) return `<section class="card"><p>Each screen you record shows up here, with how the replica compares.</p><div class="row" style="margin-top:12px"><button class="btn primary" data-goto="record">Record it ${I.arrow}</button></div></section>`;
+    if (!d.status.built) return `${err}<section class="card"><h2>Make the replica</h2><p class="muted">Scenecast builds it, checks it and compares every screen with the real product. A few minutes.</p>
+      <div class="row" style="margin-top:12px"><button class="btn primary" data-action="make-replica" data-test="make-replica">Make the replica ${I.arrow}</button></div></section>`;
+    if (!r) return `${err}<p class="muted">Reading the replica\u2026</p>`;
+    const fixing = running('fidelity', d.id);
+    const primary = r.differ ? `<button class="btn primary" data-action="review-fix" data-test="review-fix" ${fixing ? 'disabled' : ''}>Fix it for me ${I.arrow}</button>`
+      : !r.compared ? `<button class="btn primary" data-action="review-compare" data-test="review-compare" ${fixing ? 'disabled' : ''}>Compare with the real product ${I.arrow}</button>`
+      : `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`;
+    let k = 0;
+    const row = (b, label, screens) => {
+      const bad = screens.filter(x => x.pass === false).length, todo = screens.some(x => x.pass == null);
+      const state = bad ? ['hold', `${bad} to look at`, 'warn'] : todo ? ['todo', 'Not compared', 'idle'] : ['ok', 'Matches', 'ok'];
+      const meta = [b?.app ? appLabel({ id: b.app }) : '', b?.start != null && b?.end != null ? `${clock(b.start)}\u2013${clock(b.end)}` : '', plural(screens.length, 'screen')].filter(Boolean).join(' \u00b7 ');
+      return `<div class="rd-row" data-test="review-beat" data-differ="${bad}">${mk(state[0], state[1])}<span class="t"><b>${label}</b><small>${esc(meta)}</small></span><span class="state ${state[2]}">${state[1]}</span>
+        <div class="film">${screens.map((sc, i) => thumbBtn(d, sc, `${label}, screen ${i + 1}`)).join('')}</div></div>`;
+    };
+    const rows = r.beats.map(b => row(b, r.beats.length > 1 || b.title !== 'The show' ? `Beat ${b.n} \u00b7 ${esc(b.title)}` : 'The show', b.screens)).join('')
+      + (r.others.length ? row(null, 'Menus and hovers', r.others) : '');
+    const sub = !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
+      : r.differ ? `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'differs' : 'differ'} from the real product. Fix it for me finds why and fixes it.`
+      : 'Every screen matches the real product.';
+    // The quick checks (keys, focus points, menus, the guide): not a screen's, so said once, above the show.
+    const ck = J(d.id).checks?.outcome;
+    const nf = (ck?.items || []).filter(i => i.status === 'fail').length || 1;
+    const checks = ck && !ck.pass ? `<div class="notice warn" data-test="review-checks"><div class="grow"><strong>${plural(nf, 'check')} ${nf === 1 ? 'fails' : 'fail'}.</strong> Something beyond the screens (a key, a focus point, a menu) doesn\u2019t work in the replica yet.
+      <div class="row" style="margin-top:8px"><button class="btn" data-goto="build">See what fails</button></div></div></div>` : '';
+    return `${err}${checks}<div class="review-grid">
+      <section class="card rundown compact" aria-label="Show" data-test="review" data-compared="${r.compared}" data-screens="${r.screens}" data-matching="${r.matching}" data-differ="${r.differ}">
+        <div class="rd-head"><div class="grow"><h2>Show</h2><small>${sub}</small></div><div class="next">${primary}</div></div>
+        <div class="rd-cols" aria-hidden="true"><span></span><span>Beat</span><span>State</span></div>
+        <div>${rows}</div></section>
+      ${pickPanel(d, r)}</div>`;
+  },
+});
+function pickPanel(d, r) {
+  const beat = r.beats.find(b => b.screens.some(x => x.id === J(d.id).pick));
+  const list = beat ? beat.screens : r.others;
+  const i = list.findIndex(x => x.id === J(d.id).pick);
+  const sc = list[i];
+  if (!sc) return '<section class="card pick"><p class="muted">Pick a screen to see it next to the real product.</p></section>';
+  const [st] = screenState(sc);
+  const where = beat ? `Beat ${beat.n}, screen ${i + 1}` : `Menus and hovers, ${i + 1}`;
+  const said = sc.pass === true ? `<p><b>Matches.</b> Same as the real product${sc.pct ? ` (${pctWords(sc.pct)}: anti-aliasing, a caret)` : ', to the pixel'}.</p>`
+    : sc.pass === false ? `<p><b>${esc(sc.why[0] || 'It differs from the real product.')}</b>${sc.why.length > 1 ? ` Also: ${sc.why.slice(1).map(esc).join(' ')}` : ''} <span class="muted">${pctWords(sc.pct)}.</span></p>`
+    : '<p class="muted">Not compared yet.</p>';
+  return `<section class="card pick" aria-live="polite" data-test="review-pick" data-screen="${esc(sc.id)}" data-state="${st}">
+    <h2>${where}</h2><p class="sub">${esc(appLabel({ id: sc.app }))}</p>
+    ${sc.sideBySide ? `<figure class="compare"><div class="labels"><span>Real product</span><span>Your replica</span></div><img src="${esc(sc.sideBySide)}" alt="The real product and your replica, side by side"></figure>`
+      : sc.shot ? `<figure class="compare one"><div class="labels"><span>What you recorded</span></div><img src="${esc(sc.shot)}" alt="What you recorded"></figure>` : ''}
+    ${said}
+    <div class="others"><button class="alink" data-goto="edit" data-test="review-wording">Change wording or a date</button><button class="alink" data-goto="script" data-test="review-say">Edit what you say here</button></div></section>`;
+}
+PANELS.review = async (panel, d) => {
+  panel.innerHTML = '<div data-region="review"></div>';
+  if (!J(d.id).review && d.status.built) { await loadReview(d.id); }
+};
 
 // ---- Build and check ---------------------------------------------------------------------------------------------
 
@@ -1427,8 +1553,8 @@ function readyRows(d, p) {
   const ready = '<span class="state ok">Ready</span>';
   const rows = [];
   rows.push(f?.pass ? row('ok', 'Every screen matches the real product', `${f.total} of ${f.total}`, ready, 'ready-matches')
-    : f ? row('hold', `${plural(f.total - f.within, 'screen')} ${f.total - f.within === 1 ? 'doesn\u2019t' : 'don\u2019t'} match yet`, `${f.within} of ${f.total} match`, '<button class="alink" data-goto="fidelity">Fix on Review</button>', 'ready-matches')
-      : row('todo', 'Not compared with the real product yet', 'Review compares each screen with what you recorded.', '<button class="alink" data-goto="fidelity">Compare on Review</button>', 'ready-matches'));
+    : f ? row('hold', `${plural(f.total - f.within, 'screen')} ${f.total - f.within === 1 ? 'doesn\u2019t' : 'don\u2019t'} match yet`, `${f.within} of ${f.total} match`, '<button class="alink" data-goto="review">Fix on Review</button>', 'ready-matches')
+      : row('todo', 'Not compared with the real product yet', 'Review compares each screen with what you recorded.', '<button class="alink" data-goto="review">Compare on Review</button>', 'ready-matches'));
   rows.push(g && !g.missingPictures ? row('ok', 'Presenter guide', 'Talk track, clicks and pictures for each beat', ready, 'ready-guide')
     : g ? row('hold', 'Presenter guide', `${plural(g.missingPictures, 'picture')} not made yet`, '<button class="alink" data-goto="script">Make them</button>', 'ready-guide')
       : row('todo', 'No presenter guide yet', 'Add your talk track on Review, and Scenecast makes it.', '<button class="alink" data-goto="script">Add the talk track</button>', 'ready-guide'));
@@ -1572,8 +1698,7 @@ document.addEventListener('change', e => {
 });
 async function quickChecks(id = S.id) {
   if (!S.demos.find(x => x.id === id)?.status.built) return;
-  if (id !== S.id) return;
-  return step('checks', 'run_checks', { quick: true });
+  return step('checks', 'run_checks', { quick: true, id });
 }
 // Export: the whole checklist first (unless it passed and nothing changed since), then the folder or zip.
 async function exportDemo(kind, anyway) {
@@ -1658,7 +1783,8 @@ const ACTIONS = {
     J(id).aiChain = null;
     const o = await step('ai-record', 'ai_record', {});
     loadAi(id);
-    if (o) await aiFinish(id, false);
+    // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away.
+    if (o) await makeReplica(id);
   },
   'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
   'coach-start': async () => {
@@ -1752,8 +1878,21 @@ const ACTIONS = {
     const id = S.id;
     J(id).goOnOff = null;
     const o = await step('record-stop', 'record_stop', {}, () => { J(id).record = {}; });
+    if (!o) return;
+    // Saved: on to Review, where the replica is made and checked without a button.
     const d = S.demos.find(x => x.id === id);
-    if (o && (d?.mode === 'script' || d?.mode === 'coach')) await aiFinish(id, true);
+    const chain = makeReplica(id, { write: d?.mode === 'script' || d?.mode === 'coach' });
+    if (S.id === id) openDemo(id, 'review');
+    await chain;
+  },
+  'make-replica': () => makeReplica(S.id),
+  'review-compare': async () => { const id = S.id; await step('fidelity', 'fidelity_run', { fix: false }); await loadReview(id); rerender(); },
+  'review-fix': async () => {
+    const id = S.id;
+    J(id).aiChain = { stage: 'fix' }; rerender();
+    await step('fidelity', 'fidelity_run', { fix: true });
+    J(id).aiChain = { stage: 'done' };
+    await loadReview(id); rerender();
   },
   build: async () => {
     const o = await step('build', 'build', { force: false }, o => { J(S.id).scrub = o.scrub; });
@@ -1833,6 +1972,7 @@ document.addEventListener('click', async e => {
   if (ds.delete) return deleteDemo(ds.delete);
   if (ds.tab) { S.tab = S.reviewTab = ds.tab; renderTabsBar(); renderHead(); await renderPanel(); return $(`#tab-${ds.tab}`)?.focus(); }
   if (ds.goto) { S.tab = ds.goto; return openDemo(S.id); }
+  if (ds.pick) { J(S.id).pick = ds.pick; return renderRegions(); }
   if (ds.sheet) { J(S.id).sheetTab = ds.sheet; return renderPanel(); }
   if (ds.reveal) return call('reveal', { path: ds.reveal }).catch(() => {});
   if (ds.copy) { await copyText(ds.copy); return toast('Copied'); }

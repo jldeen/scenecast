@@ -5,7 +5,7 @@
 //   2. An app that lands on a sign-in page: not ready, and it says to sign in (never a recording of the sign-in page).
 //   3. An app that isn't open, with nothing to open: not ready, with the open tabs, so the app can ask which one it is.
 //   node packages/selftest/redirect-tab.mjs
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,10 +40,14 @@ const demoDir = (name, apps) => {
   writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name, title: name, port: 47898, receiverPort: RX, raw: join(tmp, `${name}-raw`), chrome: { browser: 'chrome' }, record: { auto: false }, apps }, null, 2) + '\n');
   return dir;
 };
-const start = dir => {
-  const r = spawnSync(process.execPath, [KIT, 'record', 'start', '--demo', dir], { encoding: 'utf8', env: { ...process.env, REPLICA_RX_PORT: String(RX), REPLICA_NO_OPEN: '1' }, timeout: 240000 });
-  try { return JSON.parse(r.stdout.slice(r.stdout.indexOf('{'))); } catch (e) { return { error: `no answer: ${r.stdout}\n${r.stderr}` }; }
-};
+// Not spawnSync: the product above is served from this process, so it has to keep answering while Start runs.
+const start = dir => new Promise(done => {
+  const k = spawn(process.execPath, [KIT, 'record', 'start', '--demo', dir], { env: { ...process.env, REPLICA_RX_PORT: String(RX), REPLICA_NO_OPEN: '1' } });
+  let out = '', err = '';
+  k.stdout.on('data', d => { out += d; }); k.stderr.on('data', d => { err += d; });
+  const t = setTimeout(() => k.kill(), 300000);
+  k.on('close', () => { clearTimeout(t); try { done(JSON.parse(out.slice(out.indexOf('{')))); } catch (e) { done({ error: `no answer: ${out}\n${err}` }); } });
+});
 
 const rx = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), join(tmp, 'raw'), String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
 let ctx;
@@ -57,7 +61,7 @@ try {
 
   // 1 · Redirected: opened, found, kept, recorded.
   const moved = demoDir('moved', [{ id: 'chat', url: `http://127.0.0.1:${WEB}/app?who=chat`, match: `127.0.0.1:${WEB}` }, { id: 'admin', url: `http://127.0.0.1:${WEB}/moved`, match: `127.0.0.1:${WEB}/moved` }]);
-  const r1 = start(moved);
+  const r1 = await start(moved);
   check('an app whose address redirects to another host records on the first Start', r1.recording === true, JSON.stringify(r1));
   const kept = JSON.parse(readFileSync(join(moved, 'demo.json'), 'utf8')).apps.find(a => a.id === 'admin');
   check('its new host is kept as the app\'s match', kept.match === `localhost:${WEB}`, JSON.stringify(kept));
@@ -67,13 +71,13 @@ try {
 
   // 2 · A sign-in page: not ready, says so, nothing recorded.
   const signin = demoDir('signin', [{ id: 'admin', url: `http://127.0.0.1:${WEB}/signin`, match: `127.0.0.1:${WEB}/signin` }]);
-  const r2 = start(signin);
+  const r2 = await start(signin);
   check('an app that lands on a sign-in page isn\'t recorded: it says to sign in', /^not ready to record: admin opened a sign-in page/.test(r2.error || '') && !r2.recording, JSON.stringify(r2).slice(0, 600));
   check('and its match is left alone', JSON.parse(readFileSync(join(signin, 'demo.json'), 'utf8')).apps[0].match === `127.0.0.1:${WEB}/signin`);
 
   // 3 · Not open, nothing to open: the open tabs come back, to pick from.
   const ghost = demoDir('ghost', [{ id: 'ghost', match: 'nowhere.invalid' }]);
-  const r3 = start(ghost);
+  const r3 = await start(ghost);
   const item = (r3.items || []).find(i => i.id === 'app ghost') || {};
   check('an app that can\'t be found comes back with the open tabs to pick from', /no tab for ghost/.test(r3.error || '') && item.missing === true && (item.tabs || []).some(t => t.title === 'chat' && t.host === `127.0.0.1:${WEB}`), JSON.stringify(item).slice(0, 600));
 } catch (e) {

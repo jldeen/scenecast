@@ -38,7 +38,7 @@
     { id: 'iq', url: 'https://daily.iq.microsoft.com/', key: 'i' },
     { id: 'admin', url: 'https://admin.cloud.microsoft/', key: 'a' },
   ];
-  const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', recording: 'new', paused: 'new', recorded: 'recorded', review: 'built', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
+  const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', recording: 'new', paused: 'new', recorded: 'recorded', review: 'built', 'review-ok': 'built', making: 'new', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
   const after = s => ['recorded', 'built', 'checked'].indexOf(stage) >= ['recorded', 'built', 'checked'].indexOf(s);
   const status = {
     recorded: after('recorded'), recordedAt: after('recorded') ? now - 3600e3 : null, screens: after('recorded') ? 22 : 0,
@@ -71,7 +71,29 @@
   const capStatus = { recording: true, busy: CAP === 'busy' || CAP === 'early', count: 14, actions: 9, streams: 1, chromeSecs: 161, blocked: 0,
     held: CAP === 'paused' ? { why: 'you', secs: 12 } : CAP === 'bar' || CAP === 'off' ? { why: 'bar', secs: 40 } : undefined };
   if (CAP) window.SCENECAST_CAPTURE = { demo: 'innovation-act-1-demo-1', copilot: CAP === 'copilot' || CAP === 'ask' };
+  // Review: a believable show (22 screens in 4 beats), each screen a drawn picture of its app; on 'review' one screen in
+  // beat 3 differs (a date in a late font); 'review-ok' after Fix it for me.
+  const COLORS = { teams: '#5B5FC7', copilot: '#0F6CBD', iq: '#0E7C66', admin: '#C4420F' };
+  const pic = (app, n, wide) => {
+    const c = COLORS[app], w = wide ? 640 : 320, h = 200, half = wide ? 2 : 1;
+    const one = x => `<g transform="translate(${x} 0)"><rect width="320" height="200" fill="#fff"/><rect width="320" height="22" fill="${c}"/><rect x="0" y="22" width="56" height="178" fill="#F3F4F6"/>`
+      + Array.from({ length: 5 }, (_, i) => `<rect x="72" y="${40 + i * 28}" width="${120 + ((n * 37 + i * 53) % 110)}" height="9" rx="4" fill="${i === n % 5 ? c : '#D7DCE1'}" opacity="${i === n % 5 ? .55 : 1}"/>`).join('')
+      + `<rect x="72" y="176" width="200" height="14" rx="7" fill="none" stroke="#C5CDD5"/></g>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">${one(0)}${half === 2 ? one(320) + '<rect x="319" width="2" height="200" fill="#0E1A26"/>' : ''}</svg>`;
+    return 'data:image/svg+xml;base64,' + btoa(svg);
+  };
+  const reviewOf = fixed => {
+    const plan = [['The late shipment lands in Teams', 0, 75, 'teams', 5], ['Ask Copilot about PO-450101', 75, 210, 'copilot', 7], ['Who can approve the expedite', 210, 345, 'iq', 6], ['IT turns it on for everyone', 345, 450, 'admin', 4]];
+    let k = 0;
+    const beats = plan.map(([title, start, end, app, n], b) => ({ n: b + 1, title, start, end, app, key: `${OS === 'macos' ? '⌥' : 'Ctrl+Alt+'}${b + 1}`,
+      screens: Array.from({ length: n }, (_, i) => { k++; const bad = !fixed && b === 2 && i === 0; return { id: `${app}-${String(i).padStart(2, '0')}`, app, shot: pic(app, k), sideBySide: pic(app, k, true), pass: !bad, pct: bad ? 2.8 : (k % 4 ? 0.01 : 0), why: bad ? ['A date shows in a different font: the product loads it late, and the replica can keep the real one.'] : [] }; }) }));
+    return { beats, others: [], screens: k, compared: true, matching: fixed ? k : k - 1, differ: fixed ? 0 : 1, fontsOk: fixed, report: null };
+  };
   const H = {
+    review_get: () => after('built') ? reviewOf(SC === 'review-ok' || SC === 'present' || SC === 'presenting' || SC === 'share') : null,
+    build: async () => { await wait(2500); return { ok: true, liveScenes: 22, streams: 2, beats: 4, fallback: [], warnings: [], errors: [], scrub: null }; },
+    run_checks: async () => { await wait(800); return { pass: true, passed: 41, failed: 0, quick: true, items: [] }; },
+    fidelity_run: async () => { await wait(1500); return { pass: true, report: { items: [] }, dir: '', html: '' }; },
     record_status: () => CAP ? capStatus : { recording: false },
     // New demo: the browser's open tabs (new-typed: none, so addresses are typed in).
     open_tabs: () => SC === 'new' ? [
@@ -180,11 +202,13 @@
     if (SC === 'new' || SC === 'new-typed') { document.querySelector('#new-demo')?.click(); await wait(300); return ready(); }
     document.querySelector(`[data-open="${demo.id}"]`)?.click();
     await wait(200);
-    const gate = { review: 'review', present: 'present', presenting: 'present', share: 'share' }[SC];
+    const gate = { review: 'review', 'review-ok': 'review', present: 'present', presenting: 'present', share: 'share' }[SC];
     if (gate) { document.querySelector(`[data-gate="${gate}"]`)?.click(); await wait(200); }
     if (q.get('details') === '1') document.querySelector('[data-action="details"]')?.click();
     if (SC === 'presenting') { await wait(300); document.querySelector('[data-action="present-start"]')?.click(); await wait(300); }
     await wait(500);
+    // Making: recorded, Stop pressed, the replica being made (the build is under way).
+    if (SC === 'making') { await wait(400); document.querySelector('[data-action="record-start"]')?.click(); await wait(900); document.querySelector('[data-action="record-stop"]')?.click(); await wait(1600); }
     if (SC === 'recording' || SC === 'paused' || SC === 'record-error') { await wait(500); document.querySelector('[data-action="record-start"]')?.click(); }
     document.documentElement.dataset.previewReady = '1';
   }, 300));

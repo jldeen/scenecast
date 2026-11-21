@@ -705,6 +705,46 @@ fn close_capture(app: &AppHandle) {
     }
 }
 
+/// Review: the show's beats with their screens and how each compares, its pictures as addresses the window can show.
+#[tauri::command]
+async fn review_get(state: State<'_, Shared>, id: String) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let r =
+            scenecast_app::review::read(&state.library.dir(&id)?, scenecast_app::keys::this_os());
+        for dir in &r.pictures {
+            state.files.allow(dir);
+        }
+        let url = |p: &Option<PathBuf>| {
+            p.as_deref()
+                .and_then(|p| state.files.url_path(p))
+                .map(|u| format!("{FILES_BASE}{u}"))
+        };
+        let screen = |s: &scenecast_app::review::Screen| {
+            let mut v = json!(s);
+            v["shot"] = json!(url(&s.shot));
+            v["sideBySide"] = json!(url(&s.side_by_side));
+            v
+        };
+        let mut v = json!(&r);
+        v["beats"] = Value::from(
+            r.beats
+                .iter()
+                .map(|b| {
+                    let mut bv = json!(b);
+                    bv["screens"] = Value::from(b.screens.iter().map(screen).collect::<Vec<_>>());
+                    bv
+                })
+                .collect::<Vec<_>>(),
+        );
+        v["others"] = Value::from(r.others.iter().map(screen).collect::<Vec<_>>());
+        v["report"] = json!(url(&r.report));
+        v.as_object_mut().map(|o| o.remove("pictures"));
+        Ok(v)
+    })
+    .await
+}
+
 /// New demo: the browser's open web pages, to pick the apps from (none when the recorder isn't connected).
 #[tauri::command]
 async fn open_tabs() -> Res<Vec<Value>> {
@@ -1834,6 +1874,7 @@ fn main() {
             record_start,
             record_status,
             open_tabs,
+            review_get,
             record_pause,
             record_go_on,
             record_stop,

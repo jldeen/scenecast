@@ -310,21 +310,27 @@ try {
   check('the app shows screens captured as they come', screens >= 3, screens);
   await shot('05-recording');
   await click('record-stop');
+  // Stop: on to Review, which makes the replica without a button (build, checks, every screen compared).
   await waitFor('the recording', () => exists('record-done'), 300000);
-  // What shows (innerText): the closed Details under it holds the steps, streams and timings.
   const done = await b.execute(() => document.querySelector('[data-test="record-done"]').innerText);
   check('stop: the recording, in plain words (what was made)', /Recorded \d+ screens?/.test(done) && !/streamed|recorder took/.test(done), done);
-  await shot('06-recorded');
+  await shot('06-making');
   lap('record');
 
-  // ---- 4 · Build and check (Review) ----------------------------------------------------------------------------
-  await click('tab-review');
+  // ---- 4 · Review: made and checked on its own ------------------------------------------------------------------
+  await waitFor('Review, made on its own', async () => (await attr('review', 'data-compared')) === 'true' || (await exists('making-failed')), 1500000, 1000);
+  check('after Stop, Review appears on its own: built, checked and compared with the real product, no button pressed',
+    (await attr('review', 'data-compared')) === 'true' && +(await attr('review', 'data-screens')) >= 3 && await exists('screen'),
+    (await exists('making-failed')) ? await text('making-failed') : JSON.stringify({ screens: await attr('review', 'data-screens'), differ: await attr('review', 'data-differ') }));
+  const differ = +(await attr('review', 'data-differ'));
+  check('Review: the one next step (Fix it for me, or Next: rehearse)', differ ? await exists('review-fix') : await exists('review-next'), differ);
+  await shot('06b-review');
+  // Its build and checks, in full, a tab away.
   await click('tab-build');
-  await click('build');
-  await waitFor('the build', async () => (await exists('build-done')) || (await exists('build-failed')), 600000);
+  await waitFor('the build', async () => (await exists('build-done')) || (await exists('build-failed')), 60000);
   check('builds the replica', await exists('build-done'), (await exists('build-failed')) && await text('build-failed'));
   check('shows the scrub report', (await exists('scrub-clean')) || (await exists('scrub-summary')));
-  // The checks for what changed run on their own after the build; never the whole checklist (that's Export).
+  // The checks for what changed ran on their own after the build; never the whole checklist (that's Export).
   await waitFor('the checks', () => exists('checks-done'), 600000);
   const failing = await b.execute(() => [...document.querySelectorAll('[aria-label=Checks] [data-status=fail]')].map(li => li.innerText.replace(/\s+/g, ' ')).join('; '));
   check('the build runs the quick checks on its own, and they pass', (await attr('checks-done', 'data-pass')) === 'true' && (await attr('checks-done', 'data-quick')) === 'true', `${await text('checks-done')} ${failing}`);
@@ -568,7 +574,7 @@ try {
   await waitFor('Record for me to finish', () => exists('ai-record-done'), 600000);
   check('Record for me: recorded, two sends after the presenter\'s go-ahead', (await attr('ai-record-done', 'data-confirmed')) === '1' && +(await attr('ai-record-done', 'data-steps')) >= 10, await text('ai-record-done'));
   await waitFor('the demo to be ready', async () => (await exists('ai-after-done')) || (await b.execute(() => /notice bad/.test(document.querySelector('[data-region="ai-after"]')?.innerHTML || ''))), 900000);
-  check('Record for me: built, the talk track on its screens, the guide, the checks pass', await exists('ai-after-done'), await b.execute(() => document.querySelector('[data-region="ai-after"]')?.innerText));
+  check('Record for me: built, the talk track on its screens, the guide, the checks pass, compared', await exists('ai-after-done') && (await attr('ai-after-done', 'data-checks')) === 'true' && (await attr('ai-after-done', 'data-compared')) === 'true', await b.execute(() => document.querySelector('[data-region="ai-after"]')?.innerText));
   check('Record for me: what was sent to Copilot, listed', await exists('ai-sent-list'));
   await shot('18-record-for-me-done');
   check('Record for me: script.md and focus points', /Kestrel moved the ship date/.test(readFileSync(join(FM, 'script.md'), 'utf8')) && JSON.parse(readFileSync(join(FM, 'focus.json'), 'utf8')).points.length > 0);
