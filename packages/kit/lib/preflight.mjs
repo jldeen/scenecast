@@ -177,7 +177,8 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
       return { status: 'ok', detail: `extension ${have || ''} connected`.replace('  ', ' '), version: have };
     }
     if (recorder === 'agent') return { status: 'fail', detail: 'no agent polling: run scenecast agent, then start it in the browser' };
-    const have = existsSync(join(extDir, 'manifest.json')) && JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8')).version;
+    const m = existsSync(join(extDir, 'manifest.json')) && JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
+    const have = m && (m.version_name || m.version);
     if (fix && have !== ver) await new Promise(r => execFile(process.execPath, [join(KIT, 'recorder', 'build.mjs'), '--extension', extDir, '--port', String(port)], () => r()));
     if (!info) await look();
     return { status: 'fail', detail: recorderAdvice({ info, profile, browser, extDir, other: await browserProfiles({ browser: browser === 'edge' ? 'chrome' : 'edge', procs, pictures: false }).catch(() => null) }), extensionDir: extDir };

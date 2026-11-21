@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/editor",
-  "version": "0.4.13",
+  "version": "0.5.0-rc.1",
   "private": true,
   "type": "module",
   "description": "The editor inside the replica: focus-point dots, wording and date overrides, beat starts, undo."

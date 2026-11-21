@@ -65,9 +65,14 @@ pub fn recorder_version() -> Option<String> {
     pkg["version"].as_str().map(str::to_owned)
 }
 
+/// The recorder folder's version: its name when the manifest has one (a release candidate's 0.5.0-rc.1, which Chrome
+/// only takes as 0.5.0.1), else its version.
 fn folder_version(dir: &Path) -> Option<String> {
     let m: Value = serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).ok()?).ok()?;
-    m["version"].as_str().map(str::to_owned)
+    m["version_name"]
+        .as_str()
+        .or(m["version"].as_str())
+        .map(str::to_owned)
 }
 
 /// The extension folder, built (or rebuilt when this app's recorder is newer). Returns the folder and whether its

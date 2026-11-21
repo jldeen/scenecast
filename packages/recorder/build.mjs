@@ -75,7 +75,11 @@ ${ext('main.js')}
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const manifest = JSON.parse(ext('manifest.json'));
-  manifest.version = VERSION;
+  // Chrome and Edge take one to four numbers: a release candidate's 0.5.0-rc.1 is 0.5.0.1 there, with its full
+  // version as the name the extensions page shows (and the one the app compares).
+  const [, num, pre] = VERSION.match(/^(\d+(?:\.\d+){0,2})(?:-\D*(\d+))?/) || [, VERSION];
+  manifest.version = pre ? `${num}.${pre}` : num;
+  if (manifest.version !== VERSION) manifest.version_name = VERSION;
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   writeFileSync(join(outDir, 'sw.js'), sw);
   for (const f of ['popup.html', 'popup.js', 'icon.png']) copyFileSync(join(here, 'extension', f), join(outDir, f));
