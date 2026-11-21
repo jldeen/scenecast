@@ -86,6 +86,41 @@ pub fn send_command(port: u16, command: &Value) -> Option<Value> {
     )
 }
 
+/// A command to the recorder through the receiver on `port`, and its answer (`None`: no answer within `timeout`, or
+/// the recorder said it failed).
+pub fn command_result(port: u16, command: &Value, timeout: Duration) -> Option<Value> {
+    let id = send_command(port, command)?["id"].as_str()?.to_owned();
+    let t = Instant::now();
+    while t.elapsed() < timeout {
+        let r = get_json(
+            port,
+            &format!("/result?id={id}"),
+            Duration::from_millis(1500),
+        )?;
+        if r["pending"] != true {
+            return (r["ok"] == true).then(|| r["value"].clone());
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    None
+}
+
+/// The browser's open web pages (title and address, in its own order), from the recorder connected to the app's
+/// receiver; empty when none is.
+pub fn open_tabs() -> Vec<Value> {
+    let r = host().state();
+    let Some(port) = r.port.filter(|_| r.connected) else {
+        return Vec::new();
+    };
+    command_result(
+        port,
+        &serde_json::json!({ "op": "openTabs" }),
+        Duration::from_secs(8),
+    )
+    .and_then(|v| v.as_array().cloned())
+    .unwrap_or_default()
+}
+
 fn request_body(
     port: u16,
     method: &str,

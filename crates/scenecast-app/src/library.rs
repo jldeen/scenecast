@@ -355,8 +355,17 @@ fn app_id_from_url(url: &str) -> String {
     let id = if local {
         slug(path.split(['/', '?', '#']).next().unwrap_or(""))
     } else {
-        let parts: Vec<&str> = host.split('.').filter(|p| *p != "www").collect();
-        slug(parts.first().copied().unwrap_or(""))
+        // The first part of the host that names something: daily.iq.microsoft.com is "iq", portal.azure.com "azure".
+        const GENERIC: &[&str] = &[
+            "www", "app", "apps", "portal", "web", "my", "daily", "go", "beta", "preview",
+            "insiders",
+        ];
+        let parts: Vec<&str> = host.split('.').collect();
+        let named = parts[..parts.len().saturating_sub(1).max(1)]
+            .iter()
+            .find(|p| !GENERIC.contains(p))
+            .or(parts.first());
+        slug(named.copied().unwrap_or(""))
     };
     if id.is_empty() { "app".to_owned() } else { id }
 }
@@ -861,5 +870,8 @@ mod tests {
         assert_eq!(app_id_from_url("https://www.contoso.com/x"), "contoso");
         assert_eq!(app_id_from_url("http://127.0.0.1:4100/chat?x=1"), "chat");
         assert_eq!(app_id_from_url("http://localhost:4100/"), "app");
+        assert_eq!(app_id_from_url("https://daily.iq.microsoft.com/w"), "iq");
+        assert_eq!(app_id_from_url("https://portal.azure.com/#home"), "azure");
+        assert_eq!(app_id_from_url("https://teams.cloud.microsoft/"), "teams");
     }
 }

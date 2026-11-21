@@ -663,7 +663,9 @@ fn open_capture(app: &AppHandle, id: &str, copilot: bool) {
         serde_json::json!({ "demo": id, "copilot": copilot })
     );
     if let Some(w) = app.get_webview_window(CAPTURE) {
-        let _ = w.eval(format!("{init} window.captureOpen && window.captureOpen();"));
+        let _ = w.eval(format!(
+            "{init} window.captureOpen && window.captureOpen();"
+        ));
         return;
     }
     let (width, height) = (340.0, 240.0);
@@ -701,6 +703,12 @@ fn close_capture(app: &AppHandle) {
             let _ = main.set_focus();
         }
     }
+}
+
+/// New demo: the browser's open web pages, to pick the apps from (none when the recorder isn't connected).
+#[tauri::command]
+async fn open_tabs() -> Res<Vec<Value>> {
+    blocking(|| Ok(scenecast_app::receiver::open_tabs())).await
 }
 
 /// Pause: nothing the presenter does is recorded until Go on.
@@ -1825,6 +1833,7 @@ fn main() {
             pending_opens,
             record_start,
             record_status,
+            open_tabs,
             record_pause,
             record_go_on,
             record_stop,

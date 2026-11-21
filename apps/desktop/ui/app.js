@@ -448,15 +448,18 @@ const SLOTS = [[0, 'No set length'], [180, '3 min'], [300, '5 min'], [480, '8 mi
 function renderNew() {
   S.view = 'new';
   S.id = null;
+  Object.assign(NEW, { tabs: null, ticked: new Set(), all: false });
   renderSidebar();
   const mode = 'manual';
   $('#main').innerHTML = `${pageHead({ title: 'New demo', sub: 'Name it and add its apps. You can change both later.' })}
     <div class="split">
     <form id="new-form" class="card" novalidate data-mode="${mode}">
       <div class="field"><label for="new-title">Name</label><input id="new-title" type="text" required placeholder="Innovation Act 1 · Demo 1" data-test="new-title"></div>
-      <fieldset class="field"><legend>Which apps does it show? <span class="hint">Each one\u2019s start page. On stage you switch to an app with ${isMac() ? '⌥' : 'Ctrl+Alt+'} and its first letter.</span></legend>
-        <div id="apps">${appRow(0)}</div>
-        <button type="button" class="alink" id="add-app" data-test="add-app">Add another app</button></fieldset>
+      <fieldset class="field"><legend>Which apps does it show? <span class="hint" id="apps-hint">Each one\u2019s start page. On stage you switch to an app with ${isMac() ? '⌥' : 'Ctrl+Alt+'} and its first letter.</span></legend>
+        <div id="tab-list" class="tab-list" data-test="tab-list" hidden></div>
+        <button type="button" class="alink" id="show-manual" data-test="show-manual" hidden>Add one that isn\u2019t open</button>
+        <div id="manual-apps"><div id="apps">${appRow(0)}</div>
+        <button type="button" class="alink" id="add-app" data-test="add-app">Add another app</button></div></fieldset>
       <div class="field"><label for="new-script">Your talk track <span class="hint">Optional. Paste it now or add it later.</span></label>
         <textarea id="new-script" rows="4" data-test="new-script" placeholder="## The late shipment lands in Teams (0:00–1:15)&#10;&gt; Kestrel just told us PO-450101 will ship six days late."></textarea>
         <p class="hint" style="margin-top:4px">Each <code>##</code> heading starts a beat; a time like <code>(0:00–1:15)</code> gives it its place in your slot.</p></div>
@@ -476,6 +479,7 @@ function renderNew() {
   $('#new-title').focus();
   renderRegions();
   const form = $('#new-form');
+  loadOpenTabs();
   // The browser and profile are the ones the recorder is in (slice 7): nothing to choose, unless it's in neither.
   const where = async (b, info) => {
     const p = info?.profiles?.find(x => x.extension?.id && x.extension.enabled !== false) || info?.profiles?.find(x => x.dir === info.picked);
@@ -493,8 +497,83 @@ function renderNew() {
     where(b, b === 'chrome' ? c : e);
   })();
 }
+// New demo from the browser's open tabs (slice 11): the recorder lists them; the product ones are ticked, one per
+// address, in the browser's own order. Read again when the window comes back to the front (a tab opened meanwhile).
+const GENERIC_HOST = new Set(['www', 'app', 'apps', 'portal', 'web', 'my', 'daily', 'go', 'beta', 'preview', 'insiders']);
+// An app's name from its address, as the app names it (library.rs app_id_from_url): daily.iq.microsoft.com is iq.
+const nameFor = url => {
+  try {
+    const u = new URL(url), h = u.hostname;
+    if (h === 'localhost' || /^[\d.]+$/.test(h)) return (u.pathname.split('/')[1] || 'app').toLowerCase();
+    const parts = h.split('.');
+    return parts.slice(0, Math.max(1, parts.length - 1)).find(p => !GENERIC_HOST.has(p)) || parts[0];
+  } catch { return 'app'; }
+};
+// Ticked to start with: Microsoft product pages. Not mail (an inbox would be recorded), sign-in or docs; anything else
+// is a tick away.
+const PRODUCT_HOST = /(^|\.)(cloud\.microsoft|microsoft\.com|office\.com|microsoft365\.com|sharepoint\.com|azure\.com|powerbi\.com|dynamics\.com|powerapps\.com)$/i;
+const NOT_A_PRODUCT = /^(learn|support|docs|techcommunity|answers|login|account|myaccount|go|outlook|mail)\./i;
+const NEW = { tabs: null, ticked: new Set(), all: false };
+async function loadOpenTabs() {
+  const tabs = await invoke('open_tabs').catch(() => []);
+  if (S.view !== 'new' || !$('#tab-list')) return;
+  const first = NEW.tabs === null;
+  // One row per address (the same page open twice is one app).
+  const seen = new Set();
+  NEW.tabs = (tabs || []).filter(t => !seen.has(t.url) && seen.add(t.url));
+  if (first) {
+    const hosts = new Set();
+    for (const t of NEW.tabs) {
+      const h = new URL(t.url).hostname;
+      if (PRODUCT_HOST.test(h) && !NOT_A_PRODUCT.test(h) && !hosts.has(h) && hosts.size < 6) { hosts.add(h); NEW.ticked.add(t.url); }
+    }
+  }
+  renderOpenTabs();
+}
+function renderOpenTabs() {
+  const box = $('#tab-list');
+  if (!box) return;
+  const tabs = NEW.tabs || [];
+  const has = tabs.length > 0, manual = $('#manual-apps');
+  box.hidden = !has;
+  // No open tabs (or no recorder yet): addresses typed in, as before. Tabs: typing one in is a click away.
+  if (!has) { manual.hidden = false; $('#show-manual').hidden = true; return; }
+  manual.hidden = !manual.dataset.shown;
+  $('#show-manual').hidden = !!manual.dataset.shown;
+  $('#apps-hint').textContent = `Your open tabs: tick the ones in the demo, on the page it starts from. On stage you switch to an app with ${isMac() ? '⌥' : 'Ctrl+Alt+'} and its first letter.`;
+  // The ticked ones first, then the rest, each in the browser's order.
+  const order = [...tabs.filter(t => NEW.ticked.has(t.url)), ...tabs.filter(t => !NEW.ticked.has(t.url))];
+  const shown = NEW.all ? order : order.slice(0, Math.max(8, NEW.ticked.size));
+  box.innerHTML = shown.map((t, i) => {
+    const u = new URL(t.url);
+    return `<label class="tab-row" data-test="tab-row" data-url="${esc(t.url)}"><input type="checkbox" data-tab-url="${esc(t.url)}" ${NEW.ticked.has(t.url) ? 'checked' : ''}>
+      ${tile({ id: nameFor(t.url), url: t.url }, i)}<span class="t"><b>${esc(t.title || u.hostname)}</b><small>${esc(u.hostname + (u.pathname.length > 1 ? u.pathname : ''))}</small></span></label>`;
+  }).join('') + (order.length > shown.length ? `<button type="button" class="alink tab-more" data-test="tab-more">Show all ${order.length} tabs</button>` : '');
+  createLabel();
+}
+document.addEventListener('change', e => {
+  const url = e.target.dataset?.tabUrl;
+  if (!url) return;
+  if (e.target.checked) NEW.ticked.add(url); else NEW.ticked.delete(url);
+  createLabel();
+});
+// The button says what it makes: "Create with 4 apps".
+function createLabel() {
+  const btn = $('[data-test="create-demo"]');
+  if (!btn) return;
+  const n = NEW.ticked.size + [...document.querySelectorAll('[data-app-url]')].filter(i => i.value.trim()).length;
+  btn.innerHTML = `${NEW.tabs?.length && n ? `Create with ${plural(n, 'app')}` : 'Create demo'} ${I.arrow}`;
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('.tab-more')) { NEW.all = true; renderOpenTabs(); }
+  if (e.target.closest('#show-manual')) { $('#manual-apps').hidden = false; $('#manual-apps').dataset.shown = '1'; $('#show-manual').hidden = true; $('#app-url-0')?.focus(); }
+});
+window.addEventListener('focus', () => { if (S.view === 'new' && NEW.tabs) loadOpenTabs(); });
 async function createDemo(form) {
-  const apps = [...form.querySelectorAll('[data-app-row]')].map(r => ({ id: $('[data-app-id]', r).value.trim(), url: $('[data-app-url]', r).value.trim() }));
+  const typed = [...form.querySelectorAll('[data-app-row]')].map(r => ({ id: $('[data-app-id]', r).value.trim(), url: $('[data-app-url]', r).value.trim() }));
+  // The ticked tabs (named from their addresses), then any typed in; an empty typed row is left out when tabs were ticked.
+  const tabbed = (NEW.tabs || []).filter(t => NEW.ticked.has(t.url)).map(t => ({ id: '', url: t.url }));
+  const apps = tabbed.length ? [...tabbed, ...typed.filter(a => a.url)] : typed;
   const slot = +$('#new-slot').value || null;
   // No profile: the demo records in the one the recorder is in (or the one the first run was told to use).
   const spec = { title: $('#new-title').value, apps, browser: form.browser.value, profile: savedProfile() || null, mode: 'manual', slot };
@@ -1485,7 +1564,7 @@ async function saveAiFields(id = S.id) {
   if (!goal && !source) return;
   AIS[id] = await call('ai_save', { id, goal: goal ? goal.value : null, source: source ? source.value : null });
 }
-document.addEventListener('input', e => { if (e.target.dataset.save) e.target.dataset.dirty = '1'; if (e.target.id === 'ai-plan') scheduleRegions(); });
+document.addEventListener('input', e => { if (e.target.dataset.save) e.target.dataset.dirty = '1'; if (e.target.id === 'ai-plan') scheduleRegions(); if ('appUrl' in e.target.dataset) createLabel(); });
 document.addEventListener('change', e => {
   const f = e.target.dataset.save;
   if (!f || f === 'plan' || S.view !== 'demo') return;

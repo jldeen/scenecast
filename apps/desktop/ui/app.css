@@ -134,6 +134,17 @@ fieldset { border: 0; padding: 0; margin: 0; }
 legend { font-weight: 700; margin-bottom: 6px; padding: 0; }
 .choice { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; margin-right: 16px; }
 .app-row { display: grid; grid-template-columns: 180px 1fr auto; gap: 8px; margin-bottom: 8px; }
+/* New demo: the browser's open tabs, ticked to make the apps. */
+.tab-list { border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); margin-bottom: 10px; overflow: hidden; }
+.tab-row { display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: center; padding: 9px 14px; margin: 0; border-top: 1px solid var(--rule); cursor: pointer; font-weight: 500; }
+.tab-row:first-child { border-top: 0; }
+.tab-row:hover { background: var(--paper-2); }
+.tab-row:has(input:checked) { background: var(--accent-soft); }
+.tab-row input { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); }
+.tab-row .t { display: grid; min-width: 0; }
+.tab-row .t b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-row .t small { color: var(--muted); font-size: var(--t-label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-list .tab-more { margin: 8px 14px 10px; font-size: var(--t-label); }
 .field + .field, .field + #new-ai, #new-ai + .field, #new-ai > * + * { margin-top: 18px; }
 #new-ai { margin-top: 18px; }
 select.inline { width: auto; padding: 6px 10px; }

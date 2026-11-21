@@ -258,6 +258,11 @@ const OPS = {
     return { agent: typeof AGENT_ID !== 'undefined' ? AGENT_ID : null, receiver: RX, pages, active: act ? act.url().slice(0, 160) : null, recording: typeof REC !== 'undefined' ? !!REC.on : null };
   },
   async tabs() { return H.tabs(); },
+  // The browser's open web pages, in its own order, for New demo: from its tab list, without attaching to any of them.
+  async openTabs() {
+    const all = typeof chrome !== 'undefined' && chrome.tabs ? await chrome.tabs.query({}) : ctx.pages().map(p => ({ url: p.url(), title: '' }));
+    return all.filter(t => /^https?:/i.test(t.url || '')).map(t => ({ title: String(t.title || '').slice(0, 120), url: String(t.url).slice(0, 400), active: !!t.active }));
+  },
   async mark(c) { const p = await pageFor(c.url); await H.mark(p, c.kind); return 'ok'; },
   async front(c) { const p = await pageFor(c.tab); await p.bringToFront(); return p.url(); },
   async goto(c) { const p = await pageFor(c.tab); await p.goto(c.url, { waitUntil: 'domcontentloaded' }); return p.url(); },

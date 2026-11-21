@@ -73,6 +73,18 @@
   if (CAP) window.SCENECAST_CAPTURE = { demo: 'innovation-act-1-demo-1', copilot: CAP === 'copilot' || CAP === 'ask' };
   const H = {
     record_status: () => CAP ? capStatus : { recording: false },
+    // New demo: the browser's open tabs (new-typed: none, so addresses are typed in).
+    open_tabs: () => SC === 'new' ? [
+      { title: 'Procurement chat | Microsoft Teams', url: 'https://teams.cloud.microsoft/', active: false },
+      { title: 'Inbox - Jessica Deen - Outlook', url: 'https://outlook.cloud.microsoft/mail/', active: false },
+      { title: 'Microsoft 365 Copilot', url: 'https://m365.cloud.microsoft/chat', active: true },
+      { title: 'Supply Chain Operations | Microsoft IQ', url: 'https://daily.iq.microsoft.com/workspaces/supply', active: false },
+      { title: 'Home | Microsoft 365 admin center', url: 'https://admin.cloud.microsoft/', active: false },
+      { title: 'Scenecast keynote run of show - Google Docs', url: 'https://docs.google.com/document/d/1x', active: false },
+      { title: 'jldeen/scenecast: Live demos, replicated', url: 'https://github.com/jldeen/scenecast', active: false },
+      { title: 'Weather', url: 'https://www.bbc.co.uk/weather', active: false },
+      { title: 'Expense report | Dynamics 365', url: 'https://myexpense.operations.dynamics.com/', active: false },
+    ] : [],
     record_pause: () => ({ held: 'you' }),
     record_go_on: ({ anyway }) => CAP === 'off' && !anyway ? { held: 'bar', off: ['teams'] } : { recording: true, goOn: true },
     ai_answer: () => null, ai_stop: () => null,
@@ -165,7 +177,7 @@
     const S = window.__scenecast;
     const ready = () => { document.documentElement.dataset.previewReady = '1'; };
     if (!S || SC === 'empty' || SC === 'library') return ready();
-    if (SC === 'new') { document.querySelector('#new-demo')?.click(); await wait(200); return ready(); }
+    if (SC === 'new' || SC === 'new-typed') { document.querySelector('#new-demo')?.click(); await wait(300); return ready(); }
     document.querySelector(`[data-open="${demo.id}"]`)?.click();
     await wait(200);
     const gate = { review: 'review', present: 'present', presenting: 'present', share: 'share' }[SC];
