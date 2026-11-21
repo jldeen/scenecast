@@ -322,12 +322,16 @@ function renderSidebar() {
   $('#nav-library').setAttribute('aria-current', S.view === 'library' ? 'page' : 'false');
   $('#new-demo').setAttribute('aria-current', S.view === 'new' ? 'page' : 'false');
   $('#nav-copilot').setAttribute('aria-current', S.view === 'copilot' ? 'page' : 'false');
-  $('#demo-list').innerHTML = S.demos.map(d => {
+  const next = document.createElement('ul');
+  next.innerHTML = S.demos.map(d => {
     const w = where(d);
     return `<li><button data-open="${esc(d.id)}" data-test="demo-${esc(d.id)}" ${S.view === 'demo' && S.id === d.id ? 'aria-current="page"' : ''}>
     <span class="title">${esc(d.title)}</span><span class="sub"><em>${esc(w.word)}</em> · ${esc(w.note)}</span></button></li>`;
   }).join('') || '<li class="none">None yet. Your demos show up here.</li>';
+  morph($('#demo-list'), next);
 }
+// "Recorded 10 min ago" stays true while the window sits open.
+setInterval(renderSidebar, 60 * 1000);
 
 // ---- Your demos, and the first run ---------------------------------------------------------------------------------
 

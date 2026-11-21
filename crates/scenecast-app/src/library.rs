@@ -3,6 +3,7 @@
 //! The library is `SCENECAST_LIBRARY` if set, else `Scenecast` in the user's Documents folder. A demo's id is its
 //! folder name.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -29,7 +30,8 @@ pub struct DemoApp {
     pub key: Option<String>,
 }
 
-/// The fidelity loop's last result: states within the threshold out of all compared.
+/// The fidelity loop's last result: screens within the threshold out of all compared. A screen is compared at each
+/// zoom and with each menu open; it's within when every one of those is (as Review counts it).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FidelityScore {
@@ -530,8 +532,14 @@ pub fn status(dir: &Path, manifest: Option<&scenecast_core::BundleManifest>) -> 
     let report = dir.join(".out/fidelity/report.json");
     if let Some(r) = read_json(&report) {
         let items = r["items"].as_array().cloned().unwrap_or_default();
-        let total = items.len();
-        let within = items.iter().filter(|i| i["pass"] == true).count();
+        let mut screens: BTreeMap<String, bool> = BTreeMap::new();
+        for i in &items {
+            let key = i["state"].as_str().or(i["id"].as_str()).unwrap_or_default();
+            let ok = screens.entry(key.to_owned()).or_insert(true);
+            *ok &= i["pass"] == true;
+        }
+        let total = screens.len();
+        let within = screens.values().filter(|ok| **ok).count();
         let fonts_ok = r["fonts"]
             .as_array()
             .is_none_or(|f| f.iter().all(|f| f["status"] == "match"));
@@ -843,7 +851,8 @@ mod tests {
         fs::write(
             a.dir.join(".out/fidelity/report.json"),
             r#"{"pass":false,"threshold":0.5,"rounds":[],"fonts":[{"status":"match"}],"fixes":[],
-               "items":[{"id":"a","pass":true},{"id":"b","pass":true},{"id":"c","pass":false}]}"#,
+               "items":[{"id":"a","pass":true},{"id":"b","pass":true},{"id":"c","pass":false},
+                        {"id":"a@150","state":"a","pass":true},{"id":"b@150","state":"b","pass":false}]}"#,
         )
         .unwrap();
         fs::write(
@@ -854,7 +863,8 @@ mod tests {
         fs::write(a.dir.join("focus.json"), r#"{"points":[{},{},{}]}"#).unwrap();
         let s = lib.get(&a.id).unwrap().status;
         let f = s.fidelity.unwrap();
-        assert_eq!((f.within, f.total, f.score, f.pass), (2, 3, 66.7, false));
+        // Screens, not views: b differs at 150%, so only a matches.
+        assert_eq!((f.within, f.total, f.score, f.pass), (1, 3, 33.3, false));
         assert!(f.fonts_ok);
         let c = s.checks.unwrap();
         assert_eq!((c.passed, c.failed, c.quick, c.pass), (1, 1, true, false));

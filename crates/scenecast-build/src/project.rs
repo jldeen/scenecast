@@ -267,10 +267,7 @@ fn assign_apps(specs: &[AppSpec]) -> Result<Vec<ScaffoldApp>, ProjectError> {
             .or_else(|| ('A'..='Z').find(free))
             .unwrap_or('A');
         used.push(key);
-        let mut title = spec.id.clone();
-        if let Some(first) = title.get_mut(0..1) {
-            first.make_ascii_uppercase();
-        }
+        let title = app_title(&spec.id);
         apps.push(ScaffoldApp {
             id: spec.id.clone(),
             key,
@@ -280,6 +277,19 @@ fn assign_apps(specs: &[AppSpec]) -> Result<Vec<ScaffoldApp>, ProjectError> {
         });
     }
     Ok(apps)
+}
+
+/// An app's name from its id, as the app window shows it: `iq` is IQ, `admin-center` is Admin center.
+fn app_title(id: &str) -> String {
+    let words = id.replace(['-', '_'], " ");
+    let words = words.trim();
+    if words.chars().count() <= 3 {
+        return words.to_uppercase();
+    }
+    let mut c = words.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 // The app's tab is found by its host (demo.json `match`).
@@ -393,6 +403,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(created.name, "ignite-demo");
+        assert_eq!(
+            ["iq", "admin-center", "chat"].map(app_title),
+            ["IQ", "Admin center", "Chat"]
+        );
         let keys: Vec<_> = created.apps.iter().map(|a| a.key.clone()).collect();
         assert_eq!(keys, [Some("C".to_owned()), Some("A".to_owned())]);
         let manifest = read_manifest(&created.dir).unwrap();
