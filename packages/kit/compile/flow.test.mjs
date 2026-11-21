@@ -69,3 +69,23 @@ test('a newer take (Record again) replaces the demo\'s copy of the recording', a
   const { flow } = await compileFlow(loadDemo(dir));
   assert.ok(flow.states.second && !flow.states.first, Object.keys(flow.states).join());
 });
+
+test('focus points from an earlier script that don\'t fit a new take are left out, not a failed build', async t => {
+  // Nov 20: a new Record for me take had fewer beats than the last script, and Build stopped on its focus point.
+  const dir = mkdtempSync(join(tmpdir(), 'scenecast-flow-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name: 'fixture', apps: [{ id: 'a', key: 'A' }] }));
+  const recording = { states: { start: { app: 'a', snap: 'start' } }, beats: [{ active: 'a', states: { a: 'start' } }] };
+  writeFileSync(join(dir, 'recording.json'), JSON.stringify(recording));
+  writeFileSync(join(dir, 'focus.json'), JSON.stringify({ points: [
+    { id: 'keep', app: 'a', states: ['start'], find: 'x', beat: 0 },
+    { id: 'old-beat', app: 'a', states: ['start'], find: 'x', beat: 4 },
+    { id: 'old-screen', app: 'a', states: ['gone'], find: 'x', beat: 0 },
+  ] }));
+  const demo = loadDemo(dir);
+  const { flow } = await compileFlow(demo);
+  const result = await finishFlow(demo, flow, recording);
+  assert.deepEqual(result.flow.focus.map(p => p.id), ['keep']);
+  assert.deepEqual(result.problems, []);
+  assert.ok(result.flow.notes.some(n => /old-beat, old-screen/.test(n)));
+});

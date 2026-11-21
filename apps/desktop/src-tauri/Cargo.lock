@@ -4103,7 +4103,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-app"
-version = "0.4.11"
+version = "0.4.13"
 dependencies = [
  "regex",
  "scenecast-build",
@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-build"
-version = "0.4.11"
+version = "0.4.13"
 dependencies = [
  "base64 0.22.1",
  "regex",
@@ -4131,7 +4131,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-core"
-version = "0.4.11"
+version = "0.4.13"
 dependencies = [
  "schemars 1.2.3",
  "serde",
@@ -4141,7 +4141,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-desktop"
-version = "0.4.11"
+version = "0.4.13"
 dependencies = [
  "scenecast-app",
  "serde",

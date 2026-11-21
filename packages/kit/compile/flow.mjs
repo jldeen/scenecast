@@ -159,7 +159,12 @@ export async function finishFlow(demo, flow, rec) {
     hand = (typeof m.default === 'function' ? await m.default(flow) : m.default) || [];
     if (m.options) flow.focusOptions = m.options;
   }
-  const generated = readFocusJson(demo.dir).points;
+  // Points from an earlier script (focus.json) can name beats or screens a new take doesn't have: they're left out until
+  // Script makes new ones, instead of stopping the build (Nov 20: Record for me again, then Build, failed on one).
+  const nBeats = (flow.beats || []).length, S = flow.states || {};
+  const fits = p => !Number.isInteger(p.beat) || p.beat < nBeats && (p.states || []).every(id => S[id]);
+  const all = readFocusJson(demo.dir).points, generated = all.filter(fits);
+  if (generated.length < all.length) (flow.notes = flow.notes || []).push(`${all.length - generated.length} focus point(s) from an earlier script left out (${all.filter(p => !fits(p)).map(p => p.id).join(', ')}): this recording has no such beat or screen; Script makes new ones`);
   if (existsSync(fp) || generated.length) flow.focus = mergeFocus(generated, hand, flow);
   // A wording or date change (flow.edits: the editor's, scenecast text) changes the words a focus point looks for
   // too: a point made from the script still finds its sentence after "Friday" becomes "Monday".
