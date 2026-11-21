@@ -130,11 +130,23 @@ pub fn build(
     } else {
         vec![]
     };
+    // The engine's own reason ("error: …"), for the message and the app's log (Nov 20: a stopped build said only
+    // "exit code 1", and the log had nothing).
+    let mut reason: Option<String> = None;
     let result = scenecast_build::build::build(dir, &args, |p| match p {
         BuildProgress::Stage(stage) => on(Update::stage(stage, stage_label(stage))),
-        BuildProgress::Engine(line) => on(Update::line(&line)),
+        BuildProgress::Engine(line) => {
+            let (Progress::Stdout(text) | Progress::Stderr(text)) = &line;
+            if let Some(r) = text.trim_start().strip_prefix("error:") {
+                reason = Some(r.trim().to_owned());
+            }
+            on(Update::line(&line))
+        }
         BuildProgress::Fingerprint { .. } => {}
     })?;
+    if let Some(e) = result.sync.as_ref().and_then(|s| s.errors.first()) {
+        reason = Some(e.clone());
+    }
     let scrub = scrub_summary(&result.scrub);
     let stopped = match (result.credentials_in, result.exit_code) {
         (Some("raw"), _) => Some(format!(
@@ -145,8 +157,14 @@ pub fn build(
             "The built replica has a credential or a script in it. Nothing was published; see the scrub report.".to_owned(),
         ),
         (None, 0) => None,
-        (None, code) => Some(format!("The build stopped (exit code {code}); its output says why.")),
+        (None, code) => Some(match &reason {
+            Some(r) => format!("The build stopped: {r}."),
+            None => format!("The build stopped (exit code {code}); its output says why."),
+        }),
     };
+    if let Some(m) = &stopped {
+        crate::ai::app_log(&format!("build ({})", dir.display()), m);
+    }
     let sync = result.sync.as_ref();
     let errors = sync.map(|s| s.errors.clone()).unwrap_or_default();
     Ok(BuildOutcome {
