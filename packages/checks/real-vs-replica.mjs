@@ -60,6 +60,22 @@ const isHtml = f => /<(!doctype html|html[\s>])/i.test(readFileSync(f).subarray(
 const fileSha = url => { const f = rawFile(url); return f && !isHtml(f) ? sha256(readFileSync(f)) : null; };
 const normFamily = s => String(s || '').trim().replace(/^["']|["']$/g, '').toLowerCase();
 const normWeight = w => ({ normal: '400', bold: '700' }[String(w || 'normal').trim()] || String(w).trim());
+// The size a screen was recorded at (its browser window's viewport and pixel ratio, in the raw snapshot): the replica
+// is shown at that size to compare like with like. A presenter's browser window is rarely the demo's 1920×1080, and its
+// height changes by a little as the debugging bar comes and goes.
+const recordedVp = new Map();
+function recordedViewport(snap) {
+  if (recordedVp.has(snap)) return recordedVp.get(snap);
+  let vp = null;
+  try {
+    const f = join(demo.raw, 'snaps', snap + '.json');
+    const main = existsSync(f) && JSON.parse(readFileSync(f, 'utf8')).docs.find(d => d.key === 'main');
+    const v = main && main.meta && main.meta.viewport;
+    if (v && v.w && v.h) vp = { width: v.w, height: v.h, dpr: v.dpr || VP.dpr };
+  } catch (e) {}
+  recordedVp.set(snap, vp);
+  return vp;
+}
 function realFonts(snap) {
   const f = join(demo.raw, 'snaps', snap + '.json');
   if (!existsSync(f)) return null;
@@ -123,18 +139,19 @@ rmSync(OUT, { recursive: true, force: true }); mkdirSync(OUT, { recursive: true 
 const results = [];
 emit('compare-start', { items: items.length, threshold: THRESHOLD, fallback });
 for (const it of items) {
-  const row = { id: it.id, kind: it.kind, state: it.state, app: it.app, snap: it.snap, z: it.z, click: it.click ? it.click.name : undefined, real: it.real };
+  const row = { id: it.id, kind: it.kind, state: it.state, app: it.app, snap: it.snap, z: it.z, click: it.click ? it.click.name : undefined, real: it.real, viewport: recordedViewport(it.snap) || undefined };
   if (!it.real) { Object.assign(row, { pct: null, pass: true, note: 'no real screenshot for this state' }); results.push(row); emit('compared', row); continue; }
   if (!it.state || !S[it.state]) { Object.assign(row, { pct: null, pass: false, error: 'no state for it in the flow' }); results.push(row); emit('compared', row); continue; }
   let r;
-  try { r = await render(it); } catch (e) { r = { error: String(e.message || e).slice(0, 300) }; }
+  try { r = await render({ ...it, viewport: recordedViewport(it.snap) || undefined }); } catch (e) { r = { error: String(e.message || e).slice(0, 300) }; }
   if (r.error) { Object.assign(row, { pct: null, pass: false, error: r.error }); results.push(row); emit('compared', row); continue; }
   const real = readFileSync(it.real);
   const [d] = await diffDetail(cmp, [{ real: real.toString('base64'), replica: r.png.toString('base64') }], { label: [it.id] });
   writeFileSync(join(OUT, file(it.id, 'replica')), r.png);
   writeFileSync(join(OUT, file(it.id, 'side-by-side')), Buffer.from(d.sideBySide, 'base64'));
   writeFileSync(join(OUT, file(it.id, 'diff')), Buffer.from(d.diff, 'base64'));
-  const sizeOk = d.size.real.join() === d.size.replica.join();
+  // Within a pixel or two: a window's height in CSS pixels isn't always whole (806.5 at 2×), the replica's is.
+  const sizeOk = Math.abs(d.size.real[0] - d.size.replica[0]) <= 2 && Math.abs(d.size.real[1] - d.size.replica[1]) <= 2;
   Object.assign(row, { pct: d.pct, box: d.box, regions: d.regions, size: d.size, replica: join(OUT, file(it.id, 'replica')), sideBySide: join(OUT, file(it.id, 'side-by-side')), diff: join(OUT, file(it.id, 'diff')) });
   if (!sizeOk) row.sizeMismatch = true;
   if (r.fonts) row.fonts = fontVerdicts(realFonts(it.snap), r.fonts);

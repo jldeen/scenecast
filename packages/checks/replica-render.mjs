@@ -20,20 +20,27 @@ export async function openReplica(demo, url, kit) {
   const VP = demo.cfg.viewport;
   const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
   const pages = new Map();
-  async function pageAt(z) {
-    if (pages.has(z)) return pages.get(z);
+  // A page per zoom and pixel ratio; it.viewport (the size a screen was recorded at) resizes it to match.
+  async function pageAt(z, dpr = VP.dpr) {
+    const key = `${z}@${dpr}`;
+    if (pages.has(key)) return pages.get(key);
     const zf = z / 100;
-    const ctx = await browser.newContext({ viewport: { width: Math.round(VP.width / zf), height: Math.round(VP.height / zf) }, deviceScaleFactor: VP.dpr * zf });
+    const ctx = await browser.newContext({ viewport: { width: Math.round(VP.width / zf), height: Math.round(VP.height / zf) }, deviceScaleFactor: dpr * zf });
     const page = await ctx.newPage();
     await page.goto(url);
     await page.waitForFunction(() => window.d1 && window.d1.state.active);
-    pages.set(z, page);
+    pages.set(key, page);
     return page;
   }
   const idle = page => page.evaluate(() => window.d1.idle());
   // it: { app, state, z, click?: { name, ctl, frame } } → the page, showing it (or { error }).
   async function show(it) {
-    const page = await pageAt(it.z || 100);
+    const z = it.z || 100, zf = z / 100;
+    const page = await pageAt(z, it.viewport ? it.viewport.dpr : VP.dpr);
+    if (it.viewport) {
+      const want = { width: Math.round(it.viewport.width / zf), height: Math.round(it.viewport.height / zf) }, have = page.viewportSize();
+      if (!have || have.width !== want.width || have.height !== want.height) { await page.setViewportSize(want); await idle(page); }
+    }
     const vp = page.viewportSize();
     await page.mouse.move(vp.width - 1, 2);
     await page.evaluate(([a, s]) => window.d1.go(a, s), [it.app, it.state]); await idle(page);

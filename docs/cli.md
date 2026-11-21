@@ -138,7 +138,7 @@ again, up to `--rounds` fix rounds (3). The rule-based diagnoser knows:
 | script-pinned | at another zoom, a fixed box isn't where the real page put it | `pin`: kept over the placeholder that's where the real page put it |
 | script-sized | at another zoom, a size isn't the real page's | `set`: the size as a function of the window, from the two captures |
 | virtualized | at another zoom, a scrolling list ends early: only the rows in view were captured | `rows`: the rows from the capture at that zoom |
-| size | the screenshots aren't the same size | none: record at the demo's viewport |
+| size | the screenshots aren't the same size (rare: each screen is compared at the size it was recorded at) | none |
 
 Anything else is reported as unexplained. The loop never replaces a page with a screenshot: there is no such patch,
 and it fails if the manifest has more fallback scenes at the end than at the start. Remove a patch from

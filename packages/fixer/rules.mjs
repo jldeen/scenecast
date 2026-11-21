@@ -278,7 +278,7 @@ const sizeRule = {
   name: 'size',
   async diagnose(f) {
     if (!f.sizeMismatch) return [];
-    return [{ cause: 'size', confidence: 0.9, summary: `the real screenshot is ${f.size.real.join('×')} and the replica's ${f.size.replica.join('×')}: record at the demo's viewport (demo.json viewport)`, evidence: f.size }];
+    return [{ cause: 'size', confidence: 0.9, summary: `The replica showed this screen at a different size from the one you recorded (${f.size.replica.join('×')} pixels, not ${f.size.real.join('×')}).`, evidence: f.size }];
   },
 };
 
