@@ -27,60 +27,49 @@ left (Scenecast checks by itself). Click it: it downloads, installs and restarts
 
 ## 2 · Your first demo
 
-![The demo library](app/library.png)
+![Your demos](app/library.png)
 
-1. **New demo.** Pick how you want to make it: **Record for me** (say what it should show; Copilot plans it and
-   clicks through while it records), **I'll click, you script it** (click through once; Copilot writes the script),
-   **Coach me** (Copilot shows each next step and line while you click) or **I know my demo**. The first three use
-   GitHub Copilot: on the **Copilot** page, **Sign in with GitHub** once and enter the code it shows
-   ([more](ai.md)). Then name the demo, add each web app it shows (its start page's address), pick Edge or Chrome and
-   the **profile** you're signed in to the apps with (Scenecast lists your browser's profiles by name).
-2. **Record → Install recorder** (once per browser). Scenecast opens a page with the steps in the browser you
-   already have open, in your profile, shows the **Recorder Extension** folder (in Documents/Scenecast) in Finder or
-   File Explorer, and copies `chrome://extensions` (or `edge://extensions`). Paste that in the address bar and press
-   Enter (browsers only open that page from their own address bar). Then, with the pictures Scenecast shows you: turn
-   on **Developer mode**, and drag the folder onto the page (or **Load unpacked** and pick it). Scenecast turns green as soon as the recorder
-   connects: nothing to type, no port to set.
-3. **Record → Check** (or **Check and fix**). Every line should go green: the receiver, your browser, the recorder,
-   each app's tab (open, on its start screen). "Fix" puts right what it can.
+1. **Open your demo's apps** in Edge or Chrome, each on the page it starts from, signed in.
+2. **New demo.** Name it, and tick its apps from your open tabs (Microsoft product pages are ticked already; mail
+   isn't). Add your talk track if you have one: each `##` heading is a beat, with its time, like
+   `## The late shipment lands (0:00–1:15)`. **Create.**
 
-   ![Ready to record](app/record.png)
+   ![New demo](app/new-demo.png)
 
-4. **Record for me:** press **Draft the plan**, read it (change anything), then **Approve and record**. Keep your hands
-   off the browser; when it asks **May I?** before a send or a save, say **Do it**, **I'll click it myself** or
-   **Skip it**. It builds the replica, writes your script and presenter guide and runs the checks after: skip to step 9.
-   **Coach me:** press **Start coaching** (and **Open the coach window** for your laptop screen), then record as below
-   and follow it. **I'll click, you script it:** just record as below. Either way, when you stop, Scenecast writes the
-   script, focus points and presenter guide and runs the checks on its own.
-
-   **Otherwise: Start recording**, then run the demo once, the way you'll present it, in your browser. **Wait for "Ready for
-   your next step"** before each click: Scenecast captures each screen and everything you could hover or open on it.
-   **Stop recording** at the end. (A "started debugging this browser" bar shows while it records: leave it.)
+3. **Add the recorder** (the first time, once per browser). Scenecast shows the **Recorder Extension** folder (in
+   Documents/Scenecast) in Finder or File Explorer and copies the extensions page's address. Paste it in your
+   browser's address bar and press Enter, turn on **Developer mode**, and drag the folder onto the page. Scenecast
+   turns green as soon as the recorder connects: nothing to type.
+4. **Record.** The run of show checks your browser, the recorder and each app's tab: **All set**, or one fix for
+   whatever isn't (it opens a tab that isn't open; it asks **Which tab is it?** if it can't find one). **Start
+   recording**, then run the demo once, the way you'll present it. A small window stays on top of your browser:
+   **wait for "Ready: click next"** before each click (Scenecast captures each screen and everything you could hover
+   or open on it). **Pause** if you need to; **Stop** at the end. A "started debugging this browser" bar shows while it
+   records: leave it (if you close it, the recording pauses; **Pick up where I left off**).
 
    ![Recording](app/recording.png)
 
-5. **Build & check → Build.** The recording becomes the replica. Passwords, emails and tenant IDs are scrubbed on
-   the way (the scrub report lists what came out). The checks for what changed then run on their own.
-6. **Fidelity → Fix differences.** Every screen of the real product next to the replica, compared pixel by pixel.
-   Fix repairs what differs and compares again. Aim for every state matching.
+   **Or let Copilot click:** on Record, **or let Copilot click for you**. Say what the demo should show, **Draft the
+   plan**, read it, then **Approve and start**. Keep your hands off the browser; when it asks **May I?** before a send
+   or a save, say **Do it**, **I'll click it** or **Skip**. It writes your talk track from what happened. **Coach me**
+   shows each next step and what to say while you click. Both use GitHub Copilot: on the **Copilot** page, **Sign in
+   with GitHub** once ([more](ai.md)).
+5. **Review.** When you stop, Scenecast makes the replica by itself: it builds it (passwords, emails and tenant IDs
+   are taken out), puts your talk track on its screens, checks it, and compares every screen with the real product.
+   Then each beat shows with its screens; pick one to see it next to the real product. If one differs, **Fix it for
+   me**.
 
-   ![Fidelity](app/fidelity.png)
+   ![Review](app/review.png)
 
-7. **Script.** Paste your script (or **Open a file…**: plain text, Markdown or a RunLines `.sk`) and press **Find
-   the focus points**. Each line lands on its screen, with focus points: the spots the replica zooms to as you talk.
-   The same script becomes your **presenter guide** (below).
-
-   ![Script to focus points](app/script.png)
-
-8. **Edit** (if you need to). **Open the editor**: the replica opens in your browser. Click something to add a focus
-   point; drag across words to change wording or a date everywhere it appears; set where a beat starts. **Stop
-   editing** when done: Scenecast checks just what you changed, in a minute or two.
-9. **Present.** The run of show: what's ready before the show, then each beat with its key and its time. **Rehearse**
+   Beside it: **Talk track** (paste or open it: plain text, Markdown or a RunLines `.sk`) puts each line on its screen
+   with focus points, the spots the replica zooms to as you talk, and makes your presenter guide. **Wording and dates**
+   opens the replica to change a word or a date everywhere it appears, or add a focus point.
+6. **Present.** The run of show: what's ready before the show, then each beat with its key and its time. **Rehearse**
    once with the clock going (each beat's time is kept), then **Present**: the stage opens full screen on the
    projector, your guide on the laptop, and Scenecast steps out of the way.
-10. **Share** (to hand it to someone else). Every check runs once, here. **A Scenecast file**: they double-click it
-    and it opens in Scenecast on Present, ready to rehearse, with your guide. **A folder for any browser**: they open
-    `index.html` in Edge or Chrome, no install. Neither has your recording or your sign-ins.
+7. **Share** (to hand it to someone else). Every check runs once, here. **A Scenecast file**: they double-click it
+   and it opens in Scenecast on Present, ready to rehearse, with your guide. **A folder for any browser**: they open
+   `index.html` in Edge or Chrome, no install. Neither has your recording or your sign-ins.
 
 ## 3 · Presenting, with the presenter guide
 
@@ -115,12 +104,14 @@ Present shows these for your demo, with each beat's key. **Rehearse** once on th
 | What you see | What to do |
 |---|---|
 | The app won't open the first time | The "open anyway" step in section 1. |
-| **Check** says the recorder isn't there | **Set it up** and do the three clicks; or press the reload ↻ on the Scenecast card in `edge://extensions`. |
-| **Check** says the browser isn't running with your profile | Close the stray window it opened, open your browser normally, **Check and fix**. |
-| Recording seems stuck on "capturing this screen" | Wait: hovers and menus on a new screen take a little while. Don't click until it says "Ready for your next step". |
-| The browser paused the recorder for a moment | Nothing to do: it picks the recording up where it left off, by itself. If you clicked **Cancel** on the debugging bar, the recording stopped: **Start recording** and run the demo again. |
-| The build stopped: "credentials found" | A password, key or token was on screen while recording. Record that part again without it. |
-| A check fails after an edit | Its line says what: usually a focus point on words that aren't on that screen. Move the dot under Edit. |
+| Record says the recorder isn't connected | **Add the recorder** and drag the folder in again; or press the reload ↻ on the Scenecast card in `chrome://extensions` or `edge://extensions`. |
+| Record asks **Which tab is it?** | Pick the app's tab from the list (Scenecast keeps its address), or open it on its start page. |
+| Record asks which profile | Pick the one you're signed in to the apps with. Scenecast remembers it. |
+| The window on top says **Hold on** for a while | Wait: hovers and menus on a new screen take a little while. Click when it says **Ready: click next**. A click that came too early says so: do it again. |
+| You closed the debugging bar | The recording paused, with every screen kept: **Pick up where I left off**. |
+| Making the replica stopped: "credentials found" | A password, key or token was on screen while recording. Record that part again without it. |
+| Review says a screen needs a look | **Fix it for me**. If it still differs, record that part again. |
+| Review says a check fails | **See what fails**: usually a focus point on words that aren't on that screen. Move the dot under **Wording and dates**. |
 | Share says "Not shared yet" | The checks it lists failed. Fix them on Review, or **Share it anyway** if you accept them. |
 | Someone sent you a `.scenecast` file | Double-click it, or **Share → Open a demo file…**. It opens on Present. |
 | The guide says **Not connected** | It has to be in the same browser as the stage. Close it and use **Open the guide again** in Scenecast, or press **⌥G** / **Ctrl+Alt+G** on the stage. |

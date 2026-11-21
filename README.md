@@ -30,11 +30,13 @@ You also need Microsoft Edge or Google Chrome, signed in to the apps your demo s
 
 ## Your first demo
 
-1. **New demo.** Name it and add the apps it shows (each one's start page). Paste your talk track if you have one.
+1. **New demo.** Open your demo's apps in your browser, then name it and tick them from your open tabs. Paste your
+   talk track if you have one.
 2. **Record.** The first time, Scenecast helps you add its recorder to your browser: one step, once. Then click
-   **Start recording** and go through your demo, or let Copilot click for you.
-3. **Review.** Scenecast checks each screen of the replica against the real product, says why if one differs, and
-   can fix it.
+   **Start recording** and go through your demo, or let Copilot click for you. A small window beside your browser
+   says when to click.
+3. **Review.** When you stop, Scenecast makes the replica and checks each screen against the real product by itself.
+   It says why if one differs, and can fix it.
 4. **Present.** **Rehearse** once with the clock running, then **Present**: the demo opens full screen on the
    projector, and your guide on your laptop.
 5. **Share** (optional). Make one file for another presenter. They double-click it, and it's ready to rehearse.

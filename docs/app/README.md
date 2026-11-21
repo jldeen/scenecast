@@ -3,7 +3,7 @@
 The way presenters use Scenecast: one window for the whole demo, from making it to presenting it, on macOS and
 Windows, with Edge or Chrome. No terminal. (The `scenecast` CLI does the same underneath, for automation and CI.)
 
-![The demo library](library.png)
+![Your demos](library.png)
 
 ## Install
 
@@ -24,37 +24,34 @@ Your demos are kept in `Documents/Scenecast`.
 
 ## A demo, step by step
 
+Four steps along the top of every demo: **Record**, **Review**, **Present**, **Share**. Each screen has one next step.
+
 | Step | What you do |
 |---|---|
-| **New demo** | Pick how: **Record for me**, **I'll click, you script it**, **Coach me** (all three with GitHub Copilot, through your own sign-in on the **Copilot** page: [ai.md](../ai.md)) or **I know my demo**. Name it, list its apps (each one's start page: a tab while you record), pick Edge or Chrome; for Record for me and Coach me, say what it should show or give it your notes, a doc or a script. |
-| **Record** | The receiver the extension talks to runs while the demo is open (the app starts it with its own Node, restarts it if it stops, stops it on quit). **Install recorder** once: it puts the extension in Documents/Scenecast/Recorder Extension, opens a setup page in your running browser and profile and copies the extensions page's address (browsers only open it from their own address bar), shows the folder in Finder or File Explorer, and walks through Developer mode and the drag with real pictures; it turns green when the extension connects (it finds the receiver itself, no port to set). Pick the browser profile by name (or "the one that's open"). **Check** says whether everything's ready: the receiver, your browser and profile, the recorder, each app's tab (open, on its start screen; light or dark); **Check and fix** puts right what it can, and never restarts a browser you already have open. Then **Start recording** and run the demo once: the app shows each screen as it's captured, the side states being swept, and the recorder's time apart from the product's. **Stop recording**. |
-| **Record for me** | On the Record step: **Draft the plan** (from your words and each app's start screen), read and edit it, **Approve and record**. Copilot clicks through in your browser through the recorder while it records; before anything that sends or changes something it asks **May I?** (Do it, I'll click it myself, Skip it, Stop). Then the talk track from what happened, the build, the focus points and presenter guide, and the checks, on their own. **Coach me** shows the next step and line as you record (and in a coach window for the laptop screen); **I'll click, you script it** writes the script after you stop. **What was sent to Copilot** lists every request. |
-| **Build & check** | Turns the recording into the replica, scrubbing secrets and personal data on the way (the scrub report lists what was removed; a password, key or token stops the build). Then the checks for what changed run on their own. |
-| **Fidelity** | Every captured state of the real product next to the replica, compared pixel by pixel, with the fonts. **Fix differences** diagnoses each one, patches this demo, builds and compares again. |
-| **Script** | Paste your script or open it (text, Markdown or RunLines `.sk`). **Find the focus points** puts each line on its screen and makes its focus points; the line-to-screen sheet and the cue sheet show here. The same script becomes the **presenter guide** (its notes and a picture per beat). Then the checks for what changed. |
-| **Edit** | Opens the replica in edit mode in Edge or Chrome: add dots, change wording and dates, set beat starts. Each saved change is listed in the app as it happens. **Stop editing** runs the checks for what the edits touched. |
-| **Present** | The presenter keys on one page first, and the presenter guide's. **Start presenting** opens the replica full screen in Edge or Chrome and, ticked by default, the [presenter guide](../presenter.md) on the screen the app is on (the laptop's); the app steps out of the way. **Open presenter guide** opens it again. **Stop presenting** when you're done. |
-| **Export** | Every check first (two identical runs, cold starts, every zoom, focus points, the presenter guide), unless it already passed and nothing changed since; a failing check stops it, with **Export anyway**. Then the replica as a plain folder or a zip, for another presenter: they open `index.html`, no install. |
+| **First run** | Scenecast finds your browser and the profile you work in, and adds the recorder with you once (the folder, then a drag onto the extensions page, with pictures). It turns green by itself when the recorder connects. |
+| **New demo** | Name it, and tick its apps from your open tabs: Microsoft product pages are ticked to start with (mail, sign-in and docs pages aren't), each named from its address. Or type a start page in. Optional: your talk track (each `##` heading starts a beat, with its time, like `(0:00–1:15)`) and your slot. The button says what it makes: **Create with 4 apps**. |
+| **Record** | The run of show. **Pre-show**: your browser, the recorder and each app's tab, checked when you open it ("All set" when it's ready); anything that isn't has its own fix (Which tab is it?, Sign in, Add the recorder). **Show**: your talk track's beats with their times. **Start recording** checks again with its fixes (it opens a tab that isn't open, and keeps the new address of one that moved) and starts. While you record, a small window stays on top of the browser: **Ready: click next** or **Hold on: capturing**, the screens so far, **Pause** and **Stop**. Closing the browser's "debugging" bar pauses it; **Pick up where I left off** goes on with every screen kept. |
+| **…or let Copilot click** | On Record: **or let Copilot click for you**. Say what to show; **Draft the plan** (from your words and each app's start screen); read it in the run of show; **Approve and start**. Copilot clicks in your browser while it records, and asks **May I?** before anything that sends or changes something (Do it, I'll click it, Skip). **Coach me** shows the next step and what to say while you click. All through your own GitHub Copilot sign-in ([ai.md](../ai.md)); **What was sent to Copilot** lists every request. |
+| **Review** | After Stop, the replica is made on its own, no button: built (email addresses, names and IDs taken out; a password, key or token stops it), your talk track put on its screens, the quick checks, and every screen compared with the real product. Review shows each beat with its screens; pick one to see it next to the real product, and why it differs in a sentence. One next step: **Fix it for me** (finds why, changes this demo, builds and compares again, never with a screenshot) or **Next: rehearse**. Beside it: **Talk track** (paste or open it; the line-to-screen and cue sheets; your guide), **Wording and dates** (the replica in edit mode: change a word or a date, add a focus point), and the **Build** and **Real vs replica** in full. |
+| **Present** | A ready check first: every screen matches, your guide is made, you've rehearsed, and the projector is found. **Rehearse** runs it with the clock going and keeps each beat's time; the run of show shows planned against rehearsed. **Present** opens the stage full screen on the projector and your guide on the laptop (**Swap them** if they're the wrong way round). The keys for this computer: ⌥ on a Mac, Ctrl+Alt on Windows. A clicker's Page Down moves the stage on. |
+| **Share** | **A Scenecast file** (they double-click it and it opens ready to rehearse, with your guide) or **a folder for any browser** (for someone without Scenecast). Every check runs first. Not your recording, not your sign-ins. |
 
-**Fast checks.** A small change never runs the whole checklist. After a build, a script or an edit, the app runs
-`quick`: only the screens and states the change touched (and the keys, focus points or presenter guide if those
-changed), a minute or two. The whole checklist runs once, on Export.
+**Fast checks.** A small change never runs the whole checklist. After a build, a talk track or an edit, only what the
+change touched is checked (and the keys, focus points or guide if those changed), a minute or two. The whole checklist
+runs once, when you share.
 
 From the library: open, duplicate (with its recording) or delete (to the Trash or Recycle Bin) any demo, with where
-each one stands: recorded, built, fidelity score, focus points, last checked.
+each one stands.
 
 ## Screens
 
 | | |
 |---|---|
-| ![New demo: how](new-demo-choice.png) New demo: the four ways | ![GitHub Copilot](copilot.png) Copilot: sign-in, and what it sees |
-| ![The plan](plan.png) Record for me: the goal and the plan | ![May I?](may-i.png) Record for me: asking before a send |
-| ![New demo](new-demo.png) New demo | ![Ready to record](record.png) Record: the recorder and preflight |
-| ![Recording](recording.png) Recording, live | ![Build and check](build.png) Build, scrub report, checks |
-| ![Fidelity](fidelity.png) Fidelity: real vs replica | ![Script](script.png) Script to focus points |
-| ![Edit](edit.png) Edit: saved changes | ![Present](present.png) Present: the keys and the presenter guide |
-| ![Presenting](presenting.png) Presenting, with the presenter guide | ![The presenter guide](presenter-guide.png) The presenter guide, on the laptop screen |
-| ![Export](export.png) Export: every check, then the folder or zip | ![Library](library.png) The library |
+| ![New demo](new-demo.png) New demo, from your open tabs | ![Record](record.png) Record: the run of show |
+| ![Recording](recording.png) Recording, with the window on top of the browser | ![Review](review.png) Review: each beat's screens, next to the real product |
+| ![The plan](plan.png) Copilot: the plan in the run of show | ![May I?](may-i.png) Copilot asks before a send |
+| ![Present](present.png) Present: the ready check and the keys | ![Presenting](presenting.png) Presenting, with your guide |
+| ![The presenter guide](presenter-guide.png) Your guide, on the laptop screen | ![Share](share.png) Share: a Scenecast file, or a folder |
 
 ## Why the replica opens in Edge or Chrome
 
