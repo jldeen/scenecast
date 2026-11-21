@@ -51,9 +51,10 @@ export async function recordForMe({ demo, model, settings = {}, emit = () => {},
   // a real app (Nov 20, the admin center: 10 frames) a pass of that loop takes over a second, so "not busy" right
   // after an action didn't mean it was done: the last click was still held when Stop came, and was dropped. Wait for
   // the recorder to count it first.
+  // Picked up: counted, or being captured now (a click's new screen is counted only after its side states).
   const actions = async () => (await cmd('recordStatus', {}, 30)).actions || 0;
   const seen = async (before, maxS = 30) => {
-    for (let t0 = Date.now(); Date.now() - t0 < maxS * 1000;) { if ((await actions()) > before) return true; await sleep(250); }
+    for (let t0 = Date.now(); Date.now() - t0 < maxS * 1000;) { const s = await cmd('recordStatus', {}, 30); if ((s.actions || 0) > before || s.busy || (s.typing || []).length) return true; await sleep(250); }
     emit({ event: 'note', text: `the recorder didn't see that step within ${maxS} s` });
     return false;
   };

@@ -71,6 +71,17 @@ try {
   const log = readFileSync(join(raw, 'receiver.log'), 'utf8');
   check('the log names the frame that didn\'t answer', /a frame \(http:\/\/localhost:\d+\/stuck\) didn't answer/.test(log), log.split('\n').filter(l => /rec:/.test(l)).slice(-6).join('\n'));
   await send({ op: 'recordAbort' }, 60, RX);
+  // Between takes: a click with no recording on is kept by the page (its queue outlives Stop). The next take must not
+  // replay it (Nov 20: the second take began with a click made while tidying the tabs).
+  await send({ op: 'front', tab: busy }, 30, RX);
+  const box2 = await send({ op: 'find', tab: busy, text: 'Open' }, 30, RX);
+  await send({ op: 'click', tab: busy, x: box2.value.x, y: box2.value.y }, 30, RX);
+  await sleep(500);
+  const r2 = await send({ op: 'recordStart', apps: [{ id: 'app', match }, { id: 'busy', match: busy }], record: { auto: false } }, 120, RX);
+  await sleep(4000);
+  const st2 = (await send({ op: 'recordStatus' }, 30, RX)).value || {};
+  check('a new take doesn\'t replay a click made between takes', r2.ok && st2.recording && !st2.actions && !(st2.log || []).some(l => /click "Open"/.test(l)), JSON.stringify({ actions: st2.actions, log: (st2.log || []).slice(-4) }));
+  await send({ op: 'recordAbort' }, 60, RX);
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {

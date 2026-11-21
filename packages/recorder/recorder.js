@@ -408,7 +408,9 @@ OPS.recordStart = async c => {
     REC.sigs[a.id] = new Map();
   }
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
-  for (const A of REC.apps) { rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); }
+  // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
+  // reload), and Nov 20's second take began with a click made between takes.
+  for (const A of REC.apps) { rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); }
   for (const A of REC.apps) {
     rlogr(`start: ${A.id}: capturing its start screen`);
     await A.page.bringToFront();
