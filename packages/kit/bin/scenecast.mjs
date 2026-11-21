@@ -20,7 +20,7 @@ const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary;
   preflight [--check] [--json|--ndjson]  profiles [--browser chrome|edge] [--json]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
   flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release] [--no-editor]
   script <file> [--matcher text|<file.mjs>] [--no-write] [--no-pdf] [--strict]  edit [--no-open] [--port N]
-  notes [--script <file>] [--check [--as-windows]]  guide-shots  ai status|sign-in|plan|record|script|coach|answer|stop|sent
+  notes [--script <file>] [--from-recording] [--check [--as-windows]]  guide-shots  ai status|sign-in|plan|record|script|coach|answer|stop|sent
   text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
   check [--runs 2]  checklist [--skip a,b] [--only a,b]  fidelity-compare|fidelity-fix|fidelity-report  sheet  hovers  scan [<dir>]
 
@@ -142,6 +142,15 @@ async function main() {
       const { compileFlow } = await import('../compile/flow.mjs');
       const { writeNotes, scriptPath } = await import('../lib/notes.mjs');
       const file = arg(rest, '--script') ? resolve(arg(rest, '--script')) : scriptPath(demo);
+      // Before there's a script: the guide from the recording, each beat's steps and pictures (the build writes these
+      // too; this makes them for a demo built before they had pictures).
+      if (rest.includes('--from-recording')) {
+        if (existsSync(file)) { console.log(`the guide comes from the script (${file}): scenecast notes`); return 0; }
+        const { writeRecordingNotes } = await import('../lib/notes.mjs');
+        const { flow } = await compileFlow(demo);
+        console.log(writeRecordingNotes(demo, flow) ? 'presenter guide: each beat\'s steps from the recording (no script yet)' : 'presenter/notes.json: kept');
+        return 0;
+      }
       if (!existsSync(file)) { console.log(`no script at ${file}: write it there (Markdown, text or a RunLines .sk), set demo.json presenter.script, or pass --script <file>`); return 1; }
       if (arg(rest, '--script')) {
         const cfg = JSON.parse(readFileSync(join(demo.dir, 'demo.json'), 'utf8'));

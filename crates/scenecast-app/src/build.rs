@@ -167,6 +167,16 @@ pub fn build(
     }
     let sync = result.sync.as_ref();
     let errors = sync.map(|s| s.errors.clone()).unwrap_or_default();
+    // No script yet: the guide's pictures from the replica just built. Without them the guide still works.
+    if stopped.is_none()
+        && errors.is_empty()
+        && let Err(e) = crate::guide::from_recording(dir, &mut on)
+    {
+        crate::ai::app_log(
+            &format!("guide pictures ({})", dir.display()),
+            &e.to_string(),
+        );
+    }
     Ok(BuildOutcome {
         ok: stopped.is_none() && errors.is_empty(),
         exit_code: result.exit_code,

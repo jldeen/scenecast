@@ -322,7 +322,7 @@ export function buildNotes(demo, flow, text, name) {
   };
   const screenLine = n => { const l = plan.beats[n] && plan.beats[n].lands; return l ? `${appTitle(l.app)}${keyOf(n) ? ` (**${keyOf(n)}**)` : ''}` : ''; };
   const start = { n: 0, label: 'S', title: s.beats[0] && plan.beats[1] && !plan.beats[1].own ? s.beats[0].title : 'Before the talk', time: '', start: 0, end: null, part: 'Backstage', screen: screenLine(0) || 'the start (**⌥0**)',
-    say: [], do: s.backstage.do.length ? s.backstage.do : [{ level: 0, text: 'In the Scenecast app, **Start presenting** (or `scenecast present`): the stage goes full screen on the projector. Press **⌥0**.' }, { level: 0, text: '**Open presenter guide** in the app (or **⌥G** on the stage) and keep this window on the laptop screen. Its dot should read **In sync**.' }],
+    say: [], do: s.backstage.do.length ? s.backstage.do : [{ level: 0, text: 'In Scenecast, **Present**: the stage goes full screen on the projector, and this guide opens on your laptop. Press **⌥0**.' }, { level: 0, text: 'Keep this window on the laptop screen (**⌥G** on the stage brings it back). Its dot should read **In sync**.' }],
     watch: troubles[0] || [], focus: focus[0] || [], next: nextOf(0), shot: shotFor[0], shotApp: extra[0] || {} };
   const beats = s.beats.map(b => ({
     n: b.n, label: String(b.n), title: b.title, time: b.start != null && b.end != null ? `${clock(b.start)}–${clock(b.end)}` : '', start: b.start, end: b.end,
@@ -355,9 +355,8 @@ export function writeNotes(demo, flow, file = scriptPath(demo)) {
 // presenter can see where a prompt or a click is expected. A script's notes are never replaced.
 export function recordingNotes(demo, flow) {
   const notes = buildNotes(demo, flow, scriptFromFlow(flow, demo.cfg.title || demo.name), 'recording.md');
-  // No pictures yet: they come with the script (guide-shots); the guide shows the steps without them.
-  for (const b of notes.beats) { b.shot = null; b.shotApp = {}; }
-  return Object.assign(notes, { script: null, fromRecording: true, shots: [], shotLabels: {} });
+  // Its pictures too (guide-shots makes them after the build): the guide showed an empty black frame without them.
+  return Object.assign(notes, { script: null, fromRecording: true });
 }
 export function writeRecordingNotes(demo, flow) {
   if (existsSync(scriptPath(demo))) return false;

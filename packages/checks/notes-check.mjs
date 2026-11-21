@@ -68,14 +68,17 @@ try {
   await p0.goto(srv.url); await p0.waitForFunction(() => window.d1 && window.d1.state && window.d1.state.active);
   const wait = (demo.cfg.presenter || {}).shotWait || {};
   const shotBad = [], shotWarn = [];
+  // Before there's a script the guide works without its pictures (a frame shows only with one): the app takes them
+  // after its build; from the command line, `scenecast guide-shots`. A missing or old one is a warning then.
+  const bad = notes.fromRecording ? shotWarn : shotBad;
   for (const s of notes.shots) {
     const f = join(demo.dir, 'presenter', 'shots', s.name + '.png');
-    if (!existsSync(f)) { shotBad.push(`${s.name}: missing (run \`scenecast guide-shots\`)`); continue; }
+    if (!existsSync(f)) { bad.push(`${s.name}: missing (run \`scenecast guide-shots\`)`); continue; }
     await p0.evaluate(async ([a, st]) => { await window.d1.go(a, st); window.d1.activate(a); await window.d1.idle(); }, [s.app, s.state]);
     await p0.mouse.move(demo.cfg.viewport.width - 2, 2); await sleep(400 + (wait[s.app] || 0));
     const now = (await p0.screenshot()).toString('base64');
     const [c] = await comparePngs(p0, [[readFileSync(f).toString('base64'), now]]);
-    if (c.pct > 15) shotBad.push(`${s.name}: ${c.pct}% differs from ${s.app} ${s.state} (run \`scenecast guide-shots\`)`);
+    if (c.pct > 15) bad.push(`${s.name}: ${c.pct}% differs from ${s.app} ${s.state} (run \`scenecast guide-shots\`)`);
     else if (c.pct > 2) shotWarn.push(`${s.name}: ${c.pct}% differs`);
   }
   await ctx0.close();
@@ -111,12 +114,16 @@ try {
   const content = [];
   for (const b of B) {
     await win.click(`[data-goto="${b.n}"]`);
+    // Each picture loads. Before a script, one not taken yet may be missing, as long as its frame isn't on screen.
+    const soft = !!notes.fromRecording;
+    const loads = soft => ['shot', 'next-shot'].map(s => document.querySelector(`[data-pn="${s}"]`))
+      .map(i => !i.getAttribute('src') || (i.complete && i.naturalWidth > 0) || (soft && !!i.closest('[hidden]')));
     const got = await win.evaluate(() => {
       const q = s => document.querySelector(`[data-pn="${s}"]`);
-      const imgs = [q('shot'), q('next-shot')].map(i => !i.getAttribute('src') || (i.complete && i.naturalWidth > 0));
-      return { title: q('title').textContent, say: [...q('say').querySelectorAll(':scope > p, :scope > .pn-alt > p')].map(p => p.innerText), clicks: q('clicks').querySelectorAll(':scope > ul > li').length, focus: q('clicks').querySelectorAll('.pn-focus li').length, watch: q('watch').querySelectorAll('li').length, imgs, index: window.presenter.index };
+      return { title: q('title').textContent, say: [...q('say').querySelectorAll(':scope > p, :scope > .pn-alt > p')].map(p => p.innerText), clicks: q('clicks').querySelectorAll(':scope > ul > li').length, focus: q('clicks').querySelectorAll('.pn-focus li').length, watch: q('watch').querySelectorAll('li').length, index: window.presenter.index };
     });
-    for (let i = 0; i < 20 && got.imgs.includes(false); i++) { await sleep(100); got.imgs = await win.evaluate(() => ['shot', 'next-shot'].map(s => document.querySelector(`[data-pn="${s}"]`)).map(i => !i.getAttribute('src') || (i.complete && i.naturalWidth > 0))); }
+    got.imgs = await win.evaluate(loads, soft);
+    for (let i = 0; i < 20 && got.imgs.includes(false); i++) { await sleep(100); got.imgs = await win.evaluate(loads, soft); }
     const name = notes.names[b.n];
     if (got.index !== b.n) content.push(`${name}: its circle shows ${got.index}`);
     if (got.title !== b.title) content.push(`${name}: title "${got.title}"`);

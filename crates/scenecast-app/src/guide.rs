@@ -111,8 +111,18 @@ fn has_script(dir: &Path) -> bool {
 }
 
 fn run(dir: &Path, sub: &str, on: &mut impl FnMut(Update)) -> Result<(), AppError> {
+    run_with(dir, sub, &[], on)
+}
+
+fn run_with(
+    dir: &Path,
+    sub: &str,
+    args: &[&str],
+    on: &mut impl FnMut(Update),
+) -> Result<(), AppError> {
+    let args: Vec<std::ffi::OsString> = args.iter().map(Into::into).collect();
     let mut lines = Vec::new();
-    let code = engine()?.run_with_progress(with_demo(sub, &[], dir), |p| {
+    let code = engine()?.run_with_progress(with_demo(sub, &args, dir), |p| {
         let (scenecast_build::Progress::Stdout(l) | scenecast_build::Progress::Stderr(l)) = &p;
         lines.push(l.clone());
         on(Update::line(&p));
@@ -133,6 +143,27 @@ pub fn make(dir: &Path, mut on: impl FnMut(Update)) -> Result<Option<GuideStatus
     }
     on(Update::stage("guide", "Writing the presenter guide"));
     run(dir, "notes", &mut on)?;
+    if pictures_stale(dir) {
+        on(Update::stage(
+            "guide-shots",
+            "Taking the presenter guide's pictures",
+        ));
+        run(dir, "guide-shots", &mut on)?;
+    }
+    Ok(status(dir))
+}
+
+/// Before there's a script, the guide comes from the recording: each beat's steps, and a picture of the screen it starts
+/// on. Made after each build, so "On screen now" shows that screen (an empty black frame before). `None`: there's a
+/// script (`make` does its guide).
+pub fn from_recording(
+    dir: &Path,
+    mut on: impl FnMut(Update),
+) -> Result<Option<GuideStatus>, AppError> {
+    if has_script(dir) {
+        return Ok(None);
+    }
+    run_with(dir, "notes", &["--from-recording"], &mut on)?;
     if pictures_stale(dir) {
         on(Update::stage(
             "guide-shots",

@@ -76,11 +76,20 @@ function clicksHtml(b) {
   if ((b.focus || []).length) h += `<p class="pn-focus-h">${md('⌥F')}, in order (Esc zooms out)</p><ol class="pn-focus">${b.focus.map(f => `<li>${md(f)}</li>`).join('')}</ol>`;
   return h;
 }
+// A picture's frame shows only once its picture has loaded: never an empty black box (no picture, or one not made yet).
+function setShot(img, url, frame = img.parentElement) {
+  if (img.getAttribute('src') === (url || null) && (!url || img.complete)) { frame.hidden = !url || !img.naturalWidth; return; }
+  frame.hidden = true;
+  if (!url) { img.removeAttribute('src'); return; }
+  img.onload = () => { if (img.getAttribute('src') === url) frame.hidden = false; };
+  img.onerror = () => { if (img.getAttribute('src') === url) frame.hidden = true; };
+  img.setAttribute('src', url);
+}
 function showShot() {
   const b = B[index];
   const name = (index === live && b.shotApp && b.shotApp[app]) || b.shot;
   const url = shotUrl(name);
-  if ($('shot').getAttribute('src') !== url) { if (url) $('shot').setAttribute('src', url); else $('shot').removeAttribute('src'); }
+  setShot($('shot'), url);
   $('shot-label').textContent = (notes.shotLabels || {})[name] || stepName(b);
 }
 function show(n) {
@@ -102,7 +111,7 @@ function show(n) {
   $('next-act').innerHTML = md(b.next[0]);
   $('next-to').innerHTML = md(b.next[1]);
   $('next-title').textContent = next ? stepName(next) : '';
-  if (next && next.shot) $('next-shot').setAttribute('src', shotUrl(next.shot)); else $('next-shot').removeAttribute('src');
+  setShot($('next-shot'), next && next.shot ? shotUrl(next.shot) : '', $('next-shot').closest('.pn-up'));
   $('prev').disabled = n === 0;
   $('next').disabled = n === LAST;
   tick();

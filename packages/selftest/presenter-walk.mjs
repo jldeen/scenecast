@@ -36,6 +36,44 @@ export function fixtureScript(flow) {
   return md;
 }
 
+// The demo's replica with its guide (/presenter.html), on a free port.
+async function serveDemo(DEMO) {
+  const port = await freePort();
+  const srv = spawn(process.execPath, [join(KIT, 'player', 'serve.mjs'), '--demo', DEMO, '--port', String(port), '--no-editor'], { cwd: DEMO, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+  const url = await new Promise(res => { let o = ''; srv.stdout.on('data', d => { o += d; const m = /(http:\/\/127\.0\.0\.1:\d+\/)/.exec(o); if (m) res(m[1]); }); setTimeout(() => res(null), 15000); });
+  return { url, stop: () => srv.kill() };
+}
+
+// The guide's pictures as the presenter sees them ("On screen now" and "Up next"), at its first beat: each frame on
+// screen, whether its picture loaded, and how light and how varied it is (a blank or black picture is neither).
+export async function guidePictures(browser, url) {
+  const p = await browser.newPage({ viewport: { width: 1512, height: 900 } });
+  try {
+    await p.goto(url + 'presenter.html');
+    await p.waitForFunction(() => (document.querySelector('[data-pn="title"]') || {}).textContent);
+    await p.waitForFunction(() => [...document.querySelectorAll('[data-pn="shot"], [data-pn="next-shot"]')].every(i => !i.getAttribute('src') || i.complete), null, { timeout: 10000 }).catch(() => {});
+    await sleep(300);
+    return await p.evaluate(() => ({
+      next: [...document.querySelectorAll('.pn-do')].map(e => e.textContent.replace(/\s+/g, ' ').trim()).join(),
+      frames: [...document.querySelectorAll('[data-pn="shot"], [data-pn="next-shot"]')].map(img => {
+        const frame = img.closest('.pn-shot, .pn-up'), r = frame.getBoundingClientRect();
+        const out = { which: img.dataset.pn, shown: !frame.hidden && r.width > 0 && r.height > 0, loaded: img.complete && img.naturalWidth > 0 };
+        if (out.loaded) {
+          const c = document.createElement('canvas'); c.width = 64; c.height = 36;
+          const g = c.getContext('2d'); g.drawImage(img, 0, 0, 64, 36);
+          const d = g.getImageData(0, 0, 64, 36).data;
+          let sum = 0, lo = 255, hi = 0;
+          for (let i = 0; i < d.length; i += 4) { const y = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; sum += y; lo = Math.min(lo, y); hi = Math.max(hi, y); }
+          Object.assign(out, { light: Math.round(sum / (d.length / 4)), spread: Math.round(hi - lo) });
+        }
+        return out;
+      }),
+    }));
+  } finally { await p.close(); }
+}
+// A frame on screen with no picture, a blank one (one colour) or a near-black one: what Jessica saw on Nov 21.
+export const blankFrames = g => g.frames.filter(f => f.shown && (!f.loaded || f.light < 10 || f.spread < 12));
+
 export async function presenterWalk({ DEMO, check, BIN = binary() }) {
   const run = (...a) => scenecast(BIN, DEMO, ...a);
   const notesOf = () => JSON.parse(readFileSync(join(DEMO, 'presenter', 'notes.json'), 'utf8'));
@@ -46,6 +84,25 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
   rmSync(join(DEMO, 'presenter'), { recursive: true, force: true });
   const cfg0 = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8'));
   if (cfg0.presenter) { delete cfg0.presenter; writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(cfg0, null, 2) + '\n'); }
+  // Before there's a script, the guide comes from the recording, with a picture of each beat's screen (Nov 21: two
+  // empty black frames). A picture that isn't there leaves no frame. Up next says where and how, with no doubled arrow.
+  for (const f of ['script.md', 'script.txt', 'script.sk']) rmSync(join(DEMO, f), { force: true });
+  {
+    let r0 = await run('notes', '--from-recording');
+    const r1 = await run('guide-shots');
+    const N0 = notesOf();
+    const srv = await serveDemo(DEMO);
+    const b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+    try {
+      const g = await guidePictures(b, srv.url);
+      check('presenter: before a script, the guide shows each beat\'s screen (no blank or black frame)', r0.code === 0 && r1.code === 0 && N0.fromRecording && N0.shots.length > 0
+        && g.frames.length === 2 && g.frames.every(f => f.shown) && !blankFrames(g).length && !/→\s*(\([^)]*\))?\s*→/.test(g.next), JSON.stringify({ r0: r0.out.slice(-300), r1: r1.out.slice(-300), shots: N0.shots, g }));
+      rmSync(join(DEMO, 'presenter', 'shots'), { recursive: true, force: true });
+      const none = await guidePictures(b, srv.url);
+      check('presenter: a picture that isn\'t there leaves no empty frame', none.frames.every(f => !f.shown), JSON.stringify(none));
+    } finally { await b.close(); srv.stop(); }
+    rmSync(join(DEMO, 'presenter'), { recursive: true, force: true });
+  }
   // The script the app keeps (script.md, the one script to focus points reads): the guide reads it as it is.
   copyFileSync(join(ROOT, 'examples', 'fixture-app', 'script.md'), join(DEMO, 'script.md'));
   let r = await run('notes');
