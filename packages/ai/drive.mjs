@@ -139,6 +139,8 @@ export async function recordForMe({ demo, model, settings = {}, emit = () => {},
           if (!field) return instead(step, o, depth, 'there\'s no box to type in on this screen');
         }
         if (!field.focused) { await rawClick(field); await sleep(250); }
+        // Typing replaces what's in the box (Copilot keeps an unsent prompt there).
+        await cmd('clear', { tab: appTab(demo, app) }, 30).catch(() => {});
         const before = await actions();
         await cmd('type', { tab: appTab(demo, app), text: step.value, delay: 18 }, 120);
         await seen(before, 15);
