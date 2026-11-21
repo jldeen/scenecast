@@ -76,6 +76,9 @@ function recordedViewport(snap) {
   recordedVp.set(snap, vp);
   return vp;
 }
+// A zoom's own capture was taken with the page zoomed (its viewport already the zoomed size): the window it was
+// recorded in is its screen's, at 100%.
+const viewportOf = it => recordedViewport(it.kind === 'zoom' ? (S[it.state] || {}).snap || it.snap : it.snap) || undefined;
 function realFonts(snap) {
   const f = join(demo.raw, 'snaps', snap + '.json');
   if (!existsSync(f)) return null;
@@ -139,11 +142,11 @@ rmSync(OUT, { recursive: true, force: true }); mkdirSync(OUT, { recursive: true 
 const results = [];
 emit('compare-start', { items: items.length, threshold: THRESHOLD, fallback });
 for (const it of items) {
-  const row = { id: it.id, kind: it.kind, state: it.state, app: it.app, snap: it.snap, z: it.z, click: it.click ? it.click.name : undefined, real: it.real, viewport: recordedViewport(it.snap) || undefined };
+  const row = { id: it.id, kind: it.kind, state: it.state, app: it.app, snap: it.snap, z: it.z, click: it.click ? it.click.name : undefined, real: it.real, viewport: viewportOf(it) };
   if (!it.real) { Object.assign(row, { pct: null, pass: true, note: 'no real screenshot for this state' }); results.push(row); emit('compared', row); continue; }
   if (!it.state || !S[it.state]) { Object.assign(row, { pct: null, pass: false, error: 'no state for it in the flow' }); results.push(row); emit('compared', row); continue; }
   let r;
-  try { r = await render({ ...it, viewport: recordedViewport(it.snap) || undefined }); } catch (e) { r = { error: String(e.message || e).slice(0, 300) }; }
+  try { r = await render({ ...it, viewport: viewportOf(it) }); } catch (e) { r = { error: String(e.message || e).slice(0, 300) }; }
   if (r.error) { Object.assign(row, { pct: null, pass: false, error: r.error }); results.push(row); emit('compared', row); continue; }
   const real = readFileSync(it.real);
   const [d] = await diffDetail(cmp, [{ real: real.toString('base64'), replica: r.png.toString('base64') }], { label: [it.id] });
