@@ -24,8 +24,31 @@ pub struct Screen {
     pub pass: Option<bool>,
     /// The most different of its views, in percent of pixels.
     pub pct: Option<f64>,
-    /// Why it differs, in a sentence each (what the fixer found).
+    /// Why it differs, in a plain sentence each.
     pub why: Vec<String>,
+    /// What the fixer found, in its own words (for Details).
+    #[serde(default)]
+    pub detail: Vec<String>,
+}
+
+/// What a fixer cause means, in a sentence for anyone. Its own summary (selectors, file names) goes under Details.
+fn plain_cause(cause: &str) -> Option<&'static str> {
+    Some(match cause {
+        "font-substituted" => {
+            "Some text is in a different font: the replica doesn't have the font's file."
+        }
+        "missing-asset" => "A picture or icon is missing in the replica.",
+        "late-style" => "A menu or panel opens without its look in the replica.",
+        "script-pinned" => "Something the page places itself is in a different spot.",
+        "script-sized" => "Something the page sizes to the window is a different size.",
+        "virtualized" => "A long list ends early: only the rows on screen were recorded.",
+        "size" => "The replica showed this screen at a different size.",
+        "unexplained" => {
+            "It still differs, and the reason isn't clear. If it looks wrong, record this screen again."
+        }
+        "error" => "Fix it for me hit a problem on this screen.",
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,25 +136,31 @@ pub fn read(dir: &Path, os: &str) -> Review {
             .iter()
             .filter_map(|i| i["pct"].as_f64())
             .reduce(f64::max);
-        let mut why = Vec::new();
+        let (mut why, mut detail) = (Vec::new(), Vec::new());
+        let add = |list: &mut Vec<String>, w: String| {
+            if !list.contains(&w) {
+                list.push(w);
+            }
+        };
         for i in mine.iter().filter(|i| i["pass"] != true) {
-            let said: Vec<String> = i["causes"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|c| c["summary"].as_str().map(str::to_owned))
-                .collect();
-            let said = if said.is_empty() {
-                i["id"]
-                    .as_str()
-                    .and_then(|x| residual.get(x).cloned())
-                    .unwrap_or_default()
-            } else {
-                said
-            };
-            for w in said {
-                if !why.contains(&w) {
-                    why.push(w);
+            let causes = i["causes"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+            for c in causes {
+                let summary = c["summary"].as_str().map(str::to_owned);
+                match (c["cause"].as_str().and_then(plain_cause), summary) {
+                    (Some(plain), summary) => {
+                        add(&mut why, plain.to_owned());
+                        if let Some(s) = summary {
+                            add(&mut detail, s);
+                        }
+                    }
+                    (None, Some(s)) => add(&mut why, s),
+                    (None, None) => {}
+                }
+            }
+            if causes.is_empty() {
+                let left = i["id"].as_str().and_then(|x| residual.get(x));
+                for w in left.into_iter().flatten() {
+                    add(&mut why, w.clone());
                 }
             }
         }
@@ -143,6 +172,7 @@ pub fn read(dir: &Path, os: &str) -> Review {
             pass,
             pct,
             why,
+            detail,
         }
     };
 
@@ -385,6 +415,8 @@ mod tests {
                     { "id": "admin-01@150", "state": "admin-01", "kind": "zoom", "z": 150, "pass": false, "pct": 2.8,
                       "causes": [{ "summary": "A date shows in a different font: the product loads it late." }] },
                     { "id": "admin-01-menu", "state": "admin-01-menu", "kind": "state", "z": 100, "pass": false, "pct": 1.2 },
+                    { "id": "admin-01-menu@150", "state": "admin-01-menu", "kind": "zoom", "z": 150, "pass": false, "pct": 1.4,
+                      "causes": [{ "cause": "virtualized", "summary": "div.list is virtualized: only the rows in view at 100% were captured" }] },
                     { "id": "iq-start", "state": "iq-start", "kind": "state", "z": 100, "pass": true, "pct": 0.0 }
                 ],
                 "residual": [{ "id": "admin-01-menu", "why": ["not diagnosed (compare only, or the round limit)"] }]
@@ -418,9 +450,17 @@ mod tests {
         );
         // A menu off the path that differs is kept apart, so it isn't missed.
         assert_eq!(r.others.len(), 1);
+        // A cause the fixer named reads plainly, with its own words under Details.
         assert_eq!(
             r.others[0].why,
-            ["not diagnosed (compare only, or the round limit)"]
+            [
+                "not diagnosed (compare only, or the round limit)",
+                "A long list ends early: only the rows on screen were recorded."
+            ]
+        );
+        assert_eq!(
+            r.others[0].detail,
+            ["div.list is virtualized: only the rows in view at 100% were captured"]
         );
         assert_eq!((r.screens, r.matching, r.differ), (5, 4, 2));
         assert!(r.compared && r.fonts_ok);

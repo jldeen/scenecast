@@ -364,6 +364,7 @@ dialog .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px
 .compare .labels { display: grid; grid-template-columns: 1fr 1fr; font-size: var(--t-label); font-weight: 700; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--rule); }
 .compare.one .labels { grid-template-columns: 1fr; }
 .compare img { display: block; width: 100%; height: auto; }
+.card.pick .also { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .card.pick .others { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-top: 10px; border-top: 1px solid var(--rule); font-size: var(--t-label); }
 .card.making { display: grid; gap: 10px; max-width: 720px; }
 .card.making .sub { color: var(--muted); margin-bottom: 4px; }

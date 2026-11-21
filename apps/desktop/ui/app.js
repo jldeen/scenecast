@@ -1347,7 +1347,7 @@ function pickPanel(d, r) {
   const [st] = screenState(sc);
   const where = beat ? (beat.n === 0 ? `${appLabel({ id: sc.app })}\u2019s start screen` : `Beat ${beat.n}, screen ${i + 1}`) : `Menus and hovers, ${i + 1}`;
   const said = sc.pass === true ? `<p><b>Matches.</b> Same as the real product${sc.pct ? ` (${pctWords(sc.pct)}: anti-aliasing, a caret)` : ', to the pixel'}.</p>`
-    : sc.pass === false ? `<p><b>${esc(plainWhy(sc.why[0] || 'It differs from the real product.'))}</b>${sc.why.length > 1 ? ` Also: ${sc.why.slice(1).map(w => esc(plainWhy(w))).join(' ')}` : ''} <span class="muted">${pctWords(sc.pct)}.</span></p>`
+    : sc.pass === false ? `<p><b>${esc(plainWhy(sc.why[0] || 'It differs from the real product.'))}</b> <span class="muted">${pctWords(sc.pct)}.</span></p>${sc.why.length > 1 ? `<ul class="also">${sc.why.slice(1).map(w => `<li>${esc(plainWhy(w))}</li>`).join('')}</ul>` : ''}${(sc.detail || []).length ? `<details class="err-detail"><summary>Details</summary><div class="log">${sc.detail.map(esc).join('\n')}</div></details>` : ''}`
     : '<p class="muted">Not compared yet.</p>';
   return `<section class="card pick" aria-live="polite" data-test="review-pick" data-screen="${esc(sc.id)}" data-state="${st}">
     <h2>${where}</h2><p class="sub">${esc(appLabel({ id: sc.app }))}</p>

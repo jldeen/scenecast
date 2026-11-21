@@ -86,7 +86,7 @@
     const plan = [['The late shipment lands in Teams', 0, 75, 'teams', 5], ['Ask Copilot about PO-450101', 75, 210, 'copilot', 7], ['Who can approve the expedite', 210, 345, 'iq', 6], ['IT turns it on for everyone', 345, 450, 'admin', 4]];
     let k = 0;
     const beats = plan.map(([title, start, end, app, n], b) => ({ n: b + 1, title, start, end, app, key: `${OS === 'macos' ? '⌥' : 'Ctrl+Alt+'}${b + 1}`,
-      screens: Array.from({ length: n }, (_, i) => { k++; const bad = !fixed && b === 2 && i === 0; return { id: `${app}-${String(i).padStart(2, '0')}`, app, shot: pic(app, k), sideBySide: pic(app, k, true), pass: !bad, pct: bad ? 2.8 : (k % 4 ? 0.01 : 0), why: bad ? ['A date shows in a different font: the product loads it late, and the replica can keep the real one.'] : [] }; }) }));
+      screens: Array.from({ length: n }, (_, i) => { k++; const bad = !fixed && b === 2 && i === 0; return { id: `${app}-${String(i).padStart(2, '0')}`, app, shot: pic(app, k), sideBySide: pic(app, k, true), pass: !bad, pct: bad ? 2.8 : (k % 4 ? 0.01 : 0), why: bad ? ['Some text is in a different font: the replica doesn\u2019t have the font\u2019s file.', 'A picture or icon is missing in the replica.'] : [], detail: bad ? ['Segoe UI: the replica falls back; its file wasn\u2019t captured (record the screen again with the font loaded)', '/assets/avatar.png expired when captured, and no other capture has it: record the screen again'] : [] }; }) }));
     return { beats, others: [], screens: k, compared: true, matching: fixed ? k : k - 1, differ: fixed ? 0 : 1, fontsOk: fixed, report: null };
   };
   const H = {
