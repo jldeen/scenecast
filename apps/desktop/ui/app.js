@@ -483,8 +483,19 @@ async function renderPanel() {
 function renderRegions() {
   for (const el of document.querySelectorAll('[data-region]')) {
     const html = REGIONS[el.dataset.region]?.(demo());
-    if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+    if (html !== undefined && el.innerHTML !== html) patchRegion(el, html);
   }
+}
+// Only the parts that changed are replaced: the "May I?" buttons stay the same elements while the line above them
+// counts screens (Nov 20: rebuilt every second during Record for me, a click on "Do it" could land on a button that
+// was gone by the time the mouse came up).
+function patchRegion(el, html) {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  const next = [...t.content.childNodes], cur = [...el.childNodes];
+  const same = (a, b) => a.nodeType === b.nodeType && (a.nodeType === 1 ? a.outerHTML === b.outerHTML : a.textContent === b.textContent);
+  next.forEach((n, i) => { const c = cur[i]; if (!c) el.appendChild(n); else if (!same(c, n)) c.replaceWith(n); });
+  for (const c of cur.slice(next.length)) c.remove();
 }
 
 const progressBar = on => on ? '<div class="progress" role="progressbar" aria-label="Working"><div></div></div>' : '';

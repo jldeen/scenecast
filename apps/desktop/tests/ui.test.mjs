@@ -469,7 +469,10 @@ try {
   // Each send waits for the presenter: Enter gets "Do it", Send "I'll click it myself" (and the person clicks it).
   const answerNext = async (how, before) => {
     const q = await waitFor('Copilot to ask', async () => { const id = await attr('ai-confirm', 'data-qid'); return id && id !== before && id; }, 300000);
+    // The buttons stay put while the progress line above them updates (they were rebuilt every second).
+    await b.execute(() => { window.__doIt = document.querySelector('[data-test="ai-confirm-do"]'); });
     await sleep(1200);
+    check('Record for me: "May I?" buttons aren\'t rebuilt while it waits', await b.execute(() => document.querySelector('[data-test="ai-confirm-do"]') === window.__doIt));
     if (how === 'do') await shot('17-may-i');
     await click(how === 'do' ? 'ai-confirm-do' : 'ai-confirm-self');
     return q;

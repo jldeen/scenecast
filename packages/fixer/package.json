@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/fixer",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "private": true,
   "type": "module",
   "description": "The fidelity fixer: pluggable diagnosers (rule-based by default) that write per-demo patches for real-vs-replica differences."
