@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/checks",
-  "version": "0.5.0-rc.3",
+  "version": "0.5.0-rc.4",
   "private": true,
   "type": "module",
   "description": "The fidelity checklist: two-run, cold start x3, clicks, hovers, drags, zoom, focus points, secret scan, contact sheets."
