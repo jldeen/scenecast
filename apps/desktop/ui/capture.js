@@ -72,8 +72,29 @@ function render() {
   document.body.dataset.state = state;
   $('#cap-title').textContent = title;
   $('#cap-time').textContent = clock(st.chromeSecs);
-  if ($('#cap-body').innerHTML !== body) $('#cap-body').innerHTML = body;
-  $('#cap-foot').innerHTML = foot;
+  put($('#cap-body'), body);
+  put($('#cap-foot'), foot);
+}
+// Only what changed: Pause and Stop stay the same buttons while the count ticks over (a click on a button that was
+// just replaced is lost).
+function put(el, html) {
+  if (el.innerHTML === html) return;
+  const next = document.createElement(el.tagName);
+  next.innerHTML = html;
+  morph(el, next);
+}
+function morph(from, to) {
+  const a = [...from.childNodes], b = [...to.childNodes];
+  if (a.length !== b.length) return from.replaceChildren(...b);
+  a.forEach((x, i) => {
+    const y = b[i];
+    if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName) return from.replaceChild(y, x);
+    if (x.nodeType !== 1) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; return; }
+    if (x.isEqualNode(y)) return;
+    for (const { name } of [...x.attributes]) if (!y.hasAttribute(name)) x.removeAttribute(name);
+    for (const { name, value } of [...y.attributes]) if (x.getAttribute(name) !== value) x.setAttribute(name, value);
+    morph(x, y);
+  });
 }
 
 async function act(what) {

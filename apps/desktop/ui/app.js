@@ -792,8 +792,27 @@ async function renderPanel() {
 function renderRegions() {
   for (const el of document.querySelectorAll('[data-region]')) {
     const html = REGIONS[el.dataset.region]?.(demo());
-    if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+    if (html === undefined || el.innerHTML === html) continue;
+    const next = document.createElement(el.tagName);
+    next.innerHTML = html;
+    morph(el, next);
   }
+}
+// Only what changed is changed: a status line ticking over doesn't replace the buttons beside it (a click on a button
+// that was just replaced is lost), and pictures already shown aren't loaded again.
+function morph(from, to) {
+  const a = [...from.childNodes], b = [...to.childNodes];
+  if (a.length !== b.length) return from.replaceChildren(...b);
+  a.forEach((x, i) => {
+    const y = b[i];
+    if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName) return from.replaceChild(y, x);
+    if (x.nodeType !== 1) { if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue; return; }
+    if (x.isEqualNode(y)) return;
+    // A Details the presenter opened stays open.
+    for (const { name } of [...x.attributes]) if (!y.hasAttribute(name) && !(name === 'open' && x.nodeName === 'DETAILS')) x.removeAttribute(name);
+    for (const { name, value } of [...y.attributes]) if (x.getAttribute(name) !== value) x.setAttribute(name, value);
+    morph(x, y);
+  });
 }
 
 const progressBar = on => on ? '<div class="progress" role="progressbar" aria-label="Working"><div></div></div>' : '';
