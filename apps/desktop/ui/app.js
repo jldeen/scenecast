@@ -273,7 +273,12 @@ listen('job', ({ payload: { demo: id, job, update: u } }) => {
       break;
     case 'record':
       if (!u.status?.held) J(id).goOnOff = null;
-      if ((j.status?.count ?? -1) !== u.status?.count || !!j.status?.recording !== !!u.status?.recording || !!j.status?.held !== !!u.status?.held) { j.status = u.status; renderSidebar(); }
+      if ((j.status?.count ?? -1) !== u.status?.count || !!j.status?.recording !== !!u.status?.recording || !!j.status?.held !== !!u.status?.held) {
+        // The page title says Recording or Paused too.
+        const flipped = !!j.status?.held !== !!u.status?.held || !!j.status?.recording !== !!u.status?.recording;
+        j.status = u.status; renderSidebar();
+        if (flipped && id === S.id && S.view === 'demo') renderHead();
+      }
       j.status = u.status;
       break;
     case 'check':
@@ -725,7 +730,8 @@ function headFor(d) {
     if (!s.recorded) return { title: 'Nothing to review yet', sub: 'Record the demo first: each screen shows up here.' };
     const r = J(d.id).review;
     if (r?.compared && S.tab === 'review') {
-      const beats = r.beats.length > 1 ? ` in ${plural(r.beats.length, 'beat')}` : '';
+      const nb = r.beats.filter(b => b.n > 0).length;
+      const beats = nb > 1 ? ` in ${plural(nb, 'beat')}` : '';
       const talk = s.focusPoints ? ' \u00b7 talk track on its screens' : '';
       if (!r.differ) return { title: 'Your replica matches the real product', sub: `${plural(r.screens, 'screen')}${beats} \u00b7 every one matches${talk}`, side: slot };
       return { title: `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'needs' : 'need'} a look`, sub: `${plural(r.screens, 'screen')}${beats} \u00b7 ${r.matching} match the real product${talk}`, side: slot };
@@ -945,7 +951,7 @@ function recHead(d) {
   }
   if (recording) {
     const busyNow = !!st?.busy;
-    return head('Recording', `<span data-test="recording" data-busy="${busyNow}" data-count="${st?.count ?? 0}" class="state ${busyNow ? 'warn' : 'ok'}">${busyNow ? `Hold on: capturing this screen${st?.side ? ` (${esc(st.side)})` : ''}` : 'Ready: click next'}</span> · ${plural(st?.count ?? 0, 'screen')} so far`,
+    return head('Recording', `<span data-test="recording" data-busy="${busyNow}" data-count="${st?.count ?? 0}" class="state ${busyNow ? 'warn' : 'ok'}">${busyNow ? 'Hold on: capturing this screen' : 'Ready: click next'}</span> · ${plural(st?.count ?? 0, 'screen')} so far`,
       `<button class="alink" data-action="record-pause" data-test="record-pause">Pause</button>
        <button class="btn primary big" data-action="record-stop" data-test="record-stop" ${running('record-stop', d.id) ? 'disabled' : ''}>${STOP} Stop recording</button>`);
   }
@@ -1311,7 +1317,7 @@ Object.assign(REGIONS, {
       return `<div class="rd-row" data-test="review-beat" data-differ="${bad}">${mk(state[0], state[1])}<span class="t"><b>${label}</b><small>${esc(meta)}</small></span><span class="state ${state[2]}">${state[1]}</span>
         <div class="film">${screens.map((sc, i) => thumbBtn(d, sc, `${label}, screen ${i + 1}`)).join('')}</div></div>`;
     };
-    const rows = r.beats.map(b => row(b, r.beats.length > 1 || b.title !== 'The show' ? `Beat ${b.n} \u00b7 ${esc(b.title)}` : 'The show', b.screens)).join('')
+    const rows = r.beats.map(b => row(b, b.n === 0 || (r.beats.length === 1 && b.title === 'The show') ? esc(b.title) : `Beat ${b.n} \u00b7 ${esc(b.title)}`, b.screens)).join('')
       + (r.others.length ? row(null, 'Menus and hovers', r.others) : '');
     const sub = !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
       : r.differ ? `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'differs' : 'differ'} from the real product. Fix it for me finds why and fixes it.`
@@ -1329,6 +1335,9 @@ Object.assign(REGIONS, {
       ${pickPanel(d, r)}</div>`;
   },
 });
+// What the comparison found, in the presenter's words (its report's two stock phrases are the engine's).
+const plainWhy = w => /^not diagnosed/i.test(w) ? 'It differs from the real product. Fix it for me finds out why.'
+  : /^within the threshold/i.test(w) ? 'Only small differences: anti-aliasing, a shadow, a caret.' : w;
 function pickPanel(d, r) {
   const beat = r.beats.find(b => b.screens.some(x => x.id === J(d.id).pick));
   const list = beat ? beat.screens : r.others;
@@ -1336,9 +1345,9 @@ function pickPanel(d, r) {
   const sc = list[i];
   if (!sc) return '<section class="card pick"><p class="muted">Pick a screen to see it next to the real product.</p></section>';
   const [st] = screenState(sc);
-  const where = beat ? `Beat ${beat.n}, screen ${i + 1}` : `Menus and hovers, ${i + 1}`;
+  const where = beat ? (beat.n === 0 ? `${appLabel({ id: sc.app })}\u2019s start screen` : `Beat ${beat.n}, screen ${i + 1}`) : `Menus and hovers, ${i + 1}`;
   const said = sc.pass === true ? `<p><b>Matches.</b> Same as the real product${sc.pct ? ` (${pctWords(sc.pct)}: anti-aliasing, a caret)` : ', to the pixel'}.</p>`
-    : sc.pass === false ? `<p><b>${esc(sc.why[0] || 'It differs from the real product.')}</b>${sc.why.length > 1 ? ` Also: ${sc.why.slice(1).map(esc).join(' ')}` : ''} <span class="muted">${pctWords(sc.pct)}.</span></p>`
+    : sc.pass === false ? `<p><b>${esc(plainWhy(sc.why[0] || 'It differs from the real product.'))}</b>${sc.why.length > 1 ? ` Also: ${sc.why.slice(1).map(w => esc(plainWhy(w))).join(' ')}` : ''} <span class="muted">${pctWords(sc.pct)}.</span></p>`
     : '<p class="muted">Not compared yet.</p>';
   return `<section class="card pick" aria-live="polite" data-test="review-pick" data-screen="${esc(sc.id)}" data-state="${st}">
     <h2>${where}</h2><p class="sub">${esc(appLabel({ id: sc.app }))}</p>
@@ -1892,7 +1901,7 @@ const ACTIONS = {
     await call('record_pause', { id });
     const j = J(id).record || {};
     if (j.status) j.status = { ...j.status, held: { why: 'you', secs: 0 } };
-    renderRegions();
+    renderSidebar(); renderHead();
   },
   'record-go-on': async t => {
     const id = S.id;
@@ -1902,7 +1911,7 @@ const ACTIONS = {
       J(id).goOnOff = r?.off?.length ? r.off : null;
       const j = J(id).record || {};
       if (!J(id).goOnOff && j.status) j.status = { ...j.status, held: undefined };
-    } catch { /* said in a toast */ } finally { delete J(id).running['record-go-on']; renderRegions(); }
+    } catch { /* said in a toast */ } finally { delete J(id).running['record-go-on']; renderSidebar(); renderHead(); }
   },
   'record-stop': async () => {
     const id = S.id;
@@ -1919,7 +1928,7 @@ const ACTIONS = {
   'review-compare': async () => { const id = S.id; await step('fidelity', 'fidelity_run', { fix: false }); await loadReview(id); rerender(); },
   'review-fix': async () => {
     const id = S.id;
-    J(id).aiChain = { stage: 'fix' }; rerender();
+    J(id).aiChain = { stage: 'fix' }; renderSidebar(); rerender();
     await step('fidelity', 'fidelity_run', { fix: true });
     J(id).aiChain = { stage: 'done' };
     await loadReview(id); renderSidebar(); rerender();

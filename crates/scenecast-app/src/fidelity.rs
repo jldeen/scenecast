@@ -46,7 +46,7 @@ pub fn run(dir: &Path, fix: bool, mut on: impl FnMut(Update)) -> Result<Fidelity
         FidelityProgress::Round(n) => on(Update::stage(
             "round",
             &if n == 1 {
-                "Comparing every state with the real product".to_owned()
+                "Comparing every screen with the real product".to_owned()
             } else {
                 format!("Round {n}: comparing again")
             },

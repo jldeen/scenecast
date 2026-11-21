@@ -25,9 +25,11 @@ const status = async () => (await send({ op: 'recordStatus' }, 30, RX)).value ||
 // Settled: not busy three times running.
 const settled = async () => { let quiet = 0; for (let i = 0; i < 120 && quiet < 3; i++) { await sleep(300); quiet = (await status()).busy ? 0 : quiet + 1; } };
 
-// The product: a heading and buttons that each change it (a new screen per click).
+// The product: a heading and buttons that each change it (a new screen per click). /live is a second app whose page
+// keeps changing by itself (a list that grows every half second), left in the background: Go on mustn't count it as moved.
 const web = createServer((q, s) => {
   s.setHeader('content-type', 'text/html');
+  if (q.url.startsWith('/live')) return s.end(`<title>Live</title><h1>live</h1><ul id="l"></ul><script>setInterval(() => { const li = document.createElement('li'); li.textContent = new Date().toISOString(); document.getElementById('l').append(li); }, 500)</script>`);
   s.end(`<title>Pause</title><h1 id="t">home</h1>${['two', 'three', 'four', 'five', 'six'].map(w => `<button id="${w}" onclick="document.getElementById('t').textContent='${w}'">${w}</button>`).join(' ')}`);
 }).listen(WEB, '127.0.0.1');
 
@@ -38,11 +40,13 @@ try {
   for (let i = 0; i < 50 && !(await ping()); i++) await sleep(100);
   ctx = await chromium.launchPersistentContext(join(tmp, 'profile'), { channel: 'chromium', headless: true, viewport: { width: 1000, height: 700 }, ignoreDefaultArgs: ['--disable-extensions'],
     args: ['--silent-debugger-extension-api', '--disable-features=DisableLoadExtensionCommandLineSwitch', `--disable-extensions-except=${join(tmp, 'ext')}`, `--load-extension=${join(tmp, 'ext')}`] });
+  const live = await ctx.newPage();
+  await live.goto(`http://127.0.0.1:${WEB}/live`);
   const page = await ctx.newPage();
-  await page.goto(`http://127.0.0.1:${WEB}/`);
+  await page.goto(`http://127.0.0.1:${WEB}/app`);
   for (let i = 0; i < 80; i++) { const p = await ping(); if (p && p.agent && p.agent.id) break; await sleep(250); }
 
-  const start = await send({ op: 'recordStart', apps: [{ id: 'app', match: `127.0.0.1:${WEB}` }], record: { auto: false, settleMs: 900, everyMs: 250, typeIdleMs: 700 } }, 180, RX);
+  const start = await send({ op: 'recordStart', apps: [{ id: 'app', match: `127.0.0.1:${WEB}/app` }, { id: 'live', match: `127.0.0.1:${WEB}/live` }], first: 'app', record: { auto: false, settleMs: 900, everyMs: 250, typeIdleMs: 700 } }, 180, RX);
   check('recording starts', start.ok && start.value.recording, JSON.stringify(start));
   await settled();
 
@@ -52,22 +56,22 @@ try {
   for (let i = 0; i < 40 && !busy; i++) { busy = !!(await status()).busy; if (!busy) await sleep(100); }
   check('a click: the status says busy while the screen is captured (the capture window\'s Hold on)', busy);
   await settled();
-  check('and then ready, with the new screen', (await status()).count === 2, JSON.stringify(await status()).slice(0, 300));
+  check('and then ready, with the new screen', (await status()).count === 3, JSON.stringify(await status()).slice(0, 300));
 
   // 2 · Pause: not recorded; Go on with the tab moved says which; Go on from here.
   const p1 = await send({ op: 'recordPause' }, 30, RX);
   check('Pause: paused, by the presenter', p1.ok && p1.value.held === 'you' && (await status()).held?.why === 'you', JSON.stringify(p1));
   await page.click('#three');
   await sleep(2500);
-  check('a click while paused isn\'t recorded', (await status()).count === 2, (await status()).count);
+  check('a click while paused isn\'t recorded', (await status()).count === 3, (await status()).count);
   const g1 = await send({ op: 'recordGoOn' }, 120, RX);
-  check('Go on with the tab on another screen: still paused, and it says which tab', g1.ok && (g1.value.off || []).includes('app') && !!(await status()).held, JSON.stringify(g1.value));
+  check('Go on with the tab on another screen: still paused, and it says which tab (not the background app that changed by itself)', g1.ok && (g1.value.off || []).join() === 'app' && !!(await status()).held, JSON.stringify(g1.value));
   await page.click('#two');
   const g2 = await send({ op: 'recordGoOn' }, 120, RX);
   check('back on the screen it was paused on: Go on goes on', g2.ok && g2.value.recording && !(await status()).held, JSON.stringify(g2.value));
   await page.click('#four');
   await settled();
-  check('the next click records', (await status()).count === 3, (await status()).count);
+  check('the next click records', (await status()).count === 4, (await status()).count);
 
   // 3 · The debugging bar closed: paused by itself; Go on keeps every screen.
   await send({ op: 'testCloseBar' }, 30, RX);
@@ -76,17 +80,17 @@ try {
   check('the debugging bar closed: paused by itself, and it says why', held?.why === 'bar', JSON.stringify(held));
   const g3 = await send({ op: 'recordGoOn' }, 120, RX);
   const after = await status();
-  check('Pick up where I left off: every screen kept', g3.ok && g3.value.recording && !after.held && after.count === 3, JSON.stringify({ g3: g3.value, count: after.count }));
+  check('Pick up where I left off: every screen kept', g3.ok && g3.value.recording && !after.held && after.count === 4, JSON.stringify({ g3: g3.value, count: after.count }));
   await page.click('#five');
   await settled();
-  check('and the next click records', (await status()).count === 4, (await status()).count);
+  check('and the next click records', (await status()).count === 5, (await status()).count);
 
   // Stop while paused: at once, with every screen (nothing done while paused counts).
   await send({ op: 'recordPause' }, 30, RX);
   await page.click('#six');
   const t0 = Date.now();
   const stop = await send({ op: 'recordStop' }, 300, RX);
-  check('Stop while paused: at once, all four screens, nothing done while paused', stop.ok && stop.value.states === 4 && Date.now() - t0 < 30000, JSON.stringify({ secs: (Date.now() - t0) / 1000, v: stop.value }).slice(0, 300));
+  check('Stop while paused: at once, every screen (five), nothing done while paused', stop.ok && stop.value.states === 5 && Date.now() - t0 < 30000, JSON.stringify({ secs: (Date.now() - t0) / 1000, v: stop.value }).slice(0, 300));
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {

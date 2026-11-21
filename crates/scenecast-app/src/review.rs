@@ -225,7 +225,57 @@ pub fn read(dir: &Path, os: &str) -> Review {
         }
     }
 
-    let on_path: HashSet<&str> = path.iter().map(|(id, _)| id.as_str()).collect();
+    // Each app's start screen that the path didn't pass through (the apps it never switched to before the first beat):
+    // shown first, as their own group, not under "Menus and hovers".
+    let mut starts_extra: Vec<Screen> = Vec::new();
+    let start_states = &recording["beats"][0]["states"];
+    let app_order: Vec<String> = recording["apps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| a["id"].as_str().map(str::to_owned))
+        .collect();
+    let mut start_apps: Vec<String> = app_order
+        .iter()
+        .filter(|a| start_states.get(a.as_str()).is_some())
+        .cloned()
+        .collect();
+    for a in start_states
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(k, _)| k)
+    {
+        if !start_apps.contains(a) {
+            start_apps.push(a.clone());
+        }
+    }
+    for a in &start_apps {
+        if let Some(id) = start_states[a.as_str()].as_str()
+            && !seen.contains(id)
+        {
+            starts_extra.push(screen(id, a));
+        }
+    }
+    if !starts_extra.is_empty() {
+        beats.insert(
+            0,
+            ReviewBeat {
+                n: 0,
+                title: "Each app's start screen".into(),
+                start: None,
+                end: None,
+                app: None,
+                key: None,
+                screens: starts_extra,
+            },
+        );
+    }
+
+    let on_path: HashSet<&str> = beats
+        .iter()
+        .flat_map(|b| b.screens.iter().map(|s| s.id.as_str()))
+        .collect();
     let others: Vec<Screen> = views
         .keys()
         .filter(|id| !on_path.contains(id.as_str()))
@@ -280,8 +330,12 @@ mod tests {
                     "chat-01": { "app": "chat", "snap": "chat-01" },
                     "admin-start": { "app": "admin", "snap": "admin-start" },
                     "admin-01": { "app": "admin", "snap": "admin-01" },
-                    "admin-01-menu": { "app": "admin", "snap": "admin-01-menu" }
+                    "admin-01-menu": { "app": "admin", "snap": "admin-01-menu" },
+                    "iq-start": { "app": "iq", "snap": "iq-start" }
                 },
+                "apps": [{ "id": "chat" }, { "id": "admin" }, { "id": "iq" }],
+                "beats": [{ "label": "start", "active": "chat",
+                    "states": { "chat": "chat-start", "admin": "admin-start", "iq": "iq-start" } }],
                 "path": [
                     { "app": "chat", "checkpoint": "chat-start" },
                     { "click": {}, "checkpoint": "chat-01" },
@@ -330,28 +384,34 @@ mod tests {
                     { "id": "admin-01", "state": "admin-01", "kind": "state", "z": 100, "pass": true, "pct": 0.0 },
                     { "id": "admin-01@150", "state": "admin-01", "kind": "zoom", "z": 150, "pass": false, "pct": 2.8,
                       "causes": [{ "summary": "A date shows in a different font: the product loads it late." }] },
-                    { "id": "admin-01-menu", "state": "admin-01-menu", "kind": "state", "z": 100, "pass": false, "pct": 1.2 }
+                    { "id": "admin-01-menu", "state": "admin-01-menu", "kind": "state", "z": 100, "pass": false, "pct": 1.2 },
+                    { "id": "iq-start", "state": "iq-start", "kind": "state", "z": 100, "pass": true, "pct": 0.0 }
                 ],
                 "residual": [{ "id": "admin-01-menu", "why": ["not diagnosed (compare only, or the round limit)"] }]
             }),
         );
         let r = read(dir, "macos");
         let ids = |b: &ReviewBeat| b.screens.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
-        assert_eq!(r.beats.len(), 2);
-        assert_eq!(ids(&r.beats[0]), ["chat-start", "chat-01"]);
-        assert_eq!(ids(&r.beats[1]), ["admin-start", "admin-01"]);
-        assert_eq!(r.beats[1].key.as_deref(), Some("⌥2"));
+        // An app the path never switched to before the first beat: its start screen comes first, on its own.
+        assert_eq!(r.beats.len(), 3);
+        assert_eq!(
+            (r.beats[0].n, ids(&r.beats[0])),
+            (0, vec!["iq-start".to_owned()])
+        );
+        assert_eq!(ids(&r.beats[1]), ["chat-start", "chat-01"]);
+        assert_eq!(ids(&r.beats[2]), ["admin-start", "admin-01"]);
+        assert_eq!(r.beats[2].key.as_deref(), Some("⌥2"));
         // The zoom that differs makes its screen differ, with what was found, in a sentence.
-        let admin = &r.beats[1].screens[1];
+        let admin = &r.beats[2].screens[1];
         assert_eq!(admin.pass, Some(false));
         assert_eq!(admin.pct, Some(2.8));
         assert_eq!(
             admin.why,
             ["A date shows in a different font: the product loads it late."]
         );
-        assert!(r.beats[0].screens[1].shot.is_some());
+        assert!(r.beats[1].screens[1].shot.is_some());
         assert!(
-            r.beats[0].screens[0]
+            r.beats[1].screens[0]
                 .side_by_side
                 .as_ref()
                 .is_some_and(|p| p.ends_with("sbs/chat-start.png"))
@@ -362,7 +422,7 @@ mod tests {
             r.others[0].why,
             ["not diagnosed (compare only, or the round limit)"]
         );
-        assert_eq!((r.screens, r.matching, r.differ), (4, 3, 2));
+        assert_eq!((r.screens, r.matching, r.differ), (5, 4, 2));
         assert!(r.compared && r.fonts_ok);
     }
 

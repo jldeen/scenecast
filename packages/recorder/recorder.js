@@ -442,7 +442,13 @@ OPS.recordStart = async c => {
 const recBarClosed = () => REC.apps.some(A => A.page.detachReason === 'canceled_by_user');
 OPS.recordPause = async () => {
   if (!REC.on) return { error: 'not recording' };
-  if (!REC.held) { REC.held = { why: 'you', since: Date.now() }; rlogr('paused'); }
+  if (!REC.held) {
+    REC.held = { why: 'you', since: Date.now(), sigs: {} };
+    // How the tab being recorded looks now, to tell on Go on whether it's been moved on.
+    const A = REC.apps.find(a => a.id === REC.active);
+    if (A) REC.held.sigs[A.id] = await recSig(A.page).catch(() => null);
+    rlogr('paused');
+  }
   return { held: REC.held.why };
 };
 OPS.recordGoOn = async c => {
@@ -457,8 +463,12 @@ OPS.recordGoOn = async c => {
     await recInstall(A.page);
     for (const f of A.page.frames()) await recEval(A.page, f, 'window.__rkrec ? window.__rkrec.drain() : null').catch(() => {});
     A.typing = null;
-    const sig = await recSettle(A.page, 600, 8000);
-    if (sig !== (REC.states[A.state] || {}).sig && (REC.sigs[A.id] || new Map()).get(sig) !== A.state) off.push(A.id);
+    // Only the tab being recorded is checked: the others sat in the background, where live content (a time, a
+    // count) moves on by itself and a signature from minutes ago no longer matches (Nov 21, on real tabs: all four
+    // apps "moved" when one was touched). It's compared with how it looked at Pause, else with its recorded screen.
+    if (A.id !== REC.active) continue;
+    const sig = await recSettle(A.page, 600, 8000), was = (REC.held.sigs || {})[A.id];
+    if (sig !== was && sig !== (REC.states[A.state] || {}).sig && (REC.sigs[A.id] || new Map()).get(sig) !== A.state) off.push(A.id);
   }
   if (off.length && !(c && c.anyway)) return { held: REC.held.why, off };
   rlogr(`going on${off.length ? ` (${off.join(', ')} not on the screen it was paused on)` : ''}`);
