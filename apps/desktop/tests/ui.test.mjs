@@ -551,7 +551,9 @@ try {
   await waitFor('the recorder to connect', async () => (await attr('recorder-state', 'data-connected')) === 'true', 60000);
   // Draft the plan checks the tabs first (it reads each start screen), the same check as Start's.
   await click('ai-plan');
-  await waitFor('the plan', () => exists('ai-plan-done'), 180000);
+  // Done, or an error (then what it said, in the failure).
+  await waitFor('the plan', async () => (await exists('ai-plan-done')) || b.execute(() => !!document.querySelector('[data-region="ai-plan-progress"] [data-test="error"]')), 180000);
+  check('Copilot drafts the plan', await exists('ai-plan-done'), await b.execute(() => { const e = document.querySelector('[data-region="ai-plan-progress"] [data-test="error"]'); return e ? `${e.dataset.error}: ${e.querySelector('.log')?.textContent || e.innerText}` : 'no error shown'; }));
   check('Record for me: the goal kept with the demo', /supplier delay/.test(readFileSync(join(FM, 'ai.json'), 'utf8')) && /"mode": ?"record"/.test(readFileSync(join(FM, 'ai.json'), 'utf8')));
   const planText = await b.execute(() => document.querySelector('[data-test="ai-plan-text"]').value);
   check('the plan fills the run of show, with the steps that ask first', await exists('plan-beat-1') && /asks you first/.test(await b.execute(() => document.querySelector('[data-test="run-of-show"]').innerText)));
