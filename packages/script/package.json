@@ -1,6 +1,6 @@
 {
   "name": "@scenecast/script",
-  "version": "0.5.0-rc.2",
+  "version": "0.5.0-rc.3",
   "private": true,
   "type": "module",
   "description": "Script to focus points: the presenter's lines matched to the replica's screens (pluggable matcher, deterministic by default), the line-to-screen sheet and the cue sheet."
