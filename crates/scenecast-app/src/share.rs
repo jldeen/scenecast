@@ -65,7 +65,10 @@ fn files(root: &Path) -> std::io::Result<Vec<(String, PathBuf)>> {
 pub fn write(dir: &Path, file: &Path, made_by: &str) -> Result<(usize, u64), AppError> {
     let demo = crate::library::load(dir)?;
     let list = files(dir)?;
-    let out = fs::File::create(file)?;
+    // Written next to it under another name, then renamed: the file never shows half-written under its own name
+    // (a 40 MB demo takes a few seconds, and someone could send it meanwhile).
+    let part = file.with_extension(format!("{EXT}.part"));
+    let out = fs::File::create(&part)?;
     let mut zip = zip::ZipWriter::new(out);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
@@ -81,6 +84,7 @@ pub fn write(dir: &Path, file: &Path, made_by: &str) -> Result<(usize, u64), App
         zip.write_all(&fs::read(path)?)?;
     }
     zip.finish()?;
+    fs::rename(&part, file)?;
     Ok((list.len(), fs::metadata(file)?.len()))
 }
 
@@ -205,6 +209,8 @@ mod tests {
         let file = tmp.path().join("supplier-delay.scenecast");
         let (n, bytes) = write(&d.dir, &file, "Scenecast 0.5.0 on macos").unwrap();
         assert!(n >= 3 && bytes > 0);
+        // Written under another name, then renamed: nothing half-written left beside it.
+        assert!(!tmp.path().join("supplier-delay.scenecast.part").exists());
         let names: Vec<String> = {
             let z = zip::ZipArchive::new(fs::File::open(&file).unwrap()).unwrap();
             z.file_names().map(str::to_owned).collect()

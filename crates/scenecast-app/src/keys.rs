@@ -87,7 +87,7 @@ pub fn reference_for(m: &BundleManifest, os: &str, focus_points: usize) -> KeyRe
         .filter_map(|a| {
             Some(KeyRow {
                 keys: k(&a.key.as_ref()?.to_uppercase()),
-                what: format!("Show {}", if a.title.is_empty() { &a.id } else { &a.title }),
+                what: format!("Show {}", app_name(&a.id, &a.title)),
             })
         })
         .collect();
@@ -165,6 +165,16 @@ pub fn reference_for(m: &BundleManifest, os: &str, focus_points: usize) -> KeyRe
     }
 }
 
+/// An app's name for the keys: its title, but a short one made from its id reads as initials (`iq` was titled "Iq").
+fn app_name(id: &str, title: &str) -> String {
+    let t = if title.is_empty() { id } else { title };
+    if t.chars().count() <= 3 && t.eq_ignore_ascii_case(id) {
+        t.to_uppercase()
+    } else {
+        t.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,7 +183,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "schema_version": "scenecast.bundle.v2",
             "title": "Fixture",
-            "apps": [{"id": "chat", "title": "Chat", "key": "c"}, {"id": "admin", "title": "", "key": "a"}],
+            "apps": [{"id": "chat", "title": "Chat", "key": "c"}, {"id": "admin", "title": "", "key": "a"}, {"id": "iq", "title": "Iq", "key": "i"}],
             "graph": {"start_scene": "chat-start", "scenes": []},
             "beats": [{"label": "0 Reset", "active": "chat"}, {"label": "1 Ask", "active": "chat"}, {"label": "2026 plan", "active": "chat"}],
         }))
@@ -198,6 +208,8 @@ mod tests {
         assert!(mac.groups[2].rows[0].what.contains("4 in this demo"));
         let apps = &mac.groups[1];
         assert_eq!(apps.title, "Apps");
+        // A short title made from its id reads as initials.
+        assert_eq!(apps.rows[2].what, "Show IQ");
         assert_eq!(
             apps.rows[0],
             KeyRow {
@@ -206,7 +218,7 @@ mod tests {
             }
         );
         assert_eq!(apps.rows[1].what, "Show admin");
-        assert_eq!(apps.rows.len(), 3);
+        assert_eq!(apps.rows.len(), 4);
         assert!(
             mac.groups
                 .iter()
