@@ -121,6 +121,38 @@ pub fn open_tabs() -> Vec<Value> {
     .unwrap_or_default()
 }
 
+/// Present: the stage window full screen, on `place` (the projector) when it's given, by the recorder in the browser the
+/// stage opened in (a browser that was already running ignores the flags that would). False: no recorder connected, or
+/// it couldn't find the window (the stage stays a window).
+pub fn stage_fullscreen(url: &str, place: Option<crate::guide::Place>) -> bool {
+    let r = host().state();
+    let Some(port) = r.port.filter(|_| r.connected) else {
+        return false;
+    };
+    command_result(
+        port,
+        &serde_json::json!({ "op": "stageWindow", "url": url, "place": place }),
+        Duration::from_secs(15),
+    )
+    .is_some_and(|v| v["state"] == "fullscreen")
+}
+
+/// Stop presenting: the stage and guide windows at `url` closed, by the recorder (only windows with nothing else in
+/// them). How many it closed; 0 with no recorder connected.
+pub fn close_stage(url: &str) -> u64 {
+    let r = host().state();
+    let Some(port) = r.port.filter(|_| r.connected) else {
+        return 0;
+    };
+    command_result(
+        port,
+        &serde_json::json!({ "op": "closeStage", "url": url }),
+        Duration::from_secs(8),
+    )
+    .and_then(|v| v["closed"].as_u64())
+    .unwrap_or(0)
+}
+
 fn request_body(
     port: u16,
     method: &str,

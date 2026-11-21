@@ -94,6 +94,23 @@ try {
   // Chrome's "started debugging this browser" bar goes: no tab is attached once the recording's stopped.
   const ext = (await send({ op: 'extension' }, 30, RX)).value || {};
   check('after Stop: the recorder lets go of every tab (no debugging bar on the stage)', Array.isArray(ext.watching) && ext.watching.length === 0, JSON.stringify(ext).slice(0, 300));
+  // A tab looked at while not recording (Record's quiet check) is let go once nothing has needed it for 20 s.
+  const looked = await send({ op: 'observe', tab: `127.0.0.1:${WEB}/app` }, 30, RX);
+  const attached = ((await send({ op: 'extension' }, 30, RX)).value || {}).watching || [];
+  let watching = [];
+  for (let i = 0; i < 40; i++) { await sleep(1000); watching = ((await send({ op: 'extension' }, 30, RX)).value || {}).watching || []; if (i > 3 && !watching.length) break; }
+  check('not recording: a tab the recorder looked at is let go after a while', looked.ok && attached.length >= 1 && !watching.length, JSON.stringify({ looked: looked.ok || looked.error, attached, watching }).slice(0, 400));
+  // Present: the stage window full screen in a browser that was already running (it ignores --start-fullscreen).
+  const full = await send({ op: 'stageWindow', url: `http://127.0.0.1:${WEB}/app` }, 30, RX);
+  check('present: the recorder puts the stage window full screen', full.ok && full.value && full.value.state === 'fullscreen', JSON.stringify(full).slice(0, 300));
+  // Stop presenting: the stage's own window closes; a window with the presenter's other tabs in it doesn't.
+  const popup = ctx.waitForEvent('page');
+  await (await ctx.newCDPSession(live)).send('Target.createTarget', { url: `http://127.0.0.1:${WEB}/stage`, newWindow: true });
+  await (await popup).waitForLoadState();
+  const closed = await send({ op: 'closeStage', url: `http://127.0.0.1:${WEB}/stage` }, 30, RX);
+  await sleep(500);
+  const left = ctx.pages().map(p => p.url());
+  check('present: Stop closes the stage window and nothing else', closed.ok && closed.value.closed === 1 && !left.some(u => u.endsWith('/stage')) && left.some(u => u.endsWith('/live')) && left.some(u => u.endsWith('/app')), JSON.stringify({ closed, left }).slice(0, 300));
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {

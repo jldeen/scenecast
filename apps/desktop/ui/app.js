@@ -940,6 +940,9 @@ function recHead(d) {
   const { st, stop, recording, starting, aiOn } = recState(d);
   const rx = rxState();
   const head = (title, small, next) => `<span hidden data-test="recorder-state" data-connected="${!!rx.connected}"></span><div class="rd-head"><div class="grow"><h2>${title}</h2><small>${small}</small></div><div class="next">${next}</div></div>`;
+  // Copilot has stopped clicking once it's writing the talk track: the browser is the presenter's again.
+  const writing = aiOn && (J(d.id)['ai-record']?.stages || []).some(s => s.name === 'script');
+  if (writing) return head('Writing your talk track', 'Copilot has finished clicking. It\u2019s writing what to say from what it did.', `<button class="btn primary big" disabled>Writing\u2026</button>`);
   if (aiOn) return head('Copilot is recording', 'Keep your hands off the browser until it asks.', `<button class="btn primary big" data-action="ai-stop" data-test="ai-stop">${STOP} Stop</button>`);
   if (starting) return head('Getting ready', `<span data-test="record-starting">Checking your browser and the app tabs, then capturing each start screen. Wait for <strong>Recording</strong> before you click.</span>`,
     `<button class="btn primary big" disabled>Starting…</button>`);
@@ -1158,7 +1161,9 @@ Object.assign(REGIONS, {
     const j = J(d.id)['ai-plan'] || {};
     if (running('ai-plan', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-planning">Copilot is reading your words and the start screens, and drafting the plan…</p>`;
     const plan = (j.events || []).find(e => e.event === 'plan');
-    if (plan && j.outcome) return `<div class="notice ok" data-test="ai-plan-done" data-steps="${plan.data.steps}"><div><strong>Plan drafted:</strong> ${plural(plan.data.beats, 'beat')}, ${plural(plan.data.steps, 'step')}${plan.data.askFirst ? `, ${plan.data.askFirst} asking you first` : ''}. Check it below.</div></div>`;
+    // As the plan is now: the presenter may have edited it since Copilot drafted it.
+    const now = planBeats(planText(d)), counts = now.length ? { beats: now.length, steps: now.reduce((n, b) => n + b.steps.length, 0) } : plan?.data;
+    if (plan && j.outcome) return `<div class="notice ok" data-test="ai-plan-done" data-steps="${counts.steps}"><div><strong>Plan drafted:</strong> ${plural(counts.beats, 'beat')}, ${plural(counts.steps, 'step')}${plan.data.askFirst ? `, ${plan.data.askFirst} asking you first` : ''}. Check it below.</div></div>`;
     return errorBox(j.error, 'ai-plan');
   },
   'ai-run'(d) {
@@ -1640,7 +1645,7 @@ PANELS.present = async (panel, d) => {
   const guideUrl = J(d.id).guideUrl, rehearsing = !!J(d.id).rehearsing;
   const gk = isMac() ? '⌥G' : 'Ctrl+Alt+G';
   const head = url ? `<div class="rd-head"><div class="grow"><h2>${rehearsing ? 'Rehearsing' : 'Presenting'}</h2>
-      <small data-test="presenting" data-url="${esc(url)}">${S.info.noOpen ? `Open it: <code>${esc(url)}</code>` : `The stage is full screen${placement(disp).stage ? ` on ${esc(placement(disp).stage.name)}` : ''}. Scenecast is out of the way.`}</small></div>
+      <small data-test="presenting" data-url="${esc(url)}">${S.info.noOpen ? `Open it: <code>${esc(url)}</code>` : J(d.id).fullscreen === false ? `The stage is open in ${esc(browserName())}${placement(disp).stage ? ` on ${esc(placement(disp).stage.name)}` : ''}. To make it full screen, click it and press <kbd>${isMac() ? '⌃⌘F' : 'F11'}</kbd>.` : `The stage is full screen${placement(disp).stage ? ` on ${esc(placement(disp).stage.name)}` : ''}. Scenecast is out of the way.`}</small></div>
       <div class="next">${guide ? '<button class="btn" data-action="present-guide" data-test="present-guide">Open the guide again</button>' : ''}
         <button class="btn primary big" data-action="present-stop" data-test="present-stop">${rehearsing ? 'Stop rehearsing' : 'Stop presenting'}</button></div></div>
       ${guide ? `<div class="notice info" style="margin:12px 20px" data-test="guide-open" data-url="${esc(guideUrl || '')}"><div>${guideUrl ? 'Your guide opened on your laptop screen. Its dot reads <strong>In sync</strong> once the stage is up.' : `Open your guide with <kbd>${esc(gk)}</kbd> on the stage.`}
@@ -1768,6 +1773,7 @@ async function presentNow(rehearse) {
   const r = await call('present_start', { id, guide, rehearse, stage: pl.stagePlace || null, guidePlace: pl.guidePlace || null });
   S.servers.present[id] = r.url;
   J(id).guideUrl = r.guide || null;
+  J(id).fullscreen = r.fullscreen;
   J(id).rehearsing = rehearse;
   announce(`${rehearse ? 'Rehearsing' : 'Presenting'}${r.guide ? ', with your guide' : ''}`);
   rerender();

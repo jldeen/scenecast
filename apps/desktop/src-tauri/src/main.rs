@@ -1376,7 +1376,10 @@ async fn present_start(
         } else {
             None
         };
-        let out = json!({ "url": session.url, "opened": session.opened, "guide": guide_url, "rehearse": rehearse });
+        // Last, so the stage is in front of the guide: full screen on its screen (the browser was already running).
+        let fullscreen =
+            session.opened && scenecast_app::receiver::stage_fullscreen(&session.url, stage);
+        let out = json!({ "url": session.url, "opened": session.opened, "guide": guide_url, "rehearse": rehearse, "fullscreen": fullscreen });
         let updates = session.updates();
         std::thread::spawn(move || for _ in updates {});
         if session.opened
@@ -1399,6 +1402,8 @@ async fn present_stop(state: State<'_, Shared>, app: AppHandle, id: String) -> R
     let state = state.inner().clone();
     blocking(move || {
         if let Some(mut s) = state.presents.lock().expect("presents lock").remove(&id) {
+            // Its windows first, while the page is still there: nothing left on screen once it's stopped.
+            scenecast_app::receiver::close_stage(&s.url);
             s.stop()?;
             scenecast_app::rundown::finish(&state.library.dir(&id)?);
         }

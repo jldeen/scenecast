@@ -309,6 +309,10 @@ const OPS = {
 };
 
 let RUNNING = true;
+// A command running, and when the last one that could touch a tab finished: the extension lets go of tabs nothing has
+// asked for in a while (main.js). Status questions don't count.
+let OP_BUSY = 0, LAST_OP = Date.now();
+const QUIET_OPS = new Set(['recordStatus', 'extension']);
 function startLoop() { (async () => {
   await rlog('agent started; pages ' + ctx.pages().length);
   while (RUNNING) {
@@ -316,11 +320,13 @@ function startLoop() { (async () => {
     if (c.error) { await sleep(2000); continue; }
     if (!c.op || c.op === 'idle') continue;
     if (c.op === 'quit') { RUNNING = false; await post('/cmd/result', { id: c.id, ok: true, value: 'bye' }); break; }
-    const t0 = Date.now();
+    const t0 = Date.now(), quiet = QUIET_OPS.has(c.op);
+    if (!quiet) OP_BUSY++;
     try {
       const f = OPS[c.op]; if (!f) throw new Error('unknown op ' + c.op);
       const v = await f(c);
       await post('/cmd/result', { id: c.id, ok: true, value: v === undefined ? null : v, ms: Date.now() - t0 });
     } catch (e) { await post('/cmd/result', { id: c.id, ok: false, error: String(e && e.stack || e).slice(0, 1500), ms: Date.now() - t0 }); }
+    finally { if (!quiet) { OP_BUSY--; LAST_OP = Date.now(); } }
   }
 })(); }
