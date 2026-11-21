@@ -1194,7 +1194,7 @@ Object.assign(REGIONS, {
 // track first when it's Copilot's to write; the talk track goes on its screens when there is one; the quick checks; and
 // every screen compared with the real product. A step that fails stops the chain and says so in Review.
 async function makeReplica(id, { write = false } = {}) {
-  const set = stage => { J(id).aiChain = { ...(J(id).aiChain || {}), stage, write }; renderRegions(); if (id === S.id) renderHead(); };
+  const set = stage => { J(id).aiChain = { ...(J(id).aiChain || {}), stage, write }; renderSidebar(); renderRegions(); if (id === S.id) renderHead(); };
   J(id).aiChain = { stage: 'start', write, recorded: J(id)['record-stop']?.outcome || J(id)['ai-record']?.outcome?.summary || null };
   J(id).review = null;
   try {
@@ -1218,6 +1218,7 @@ async function makeReplica(id, { write = false } = {}) {
   } catch (e) { J(id).aiChain = { ...(J(id).aiChain || {}), stage: 'error', error: e.message }; }
   await loadReview(id);
   if (aiMode(S.demos.find(x => x.id === id)?.mode)) loadAi(id);
+  renderSidebar();
   if (id === S.id) rerender(); else renderRegions();
 }
 
@@ -1892,7 +1893,7 @@ const ACTIONS = {
     J(id).aiChain = { stage: 'fix' }; rerender();
     await step('fidelity', 'fidelity_run', { fix: true });
     J(id).aiChain = { stage: 'done' };
-    await loadReview(id); rerender();
+    await loadReview(id); renderSidebar(); rerender();
   },
   build: async () => {
     const o = await step('build', 'build', { force: false }, o => { J(S.id).scrub = o.scrub; });
