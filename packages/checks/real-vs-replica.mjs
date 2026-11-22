@@ -171,11 +171,14 @@ async function render(it, lane) {
 const file = (id, what) => `${id.replace(/[^\w@.+-]+/g, '_')}.${what}.png`;
 rmSync(OUT, { recursive: true, force: true }); mkdirSync(OUT, { recursive: true });
 const results = new Array(items.length);
-// What's been compared so far, for Review while the rest renders (written aside, then put in place whole).
+// What's been compared so far, for Review while the rest renders (written aside, then put in place whole; a write that
+// fails, say a reader holding the file on Windows, waits for the next one).
 const writePartial = () => {
   const f = join(OUT, 'compare.json');
-  writeFileSync(f + '.tmp', JSON.stringify({ demo: demo.name, partial: true, at: new Date().toISOString(), threshold: THRESHOLD, viewport: VP, url: URL0, items: results.filter(Boolean), fallback }));
-  renameSync(f + '.tmp', f);
+  try {
+    writeFileSync(f + '.tmp', JSON.stringify({ demo: demo.name, partial: true, at: new Date().toISOString(), threshold: THRESHOLD, viewport: VP, url: URL0, items: results.filter(Boolean), fallback }));
+    renameSync(f + '.tmp', f);
+  } catch (e) {}
 };
 writePartial();
 emit('compare-start', { items: items.length, threshold: THRESHOLD, fallback, lanes: LANES });
