@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -97,6 +97,46 @@ try {
   assert.equal(interactions.defs[0].ops.length, 1);
   assert.equal(interactions.clicks[0].ops.length, 1);
   console.log('Rust asset and CSS resolution matches the JavaScript capture processor');
+
+  // The build's caches (the scrub's, by content; the fingerprints) change nothing: a build that finds everything in
+  // them, and one after a capture changed, are byte for byte what a clean --force build with no cache makes.
+  const output = dir => {
+    const out = { ...files(join(dir, 'data')), 'manifest.json': readFileSync(join(dir, 'manifest.json')).toString('base64'), 'flow.json': readFileSync(join(dir, 'flow.json')).toString('base64'), 'scrub.json': readFileSync(join(dir, '.out', 'scrub.json')).toString('base64') };
+    // build.json says when it was built, how long it took and what changed since the build before.
+    const { at, ms, changed, ...rest } = JSON.parse(readFileSync(join(dir, 'data', 'build.json'), 'utf8'));
+    out['build.json'] = JSON.stringify(rest);
+    return out;
+  };
+  const clean = (label, extra = {}) => {
+    const copy = join(temp, label);
+    cpSync(demo, copy, { recursive: true, filter: f => !/[\\/](data|\.out)$|manifest\.json$/.test(f) });
+    const r = spawnSync(binary, ['build', '--demo', copy, '--force'], { env: { ...env, SCENECAST_SCRUB_CACHE: 'off', ...extra }, encoding: 'utf8', timeout: 60000 });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    return output(copy);
+  };
+  run(binary, ['build', '--demo', demo]);
+  assert.ok(readFileSync(join(demo, '.out', 'scrub-cache.txt'), 'utf8').split('\n').length > 5, 'the scrub cache is kept');
+  assert.deepEqual(output(demo), clean('clean-1'), 'everything from the cache: as a clean build');
+  const snap = join(raw, 'snaps', 'part.json');
+  writeFileSync(snap, readFileSync(snap, 'utf8').replace('source part', 'source part, again'));
+  run(binary, ['build', '--demo', demo]);
+  assert.match(readFileSync(join(demo, 'data', 'snaps', 'start.html'), 'utf8'), /source part, again/);
+  assert.deepEqual(output(demo), clean('clean-2'), 'one capture changed: as a clean build');
+  // A token planted in a capture is caught whether the capture is new or its content was scanned before, the same as
+  // without the cache.
+  const token = ['ghp', '_', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('');
+  const findings = r => JSON.parse(readFileSync(join(r, '.out', 'scrub.json'), 'utf8')).findings.filter(f => f.credential).map(f => `${f.source} ${f.file} ${f.kind}`).sort();
+  const stops = (dir, extra = {}) => spawnSync(binary, ['build', '--demo', dir], { env: { ...env, ...extra }, encoding: 'utf8', timeout: 60000 }).status;
+  writeFileSync(join(raw, 'snaps', 'leak.json'), JSON.stringify({ docs: [], note: token }));
+  assert.equal(stops(demo), 1, 'a new capture with a token stops the build');
+  const caught = findings(demo);
+  assert.ok(caught.some(f => f === 'raw snaps/leak.json github-token'), caught.join('; '));
+  assert.equal(stops(demo), 1, 'and again, from the cache');
+  assert.deepEqual(findings(demo), caught);
+  assert.equal(stops(demo, { SCENECAST_SCRUB_CACHE: 'off' }), 1);
+  assert.deepEqual(findings(demo), caught, 'the same findings without the cache');
+  rmSync(join(raw, 'snaps', 'leak.json'));
+  console.log('cached builds match a clean build byte for byte, and planted tokens are still caught');
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

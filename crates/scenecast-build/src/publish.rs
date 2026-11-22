@@ -180,25 +180,34 @@ pub fn publish(data: &Path, mode: PublishMode) -> Result<Published, PublishError
         let staged = files(&from)?;
         let previous = files(&to)?;
         fs::create_dir_all(&to).map_err(|e| io(&to, e))?;
-        for name in &staged {
-            let src = from.join(name);
-            let dst = to.join(name);
-            let bytes = fs::read(&src).map_err(|e| io(&src, e))?;
-            let digest = hash(&bytes);
-            if *dir != "assets" {
-                output.insert(format!("{dir}/{name}"), digest.clone());
-            }
-            if previous.contains(name) {
-                let old = fs::read(&dst).map_err(|e| io(&dst, e))?;
-                if hash(&old) == digest {
-                    continue;
+        // Each file compared (and written when it changed) on several threads; the results in order.
+        let staged_list: Vec<&String> = staged.iter().collect();
+        let results = crate::par::map(
+            &staged_list,
+            |name| -> Result<(String, bool), PublishError> {
+                let src = from.join(name);
+                let dst = to.join(name);
+                let bytes = fs::read(&src).map_err(|e| io(&src, e))?;
+                let digest = hash(&bytes);
+                if previous.contains(*name) {
+                    let old = fs::read(&dst).map_err(|e| io(&dst, e))?;
+                    if old.len() == bytes.len() && hash(&old) == digest {
+                        return Ok((digest, false));
+                    }
                 }
-            }
-            let parent = dst.parent().expect("file has a parent");
-            fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
-            fs::write(&dst, bytes).map_err(|e| io(&dst, e))?;
+                let parent = dst.parent().expect("file has a parent");
+                fs::create_dir_all(parent).map_err(|e| io(parent, e))?;
+                fs::write(&dst, bytes).map_err(|e| io(&dst, e))?;
+                Ok((digest, true))
+            },
+        );
+        for (name, result) in staged_list.into_iter().zip(results) {
+            let (digest, wrote) = result?;
             if *dir != "assets" {
-                changed.push(format!("{dir}/{name}"));
+                output.insert(format!("{dir}/{name}"), digest);
+                if wrote {
+                    changed.push(format!("{dir}/{name}"));
+                }
             }
         }
         if *dir != "assets" {

@@ -9,11 +9,16 @@
 // file (SHA-256 of the font file), else it's reported as substituted (fallen back) or a different file.
 // Fallback scenes (screenshot, video-frame) are listed and never compared: they are pictures, not pages.
 //   node checks/real-vs-replica.mjs --demo <dir> [--url <replica>] [--out <dir>] [--threshold 0.5] [--only state,zoom,click]
-// Writes <out>/compare.json (default .out/fidelity/compare) and prints one "@fidelity {json}" line per item as it lands.
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+//     [--lanes N]
+// Several screens render at once (--lanes, SCENECAST_COMPARE_LANES: a third of the cores, at most 4), each in its own
+// pages. A screen whose replica renders exactly as it did last time, against the same real screenshot, keeps the last
+// comparison and its pictures (.out/fidelity/cache: the same pixels in can only give the same verdict). Writes <out>/compare.json (default .out/fidelity/compare): with "partial": true and the items so far after each
+// one lands (Review shows them as they arrive), then whole. Prints one "@fidelity {json}" line per item as it lands.
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, renameSync, readdirSync, linkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { availableParallelism } from 'node:os';
 import { diffDetail } from './compare.mjs';
 import { loadDemo, arg } from '../kit/lib/demo.mjs';
 import { openReplica } from './replica-render.mjs';
@@ -128,9 +133,35 @@ function fontVerdicts(real, rep) {
   });
 }
 
-const cmp = await (await R.browser.newContext({ viewport: { width: 800, height: 600 } })).newPage();
-async function render(it) {
-  const r = await R.show(it);
+// The last comparisons, by what went in: the diff code, the item, and both pictures' bytes.
+const CACHE = join(demo.out, 'fidelity', 'cache'), usedKeys = new Set();
+const DIFF_CODE = sha256(readFileSync(join(here, 'compare.mjs')));
+mkdirSync(CACHE, { recursive: true });
+const place = (from, to) => { rmSync(to, { force: true }); try { linkSync(from, to); } catch (e) { copyFileSync(from, to); } };
+function cached(key, id) {
+  const f = join(CACHE, key + '.json');
+  if (!existsSync(f) || !existsSync(join(CACHE, key + '.sbs.png')) || !existsSync(join(CACHE, key + '.diff.png'))) return null;
+  try {
+    const d = JSON.parse(readFileSync(f, 'utf8'));
+    place(join(CACHE, key + '.sbs.png'), join(OUT, file(id, 'side-by-side')));
+    place(join(CACHE, key + '.diff.png'), join(OUT, file(id, 'diff')));
+    usedKeys.add(key); reused++;
+    return d;
+  } catch (e) { return null; }
+}
+function keep(key, id, d) {
+  const { sideBySide, diff, ...rest } = d;
+  place(join(OUT, file(id, 'side-by-side')), join(CACHE, key + '.sbs.png'));
+  place(join(OUT, file(id, 'diff')), join(CACHE, key + '.diff.png'));
+  writeFileSync(join(CACHE, key + '.json'), JSON.stringify(rest));
+  usedKeys.add(key);
+}
+let reused = 0;
+
+const LANES = Math.max(1, Math.min(items.length || 1, +arg(args, '--lanes', process.env.SCENECAST_COMPARE_LANES || Math.min(4, Math.max(1, Math.floor(availableParallelism() / 3))))));
+const cmps = await Promise.all(Array.from({ length: LANES }, async () => (await R.browser.newContext({ viewport: { width: 800, height: 600 } })).newPage()));
+async function render(it, lane) {
+  const r = await R.show(it, lane);
   if (r.error) return r;
   const png = await r.page.screenshot({ animations: 'disabled', caret: 'hide' });
   const fonts = it.kind === 'state' ? await r.page.evaluate(replicaFontsIn, it.app) : null;
@@ -139,30 +170,52 @@ async function render(it) {
 
 const file = (id, what) => `${id.replace(/[^\w@.+-]+/g, '_')}.${what}.png`;
 rmSync(OUT, { recursive: true, force: true }); mkdirSync(OUT, { recursive: true });
-const results = [];
-emit('compare-start', { items: items.length, threshold: THRESHOLD, fallback });
-for (const it of items) {
+const results = new Array(items.length);
+// What's been compared so far, for Review while the rest renders (written aside, then put in place whole).
+const writePartial = () => {
+  const f = join(OUT, 'compare.json');
+  writeFileSync(f + '.tmp', JSON.stringify({ demo: demo.name, partial: true, at: new Date().toISOString(), threshold: THRESHOLD, viewport: VP, url: URL0, items: results.filter(Boolean), fallback }));
+  renameSync(f + '.tmp', f);
+};
+writePartial();
+emit('compare-start', { items: items.length, threshold: THRESHOLD, fallback, lanes: LANES });
+async function compareOne(it, lane) {
   const row = { id: it.id, kind: it.kind, state: it.state, app: it.app, snap: it.snap, z: it.z, click: it.click ? it.click.name : undefined, real: it.real, viewport: viewportOf(it) };
-  if (!it.real) { Object.assign(row, { pct: null, pass: true, note: 'no real screenshot for this state' }); results.push(row); emit('compared', row); continue; }
-  if (!it.state || !S[it.state]) { Object.assign(row, { pct: null, pass: false, error: 'no state for it in the flow' }); results.push(row); emit('compared', row); continue; }
+  if (!it.real) return Object.assign(row, { pct: null, pass: true, note: 'no real screenshot for this state' });
+  if (!it.state || !S[it.state]) return Object.assign(row, { pct: null, pass: false, error: 'no state for it in the flow' });
   let r;
-  try { r = await render({ ...it, viewport: viewportOf(it) }); } catch (e) { r = { error: String(e.message || e).slice(0, 300) }; }
-  if (r.error) { Object.assign(row, { pct: null, pass: false, error: r.error }); results.push(row); emit('compared', row); continue; }
+  try { r = await render({ ...it, viewport: viewportOf(it) }, lane); } catch (e) { r = { error: String(e.message || e).slice(0, 300) }; }
+  if (r.error) return Object.assign(row, { pct: null, pass: false, error: r.error });
   const real = readFileSync(it.real);
-  const [d] = await diffDetail(cmp, [{ real: real.toString('base64'), replica: r.png.toString('base64') }], { label: [it.id] });
+  const key = sha256(`${DIFF_CODE}\n${it.id}\n${sha256(real)}\n${sha256(r.png)}`);
   writeFileSync(join(OUT, file(it.id, 'replica')), r.png);
-  writeFileSync(join(OUT, file(it.id, 'side-by-side')), Buffer.from(d.sideBySide, 'base64'));
-  writeFileSync(join(OUT, file(it.id, 'diff')), Buffer.from(d.diff, 'base64'));
+  let d = cached(key, it.id);
+  if (!d) {
+    [d] = await diffDetail(cmps[lane], [{ real: real.toString('base64'), replica: r.png.toString('base64') }], { label: [it.id] });
+    writeFileSync(join(OUT, file(it.id, 'side-by-side')), Buffer.from(d.sideBySide, 'base64'));
+    writeFileSync(join(OUT, file(it.id, 'diff')), Buffer.from(d.diff, 'base64'));
+    keep(key, it.id, d);
+  }
   // Within a pixel or two: a window's height in CSS pixels isn't always whole (806.5 at 2×), the replica's is.
   const sizeOk = Math.abs(d.size.real[0] - d.size.replica[0]) <= 2 && Math.abs(d.size.real[1] - d.size.replica[1]) <= 2;
   Object.assign(row, { pct: d.pct, box: d.box, regions: d.regions, size: d.size, replica: join(OUT, file(it.id, 'replica')), sideBySide: join(OUT, file(it.id, 'side-by-side')), diff: join(OUT, file(it.id, 'diff')) });
   if (!sizeOk) row.sizeMismatch = true;
   if (r.fonts) row.fonts = fontVerdicts(realFonts(it.snap), r.fonts);
   row.pass = d.pct <= THRESHOLD && sizeOk;
-  results.push(row);
-  emit('compared', { id: row.id, kind: row.kind, z: row.z, pct: row.pct, pass: row.pass, regions: row.regions.length, fonts: (row.fonts || []).map(f => `${f.family}: ${f.status}`) });
+  return row;
 }
+let next = 0;
+await Promise.all(Array.from({ length: LANES }, async (_, lane) => {
+  for (let i = next++; i < items.length; i = next++) {
+    const row = await compareOne(items[i], lane);
+    results[i] = row;
+    writePartial();
+    emit('compared', row.pct === undefined || row.regions === undefined ? row : { id: row.id, kind: row.kind, z: row.z, pct: row.pct, pass: row.pass, regions: row.regions.length, fonts: (row.fonts || []).map(f => `${f.family}: ${f.status}`) });
+  }
+}));
 await R.close();
+// Only this run's comparisons are kept.
+for (const f of readdirSync(CACHE)) if (!usedKeys.has(f.split('.')[0])) rmSync(join(CACHE, f), { force: true });
 const fontRows = results.flatMap(r => (r.fonts || []).map(f => ({ ...f, state: r.state })));
 const fonts = Object.values(Object.fromEntries(fontRows.map(f => [`${f.family}|${f.weight}|${f.style}`, f]))).map(f => ({ ...f, states: fontRows.filter(x => x.family === f.family && x.weight === f.weight && x.style === f.style).map(x => x.state), status: fontRows.some(x => x.family === f.family && x.status !== 'match' && x.status !== 'unverified') ? fontRows.find(x => x.family === f.family && x.status !== 'match' && x.status !== 'unverified').status : f.status }));
 const report = {
@@ -172,5 +225,5 @@ const report = {
   items: results, fonts, fallback,
 };
 writeFileSync(join(OUT, 'compare.json'), JSON.stringify(report, null, 1));
-emit('compare-done', { pass: report.pass, over: results.filter(r => !r.pass).map(r => r.id), worst: report.worst, fonts: fonts.map(f => `${f.family}: ${f.status}`), file: join(OUT, 'compare.json') });
+emit('compare-done', { reused, pass: report.pass, over: results.filter(r => !r.pass).map(r => r.id), worst: report.worst, fonts: fonts.map(f => `${f.family}: ${f.status}`), file: join(OUT, 'compare.json') });
 process.exit(0);

@@ -72,6 +72,8 @@ pub struct Review {
     pub screens: u32,
     /// Compared with the real product (a report is there).
     pub compared: bool,
+    /// A compare is under way: the screens compared so far have their verdicts, the rest are still to come.
+    pub comparing: bool,
     pub matching: u32,
     pub differ: u32,
     /// Every font the real file.
@@ -93,7 +95,9 @@ pub fn read(dir: &Path, os: &str) -> Review {
         .or_else(|| read_json(&raw.as_ref()?.join("recording.json")))
         .unwrap_or(Value::Null);
     let shots = raw.as_ref().map(|r| r.join("shots"));
-    let fidelity = crate::fidelity::last(dir);
+    let live = crate::fidelity::live(dir);
+    let comparing = live.is_some();
+    let fidelity = live.or_else(|| crate::fidelity::last(dir));
     let report = fidelity.as_ref().map(|f| &f.report);
 
     // Each state's views (zoom, click, the state itself) in the report.
@@ -323,7 +327,8 @@ pub fn read(dir: &Path, os: &str) -> Review {
         .is_none_or(|f| f.iter().all(|x| x["status"] == "match"));
     Review {
         screens: all.len() as u32,
-        compared: report.is_some(),
+        compared: report.is_some() && !comparing,
+        comparing,
         matching: all.iter().filter(|s| s.pass == Some(true)).count() as u32,
         differ: (all.iter().filter(|s| s.pass == Some(false)).count() + others.len()) as u32,
         fonts_ok,
