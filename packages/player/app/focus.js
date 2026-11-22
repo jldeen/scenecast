@@ -143,18 +143,29 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
   // Where a point's text (or element) is, in page coordinates; the box around all of its parts.
   function locate(p, cur = current()) {
     const docs = docsOf(cur.doc);
-    const off = d => { let x = 0, y = 0, w = d.defaultView; while (w && w !== window && w.frameElement) { const r = w.frameElement.getBoundingClientRect(); x += r.x; y += r.y; w = w.parent; } return [x, y]; };
+    // A frame's offset in the page, and its scale when the page shows it scaled (a CSS transform, as the Playwright
+    // trace viewer does with its snapshot): a point p in the frame is at [x + k·p.x, y + k·p.y].
+    const off = d => {
+      let x = 0, y = 0, k = 1, w = d.defaultView;
+      while (w && w !== window && w.frameElement) {
+        const fe = w.frameElement, r = fe.getBoundingClientRect(), s = fe.offsetWidth ? r.width / fe.offsetWidth : 1;
+        if (Math.abs(s - 1) < 0.001) { x += r.x; y += r.y; }
+        else { x = r.x + s * (fe.clientLeft + x); y = r.y + s * (fe.clientTop + y); k *= s; }
+        w = w.parent;
+      }
+      return [x, y, k];
+    };
+    const place = (o, r) => [o[0] + o[2] * r.left, o[1] + o[2] * r.top, o[0] + o[2] * r.right, o[1] + o[2] * r.bottom];
     const one = t => {
       // { text, up }: the block around the text (a selector for closest(), or a number of parents up).
       if (typeof t !== 'string' && t.text) {
         const f = one(t.text); if (!f) return null;
         let el = f.el; if (typeof t.up === 'number') for (let i = 0; i < t.up && el.parentElement; i++) el = el.parentElement; else el = el.closest(t.up);
         if (!el) return null;
-        const d = el.ownerDocument, [ox, oy] = off(d), r = el.getBoundingClientRect();
-        return { el, rects: [[ox + r.left, oy + r.top, ox + r.right, oy + r.bottom]] };
+        return { el, rects: [place(off(el.ownerDocument), el.getBoundingClientRect())] };
       }
       if (typeof t !== 'string') {
-        for (const d of docs) { const el = [...d.querySelectorAll(t.sel)].find(x => { const r = x.getBoundingClientRect(); return r.width > 2 && r.height > 2; }); if (el) { const [ox, oy] = off(d); const r = el.getBoundingClientRect(); return { el, rects: [[ox + r.left, oy + r.top, ox + r.right, oy + r.bottom]] }; } }
+        for (const d of docs) { const el = [...d.querySelectorAll(t.sel)].find(x => { const r = x.getBoundingClientRect(); return r.width > 2 && r.height > 2; }); if (el) return { el, rects: [place(off(d), el.getBoundingClientRect())] }; }
         return null;
       }
       const re = new RegExp(N(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+'));
@@ -173,8 +184,8 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
           const a = from + m.index, z = a + m[0].length; from = Math.max(z, a + 1);
           const at = k => { let i = nodes.length - 1; while (i > 0 && nodes[i][1] > k) i--; return [nodes[i][0], k - nodes[i][1]]; };
           const rg = d.createRange(), [sn, so] = at(a), [en, eo] = at(z - 1); rg.setStart(sn, Math.min(so, sn.length)); rg.setEnd(en, Math.min(eo + 1, en.length));
-          const [ox, oy] = off(d);
-          const rects = [...rg.getClientRects()].filter(r => r.width > 1 && r.height > 1).map(r => [ox + r.left, oy + r.top, ox + r.right, oy + r.bottom]);
+          const o = off(d);
+          const rects = [...rg.getClientRects()].filter(r => r.width > 1 && r.height > 1).map(r => place(o, r));
           if (rects.length) return { el: sn.parentElement, rects };
         }
       }
@@ -328,7 +339,13 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
     const my = ++st.gen, cur = current();
     let i = st.cursor + dir;
     while (i >= 0 && i < points.length && !can(points[i], cur)) i += dir;
-    if (i < 0 || i >= points.length) return;
+    // Nothing further this way on this screen. If she's still on (or one step from) the point she's at, that's the end
+    // of the beat's points here: ⌥F does nothing (wrapping round from there looped her back through the beat, reopening
+    // its menus). Only a screen she got to some other way (an app key or a click, past this screen's points) wraps
+    // around to the screen's points from the other end.
+    if ((i < 0 || i >= points.length) && st.cursor >= 0 && can(points[st.cursor], cur)) return;
+    if (i < 0 || i >= points.length) { i = dir > 0 ? 0 : points.length - 1; while (i >= 0 && i < points.length && i !== st.cursor && !can(points[i], cur)) i += dir; }
+    if (i < 0 || i >= points.length || (i === st.cursor && !can(points[i], cur))) return;
     st.cursor = i; st.run++;
     try {
       if (st.z && !await zoomOut(my)) return;
@@ -344,8 +361,37 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
     st.p0 = [e.clientX, e.clientY];
     apply(st.s, fixedA(st.vp, st.s));
   });
-  // Left button: drawing mode (the view freezes). Right button: out of drawing mode, the drawing goes.
-  cover.addEventListener('mousedown', e => { e.preventDefault(); if (e.button === 0 && st.z === 2) { st.draw = true; setCover(); } });
+  // Left button. A click (the pointer moves under 4 px between press and release) zooms out and lands on what was under
+  // it, so "⌥F, then click X" works without Esc first. A drag (4 px or more) is ZoomIt's: drawing mode, the view freezes.
+  // Right button: out of drawing mode, the drawing goes.
+  let press = null;
+  cover.addEventListener('mousedown', e => { e.preventDefault(); if (e.button === 0 && st.z === 2) press = { x: e.clientX, y: e.clientY, moved: false }; });
+  window.addEventListener('mousemove', e => {
+    if (!press || press.moved || !(e.buttons & 1) || Math.hypot(e.clientX - press.x, e.clientY - press.y) < 4) return;
+    press.moved = true; st.draw = true; setCover();
+  }, true);
+  window.addEventListener('mouseup', e => {
+    if (e.button !== 0 || !press) return;
+    const p = press; press = null;
+    if (p.moved || st.z !== 2 || Math.hypot(e.clientX - p.x, e.clientY - p.y) >= 4) return;
+    passClick(toContent([e.clientX, e.clientY]));
+  }, true);
+  // Zoom out (no fade wait beyond ZoomIt's own), then a real click sequence on the element at that page point, in
+  // whichever frame it's in. Esc's own extras (a demo closing its menu) don't run: the click decides.
+  async function passClick(pt) {
+    const my = ++st.gen; st.run++;
+    try { if (!await zoomOut(my)) return; } finally { st.run--; }
+    await frame();
+    const sr = stage.getBoundingClientRect();
+    let doc = document, x = sr.left + pt[0], y = sr.top + pt[1], el = doc.elementFromPoint(x, y);
+    while (el && el.localName === 'iframe' && el.contentDocument) { const r = el.getBoundingClientRect(); x -= r.left; y -= r.top; doc = el.contentDocument; el = doc.elementFromPoint(x, y); }
+    if (!el) return;
+    const v = doc.defaultView, o = { bubbles: true, cancelable: true, composed: true, view: v, clientX: x, clientY: y, button: 0 };
+    el.dispatchEvent(new v.MouseEvent('mousedown', { ...o, buttons: 1 }));
+    if (el.matches('input, textarea, select, [contenteditable="true"]')) el.focus();
+    el.dispatchEvent(new v.MouseEvent('mouseup', o));
+    el.dispatchEvent(new v.MouseEvent('click', o));
+  }
   cover.addEventListener('contextmenu', e => { e.preventDefault(); if (st.z === 2 && st.draw) { st.gen++; st.draw = false; st.marks = []; render(); st.p0 = null; setCover(); } });
   let wheel = 0, wheelAt = 0;
   cover.addEventListener('wheel', e => {
@@ -359,6 +405,8 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
 
   return {
     next: () => step(1),
+    // For checks: the click a press-and-release at a screen point makes while zoomed.
+    clickAt: (x, y) => st.z === 2 ? passClick(toContent([x, y])) : null,
     back: () => step(-1),
     // Esc: erase and zoom out. True when it was zoomed (so the key goes no further).
     // Keys while zoomed: Esc out; ↑/↓ zoom in and out. True when the key was ZoomIt's.

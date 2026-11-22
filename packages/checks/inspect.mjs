@@ -2,7 +2,7 @@
 // with their role, label, test id, tag path and box, to write matchers in flow.overrides.mjs.
 //   node checks/inspect.mjs --demo <dir> '<json: [[snapId, {text|sel|re, frame?}], ...]>'   (scenecast serve running)
 import { chromium } from 'playwright-core';
-import { loadDemo } from '../kit/lib/demo.mjs';
+import { loadDemo } from '@stuntdouble/core/lib/demo.mjs';
 
 const demo = loadDemo(process.argv.slice(2));
 const queries = JSON.parse(process.argv.slice(2).find(a => a.trim().startsWith('[')));

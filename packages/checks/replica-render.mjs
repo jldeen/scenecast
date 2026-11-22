@@ -1,19 +1,20 @@
 // The replica in headless Chrome, rendered the way a real screenshot was taken: a state at its zoom (a fresh go to it,
 // its app in front, the pointer parked), or a click side state (the control clicked, the pointer left on it). Shared by
 // the real-vs-replica comparison and the fixer (which looks into the same rendering for causes).
+import { at as __at } from '@stuntdouble/core/lib/at.mjs';
 import { chromium } from 'playwright-core';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { bundleFlow } from '../kit/lib/demo.mjs';
+import { bundleFlow } from '@stuntdouble/core/lib/demo.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-export async function openReplica(demo, url, kit) {
+export async function openReplica(demo, url) {
   const fileBase = new globalThis.URL(url).protocol === 'file:';
   const up = async () => { if (fileBase) return true; try { return (await fetch(new globalThis.URL('__replica/status', url))).ok; } catch (e) { return false; } };
   let server = null;
   if (!(await up())) {
-    server = spawn(process.execPath, [join(kit, 'player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(url).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+    server = spawn(process.execPath, [__at('player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(url).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
     for (let i = 0; i < 80 && !(await up()); i++) await sleep(100);
   }
   const flow = await bundleFlow(url);

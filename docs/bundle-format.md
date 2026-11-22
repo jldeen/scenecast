@@ -14,7 +14,7 @@ demo.scenecast\
 ## Schema v2 (`scenecast.bundle.v2`)
 
 v2 is what scenecast writes. Its JSON Schema, generated from the Rust types, is
-[`schema/bundle.v2.schema.json`](../schema/bundle.v2.schema.json) (`scenecast schema`; a test fails if it's stale).
+[`packages/format/schema/bundle.v2.schema.json`](../packages/format/schema/bundle.v2.schema.json) (`scenecast schema`; a test fails if it's stale).
 
 **Scene kinds.** `live-page` is the default (a scene without `kind` is a live page). `screenshot`, `video-frame`
 and `composite` are **fallbacks**, for a screen that can't be captured live or an explicit video import.
@@ -192,12 +192,12 @@ The manifest is UTF-8 JSON. The v1 example below (schema version `scenecast.bund
 The CLI creates and edits the manifest while preserving validation rules:
 
 ```powershell
-cargo run -p scenecast-cli -- new demos\hello.scenecast --title "Hello Scenecast"
-cargo run -p scenecast-cli -- add-scene demos\hello.scenecast pricing "Pricing" --screenshot captures\pricing.png
-cargo run -p scenecast-cli -- add-hotspot demos\hello.scenecast start pricing-link "View pricing" pricing --x 420 --y 240 --width 160 --height 48
-cargo run -p scenecast-cli -- add-guide-mark demos\hello.scenecast pricing price-callout "Plan selector" --x 320 --y 220 --width 240 --height 72
-cargo run -p scenecast-cli -- add-section demos\hello.scenecast overview "Overview" --scenes start,pricing
-cargo run -p scenecast-cli -- validate demos\hello.scenecast
+cargo run -p stuntdouble-cli -- new demos\hello.scenecast --title "Hello Scenecast"
+cargo run -p stuntdouble-cli -- add-scene demos\hello.scenecast pricing "Pricing" --screenshot captures\pricing.png
+cargo run -p stuntdouble-cli -- add-hotspot demos\hello.scenecast start pricing-link "View pricing" pricing --x 420 --y 240 --width 160 --height 48
+cargo run -p stuntdouble-cli -- add-guide-mark demos\hello.scenecast pricing price-callout "Plan selector" --x 320 --y 220 --width 240 --height 72
+cargo run -p stuntdouble-cli -- add-section demos\hello.scenecast overview "Overview" --scenes start,pricing
+cargo run -p stuntdouble-cli -- validate demos\hello.scenecast
 ```
 
 Coordinates are currently capture-pixel coordinates. Future authoring surfaces can layer normalized coordinates or responsive layout metadata on top of this manifest without changing the initial click-through graph model.

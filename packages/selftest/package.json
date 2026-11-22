@@ -3,5 +3,11 @@
   "version": "0.5.2",
   "private": true,
   "type": "module",
-  "description": "End-to-end tests: the fixture app recorded, built, served and checked through the scenecast binary."
+  "description": "End-to-end tests: the fixture app recorded, built, served and checked through the scenecast binary.",
+  "dependencies": {
+    "@stuntdouble/core": "0.5.2",
+    "@stuntdouble/capture": "0.5.2",
+    "@stuntdouble/player": "0.5.2",
+    "@stuntdouble/checks": "0.5.2"
+  }
 }

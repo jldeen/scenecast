@@ -46,14 +46,14 @@ const b = srv(47702, { '/x.css': ['text/css', '.ext{background:url("sub/ext.png"
 // Its own receiver port: never a receiver another session is using.
 const RXP = '47692';
 if (await fetch(`http://127.0.0.1:${RXP}/ping`).then(() => true, () => false)) { console.log(`port ${RXP} is in use: stop whatever is on it and run again`); process.exit(1); }
-spawnSync(process.execPath, [join(here, '../recorder/build.mjs'), join(raw, 'agent'), '--port', RXP], { stdio: 'ignore' });
-const rx = spawn(process.execPath, [join(here, '../recorder/receiver.mjs'), raw, RXP], { stdio: 'inherit' });
+spawnSync(process.execPath, [join(here, '../capture/build.mjs'), join(raw, 'agent'), '--port', RXP], { stdio: 'ignore' });
+const rx = spawn(process.execPath, [join(here, '../capture/receiver.mjs'), raw, RXP], { stdio: 'inherit' });
 await new Promise(r => setTimeout(r, 500));
 // The recorder: the extension (default), or the Playwright agent (--agent).
 const MODE = process.argv.includes('--agent') ? 'agent' : 'extension';
 let browser, ctx, page;
 if (MODE === 'extension') {
-  spawnSync(process.execPath, [join(here, '../recorder/build.mjs'), '--extension', join(raw, 'ext'), '--port', RXP], { stdio: 'ignore' });
+  spawnSync(process.execPath, [join(here, '../capture/build.mjs'), '--extension', join(raw, 'ext'), '--port', RXP], { stdio: 'ignore' });
   ctx = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), 'scx-')), { channel: 'chromium', headless: true, viewport: null, args: ['--silent-debugger-extension-api', '--window-size=800,687', `--disable-extensions-except=${join(raw, 'ext')}`, `--load-extension=${join(raw, 'ext')}`] });
   if (!ctx.serviceWorkers().length) await ctx.waitForEvent('serviceworker', { timeout: 30000 });
   page = ctx.pages()[0] || await ctx.newPage();
@@ -69,7 +69,7 @@ if (MODE === 'extension') {
   const agent = eval(readFileSync(join(raw, 'agent', 'agent.js'), 'utf8'));
   console.log(await agent(page));
 }
-const cli = (op, args) => new Promise(res => { const p = spawn(process.execPath, [join(here, '../recorder/cli.mjs'), op, JSON.stringify(args)], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, REPLICA_RX_PORT: RXP } }); let o = ''; p.stdout.on('data', d => o += d); p.on('close', code => res({ code, o })); });
+const cli = (op, args) => new Promise(res => { const p = spawn(process.execPath, [join(here, '../capture/cli.mjs'), op, JSON.stringify(args)], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, REPLICA_RX_PORT: RXP } }); let o = ''; p.stdout.on('data', d => o += d); p.on('close', code => res({ code, o })); });
 const r = await cli('snap', { tab: '127.0.0.1:47701', id: 'fixture' });
 console.log('snap result', r.o.slice(0, 800));
 await cli('quit', {});

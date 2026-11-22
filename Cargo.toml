@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "crates/scenecast-app",
-    "crates/scenecast-build",
-    "crates/scenecast-cli",
-    "crates/scenecast-core",
+    "crates/stuntdouble-build",
+    "crates/stuntdouble-cli",
+    "crates/stuntdouble-format",
 ]
 # The desktop app's Tauri shell is its own workspace (it needs a webview toolkit to build).
 exclude = ["apps/desktop/src-tauri"]
@@ -20,8 +20,11 @@ anyhow = "1.0.100"
 assert_cmd = "2.1.1"
 clap = "4.5.53"
 predicates = "3.1.3"
-scenecast-build = { path = "crates/scenecast-build" }
-scenecast-core = { path = "crates/scenecast-core" }
+# The engine is StuntDouble's. Scenecast's own crate (scenecast-app) keeps its old names for it.
+scenecast-build = { package = "stuntdouble-build", path = "crates/stuntdouble-build" }
+scenecast-core = { package = "stuntdouble-format", path = "crates/stuntdouble-format" }
+stuntdouble-build = { path = "crates/stuntdouble-build" }
+stuntdouble-format = { path = "crates/stuntdouble-format" }
 serde = "1.0.228"
 schemars = "1.0"
 serde_json = { version = "1.0.145", features = ["preserve_order"] }

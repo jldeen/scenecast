@@ -83,7 +83,7 @@ try {
   const env = { ...process.env, SCENECAST_LIBRARY: LIB, SCENECAST_SELFTEST: HOOK, SCENECAST_AI_HOME: join(tmp, 'ai-home'), SCENECAST_OPENED: OPENED };
   // Copilot's runtime also takes a GitHub CLI sign-in: none here, so "signed in" means this app's own sign-in.
   env.PATH = (env.PATH || '').split(delimiter).filter(d => !['gh', 'gh.exe'].some(x => existsSync(join(d, x)))).join(delimiter);
-  for (const k of ['SCENECAST_JS', 'SCENECAST_AI_MODEL', 'COPILOT_CLI_PATH', 'GH_TOKEN', 'GITHUB_TOKEN', 'COPILOT_GITHUB_TOKEN', 'SCENECAST_NODE', 'SCENECAST_EXTENSION_DIR', 'REPLICA_RX_PORT', 'REPLICA_NO_OPEN']) delete env[k];
+  for (const k of ['STUNTDOUBLE_JS', 'STUNTDOUBLE_NODE', 'STUNTDOUBLE_BINARY', 'SCENECAST_JS', 'SCENECAST_AI_MODEL', 'COPILOT_CLI_PATH', 'GH_TOKEN', 'GITHUB_TOKEN', 'COPILOT_GITHUB_TOKEN', 'SCENECAST_NODE', 'SCENECAST_EXTENSION_DIR', 'REPLICA_RX_PORT', 'REPLICA_NO_OPEN']) delete env[k];
   const log = [];
   app = spawn(exe, [], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   app.stdout.on('data', d => log.push(String(d))); app.stderr.on('data', d => log.push(String(d)));
@@ -219,7 +219,7 @@ try {
   const reload = () => cdp.send('Extensions.loadUnpacked', { path: extDir });
   await reload();
   await sleep(3000);
-  const { send } = await import('../../../packages/recorder/cli.mjs');
+  const { send } = await import('../../../packages/capture/cli.mjs');
   await waitFor('the old recorder to answer', async () => (await send({ op: 'extension' }, 5, PORT)).value?.version === '0.0.9', 60000, 1000).catch(() => {});
   const stale = await hook('record-start', { demo: id }, 180000);
   check('a recorder older than the app: Record refuses, "Reload the recorder extension"', !stale.ok && /Reload the recorder extension/.test(stale.error) && /0\.0\.9/.test(stale.error), JSON.stringify(stale).slice(0, 600));

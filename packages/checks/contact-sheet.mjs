@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 import { readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { comparePngs } from './compare.mjs';
-import { loadDemo, readFlow, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, readFlow, arg } from '@stuntdouble/core/lib/demo.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);

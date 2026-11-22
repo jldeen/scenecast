@@ -14,7 +14,7 @@ import { startLab } from '../../examples/fixture-app/lab.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
-if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
+if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p stuntdouble-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 const keep = process.argv.includes('--keep');
 const RX_PORT = 47693, REPLICA_PORT = 4698, LAB_PORT = 47803;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-fidelity-'));

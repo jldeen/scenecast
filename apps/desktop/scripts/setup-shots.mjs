@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { buildExtension } from '../../../packages/recorder/build.mjs';
+import { buildExtension } from '../../../packages/capture/build.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, '..', 'ui', 'img', 'setup');

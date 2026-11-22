@@ -7,8 +7,8 @@
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
-import { replicaServer } from '../kit/lib/server.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
+import { replicaServer } from '@stuntdouble/core/lib/server.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);

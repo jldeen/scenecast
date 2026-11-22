@@ -31,7 +31,7 @@ first-class. Phases:
   unbacked lines flagged) and the cue sheet; the matcher is pluggable, deterministic by default. The editor, inside
   the replica (⌥⇧E, or `scenecast edit`): dots that snap to what they point at, wording and date changes everywhere
   the text appears, beat starts, undo; every change shows at once and is saved. Both are Rust library calls with
-  progress (`scenecast_build::script`, `scenecast_build::edit`).
+  progress (`stuntdouble_build::script`, `stuntdouble_build::edit`).
 - **Phase 4b (done): the desktop app.** Tauri, macOS and Windows, on the same Rust core (`crates/scenecast-app`, the
   commands; `apps/desktop`, the window): the demo library with each demo's status; new demo and record (preflight item
   by item with fixes, the one-time Load unpacked guided, live screens and recorder vs product time); build with the

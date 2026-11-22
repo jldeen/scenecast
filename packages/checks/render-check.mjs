@@ -5,7 +5,7 @@
 import { chromium } from 'playwright-core';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadDemo } from '../kit/lib/demo.mjs';
+import { loadDemo } from '@stuntdouble/core/lib/demo.mjs';
 
 const demo = loadDemo(process.argv.slice(2));
 const RAW = demo.raw;

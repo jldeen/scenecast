@@ -22,6 +22,7 @@ New to Scenecast? Start with the [README](../README.md).
 ## How it works
 
 - [Architecture](architecture.md): how a replica works, and the repository's layout.
+- [StuntDouble](stuntdouble.md): the engine under Scenecast, its packages, and a demo (replica-kit's too) on it.
 - [The fidelity checklist](engine/checklist.md): what each check proves, and when it runs.
 - [Lessons](engine/lessons.md): what the first real replica taught, the hard way.
 - [Roadmap](roadmap.md).

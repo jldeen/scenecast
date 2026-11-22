@@ -12,7 +12,7 @@ const step = (name, cmd, args) => {
   const r = spawnSync(cmd, args, { cwd: ROOT, stdio: 'inherit' });
   if (r.status !== 0) { console.log(`${name} failed`); process.exit(r.status || 1); }
 };
-if (!process.env.SCENECAST_BIN) step('cargo build', 'cargo', ['build', '-q', '-p', 'scenecast-cli']);
+if (!process.env.SCENECAST_BIN) step('cargo build', 'cargo', ['build', '-q', '-p', 'stuntdouble-cli']);
 // The unit tests are package.json's test:unit list, so the two can't drift apart.
 const units = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts['test:unit'].split(/\s+/).filter(a => a.endsWith('.test.mjs'));
 step('unit', process.execPath, ['--test', ...units]);

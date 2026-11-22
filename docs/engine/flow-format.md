@@ -62,7 +62,7 @@ A demo folder holds:
   and hover and click part (`hover:<app>`, `click:<app>`), `plain` on their plain text. The build fails on anything
   `leftovers` or `unused` reports. `hookFiles` (what it reads) are part of the build key.
 - `fidelity` (optional): `{ diagnosers: ["file.mjs"] }`, the demo's own diagnosers for `scenecast fidelity`, run
-  before the rule-based one (interface in `packages/fixer/index.mjs`).
+  before the rule-based one (interface in `packages/checks/fixer/index.mjs`).
 - `theme` (optional): `"light"` or `"dark"`, the theme the demo should be recorded in. Only a note when a screen
   isn't (preflight, record stop, `fidelity`); either theme records.
 - `checks` (optional): `known: ["text a failure starts with", …]` makes those accepted differences warnings.

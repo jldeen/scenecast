@@ -118,9 +118,9 @@ one beat per beat of the replica: edit it under **Script** like any script.
   `packages/ai/walker.mjs` (the recorded screens and where each step leads, the capture browser's interface),
   `from-script.mjs` (Do lines to steps, grounded, with writes, landings, differences and focus), `walkthrough.mjs`,
   `reset.mjs`, `make.mjs` (plan, approval, reset), `finish.mjs` (guide script, beat keys, focus points, the review).
-  The plan's format: [engine/plan-format.md](engine/plan-format.md). App packs (`packages/apps`) give each app's names,
+  The plan's format: [engine/plan-format.md](engine/plan-format.md). App packs (`@stuntdouble/apps`) give each app's names,
   writes and their undos when they're there; without them, plain rules.
-- The recorder's `observe` command (`packages/recorder/outline-page.js`) gives the page as the AI sees it; the AI
+- The recorder's `observe` command (`packages/capture/outline-page.js`) gives the page as the AI sees it; the AI
   clicks, types and presses through the recorder's own `click`, `type` and `press` commands, so the extension (or the
   Playwright agent) captures it exactly as it would a person's clicks. The receiver serves the coach window (`/coach`).
 - `crates/scenecast-app/src/ai.rs`: what the desktop app calls; the window's part is in `apps/desktop/ui/app.js`.

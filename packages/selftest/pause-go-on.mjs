@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { buildExtension } from '../recorder/build.mjs';
-import { send } from '../recorder/cli.mjs';
+import { buildExtension } from '@stuntdouble/capture/build.mjs';
+import { send } from '@stuntdouble/capture/cli.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RX = 47707, WEB = 47907;
@@ -33,7 +33,7 @@ const web = createServer((q, s) => {
   s.end(`<title>Pause</title><h1 id="t">home</h1>${['two', 'three', 'four', 'five', 'six'].map(w => `<button id="${w}" onclick="document.getElementById('t').textContent='${w}'">${w}</button>`).join(' ')}`);
 }).listen(WEB, '127.0.0.1');
 
-const rx = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), join(tmp, 'raw'), String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
+const rx = spawn(process.execPath, [join(HERE, '..', 'capture', 'receiver.mjs'), join(tmp, 'raw'), String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
 let ctx;
 try {
   buildExtension(join(tmp, 'ext'), RX);

@@ -1,0 +1,15 @@
+{
+  "name": "@stuntdouble/format",
+  "version": "0.5.2",
+  "description": "StuntDouble's replica format: manifest.json's JSON Schema, generated from the Rust types.",
+  "type": "module",
+  "main": "index.mjs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jldeen/scenecast.git"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

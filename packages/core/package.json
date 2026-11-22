@@ -1,0 +1,36 @@
+{
+  "name": "@stuntdouble/core",
+  "version": "0.5.2",
+  "description": "StuntDouble core: demo settings (demo.json), the flow compiler, edits and text rules, the presenter notes, the workflow (text, status, save, release), the project template, and the engine entry the stuntdouble binary runs.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jldeen/scenecast.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@stuntdouble/capture": "0.5.2",
+    "@stuntdouble/player": "0.5.2",
+    "@stuntdouble/checks": "0.5.2",
+    "@stuntdouble/apps": "0.5.2"
+  },
+  "peerDependencies": {
+    "@scenecast/ai": "0.5.2",
+    "@scenecast/script": "0.5.2",
+    "@scenecast/editor": "0.5.2"
+  },
+  "peerDependenciesMeta": {
+    "@scenecast/ai": {
+      "optional": true
+    },
+    "@scenecast/script": {
+      "optional": true
+    },
+    "@scenecast/editor": {
+      "optional": true
+    }
+  }
+}

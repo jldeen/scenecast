@@ -13,8 +13,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { buildExtension } from '../recorder/build.mjs';
-import { send } from '../recorder/cli.mjs';
+import { buildExtension } from '@stuntdouble/capture/build.mjs';
+import { send } from '@stuntdouble/capture/cli.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RX = 47698, WEB = 47896;
@@ -36,7 +36,7 @@ const web = createServer((q, s) => {
   const slow = q.url.startsWith('/slow') ? `<iframe src="http://localhost:${WEB}/slowframe"></iframe>` : '';
   s.end(`<title>${who}</title><h1>${who}</h1><button onclick="document.querySelector('h1').textContent = '${who} opened'">Open</button>${q.url.startsWith('/busy') ? `<iframe src="http://localhost:${WEB}/stuck"></iframe>` : ''}${blanks}${slow}`);
 }).listen(WEB, '127.0.0.1');
-const rx = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), raw, String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
+const rx = spawn(process.execPath, [join(HERE, '..', 'capture', 'receiver.mjs'), raw, String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
 let ctx;
 try {
   buildExtension(join(tmp, 'ext'), RX);

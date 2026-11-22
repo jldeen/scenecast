@@ -1,0 +1,180 @@
+#!/usr/bin/env node
+// The engine side of the scenecast CLI (from replica-kit 1.4.0). The `scenecast` binary (Rust) runs this for every
+// engine command; run it directly only to debug the engine: node packages/core/bin/engine.mjs help
+import { at as __at, need } from '../lib/at.mjs';
+import { spawn } from 'node:child_process';
+import { join, resolve, relative, isAbsolute } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { KIT, KIT_VERSION, loadDemo, arg } from '../lib/demo.mjs';
+
+const [cmd, ...rest] = process.argv.slice(2);
+// Children get the signals this process gets, so stopping `scenecast serve` stops the server too.
+const kids = new Set();
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { for (const k of kids) k.kill(sig); process.exit(130); });
+const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(process.execPath, [need(script), ...args], { stdio: 'inherit', ...opts }); kids.add(p); p.on('close', code => { kids.delete(p); res(code); }); });
+// Exit once what was printed is out: to a pipe (the app reads every command this way) Node writes asynchronously, and
+// exiting at once cut a long answer at 64 KB (the browser's profiles, with their pictures: the app never showed them).
+const exit = code => { process.exitCode = code || 0; process.stdout.write('', () => process.stderr.write('', () => process.exit(code || 0))); };
+const HELP = `scenecast engine ${KIT_VERSION} (run through the scenecast binary; see docs/cli.md)
+
+  preflight [--check] [--json|--ndjson]  profiles [--browser chrome|edge] [--json]  extension [<outDir>]  agent [<outDir>]  receiver  record start|status|stop|side …  cmd <op> ['{json}']  run <script.js> ['{json}']
+  flow [--from-raw]  build [--from-raw] [--force]  serve [--open] [--pace N] [--port N] [--release] [--no-editor]
+  script <file> [--matcher text|<file.mjs>] [--no-write] [--no-pdf] [--strict]  edit [--no-open] [--port N]
+  notes [--script <file>] [--from-recording] [--check [--as-windows]]  guide-shots  ai status|sign-in|plan|record|script|coach|answer|stop|sent
+  text "<old>" "<new>"  quick  status  save "<message>"  release [--push] [--skip-build]
+  check [--runs 2]  checklist [--skip a,b] [--only a,b]  fidelity-compare|fidelity-fix|fidelity-report  sheet  hovers  scan [<dir>]
+
+Every demo command takes --demo <dir>, or runs from inside the demo folder.`
+
+// The receiver's port: --port, else REPLICA_RX_PORT (as preflight and the receiver use it), else the demo's, else the default.
+function rx() { const given = arg(rest, '--port') || process.env.REPLICA_RX_PORT; if (given) return +given; try { return loadDemo(rest).cfg.receiverPort; } catch (e) { return 47621; } }
+async function send(op, args = {}, tmo = 900) {
+  const { send } = await import('@stuntdouble/capture/cli.mjs');
+  process.env.REPLICA_RX_PORT = process.env.REPLICA_RX_PORT || String(rx());
+  const r = await send({ op, ...args }, tmo);
+  console.log(JSON.stringify(r.ok ? r.value : { error: r.error }, null, 1));
+  return r.ok && !(r.value && r.value.error) ? 0 : 1;
+}
+const jsonArg = () => { const j = rest.find(a => a.trim().startsWith('{')); return j ? JSON.parse(j) : {}; };
+
+// Before a check: the presenter guide's notes made again from the script as it is now (they also carry the focus
+// points and beats, which edits change), and its pictures when a beat now starts on another screen. Only for a demo
+// that has a guide.
+async function refreshGuide(demo) {
+  const nf = join(demo.dir, 'presenter', 'notes.json');
+  if (!existsSync(nf)) return 0;
+  const { compileFlow } = await import('../compile/flow.mjs');
+  const { writeNotes, scriptPath } = await import('../lib/notes.mjs');
+  const file = scriptPath(demo);
+  if (!existsSync(file)) return 0;
+  const before = readFileSync(nf, 'utf8');
+  const n = writeNotes(demo, (await compileFlow(demo)).flow, file);
+  if (readFileSync(nf, 'utf8') !== before) console.log('presenter/notes.json: made again from the script');
+  let made = null; try { made = readFileSync(join(demo.dir, 'presenter', 'shots', 'shots.json'), 'utf8').trim(); } catch (e) {}
+  const want = JSON.stringify(n.shots.map(x => [x.name, x.app, x.state]));
+  if (made !== want || n.shots.some(x => !existsSync(join(demo.dir, 'presenter', 'shots', x.name + '.png')))) return node('checks/guide-shots.mjs', ['--demo', demo.dir]);
+  return 0;
+}
+
+async function main() {
+  switch (cmd) {
+    case undefined: case 'help': case '--help': case '-h': console.log(HELP); return 0;
+    case 'new': console.log('scenecast new is in the scenecast binary (Rust): it writes the project and its manifest'); return 1;
+    case 'extension': {
+      // The recorder extension (MV3, Edge and Chrome), unpacked: Documents/Scenecast/Recorder Extension unless a folder is given.
+      const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo') || (await import('../lib/profiles.mjs')).extensionDir();
+      return node('capture/build.mjs', ['--extension', out, '--port', String(rx())]);
+    }
+    case 'agent': { const out = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--port' && rest[i - 1] !== '--demo'); return node('capture/build.mjs', [...(out ? [out] : []), '--port', String(rx())]); }
+    case 'preflight': return (await import('../lib/preflight.mjs')).main(rest, loadDemo);
+    case 'open-extensions': { const r = await (await import('../lib/profiles.mjs')).openExtensionsPage(loadDemo(rest)); console.log(JSON.stringify(r)); return r.ok ? 0 : 1; }
+    case 'profiles': return (await import('../lib/profiles.mjs')).main(rest, loadDemo);
+    case 'receiver': return node('capture/receiver.mjs', ['--demo', loadDemo(rest).dir]);
+    case 'cmd': { const [op, j] = rest; return send(op, j && j.startsWith('{') ? JSON.parse(j) : {}); }
+    case 'run': {
+      const { send: s, flowScript } = await import('@stuntdouble/capture/cli.mjs');
+      let extra = jsonArg();
+      try { const d = loadDemo(rest); extra = { apps: d.cfg.apps, ...extra }; } catch (e) {}
+      process.env.REPLICA_RX_PORT = process.env.REPLICA_RX_PORT || String(rx());
+      const r = await s(flowScript(resolve(rest[0]), extra), 1800);
+      console.log(JSON.stringify(r.ok ? r.value : { error: r.error }, null, 1)); return r.ok ? 0 : 1;
+    }
+    case 'record': {
+      const sub = rest[0];
+      const demo = loadDemo(rest);
+      if (sub === 'start') {
+        const pf = await import('../lib/preflight.mjs');
+        // One readiness check, the same as Check and fix, so a check that says ready and a start that says "not open"
+        // can't disagree (--no-check: whoever starts it ran it just now; a resume never moves a tab off its screen).
+        if (!rest.includes('--no-check') && !rest.includes('--resume')) {
+          const ndjson = rest.includes('--ndjson');
+          const r = await pf.preflight(demo, { fix: true, onItem: ndjson ? i => console.error('@item ' + JSON.stringify(i)) : undefined });
+          if (!r.ready) { console.log(JSON.stringify({ error: pf.notReady(r), items: r.items }, null, 1)); return 1; }
+        }
+        // Only into a recorder running this app's version (an old one in the browser records nothing it can use).
+        const ready = await pf.recorderReady(demo);
+        if (ready.error) { console.log(JSON.stringify({ error: ready.error, version: ready.version, want: ready.want }, null, 1)); return 1; }
+      }
+      const rec = (await import('../lib/demo.mjs')).recordOpts(demo.cfg);
+      if (sub === 'start') return send('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: { ...rec, ...(rest.includes('--no-auto') ? { auto: false } : {}), ...(demo.cfg.theme ? { theme: demo.cfg.theme } : {}) }, zooms: demo.cfg.zooms, first: arg(rest, '--first'), resume: rest.includes('--resume'), ...jsonArg() }, 300);
+      if (sub === 'status') return send('recordStatus', {}, 30);
+      if (sub === 'pause') return send('recordPause', {}, 30);
+      if (sub === 'go-on') return send('recordGoOn', { anyway: rest.includes('--anyway') }, 120);
+      if (sub === 'stop') return send('recordStop', {}, 600);
+      if (sub === 'side') {
+        const kind = rest[1];
+        const extra = jsonArg();
+        if (kind === 'zoom' && !extra.zooms) extra.zooms = demo.cfg.zooms;
+        return send('recordSide', { kind, app: arg(rest, '--app'), ...extra }, 3600);
+      }
+      console.log('scenecast record start|status|pause|go-on|stop|side'); return 1;
+    }
+    case 'flow': return node('core/compile/flow.mjs', rest);
+    case 'build': {
+      const demo = loadDemo(rest);
+      let code = await node('core/compile/flow.mjs', ['--demo', demo.dir, ...(rest.includes('--compiled-flow') ? ['--compiled-flow'] : rest.includes('--from-raw') ? ['--from-raw'] : [])]);
+      if (code) return code;
+      code = await node('capture/process.mjs', ['--demo', demo.dir, ...(rest.includes('--force') ? ['--force'] : [])]);
+      if (code) return code;
+      return node('checks/secrets.mjs', [demo.dir]);
+    }
+    case 'serve': return node('player/serve.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    // The editor: the replica served for authoring, opened in edit mode (?edit=1). --no-open only prints the URL.
+    // In this process (not a child), so whoever stops `scenecast edit` stops the server.
+    case 'edit': {
+      process.argv = [process.argv[0], __at('player', 'serve.mjs'), ...(rest.includes('--demo') ? [] : ['--demo', loadDemo(rest).dir]), ...rest.filter(a => a !== '--no-open'), '--edit', ...(rest.includes('--no-open') ? [] : ['--open'])];
+      await import('@stuntdouble/player/serve.mjs');
+      return new Promise(() => {});
+    }
+    case 'script': return node('script/cli.mjs', rest.includes('--demo') ? rest : [...rest, '--demo', loadDemo(rest).dir]);
+    case 'check': return node('checks/check.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    // The checklist (scenecast check). `fidelity` is its old engine name.
+    case 'checklist': case 'fidelity': { const demo = loadDemo(rest); if (!rest.includes('--url')) await refreshGuide(demo); return node('checks/fidelity.mjs', rest.includes('--demo') ? rest : ['--demo', demo.dir, ...rest]); }
+    // The fidelity loop's steps (the scenecast binary runs the loop: compare, fix, build, compare again, report).
+    case 'fidelity-compare': return node('checks/real-vs-replica.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'fidelity-fix': return node('checks/fixer/fix.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'fidelity-report': return node('checks/fidelity-report.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    // The presenter guide (⌥G): its notes from the script, its pictures, and the check that holds script, guide and
+    // replica to each other.
+    case 'notes': {
+      const demo = loadDemo(rest);
+      if (rest.includes('--check')) return node('checks/notes-check.mjs', ['--demo', demo.dir, ...rest.filter((a, i) => a !== '--check' && a !== '--demo' && rest[i - 1] !== '--demo')]);
+      const { compileFlow } = await import('../compile/flow.mjs');
+      const { writeNotes, scriptPath } = await import('../lib/notes.mjs');
+      const file = arg(rest, '--script') ? resolve(arg(rest, '--script')) : scriptPath(demo);
+      // Before there's a script: the guide from the recording, each beat's steps and pictures (the build writes these
+      // too; this makes them for a demo built before they had pictures).
+      if (rest.includes('--from-recording')) {
+        if (existsSync(file)) { console.log(`the guide comes from the script (${file}): scenecast notes`); return 0; }
+        const { writeRecordingNotes } = await import('../lib/notes.mjs');
+        const { flow } = await compileFlow(demo);
+        console.log(writeRecordingNotes(demo, flow) ? 'presenter guide: each beat\'s steps from the recording (no script yet)' : 'presenter/notes.json: kept');
+        return 0;
+      }
+      if (!existsSync(file)) { console.log(`no script at ${file}: write it there (Markdown, text or a RunLines .sk), set demo.json presenter.script, or pass --script <file>`); return 1; }
+      if (arg(rest, '--script')) {
+        const cfg = JSON.parse(readFileSync(join(demo.dir, 'demo.json'), 'utf8'));
+        const r0 = relative(realpathSync(demo.dir), realpathSync(file)), rel = r0.startsWith('..') || isAbsolute(r0) ? file : r0.split('\\').join('/');
+        if (!cfg.presenter || cfg.presenter.script !== rel) { cfg.presenter = { ...(cfg.presenter || {}), script: rel }; writeFileSync(join(demo.dir, 'demo.json'), JSON.stringify(cfg, null, 2) + '\n'); demo.cfg.presenter = cfg.presenter; console.log(`demo.json presenter.script: ${rel}`); }
+      }
+      const { flow } = await compileFlow(demo);
+      const n = writeNotes(demo, flow, file);
+      const share = n.stage.beats.filter(b => !b.own && b.n > 0 && b.n < n.beats.length - 1).map(b => b.n);
+      console.log(`presenter/notes.json: "${n.title}", ${n.beats.length - 2} beats, ${n.beats.reduce((k, b) => k + b.say.length, 0)} lines, ${n.parts.length} parts, ${n.shots.length} pictures (scenecast guide-shots)${share.length ? `\n  beats with no screen of their own (→ steps the guide): ${share.join(', ')}` : ''}`);
+      return 0;
+    }
+    case 'ai': return node('ai/cli.mjs', rest);
+    case 'guide-shots': return node('checks/guide-shots.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'quick': { const demo = loadDemo(rest); await refreshGuide(demo); return node('checks/fidelity.mjs', ['--quick', ...(rest.includes('--demo') ? rest : ['--demo', demo.dir, ...rest])]); }
+    case 'text': return (await import('../lib/workflow.mjs')).text(rest);
+    case 'status': return (await import('../lib/workflow.mjs')).status(rest);
+    case 'save': return (await import('../lib/workflow.mjs')).save(rest);
+    case 'release': return (await import('../lib/workflow.mjs')).release(rest, (script, a) => node(script, a));
+    case 'sheet': return node('checks/contact-sheet.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'hovers': return node('checks/hover-check.mjs', rest.includes('--demo') ? rest : ['--demo', loadDemo(rest).dir, ...rest]);
+    case 'scan': return node('checks/secrets.mjs', rest.length ? rest : [process.cwd()]);
+    default: console.log(`unknown command ${cmd}\n\n${HELP}`); return 1;
+  }
+}
+exit(await main());

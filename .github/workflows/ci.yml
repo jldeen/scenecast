@@ -68,7 +68,7 @@ jobs:
         run: npx playwright-core install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       # Google Chrome comes with the GitHub runners (Playwright's "chrome" channel uses it).
       - name: Build the scenecast binary
-        run: cargo build -p scenecast-cli
+        run: cargo build -p stuntdouble-cli
       - name: Git identity for the test demo's commits
         run: |
           git config --global user.name "scenecast ci"

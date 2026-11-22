@@ -16,12 +16,12 @@
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
-import { buildNotes, recordingNotes } from '../kit/lib/notes.mjs';
-import { replicaServer } from '../kit/lib/server.mjs';
-import { compileFlow } from '../kit/compile/flow.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
+import { buildNotes, recordingNotes } from '@stuntdouble/core/lib/notes.mjs';
+import { replicaServer } from '@stuntdouble/core/lib/server.mjs';
+import { compileFlow } from '@stuntdouble/core/compile/flow.mjs';
 import { comparePngs } from './compare.mjs';
-import { keyLabel } from '../player/app/presenter-key.js';
+import { keyLabel } from '@stuntdouble/player/app/presenter-key.js';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);

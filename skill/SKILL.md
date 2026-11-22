@@ -18,7 +18,7 @@ the [flow format](references/flow-format.md) and the [lessons](references/lesson
 recording.
 
 **Getting the CLI.** `scenecast --version`. If it's missing: `gh repo clone jldeen/scenecast ~/git/scenecast && cd
-~/git/scenecast && npm ci && cargo build --release -p scenecast-cli`, then use `~/git/scenecast/target/release/scenecast`
+~/git/scenecast && npm ci && cargo build --release -p stuntdouble-cli`, then use `~/git/scenecast/target/release/scenecast`
 (`scenecast.exe` on Windows). It needs Node 20+ and Edge or Chrome. Run every demo command from inside the demo folder
 (or pass `--demo <dir>`).
 

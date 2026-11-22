@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { comparePngs } from './compare.mjs';
-import { loadDemo, bundleFlow, arg as argOf } from '../kit/lib/demo.mjs';
+import { loadDemo, bundleFlow, arg as argOf } from '@stuntdouble/core/lib/demo.mjs';
 // A picture of part of the page. Headless Chrome on the macOS runners sometimes never hands one over (the capture
 // hangs after the fonts load); asked again after a frame, through the DevTools protocol, it does.
 async function shotOf(p, clip) {
@@ -107,8 +107,9 @@ for (const hp of flow.hoverPages) {
     // On the fast clock a hover delay is a few ms: a path over a neighbour opens its card on the way, so go straight there.
     if (SPEED > 1) { await p.mouse.move(cx, cy); await p.mouse.move(cx + 1, cy); } else { await p.mouse.move(cx - 30, cy - 30); await p.mouse.move(cx, cy, { steps: 3 }); }
     const settled = await settle();
-    const on = await p.evaluate(app => window.d1.hovers(app), hp.app);
-    const shown = on.some(h => h.id === d.id);
+    // A slow machine (a CI runner) can take longer to open it: look again for up to 2 s before calling it missing.
+    let shown = false;
+    for (let t = 0; t < 10 && !(shown = (await p.evaluate(app => window.d1.hovers(app), hp.app)).some(h => h.id === d.id)); t++) await p.waitForTimeout(200);
     // The picture: the card's own CSS transitions finish (they run on the page's clock too).
     await p.waitForTimeout(SPEED > 1 ? 150 : 400);
     if (shown) r.shown++; else { const why = await p.evaluate(([x, y, app]) => window.d1.hoverAt(x, y, app), [cx, cy, hp.app]); const trace = await p.evaluate(() => window.d1.hoverTrace ? window.d1.hoverTrace().slice(-40) : []); report.failed.push({ id: d.id, text: ((d.portals || [])[0] || {}).text || JSON.stringify(d.anchors[0]).slice(0, 90) + (settled ? '' : ' (the player never settled)'), at: why, trace }); }

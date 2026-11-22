@@ -87,7 +87,7 @@ export default function overrides(flow, { recording, demo }) {
 writeFileSync(join(DEMO, 'flow.overrides.mjs'), over);
 
 // ---- timings -------------------------------------------------------------------------------------------------
-const build = () => { const t = Date.now(); const r = spawnSync(process.execPath, [join(KIT, 'kit/bin/scenecast.mjs'), 'build', '--demo', DEMO], { encoding: 'utf8' }); if (r.status) { console.log(r.stdout.slice(-2000), r.stderr.slice(-2000)); throw new Error('build failed'); } return +((Date.now() - t) / 1000).toFixed(1); };
+const build = () => { const t = Date.now(); const r = spawnSync(process.execPath, [join(KIT, 'core/bin/engine.mjs'), 'build', '--demo', DEMO], { encoding: 'utf8' }); if (r.status) { console.log(r.stdout.slice(-2000), r.stderr.slice(-2000)); throw new Error('build failed'); } return +((Date.now() - t) / 1000).toFixed(1); };
 const size = () => { const r = spawnSync('du', ['-sk', join(DEMO, 'data')], { encoding: 'utf8' }); return Math.round(+r.stdout.split('\t')[0] / 1024) + ' MB'; };
 const count = d => existsSync(d) ? readdirSync(d, { recursive: true }).length : 0;
 const out = { k: K, raw: { snaps: readdirSync(join(RAW, 'snaps')).length, blobs } };

@@ -5,7 +5,7 @@
 // when any line is not backed.
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { runScript } from './index.mjs';
 // Exit once everything printed is out (a pipe to the app is written asynchronously; exiting at once cut it at 64 KB).
 const exitWhenOut = code => process.stdout.write('', () => process.exit(code));

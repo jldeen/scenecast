@@ -86,8 +86,8 @@ try {
     flow.hoverPages = [{ page: 'page', app: 'app', base: 'start' }];
     flow.clickPages = [{ page: 'page', app: 'app', base: 'start' }];
   };\n`);
-  run(process.execPath, ['packages/kit/compile/flow.mjs', '--demo', demo]);
-  run(process.execPath, ['packages/recorder/process.mjs', '--demo', demo, '--force']);
+  run(process.execPath, ['packages/core/compile/flow.mjs', '--demo', demo]);
+  run(process.execPath, ['packages/capture/process.mjs', '--demo', demo, '--force']);
   const before = Object.fromEntries(['snaps', 'streams', 'assets'].map(dir => [dir, files(join(demo, 'data', dir))]));
   run(binary, ['build', '--demo', demo, '--force']);
   const after = Object.fromEntries(['snaps', 'streams', 'assets'].map(dir => [dir, files(join(demo, 'data', dir))]));

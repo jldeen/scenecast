@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { comparePngs } from './compare.mjs';
-import { loadDemo, bundleFlow, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, bundleFlow, arg } from '@stuntdouble/core/lib/demo.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);

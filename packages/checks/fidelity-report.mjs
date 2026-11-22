@@ -4,8 +4,8 @@
 //   node checks/fidelity-report.mjs --demo <dir> [--out <dir>] [--fallback-before N]
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
-import { readFixes } from '../fixer/patches.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
+import { readFixes } from './fixer/patches.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);

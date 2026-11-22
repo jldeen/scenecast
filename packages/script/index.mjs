@@ -7,6 +7,7 @@
 //   5. focus.json (the script's points; dots and edited points are kept), the line-to-screen sheet (HTML and PDF), the
 //      presenter cue sheet (Markdown and HTML) and script.json, in .out/script/.
 // Progress: one `@script {json}` line per step on stdout (the scenecast binary and the desktop app read them).
+import { at as __at } from '@stuntdouble/core/lib/at.mjs';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { join, basename, relative } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -16,18 +17,17 @@ import { chromium } from 'playwright-core';
 import { parseScript } from './parse.mjs';
 import { loadMatcher } from './match.mjs';
 import { writeSheet, cueSheet } from './sheet.mjs';
-import { bundleFlow } from '../kit/lib/demo.mjs';
-import { readFocusJson, writeJsonAtomic, FOCUS_JSON } from '../kit/lib/overrides.mjs';
-import { stateSequence, beatPositions, beatAt, orderFocus } from '../player/app/focus-order.js';
+import { bundleFlow } from '@stuntdouble/core/lib/demo.mjs';
+import { readFocusJson, writeJsonAtomic, FOCUS_JSON } from '@stuntdouble/core/lib/overrides.mjs';
+import { stateSequence, beatPositions, beatAt, orderFocus } from '@stuntdouble/player/app/focus-order.js';
 
-const KIT = join(fileURLToPath(import.meta.url), '..', '..');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32).replace(/^-+|-+$/g, '') || 'point';
 const freePort = () => new Promise(res => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 
 export async function startServer(dir) {
   const port = await freePort();
-  const p = spawn(process.execPath, [join(KIT, 'player', 'serve.mjs'), '--demo', dir, '--port', String(port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+  const p = spawn(process.execPath, [__at('player', 'serve.mjs'), '--demo', dir, '--port', String(port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
   const url = `http://127.0.0.1:${port}/`;
   for (let i = 0; i < 100; i++) { try { if ((await fetch(url + '__replica/status')).ok) return { url, stop: () => p.kill() }; } catch (e) {} await sleep(100); }
   p.kill();

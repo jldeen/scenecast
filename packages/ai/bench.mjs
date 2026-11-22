@@ -23,7 +23,7 @@ export async function bench({ demo, model, settings = {}, plan, yes, build = fal
   const t0 = Date.now();
   try {
     if (plan) copyFileSync(plan, join(demo.dir, 'plan.md'));
-    const pf = await import('../kit/lib/preflight.mjs');
+    const pf = await import('@stuntdouble/core/lib/preflight.mjs');
     await phase('check', async () => { const r = await pf.preflight(demo, { fix: true }); if (!r.ready) throw new Error(pf.notReady(r)); });
     const { recordForMe } = await import('./drive.mjs');
     // The presenter, played by the plan's --yes: answers land in the same answer files the app writes.

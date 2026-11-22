@@ -60,7 +60,7 @@ pub fn old_extension_dir() -> PathBuf {
 pub fn recorder_version() -> Option<String> {
     let engine = engine().ok()?;
     let pkg: Value =
-        serde_json::from_slice(&std::fs::read(engine.packages.join("recorder/package.json")).ok()?)
+        serde_json::from_slice(&std::fs::read(engine.packages.join("capture/package.json")).ok()?)
             .ok()?;
     pkg["version"].as_str().map(str::to_owned)
 }

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CATALOG, explain } from '../ui/errors.js';
 
-// Real messages, as the engine and the app word them (packages/recorder/recorder.js, packages/kit/lib/preflight.mjs,
+// Real messages, as the engine and the app word them (packages/capture/recorder.js, packages/core/lib/preflight.mjs,
 // crates/scenecast-app, apps/desktop/src-tauri, packages/ai).
 const KNOWN = [
   ['not open: teams (a tab whose address has teams.cloud.microsoft), copilot (a tab whose address has copilot.cloud.microsoft). Open them in the browser the recorder is in, then start again', 'tabs-not-open'],

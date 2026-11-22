@@ -1,5 +1,5 @@
 // scenecast's end-to-end test, offline and headless, through the scenecast binary (SCENECAST_BIN, else
-// target/debug/scenecast from cargo build -p scenecast-cli), on macOS, Windows and Linux: a fixture product (test/fixture/server.mjs) is recorded by
+// target/debug/scenecast from cargo build -p stuntdouble-cli), on macOS, Windows and Linux: a fixture product (test/fixture/server.mjs) is recorded by
 // the recorder exactly the way a demo is (a "person" clicks, types and presses Enter in two app tabs while the
 // agent watches), side paths are captured (hovers, clicks with a menu whose styles load on open, a resize handle,
 // step groups, a "+N" chip list, zoom, a virtualized grid), the replica is built, served, and the fidelity checklist
@@ -17,15 +17,15 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
-import { compileFlow } from '../kit/compile/flow.mjs';
-import { loadDemo } from '../kit/lib/demo.mjs';
-import { flowParts } from '../kit/lib/buildkey.mjs';
+import { compileFlow } from '@stuntdouble/core/compile/flow.mjs';
+import { loadDemo } from '@stuntdouble/core/lib/demo.mjs';
+import { flowParts } from '@stuntdouble/core/lib/buildkey.mjs';
 import { scriptAndEditor } from './script-focus.mjs';
 import { presenterWalk } from './presenter-walk.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
-if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
+if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p stuntdouble-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 // SCENECAST_SELFTEST_KEEP=<file>: keep the demo folder too, and write where it is to that file (selftest/hover-repeat.mjs).
 const keep = process.argv.includes('--keep') || !!process.env.SCENECAST_SELFTEST_KEEP;
 // The recorder: the extension (MV3, chrome.debugger) by default; --agent for the Playwright-driven agent.

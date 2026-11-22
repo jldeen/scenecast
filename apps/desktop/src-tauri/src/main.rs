@@ -1808,8 +1808,9 @@ async fn install_update(app: AppHandle) -> Res<()> {
     update_install_now(&app, || {}).await
 }
 
-/// In an installed app, the engine (`packages/`, its `node_modules`) and Node come with it, as resources: point the
-/// engine at them unless the environment already does. Runs before any thread starts.
+/// In an installed app, the engine (`node_modules/@stuntdouble/*`, Scenecast's `node_modules/@scenecast/*`, their
+/// dependencies) and Node come with it, as resources: point the engine at them unless the environment already does.
+/// Runs before any thread starts.
 fn use_bundled_engine() {
     let Ok(exe) = std::env::current_exe() else {
         return;
@@ -1821,10 +1822,10 @@ fn use_bundled_engine() {
         exe_dir.join("../lib/scenecast"),
         exe_dir.join("../lib/Scenecast"),
     ];
-    let Some(res) = candidates
-        .iter()
-        .find(|d| d.join("packages/kit/bin/scenecast.mjs").is_file())
-    else {
+    let Some(res) = candidates.iter().find(|d| {
+        d.join("node_modules/@stuntdouble/core/bin/engine.mjs")
+            .is_file()
+    }) else {
         return;
     };
     let node = res
@@ -1832,10 +1833,15 @@ fn use_bundled_engine() {
         .join(if cfg!(windows) { "node.exe" } else { "node" });
     // SAFETY: called first thing in main, before the runtime or any other thread exists.
     unsafe {
-        if std::env::var_os("SCENECAST_JS").is_none() {
-            std::env::set_var("SCENECAST_JS", res.join("packages"));
+        if std::env::var_os("STUNTDOUBLE_JS").is_none()
+            && std::env::var_os("SCENECAST_JS").is_none()
+        {
+            std::env::set_var("SCENECAST_JS", res.join("node_modules/@stuntdouble"));
         }
-        if std::env::var_os("SCENECAST_NODE").is_none() && node.is_file() {
+        if std::env::var_os("STUNTDOUBLE_NODE").is_none()
+            && std::env::var_os("SCENECAST_NODE").is_none()
+            && node.is_file()
+        {
             std::env::set_var("SCENECAST_NODE", &node);
         }
     }

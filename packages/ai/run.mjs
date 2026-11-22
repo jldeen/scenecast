@@ -3,7 +3,7 @@
 // answered there (an answer file the app writes: .out/ai/answers/<id>.json), and a stop file.
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { send } from '../recorder/cli.mjs';
+import { send } from '@stuntdouble/capture/cli.mjs';
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const aiDir = demo => join(demo.out, 'ai');

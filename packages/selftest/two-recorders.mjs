@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { buildExtension } from '../recorder/build.mjs';
-import { send } from '../recorder/cli.mjs';
+import { buildExtension } from '@stuntdouble/capture/build.mjs';
+import { send } from '@stuntdouble/capture/cli.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RX = 47697, APP_RX = 47629;
@@ -23,7 +23,7 @@ const ping = port => fetch(`http://127.0.0.1:${port}/ping`).then(r => r.json()).
 const procs = [], ctxs = [];
 async function receiver(port, owner) {
   const raw = join(tmp, 'raw-' + port);
-  const p = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), raw, String(port)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: owner } });
+  const p = spawn(process.execPath, [join(HERE, '..', 'capture', 'receiver.mjs'), raw, String(port)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: owner } });
   procs.push(p);
   for (let i = 0; i < 50 && !(await ping(port)); i++) await sleep(100);
 }
@@ -57,7 +57,7 @@ try {
   const { mkdirSync } = await import('node:fs');
   mkdirSync(demo, { recursive: true });
   writeFileSync(join(demo, 'demo.json'), JSON.stringify({ kit: 1, name: 'two', title: 'Two', port: 4697, receiverPort: RX, raw: join(tmp, 'raw-' + RX), apps: [{ id: 'blank', url: 'about:blank', match: 'about:blank' }], chrome: {} }));
-  const pf = await new Promise(res => { const c = spawn(process.execPath, [join(HERE, '..', 'kit', 'bin', 'scenecast.mjs'), 'preflight', '--check', '--json', '--demo', demo], { env: { ...process.env, REPLICA_RX_PORT: String(RX) } }); let o = ''; c.stdout.on('data', d => o += d); c.on('close', () => res(o)); });
+  const pf = await new Promise(res => { const c = spawn(process.execPath, [join(HERE, '..', 'core', 'bin', 'engine.mjs'), 'preflight', '--check', '--json', '--demo', demo], { env: { ...process.env, REPLICA_RX_PORT: String(RX) } }); let o = ''; c.stdout.on('data', d => o += d); c.on('close', () => res(o)); });
   const rec = (() => { try { return JSON.parse(pf.slice(pf.indexOf('{'))).items.find(i => i.id === 'recorder'); } catch (e) { return null; } })();
   check('preflight: "the recorder is in more than one browser"', rec && rec.status === 'fail' && /more than one/.test(rec.detail), pf.slice(-800));
   // The other one goes: the first is still the one, and the warning goes too.

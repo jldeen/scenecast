@@ -1,7 +1,19 @@
 {
-  "name": "@scenecast/checks",
+  "name": "@stuntdouble/checks",
   "version": "0.5.2",
-  "private": true,
+  "description": "StuntDouble's checks: the fidelity checklist (two runs, cold starts, clicks, hovers, drags, zoom, focus points, secret scan, contact sheets), real vs replica, and the fixer (fixer/: pluggable diagnosers and per-demo patches).",
   "type": "module",
-  "description": "The fidelity checklist: two-run, cold start x3, clicks, hovers, drags, zoom, focus points, secret scan, contact sheets."
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jldeen/scenecast.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@stuntdouble/core": "0.5.2",
+    "@stuntdouble/player": "0.5.2",
+    "playwright-core": "^1.56.0"
+  }
 }

@@ -1546,7 +1546,7 @@ window.d1 = {
   // Whether the field a matcher finds has the cursor (for the checks).
   focused(m, id) { const el = findEl(apps[id || active].iframe.contentDocument, m); if (!el) return false; const a = el.ownerDocument.activeElement; return !!a && (a === el || el.contains(a)); },
   // Settled: nothing playing and no hover waiting to show or hide.
-  idle: async () => { while (busy || fontWaits.size || Object.values(apps).some(a => (a.hv && (a.hv.timers.size || a.hv.sweepPending)) || (a.grp && a.grp.timers.size))) await sleep(50); },
+  idle: async () => { while (busy || fontWaits.size || Object.values(apps).some(a => a.filling || (a.hv && (a.hv.timers.size || a.hv.sweepPending)) || (a.grp && a.grp.timers.size))) await sleep(50); },
   // Which captured hovers apply at a point, and whether their in-place changes fit (for tests/hover-check.mjs).
   hoverAt(x, y, id) {
     const app = apps[id || active];

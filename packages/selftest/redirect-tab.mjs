@@ -12,11 +12,11 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { buildExtension } from '../recorder/build.mjs';
-import { send } from '../recorder/cli.mjs';
+import { buildExtension } from '@stuntdouble/capture/build.mjs';
+import { send } from '@stuntdouble/capture/cli.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const KIT = join(HERE, '..', 'kit', 'bin', 'scenecast.mjs');
+const KIT = join(HERE, '..', 'core', 'bin', 'engine.mjs');
 const RX = 47697, WEB = 47897;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-redirect-'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -49,7 +49,7 @@ const start = dir => new Promise(done => {
   k.on('close', () => { clearTimeout(t); try { done(JSON.parse(out.slice(out.indexOf('{')))); } catch (e) { done({ error: `no answer: ${out}\n${err}` }); } });
 });
 
-const rx = spawn(process.execPath, [join(HERE, '..', 'recorder', 'receiver.mjs'), join(tmp, 'raw'), String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
+const rx = spawn(process.execPath, [join(HERE, '..', 'capture', 'receiver.mjs'), join(tmp, 'raw'), String(RX)], { stdio: 'ignore', env: { ...process.env, SCENECAST_RX_OWNER: 'cli' } });
 let ctx;
 try {
   buildExtension(join(tmp, 'ext'), RX);

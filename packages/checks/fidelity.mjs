@@ -11,6 +11,7 @@
 // page, frames or definition changed (tweaks included, as the server applies them), with their controls, groups,
 // panes and chips; the presenter keys if the beats changed; hovers if an app's hover data changed. No two-run, zoom,
 // drags, reset or contact sheet: those are for a release (scenecast fidelity, no --quick).
+import { at as __at } from '@stuntdouble/core/lib/at.mjs';
 import { chromium } from 'playwright-core';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmSync, statSync, copyFileSync, mkdtempSync, constants } from 'node:fs';
@@ -19,12 +20,11 @@ import { cpus, tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadDemo, bundleFlow, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, bundleFlow, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { scan } from './secrets.mjs';
 import { comparePngs, luminance } from './compare.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const KIT = join(here, '..');
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
 let URL = arg(args, '--url', demo.url);
@@ -43,7 +43,7 @@ const add = (id, title, status, detail = '') => { items.push({ id, title, status
 const started = {};
 const taskSecs = id => started[id] ? Math.round((Date.now() - started[id]) / 100) / 10 : undefined;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const node = (script, a) => new Promise(res => { const p = spawn(process.execPath, [join(KIT, script), ...a], { stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => o += d); p.on('close', code => res({ code, out: o })); });
+const node = (script, a) => new Promise(res => { const p = spawn(process.execPath, [__at(script), ...a], { stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => o += d); p.on('close', code => res({ code, out: o })); });
 mkdirSync(demo.out, { recursive: true });
 
 // The replica server: started here if it isn't running.
@@ -52,7 +52,7 @@ const up = async () => { if (fileBase) return true; try { return (await fetch(ne
 if (!(await up())) {
   // Not on the demo's own port unless asked for (--url): the editor or the stage may start there while this runs.
   if (!arg(args, '--url')) URL = `http://127.0.0.1:${await new Promise(res => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); })}/`;
-  server = spawn(process.execPath, [join(KIT, 'player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+  server = spawn(process.execPath, [__at('player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
   for (let i = 0; i < 50 && !(await up()); i++) await sleep(100);
 }
 // The flow the replica plays: its bundle, with the server's live overrides (tweaks in flow.overrides.mjs).
@@ -242,7 +242,7 @@ try {
         const dir = join(root, `clone${i + 1}`), out = join(demo.out, 'cold', `clone${i + 1}`);
         for (const f of files) { mkdirSync(dirname(join(dir, f)), { recursive: true }); copyFileSync(join(demo.dir, f), join(dir, f), constants.COPYFILE_FICLONE); }
         const port = await freePort();
-        const srv = spawn(process.execPath, [join(KIT, 'player/serve.mjs'), '--demo', dir, '--port', String(port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+        const srv = spawn(process.execPath, [__at('player/serve.mjs'), '--demo', dir, '--port', String(port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
         try {
           for (let k = 0; k < 150; k++) { try { if ((await fetch(`http://127.0.0.1:${port}/__replica/status`)).ok) break; } catch (e) {} await sleep(100); }
           rmSync(out, { recursive: true, force: true });
@@ -290,7 +290,9 @@ try {
         shots.forEach(([n], i) => { if (want1 === 'light' ? lum[i] < 0.55 : lum[i] > 0.45) off.push(`${n}: replica screen reads ${want1 === 'light' ? 'dark' : 'light'} (luminance ${lum[i]}), recorded ${want1}`); });
         await page.close();
       }
-      add('light', 'Theme', off.length ? 'fail' : 'pass', off.length ? off.join('\n') : `every screen as recorded (${[...themes].join(' and ') || 'light'})`);
+      // A screen the demo accepts in the other theme (demo.json checks.known: a dark title slide) is a warning.
+      const offKnown = off.filter(known), offBad = off.filter(m => !known(m));
+      add('light', 'Theme', offBad.length ? 'fail' : offKnown.length ? 'warn' : 'pass', offBad.length ? offBad.join('\n') : offKnown.length ? offKnown.map(m => m + ' (known: demo.json checks.known)').join('\n') : `every screen as recorded (${[...themes].join(' and ') || 'light'})`);
     }
   } });
 
@@ -320,7 +322,8 @@ try {
     // Each screen reads as it was recorded: light, or dark when it was captured dark.
     const themeOf = id => { try { return JSON.parse(readFileSync(join(demo.data, 'snaps', (S[id].snap || id) + '.json'), 'utf8')).theme || 'light'; } catch (e) { return 'light'; } };
     shots.forEach(([id], i) => { const t = themeOf(id); if (t === 'light' ? lum[i] < 0.55 : lum[i] > 0.45) bad.push(`${id}: reads ${t === 'light' ? 'dark' : 'light'} (luminance ${lum[i]}), recorded ${t}`); });
-    add('render', 'Every screen renders', bad.length ? 'fail' : 'pass', bad.length ? bad.join('\n') : `${list.length} screens${QUICK ? ' (changed)' : ''}, no errors, each in its recorded theme (render/*.png)`);
+    const badKnown = bad.filter(known), badReal = bad.filter(m => !known(m));
+    add('render', 'Every screen renders', badReal.length ? 'fail' : badKnown.length ? 'warn' : 'pass', badReal.length ? badReal.join('\n') : `${list.length} screens${QUICK ? ' (changed)' : ''}, no errors, each in its recorded theme (render/*.png)${badKnown.length ? '; known: ' + badKnown.join('; ') : ''}`);
   } });
 
   tasks.push({ id: 'transitions', deps: [], run: async () => {
@@ -485,7 +488,8 @@ try {
     const quiet = page => page.waitForFunction(() => !window.d1.focus.state().run, null, { timeout: 20000 });
     const state = page => page.evaluate(() => window.d1.focus.state());
     // As on stage: the page has settled (its target hasn't moved for a moment) before ⌥F.
-    const settle = (page, id) => page.waitForFunction(id => { const b = String(window.d1.focus.locate(id)), w = window.__fs || (window.__fs = {}), t = performance.now(); if (w.id !== id || w.b !== b) { Object.assign(w, { id, b, t }); return false; } return t - w.t > 300; }, id, { timeout: 8000, polling: 50 }).catch(() => {});
+    // A target that isn't there yet (a page still drawing it under the checklist's load, like a trace's snapshot) hasn't settled.
+    const settle = (page, id) => page.waitForFunction(id => { const l = window.d1.focus.locate(id), b = String(l), w = window.__fs || (window.__fs = {}), t = performance.now(); if (w.id !== id || w.b !== b) { Object.assign(w, { id, b, t }); return false; } return l != null && t - w.t > 300; }, id, { timeout: 15000, polling: 50 }).catch(() => {});
     const land = async (page, p) => {
       await page.evaluate(([a, s]) => window.d1.go(a, s), [p.app, p.states[0]]); await idle(page);
       const vp = page.viewportSize(); await page.mouse.move(vp.width - 1, vp.height - 1);

@@ -20,11 +20,10 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { availableParallelism } from 'node:os';
 import { diffDetail } from './compare.mjs';
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { openReplica } from './replica-render.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const KIT = join(here, '..');
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
 const URL0 = arg(args, '--url', demo.url);
@@ -36,7 +35,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const sha256 = buf => createHash('sha256').update(buf).digest('hex');
 const emit = (event, data) => console.log('@fidelity ' + JSON.stringify({ event, ...data }));
 
-const R = await openReplica(demo, URL0, KIT);
+const R = await openReplica(demo, URL0);
 const flow = R.flow;
 const S = flow.states;
 const manifest = existsSync(join(demo.dir, 'manifest.json')) ? JSON.parse(readFileSync(join(demo.dir, 'manifest.json'), 'utf8')) : { graph: { scenes: [] } };

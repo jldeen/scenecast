@@ -11,7 +11,7 @@ Presenters use the desktop app, which carries everything it needs. For the CLI, 
 ```bash
 git clone https://github.com/jldeen/scenecast && cd scenecast
 npm install                      # playwright-core, for capture and the checks (the replica itself needs nothing)
-cargo build --release -p scenecast-cli   # target/release/scenecast (scenecast.exe on Windows)
+cargo build --release -p stuntdouble-cli   # target/release/scenecast and stuntdouble (.exe on Windows): the same CLI
 ```
 
 `scenecast` finds the JS packages next to it (or set `SCENECAST_JS` to the `packages` folder) and runs them with
@@ -154,7 +154,7 @@ Anything else is reported as unexplained. The loop never replaces a page with a 
 and it fails if the manifest has more fallback scenes at the end than at the start. Remove a patch from
 `flow.fixes.json` to undo it; `flow.overrides.mjs` runs after the fixes, so a hand edit wins.
 
-The diagnosers are pluggable (a model, a team's own rules): see `packages/fixer/index.mjs` for the interface, and
+The diagnosers are pluggable (a model, a team's own rules): see `packages/checks/fixer/index.mjs` for the interface, and
 name modules in `demo.json` as `"fidelity": { "diagnosers": ["my-diagnoser.mjs"] }` or in `SCENECAST_DIAGNOSERS`.
 They run before the rules.
 
@@ -162,7 +162,7 @@ It writes `.out/fidelity/report.html` and `report.json` (what's still different,
 the fixes) and, per round, `.out/fidelity/round-N/` (the comparison, its pictures, the diagnoses). `--no-fix` only
 compares and reports. `--ndjson` prints each event as it comes (what the desktop app shows); `--json` the outcome.
 The exit code is 0 when every state is within the threshold, every font matches and no fallback scene was added.
-From Rust: `scenecast_build::fidelity::run(dir, &FidelityOptions, |progress| …)`.
+From Rust: `stuntdouble_build::fidelity::run(dir, &FidelityOptions, |progress| …)`.
 
 ## Script to focus points: `scenecast script <file>`
 
@@ -192,7 +192,7 @@ The matcher is pluggable. `text`, the default, is deterministic (text similarity
 is across the screens, sentence by sentence, with accessibility roles), so CI runs it with no model. A demo can
 bring its own, a model for instance: `--matcher my-matcher.mjs` or `demo.json` `"script": { "matcher": "…" }`,
 whose default export is `{ name, async match({ lines, screens, sequence, flow }) }` (the interface and helpers
-are in `packages/script/match.mjs`). From Rust: `scenecast_build::script::run(dir, &ScriptOptions, |progress| …)`.
+are in `packages/script/match.mjs`). From Rust: `stuntdouble_build::script::run(dir, &ScriptOptions, |progress| …)`.
 
 ## AI-assisted recording: `scenecast ai`
 
@@ -241,7 +241,7 @@ the key **⌥⇧E** (**Ctrl+Alt+Shift+E** on Windows) turns it on and off. It's 
 
 Every change shows at once (no rebuild, no reload) and is saved: focus points to `focus.json`, wording and beat
 starts to `flow.editor.json` (docs/engine/flow-format.md). `scenecast build` bakes the wording in. The server prints
-one `@edit {"event":"saved",…}` line per change. From Rust: `scenecast_build::edit::start(dir, &EditOptions)` returns
+one `@edit {"event":"saved",…}` line per change. From Rust: `stuntdouble_build::edit::start(dir, &EditOptions)` returns
 the server with its URL; its `events()` are the saved changes, until it stops.
 
 Environment: `SCENECAST_JS` (the `packages` folder), `SCENECAST_NODE` (the Node binary), and the engine's

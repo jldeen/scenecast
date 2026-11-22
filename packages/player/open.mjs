@@ -2,7 +2,7 @@
 // browser as the stage: the presenter guide talks to the stage over a BroadcastChannel, which only works inside one
 // browser profile. The desktop app's "Open presenter guide" runs this.
 //   node packages/player/open.mjs --demo <dir> --url <url> [--position x,y] [--size w,h]
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { openApp } from './launch.mjs';
 
 const args = process.argv.slice(2);

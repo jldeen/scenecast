@@ -1,0 +1,36 @@
+[package]
+name = "stuntdouble-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Two names for one CLI: stuntdouble (StuntDouble's; `stunt` from npm runs it) and scenecast (Scenecast's).
+[lib]
+name = "stuntdouble_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stuntdouble"
+path = "src/bin/stuntdouble.rs"
+
+[[bin]]
+name = "scenecast"
+path = "src/bin/scenecast.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive"] }
+stuntdouble-build.workspace = true
+stuntdouble-format.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

@@ -14,7 +14,11 @@ export default function focusModule(api) {
   // While zoomed: Esc and ↑/↓ are ZoomIt's, before anything else. ⌥F and ⌥⇧F step through the points; Ctrl+Alt+F
   // and Ctrl+Alt+Shift+F too, on any OS (Edge on Windows keeps Alt+F for its menu).
   api.on('key', e => {
-    if (focus.key(e)) return true;
+    if (focus.key(e)) {
+      // Esc zoomed out: a demo module may close what the point showed (a menu) in the same press (d1:focus-esc).
+      if (e.key === 'Escape') window.dispatchEvent(new CustomEvent('d1:focus-esc'));
+      return true;
+    }
     if (presenterKey(e) && e.code === 'KeyF') { if (e.shiftKey) focus.back(); else focus.next(); return true; }
     return false;
   });

@@ -57,7 +57,15 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../../packages/": "packages/",
+      "../../../packages/core/": "node_modules/@stuntdouble/core/",
+      "../../../packages/capture/": "node_modules/@stuntdouble/capture/",
+      "../../../packages/player/": "node_modules/@stuntdouble/player/",
+      "../../../packages/checks/": "node_modules/@stuntdouble/checks/",
+      "../../../packages/format/": "node_modules/@stuntdouble/format/",
+      "../../../packages/apps/": "node_modules/@stuntdouble/apps/",
+      "../../../packages/ai/": "node_modules/@scenecast/ai/",
+      "../../../packages/script/": "node_modules/@scenecast/script/",
+      "../../../packages/editor/": "node_modules/@scenecast/editor/",
       "../../../node_modules/playwright-core/": "node_modules/playwright-core/",
       "../../../node_modules/@github/copilot-sdk/": "node_modules/@github/copilot-sdk/",
       "../../../node_modules/koffi/": "node_modules/koffi/",

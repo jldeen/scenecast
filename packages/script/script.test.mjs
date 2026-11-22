@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseScript } from './parse.mjs';
 import { words, facts, align, pickItems, textMatcher } from './match.mjs';
-import { applyEditorOverrides, checkFocusJson, checkEditorOverrides } from '../kit/lib/overrides.mjs';
-import { stateSequence, beatPositions, beatAt, orderFocus } from '../player/app/focus-order.js';
+import { applyEditorOverrides, checkFocusJson, checkEditorOverrides } from '@stuntdouble/core/lib/overrides.mjs';
+import { stateSequence, beatPositions, beatAt, orderFocus } from '@stuntdouble/player/app/focus-order.js';
 
 test('Markdown: headings are beats, quotes are lines, Do: is the line\'s cue', () => {
   const s = parseScript('# Demo\n\nnotes here\n\n## Beat 1 · Open\n\n> Hello there,\n> everyone.\n\n**Do:** Start (⌥0).\n\n> Second line.\n\n## Money\n> It costs $5.\n');

@@ -40,7 +40,7 @@ jobs:
       - name: Chromium for the extension tests
         run: npx playwright-core install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - name: Build the scenecast binary
-        run: cargo build -p scenecast-cli
+        run: cargo build -p stuntdouble-cli
       - name: Git identity for the test demo's commits
         run: |
           git config --global user.name "scenecast ci"

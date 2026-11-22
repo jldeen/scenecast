@@ -10,18 +10,19 @@
 // compiled again (and flow.json written, for the next build); text edits the last build hasn't baked in (data/build.json) are applied to
 // each page, frame and hover as it's served. What only a build can do is listed at /__replica/status and in the log.
 // --release serves the bundle and data exactly as built.
+import { at as __at, has } from '@stuntdouble/core/lib/at.mjs';
 import { createServer } from 'node:http';
 import { createReadStream, existsSync, statSync, readFileSync, readdirSync, realpathSync, mkdirSync } from 'node:fs';
 import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp } from './launch.mjs';
 import { diffFlow, flowFromBundle, applyFlowOverrides } from './app/bundle-flow.js';
-import { readFocusJson, readEditorOverrides, checkFocusJson, checkEditorOverrides, writeJsonAtomic, FOCUS_JSON, EDITOR_JSON } from '../kit/lib/overrides.mjs';
-import { textRe } from '../kit/lib/edits.mjs';
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
-import { compileFlow } from '../kit/compile/flow.mjs';
-import { buildInputs, buildDiff } from '../kit/lib/buildkey.mjs';
-import { compileEdits, applyEdits, applyEditsJson } from '../kit/lib/edits.mjs';
+import { readFocusJson, readEditorOverrides, checkFocusJson, checkEditorOverrides, writeJsonAtomic, FOCUS_JSON, EDITOR_JSON } from '@stuntdouble/core/lib/overrides.mjs';
+import { textRe } from '@stuntdouble/core/lib/edits.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
+import { compileFlow } from '@stuntdouble/core/compile/flow.mjs';
+import { buildInputs, buildDiff } from '@stuntdouble/core/lib/buildkey.mjs';
+import { compileEdits, applyEdits, applyEditsJson } from '@stuntdouble/core/lib/edits.mjs';
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), 'app');
 const PRESENTER = join(dirname(fileURLToPath(import.meta.url)), 'presenter');
@@ -34,18 +35,23 @@ const pair = name => { const v = String(arg(args, name, '')).split(',').map(Numb
 const REHEARSE = args.includes('--rehearse');
 const rehearsal = { at: Date.now(), events: [], end: null, live: true };
 const REHEARSAL_FILE = join(demo.dir, '.out', 'rehearsal.json');
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.bin': 'application/octet-stream' };
-const EDITOR = join(dirname(fileURLToPath(import.meta.url)), '..', 'editor', 'app');
+const TYPES = { '.zip': 'application/zip', '.webmanifest': 'application/manifest+json', '.mjs': 'text/javascript; charset=utf-8', '.map': 'application/json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.bin': 'application/octet-stream' };
+const EDITOR = __at('editor', 'app');
 const MAP = [['/app/', APP], ['/editor/', EDITOR], ['/snaps/', join(demo.data, 'snaps')], ['/streams/', join(demo.data, 'streams')], ['/assets/', join(demo.data, 'assets')]];
 // demo.json engine: { dir, modules }: the demo's own engine modules (flow.modules), served from its dir as /demo/.
 const ENGINE = demo.cfg.engine || null;
 if (ENGINE) MAP.push(['/demo/', join(demo.dir, ENGINE.dir || 'app')]);
+// demo.json static: { "/prefix/": "folder" }, a folder of the demo's own served as is (a bundled web app such as the
+// Playwright trace viewer): any file type, byte ranges, and its service worker allowed at the prefix.
+const STATIC = Object.entries(demo.cfg.static || {}).map(([pre, dir]) => [pre, join(demo.dir, dir)]);
+for (const m of STATIC) MAP.push(m);
 
 // ---- the live flow and the edits not built in yet --------------------------------------------------------------
 const RELEASE = args.includes('--release');
 // The editor (packages/editor): loaded in the replica whenever it's served for authoring (not --release, not an
 // export), hidden until its key (⌥⇧E, Ctrl+Alt+Shift+E on Windows) or ?edit=1. --no-editor leaves it out.
-const EDITING = !RELEASE && !args.includes('--no-editor');
+// (Scenecast's: served only where it's installed.)
+const EDITING = !RELEASE && !args.includes('--no-editor') && has('editor');
 const live = { key: null, flow: null, error: null, needsBuild: [], pending: [], at: null };
 const watched = () => {
   const parts = [];
@@ -244,6 +250,20 @@ createServer(async (req, res) => {
   if (!f || !existsSync(f) || !statSync(f).isFile()) {
     // Unknown assets answer with an empty 204 rather than a 404, so nothing shows in the console.
     res.writeHead(path.startsWith('/assets/') || path === '/favicon.ico' || path === '/presenter/notes.json' ? 204 : 404); return res.end();
+  }
+  const st = STATIC.find(([pre]) => path.startsWith(pre));
+  if (st) {
+    const size = statSync(f).size, type = TYPES[extname(f)] || 'application/octet-stream';
+    const h = { 'content-type': type, 'cache-control': 'no-cache', 'accept-ranges': 'bytes', 'service-worker-allowed': st[0] };
+    const r = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+    if (r && (r[1] || r[2])) {
+      const start = r[1] ? +r[1] : Math.max(0, size - +r[2]), end = r[1] && r[2] ? Math.min(+r[2], size - 1) : size - 1;
+      if (start > end || start >= size) { res.writeHead(416, { 'content-range': `bytes */${size}` }); return res.end(); }
+      res.writeHead(206, { ...h, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 });
+      return req.method === 'HEAD' ? res.end() : createReadStream(f, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { ...h, 'content-length': size });
+    return req.method === 'HEAD' ? res.end() : createReadStream(f).pipe(res);
   }
   const immutable = path.startsWith('/assets/');
   res.writeHead(200, { 'content-type': TYPES[extname(f)] || 'application/octet-stream', 'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache', 'access-control-allow-origin': '*' });

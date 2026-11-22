@@ -15,14 +15,17 @@ browser (the recorder extension, the player, the checks).
 | `apps/desktop/src-tauri/` | The app's shell and commands. Its own Cargo workspace. |
 | `apps/desktop/tests/` | The real-window UI test, the installer and update tests, `preview/` (the window without the app). |
 | `crates/scenecast-app` | What the app's commands call: the library, each step, run of show, share. |
-| `crates/scenecast-build`, `scenecast-core`, `scenecast-cli` | The build, the bundle model and schema, the CLI. |
-| `packages/recorder` | The recorder extension, capture, preflight, the receiver. |
+| `crates/stuntdouble-build`, `stuntdouble-format`, `stuntdouble-cli` | The engine (StuntDouble): the build, the bundle model and schema, the CLI (built as `stuntdouble` and `scenecast`). |
+| `packages/core` (`@stuntdouble/core`) | Engine entry (`bin/engine.mjs`), demo settings, flow compiler, text rules and edits, notes, workflow, `at()`. |
+| `packages/capture` | The recorder extension, capture, preflight's browser half, the receiver, raw → `data/`. |
 | `packages/player` | The replica: server, player, presenter keys, focus points, the presenter guide. |
 | `packages/apps` | App packs: each app's recording, build, layout, theme and platform rules and its writes, once per app (`packages/apps/README.md`). Private parts live in `~/.stuntdouble/packs`, never here. |
-| `packages/kit`, `checks`, `fixer`, `script`, `editor`, `ai`, `selftest` | Engine entry and flow compiler, the checklist, the fidelity fixer, script to focus points, the in-replica editor, Copilot modes, end-to-end tests. |
+| `packages/checks`, `format`, `build`, `cli` | The checklist and fixer, the schema, the prebuilt binary, the `stunt` command. |
+| `packages/script`, `editor`, `ai`, `selftest` | Scenecast's own: script to focus points, the in-replica editor, Copilot modes, end-to-end tests. |
 | `docs/` | The docs ([index](docs/README.md)). |
 
-More: [docs/architecture.md](docs/architecture.md).
+More: [docs/architecture.md](docs/architecture.md). The engine is StuntDouble ([docs/stuntdouble.md](docs/stuntdouble.md)):
+replica-kit's demos (inv641, the Lightning talks) run on the same packages, so a fix lands once.
 
 ## Build and test
 
@@ -50,6 +53,8 @@ leave it to CI unless you're on a machine nobody is using. Details, variables an
 - **Live pages by default.** Screenshot or video scenes are a fallback only, and the checks flag them.
 - **The UI test finds things by `data-test`.** Keep those attributes when you change a screen, and update
   `apps/desktop/tests/ui.test.mjs` with the structure.
+- **Between packages:** a package import (`@stuntdouble/core/lib/demo.mjs`) or, for a file to spawn or serve,
+  `at('player', 'serve.mjs')` (`@stuntdouble/core/lib/at.mjs`). Never `../other-package/`: it breaks in an install.
 - **Tests:** a few focused ones for what you change. Unit tests go in `package.json`'s `test:unit` list.
 - **Commits:** a subject that says what changed, a plain body, and
   `Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>`. Never force-push.

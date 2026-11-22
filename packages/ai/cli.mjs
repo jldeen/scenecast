@@ -17,7 +17,7 @@
 // stand-in (no network, no account); SCENECAST_AI_HOME is where sign-in, settings and the Copilot runtime live.
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadDemo, arg } from '../kit/lib/demo.mjs';
+import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { makeModel } from './model.mjs';
 import { readSettings, writeSettings } from './copilot.mjs';
 import { aiDir, answer, stop } from './run.mjs';
@@ -64,7 +64,7 @@ async function main() {
       const d = demo();
       // The same readiness check as Record's (--checked: the app ran it just now).
       if (!args.includes('--checked')) {
-        const pf = await import('../kit/lib/preflight.mjs');
+        const pf = await import('@stuntdouble/core/lib/preflight.mjs');
         emit({ event: 'stage', name: 'check', label: 'Checking your browser and the app tabs' });
         const r = await pf.preflight(d, { fix: true });
         if (!r.ready) throw new Error(pf.notReady(r));

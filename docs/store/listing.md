@@ -6,13 +6,13 @@ then, Scenecast keeps the folder way, and that stays for internal builds and loc
 
 ## What to do
 
-1. Build the store package: `node packages/recorder/build.mjs` (the same extension the app installs), zipped with
+1. Build the store package: `node packages/capture/build.mjs` (the same extension the app installs), zipped with
    `manifest.json` at the root. Set its `version` to the app's.
 2. **Chrome Web Store** (developer account, one-time fee): new item, upload the zip, fill in the listing below, set
    visibility to **Unlisted**, submit. The `debugger` permission means a manual review: allow a few days.
 3. **Edge Add-ons** (Partner Center, free): the same zip and listing, **Hidden**. If Edge's review is slow, Edge also
    installs from the Chrome Web Store ("Allow extensions from other stores").
-4. Put each store's ID and page in `packages/recorder/store.json`. Scenecast then recognises a recorder added from a
+4. Put each store's ID and page in `packages/capture/store.json`. Scenecast then recognises a recorder added from a
    store, and Record's **Add the recorder** opens the store page in the demo's browser and profile.
 5. For a managed fleet, IT can force-install it by ID with the `ExtensionInstallForcelist` policy (Chrome and Edge).
 
@@ -55,5 +55,5 @@ it goes to the Scenecast app on this computer. No analytics.
 
 **Privacy policy:** link to a page with the paragraph above (the repository's `docs/store/privacy.md`).
 
-**Pictures:** a 128×128 icon (`packages/recorder/extension/icon.png`), one to five screenshots at 1280×800 (Scenecast's
+**Pictures:** a 128×128 icon (`packages/capture/extension/icon.png`), one to five screenshots at 1280×800 (Scenecast's
 Record screen with the recorder connected; a recording in progress), and a 440×280 small promo tile.

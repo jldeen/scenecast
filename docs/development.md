@@ -10,7 +10,7 @@ Rust (stable), Node 20 or later, and Google Chrome or Microsoft Edge, on macOS, 
 git clone https://github.com/jldeen/scenecast && cd scenecast
 npm ci                           # the root workspace: the engine's JS and its tests
 npm ci --prefix apps/desktop     # the desktop app's tools (Tauri CLI, WebdriverIO)
-cargo build -p scenecast-cli     # target/debug/scenecast
+cargo build -p stuntdouble-cli   # target/debug/scenecast and target/debug/stuntdouble: one CLI, two names
 ```
 
 The desktop app's shell (`apps/desktop/src-tauri`) is its own Cargo workspace: run its `cargo` commands from there.
@@ -37,7 +37,7 @@ Useful while testing:
 | `REPLICA_RX_PORT` | The receiver's port. |
 | `SCENECAST_AI_MODEL=stub` | The AI modes on a deterministic stand-in: no network, no GitHub account. |
 | `SCENECAST_UPDATE_URL` | A different update feed (the UI and update tests serve their own). |
-| `SCENECAST_JS`, `SCENECAST_NODE` | The engine's packages and the Node that runs them. |
+| `STUNTDOUBLE_JS`, `STUNTDOUBLE_NODE` (or `SCENECAST_JS`, `SCENECAST_NODE`) | The folder that holds the engine's packages (`core/`, `player/`, …) and the Node that runs them. |
 
 ## CI
 

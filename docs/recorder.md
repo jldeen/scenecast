@@ -104,7 +104,7 @@ last few steps (`recent`), which the coach follows. The receiver also serves the
 
 ## How it's built
 
-`packages/recorder/build.mjs` builds one body of code two ways:
+`packages/capture/build.mjs` builds one body of code two ways:
 
 - **`extension/`** (`scenecast extension`): an MV3 service worker. `extension/cdp-page.js` is a Playwright-shaped
   shim over `chrome.debugger` (pages, frames, `evaluate`, `frameElement`, mouse, keyboard, `screenshot`, CDP

@@ -3,5 +3,5 @@
 **/node_modules/
 examples/playwright-scroll-capture/generated/
 node_modules/
-packages/recorder/dist/
+packages/capture/dist/
 .out/

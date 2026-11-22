@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmSyn
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { freePort } from '../kit/lib/server.mjs';
+import { freePort } from '@stuntdouble/core/lib/server.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = join(KIT, '..');

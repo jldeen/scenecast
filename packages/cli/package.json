@@ -1,0 +1,27 @@
+{
+  "name": "@stuntdouble/cli",
+  "version": "0.5.2",
+  "description": "StuntDouble: record a live web demo once, replay it offline the same way every time. The stunt command.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jldeen/scenecast.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "stunt": "bin/stunt.mjs",
+    "stuntdouble": "bin/stunt.mjs"
+  },
+  "dependencies": {
+    "@stuntdouble/build": "0.5.2",
+    "@stuntdouble/core": "0.5.2",
+    "@stuntdouble/capture": "0.5.2",
+    "@stuntdouble/player": "0.5.2",
+    "@stuntdouble/checks": "0.5.2",
+    "@stuntdouble/format": "0.5.2",
+    "@stuntdouble/apps": "0.5.2"
+  }
+}

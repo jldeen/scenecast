@@ -17,11 +17,11 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
-import { parsePlan, parseStep } from '../ai/plan.mjs';
+import { parsePlan, parseStep } from '@scenecast/ai/plan.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
-if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
+if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p stuntdouble-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 const keep = process.argv.includes('--keep');
 const REAL = process.argv.includes('--real');
 const only = (process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : REAL ? '1' : '1,2,3,4').split(',').map(Number);

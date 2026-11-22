@@ -747,57 +747,13 @@ version = "0.5.2"
 dependencies = [
  "png",
  "regex",
- "scenecast-build",
- "scenecast-core",
  "serde",
  "serde_json",
+ "stuntdouble-build",
+ "stuntdouble-format",
  "tempfile",
  "thiserror",
  "zip",
-]
-
-[[package]]
-name = "scenecast-build"
-version = "0.5.2"
-dependencies = [
- "base64",
- "regex",
- "scenecast-core",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "url",
-]
-
-[[package]]
-name = "scenecast-cli"
-version = "0.5.2"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "predicates",
- "scenecast-build",
- "scenecast-core",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "scenecast-core"
-version = "0.5.2"
-dependencies = [
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -923,6 +879,50 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "stuntdouble-build"
+version = "0.5.2"
+dependencies = [
+ "base64",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "stuntdouble-format",
+ "tempfile",
+ "thiserror",
+ "url",
+]
+
+[[package]]
+name = "stuntdouble-cli"
+version = "0.5.2"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "predicates",
+ "serde",
+ "serde_json",
+ "sha2",
+ "stuntdouble-build",
+ "stuntdouble-format",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "stuntdouble-format"
+version = "0.5.2"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
 
 [[package]]
 name = "syn"

@@ -8,9 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack } from './index.mjs';
 import { flowDefaults, htmlPasses } from './build.mjs';
-import { packRules } from '../recorder/pack-rules.mjs';
-import { elementEnd } from '../recorder/compose.mjs';
-import { parseStep } from '../ai/plan.mjs';
+import { packRules } from '@stuntdouble/capture/pack-rules.mjs';
+import { elementEnd } from '@stuntdouble/capture/compose.mjs';
+import { parseStep } from '@scenecast/ai/plan.mjs';
 
 const builtin = loadPacks({ dirs: [] });
 const byId = id => builtin.find(p => p.id === id);

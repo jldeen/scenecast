@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { parseStep, formatStep, risk, stepCount } from './plan.mjs';
 import { compactOutline } from './model.mjs';
 import { findItem, composer, searchBox } from './find.mjs';
-import { recordOpts } from '../kit/lib/demo.mjs';
+import { recordOpts } from '@stuntdouble/core/lib/demo.mjs';
 import { rx, observe, settled, presenter, appTab, aiDir, sleep } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 

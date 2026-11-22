@@ -6,8 +6,8 @@
   "scripts": {
     "capture": "node capture.mjs",
     "install-browsers": "playwright install chromium",
-    "export": "cargo run -p scenecast-cli -- export-html generated/playwright-scroll.scenecast generated/player",
-    "validate": "cargo run -p scenecast-cli -- validate generated/playwright-scroll.scenecast"
+    "export": "cargo run -p stuntdouble-cli -- export-html generated/playwright-scroll.scenecast generated/player",
+    "validate": "cargo run -p stuntdouble-cli -- validate generated/playwright-scroll.scenecast"
   },
   "dependencies": {
     "playwright": "^1.57.0"

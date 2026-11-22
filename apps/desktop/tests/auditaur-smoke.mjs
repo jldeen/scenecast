@@ -106,7 +106,7 @@ try {
     await fetch(`http://127.0.0.1:${PORT}/cmd`, { method: 'POST', body: JSON.stringify({ op: 'reload' }) });
     await sleep(3000);
     await waitFor('the old recorder to connect', async () => (await hook('state')).value.receiver.connected, 60000, 1000);
-    const { send } = await import('../../../packages/recorder/cli.mjs');
+    const { send } = await import('../../../packages/capture/cli.mjs');
     const v = await send({ op: 'extension' }, 10, PORT);
     console.log('the recorder in the browser says', JSON.stringify(v.value?.version ?? v));
   }
