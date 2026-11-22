@@ -278,10 +278,14 @@ fn snaps_of(dir: &Path) -> std::collections::HashMap<String, String> {
 }
 
 fn demo_width(dir: &Path) -> u32 {
-    std::fs::read(dir.join("demo.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .and_then(|c| c["viewport"]["width"].as_u64())
+    scenecast_build::build::recorded_viewport(dir)
+        .or_else(|| {
+            std::fs::read(dir.join("demo.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                .map(|c| c["viewport"].clone())
+        })
+        .and_then(|v| v["width"].as_u64())
         .map_or(1920, |w| w as u32)
 }
 

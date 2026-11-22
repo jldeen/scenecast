@@ -93,7 +93,7 @@ test('focus points from an earlier script that don\'t fit a new take are left ou
 test('a take recorded in a narrower window: compared at its size, zoom bands below it', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'scenecast-flow-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name: 'fixture', raw: 'raw', apps: [{ id: 'chat', key: 'C' }] }));
+  writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name: 'fixture', raw: 'raw', viewport: { width: 1920, height: 1080, dpr: 2 }, apps: [{ id: 'chat', key: 'C' }] }));
   mkdirSync(join(dir, 'raw'));
   const recording = {
     viewport: { width: 1374, height: 733, dpr: 2.2 },
@@ -106,7 +106,7 @@ test('a take recorded in a narrower window: compared at its size, zoom bands bel
   writeFileSync(join(dir, 'raw', 'recording.json'), JSON.stringify(recording));
   writeFileSync(join(dir, 'raw', 'viewport.json'), JSON.stringify(recording.viewport));
   const demo = loadDemo(dir);
-  // No viewport in demo.json: the recorded window, not 1920 × 1080 @2.
+  // demo.json says 1920 × 1080 @2 (as the app writes it): the recorded window wins.
   assert.deepEqual(demo.cfg.viewport, { width: 1374, height: 733, dpr: 2.2 });
   const { flow } = await compileFlow(demo);
   // The same numbers as the Rust compiler's test (flow.rs): no band at or above the 1374 window.

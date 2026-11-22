@@ -112,7 +112,8 @@ pub fn sync_manifest(dir: &Path) -> Result<SyncReport, SyncError> {
             })
         })
         .collect();
-    if let Some(v) = demo.get("viewport") {
+    let recorded = crate::build::recorded_viewport(dir);
+    if let Some(v) = recorded.as_ref().or_else(|| demo.get("viewport")) {
         manifest.viewport = Some(Viewport {
             width: v.get("width").and_then(Value::as_u64).unwrap_or(1920) as u32,
             height: v.get("height").and_then(Value::as_u64).unwrap_or(1080) as u32,

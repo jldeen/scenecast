@@ -54,9 +54,10 @@ export function loadDemo(dirOrArgs) {
   // Raw captures hold real URLs (some with sign-in tokens): they live outside the demo folder by default.
   const raw = home(process.env.REPLICA_RAW || c.raw || `~/.scenecast/${c.name}/raw`);
   const out = home(process.env.REPLICA_OUT || c.out || '.out');
-  // No viewport in demo.json: the window it was recorded in (a real Chrome window is rarely 1920×1080 @2; Nov 2026,
-  // a take at 1374 @2.2 was compared, and its zoom bands placed, at 1920).
-  if (!cfg.viewport) { const v = recordedViewport(isAbsolute(raw) ? raw : join(dir, raw)); if (v) c.viewport = { ...c.viewport, ...v }; }
+  // Recorded: the window it was recorded in wins over demo.json's (the app writes 1920×1080 @2 there when it makes a
+  // demo; a real Chrome window is rarely that. Nov 2026: a take at 1374 @2.2 was compared, and its zoom bands placed,
+  // at 1920).
+  { const v = recordedViewport(isAbsolute(raw) ? raw : join(dir, raw)); if (v) c.viewport = { ...c.viewport, ...v }; }
   const d = {
     dir, cfg: c, name: c.name,
     raw: isAbsolute(raw) ? raw : join(dir, raw),

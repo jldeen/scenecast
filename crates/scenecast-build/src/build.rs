@@ -179,6 +179,19 @@ pub fn raw_dir(dir: &Path) -> Result<PathBuf, BuildError> {
     raw_dir_from(dir, &config)
 }
 
+/// The window the demo was recorded in (`raw/viewport.json`, else the recording's `viewport`): what its captures are,
+/// so it wins over demo.json's `viewport` (the app writes 1920 x 1080 @2 there when it makes a demo; a real Chrome
+/// window is rarely that).
+pub fn recorded_viewport(dir: &Path) -> Option<serde_json::Value> {
+    let raw = raw_dir(dir).ok()?;
+    let read = |p: PathBuf| -> Option<serde_json::Value> {
+        serde_json::from_slice(&fs::read(p).ok()?).ok()
+    };
+    let v = read(raw.join("viewport.json"))
+        .or_else(|| read(raw.join("recording.json")).map(|r| r["viewport"].clone()))?;
+    (v["width"].as_f64()? > 0.0 && v["height"].as_f64()? > 0.0).then_some(v)
+}
+
 /// The demo's scrub allowlist (`demo.json` `scrub.allowlist`): PII it may keep, never credentials.
 pub fn scrub_allowlist(dir: &Path) -> Result<Vec<String>, BuildError> {
     let config: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("demo.json"))?)?;

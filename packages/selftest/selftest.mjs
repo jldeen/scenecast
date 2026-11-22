@@ -244,13 +244,13 @@ export default flow => {
   // --record-only: stop here (for timing the recorder while working on it).
   if (process.argv.includes('--record-only')) throw RECORD_ONLY;
 
-  // A demo the app made has no viewport in demo.json: from here on, everything (the build's zoom bands, the compare)
-  // takes the window it was recorded in (1600 × 900 here), not the 1920 × 1080 @2 default. Nov 2026: a take in a
-  // 1374 px window got bands for 1920; at its own size the replica swapped to its 110% layout (13% off).
-  { const c = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')); delete c.viewport; writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(c, null, 2)); }
+  // A demo the app made says 1920 × 1080 @2 in demo.json, whatever window it's recorded in: from here on everything
+  // (the build's zoom bands, the manifest, the compare) takes the window it was recorded in (1600 × 900 here). Nov
+  // 2026: a take in a 1374 px window got bands for 1920; at its own size the replica swapped to its 110% layout.
+  { const c = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')); c.viewport = { width: 1920, height: 1080, dpr: 2 }; writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(c, null, 2)); }
   {
     const vp = loadDemo(DEMO).cfg.viewport, rv = JSON.parse(readFileSync(join(tmp, 'raw', 'recording.json'), 'utf8')).viewport;
-    check('the window it was recorded in is kept, and used when demo.json has none', rv && rv.width === 1600 && rv.height === 900 && vp.width === 1600 && vp.height === 900 && vp.dpr === 1, JSON.stringify({ rv, vp }));
+    check('the window it was recorded in is kept, and wins over demo.json\'s', rv && rv.width === 1600 && rv.height === 900 && vp.width === 1600 && vp.height === 900 && vp.dpr === 1, JSON.stringify({ rv, vp }));
   }
   // 4 · Build: flow.json from the recording, raw captures → data/, secret scan.
   const expectedFlow = JSON.parse(JSON.stringify((await compileFlow(loadDemo(DEMO), { fromRaw: true })).flow));
@@ -258,6 +258,7 @@ export default flow => {
   r = await run(['build', '--from-raw'], at);
   times.build = +((Date.now() - t1) / 1000).toFixed(1);
   check('build', r.code === 0, r.out.slice(-1500));
+  check('build: the manifest has the window it was recorded in', (manifestOf().viewport || {}).width === 1600 && manifestOf().viewport.height === 900, JSON.stringify(manifestOf().viewport));
   const flow = JSON.parse(readFileSync(join(DEMO, 'flow.json'), 'utf8'));
   check('Rust flow compiler: recording and build inputs match the reference',
     isDeepStrictEqual(flow, expectedFlow) && JSON.stringify(flowParts(flow)) === JSON.stringify(flowParts(expectedFlow)));
