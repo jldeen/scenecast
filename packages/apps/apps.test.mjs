@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack } from './index.mjs';
 import { flowDefaults, htmlPasses } from './build.mjs';
-import { packRules } from '@stuntdouble/capture/pack-rules.mjs';
+import { packRules } from '@stuntdouble/core/lib/text-rules.mjs';
 import { elementEnd } from '@stuntdouble/capture/compose.mjs';
 import { parseStep } from '@scenecast/ai/plan.mjs';
 
@@ -96,7 +96,7 @@ test('flow defaults: named rules by { use } with the demo\'s fields over them, r
   assert.throws(() => flowDefaults({ apps: [{ id: 'c', layout: { set: [{ use: 'nope' }] } }] }, appPacks), /no pack rule "nope"/);
 });
 
-test('build rules (the stand-in applier): conditions, kinds, attributes stripped and whole-line CSS repairs', () => {
+test('build rules (core text rules, per pack): conditions, kinds, attributes stripped and whole-line CSS repairs', () => {
   const R = packRules(htmlPasses(builtin, { off: ['github:heading-font'] }), { elementEnd });
   const gh = '<html><head><style>\n.x { a: ; }\n</style></head><body><li class="mx-2"><form class="js-stats-toggle">t</form></li><i class="taillight-module_qW5TYa_Bitmap Heading__toON9Z"></i></body></html>';
   const repairs = htmlPasses([byId('github')])[0].repairs;

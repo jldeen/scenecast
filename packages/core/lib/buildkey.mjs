@@ -12,7 +12,7 @@ import { activePacks } from '@stuntdouble/apps/index.mjs';
 import { htmlPasses, packPath } from '@stuntdouble/apps/build.mjs';
 
 const sha = s => createHash('sha256').update(s).digest('hex').slice(0, 16);
-const CODE = ['capture/process.mjs', 'capture/compose.mjs', 'capture/pack-rules.mjs', 'core/lib/edits.mjs', 'core/lib/text-rules.mjs', 'checks/fixer/patches.mjs', 'apps/index.mjs', 'apps/build.mjs'];
+const CODE = ['capture/process.mjs', 'capture/compose.mjs', 'core/lib/edits.mjs', 'core/lib/text-rules.mjs', 'checks/fixer/patches.mjs', 'apps/index.mjs', 'apps/build.mjs'];
 let codeHash = null;
 
 // Parts of the flow the build reads, by name (so a change can say which part needs a build).

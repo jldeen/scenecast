@@ -7,17 +7,24 @@
 //   drop:  'text'           visible text removed, with the space after it
 //   block: 'text', tag      the nearest enclosing <tag> element of that text removed (a paragraph, a list item)
 //                           (in plain text such as a skill's Markdown or a screen reader's live region, its line or sentence)
+//   re:    [pattern, to, flags]   a regular expression swap in the markup (flags default "g"; $1… in `to`)
+//   css:   'rules'                <style>rules</style> before </head> (whole pages only: a part has no head)
 // Each may say `in: ['cop-*', 'stream:payoff', ...]` (captures it applies to: a snap id, "stream:<name>",
-// "hover:<app>", "click:<app>"; default all) and `check: false` (another rule puts the same text back elsewhere, so its
-// leftovers aren't counted). Matching ignores the difference between straight and curly quotes, hyphen forms and
-// non-breaking spaces.
+// "hover:<app>", "click:<app>"; default all), `url` (the document's URL holds one of these, or matches /regex/), `has`
+// (the markup holds one of these), `pages: true` (captured pages and their frames only, not hover, click or stream
+// parts), `check: false` (another rule puts the same text back elsewhere, so its leftovers aren't counted) and
+// `optional: true` (a rule that may match nothing, as an app pack's rules do). Matching ignores the difference between
+// straight and curly quotes, hyphen forms and non-breaking spaces.
 //
 // Streamed frames are cut wherever the answer had got to, often mid-sentence. In them a text node that ends with the
 // start of a rule's text (the rest of it not streamed yet) gets the same start of the new text, or is removed, so old
 // words never show for a frame.
 //
 //   const R = overrides(rules, { elementEnd, skip: ['hov-*'] });   // elementEnd: @stuntdouble/capture/compose.mjs
-//   R.html(markup, ctx, { partial }), R.plain(text, ctx), R.leftovers(text, ctx), R.unused(), R.ops
+//   R.html(markup, ctx, { partial, url }), R.plain(text, ctx), R.leftovers(text, ctx), R.unused(), R.ops
+//
+// App packs' build rules (@stuntdouble/apps htmlPasses: per pack, its rules with ids "<pack>:<rule>", the attributes
+// to strip and its CSS repairs) go through packRules(passes, { elementEnd }), the same applier per pack.
 
 const NORM = { '\u2019': "'", '\u2018': "'", '\u201c': '"', '\u201d': '"', '\u2011': '-', '\u2010': '-', '\u2013': '-', '\u00a0': ' ' };
 const norm = s => s.replace(/[\u2019\u2018\u201c\u201d\u2011\u2010\u2013\u00a0]/g, c => NORM[c]);
@@ -25,6 +32,9 @@ const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', '#39': "'" };
 const encode = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const glob = p => new RegExp('^' + p.split('*').map(esc).join('.*') + '$');
+const asList = v => v == null ? [] : Array.isArray(v) ? v : [v];
+const urlHit = (m, s) => m.length > 2 && m.startsWith('/') && m.endsWith('/') ? new RegExp(m.slice(1, -1)).test(s) : s.includes(m);
+const KINDS = ['raw', 'text', 'drop', 'block', 're', 'css'];
 
 // The page's text, outside tags, comments and style/script/title contents: T (normalized, one char per char) and,
 // for each char, where it starts and ends in the markup.
@@ -54,13 +64,20 @@ const pattern = s => new RegExp(esc(norm(s)).replace(/ /g, '\\s+'), 'g');
 export { overrides as textRules };
 export function overrides(list, { elementEnd, skip = [] }) {
   const ops = list.map((o, k) => {
-    const kind = ['raw', 'text', 'drop', 'block'].find(x => o[x] !== undefined);
-    const from = kind === 'raw' || kind === 'text' ? o[kind][0] : o[kind];
-    const to = kind === 'raw' || kind === 'text' ? o[kind][1] : '';
-    return { ...o, k, kind, from, to, n: 0, scope: (o.in || ['*']).map(glob), re: pattern(from) };
+    const kind = KINDS.find(x => o[x] !== undefined);
+    if (!kind) throw new Error(`text rule ${o.id || k}: needs one of ${KINDS.join(', ')}`);
+    const pair = kind === 'raw' || kind === 'text' || kind === 're';
+    const from = pair ? o[kind][0] : o[kind];
+    const to = pair ? o[kind][1] : '';
+    const re = kind === 're' ? new RegExp(o.re[0], o.re[2] || 'g') : kind === 'css' ? null : pattern(from);
+    return { ...o, k, kind, from, to, n: 0, scope: (o.in || ['*']).map(glob), re };
   });
   const skips = skip.map(glob);
   const inScope = (op, ctx) => !skips.some(r => r.test(ctx)) && op.scope.some(r => r.test(ctx));
+  // The rule's own conditions, on the markup as it is when the rule's turn comes.
+  const applies = (op, html, ctx, url) => !(op.url && !(url && asList(op.url).some(m => urlHit(m, url))))
+    && !(op.has && !asList(op.has).some(h => html.includes(h)))
+    && !(op.pages && /^(hover|click|stream):/.test(ctx || ''));
 
   // Replace T[a, b) in the markup with `to` (a string, or one string per text run the range spans).
   function splice(html, map, a, b, to) {
@@ -99,6 +116,8 @@ export function overrides(list, { elementEnd, skip = [] }) {
   const mapOf = st => st.map || (st.map = textOf(st.html));
   const set = (st, html) => { if (html !== st.html) { st.html = html; st.map = null; } };
   function applyOne(st, op, partial) {
+    if (op.kind === 're') { set(st, st.html.replace(op.re, (...m) => { op.n++; return op.to.replace(/\$(\d)/g, (x, k) => m[+k] ?? ''); })); return; }
+    if (op.kind === 'css') { const at = st.html.indexOf('</head>'); if (at >= 0) { op.n++; set(st, st.html.slice(0, at) + `<style>${op.from}</style>` + st.html.slice(at)); } return; }
     if (op.kind === 'raw') { if (!st.html.includes(op.from)) return; const parts = st.html.split(op.from); op.n += parts.length - 1; set(st, parts.join(op.to)); return; }
     // Full matches, last first so earlier positions stay valid.
     for (let guard = 0; guard < 50; guard++) {
@@ -140,7 +159,7 @@ export function overrides(list, { elementEnd, skip = [] }) {
   return {
     ops,
     // Markup of one capture (ctx: snap id, "stream:<name>", "hover:<app>" or "click:<app>").
-    html(html, ctx, { partial = false } = {}) { const st = { html, map: null }; for (const op of ops) if (inScope(op, ctx)) applyOne(st, op, partial); return st.html; },
+    html(html, ctx, { partial = false, url = '' } = {}) { const st = { html, map: null }; for (const op of ops) if (inScope(op, ctx) && applies(op, st.html, ctx, url)) applyOne(st, op, partial); return st.html; },
     // Plain text (a hover's anchor text): the same swaps, without markup.
     plain(s, ctx) {
       for (const op of ops) {
@@ -160,12 +179,46 @@ export function overrides(list, { elementEnd, skip = [] }) {
       // The text index once per file, not once per rule (it was most of a large demo's build: 435 of 521 s).
       let T = null;
       for (const op of ops) {
-        if (op.check === false || !inScope(op, ctx)) continue;
+        if (op.check === false || op.kind === 're' || op.kind === 'css' || !inScope(op, ctx)) continue;
         const hay = op.kind === 'raw' ? text : (T ??= textOf(text).T);
         if (op.kind === 'raw' ? text.includes(op.from) : hay.search(op.re) >= 0) out.push(op.from.slice(0, 50));
       }
       return out;
     },
-    unused: () => ops.filter(op => !op.n && !op.optional).map(op => `${op.kind}: ${op.from.slice(0, 50)}`),
+    unused: () => ops.filter(op => !op.n && !op.optional).map(op => op.id || `${op.kind}: ${op.from.slice(0, 50)}`),
+  };
+}
+
+// App packs' build rules: per pack (a page or frame finds its pack by URL), its attributes blanked (strip: sign-in
+// tokens), its rules through the applier above, then its CSS repairs (whole lines swapped from a map: declarations
+// Chrome's CSSOM dropped). apply(html, packId, { url, ctx }); report() and unused() list what each rule did.
+export function packRules(passes, { elementEnd }) {
+  const byPack = new Map();
+  for (const p of passes) {
+    const strip = p.strip && p.strip.length ? new RegExp(`(\\s(?:${p.strip.map(esc).join('|')})=")[^"]*"`, 'gi') : null;
+    byPack.set(p.pack, { ...p, R: overrides(p.rules || [], { elementEnd }), strip, repairUsed: new Set() });
+  }
+  function apply(html, packId, { url = '', ctx = '' } = {}) {
+    const p = byPack.get(packId);
+    if (!p) return html;
+    if (p.strip) html = html.replace(p.strip, '$1"');
+    html = p.R.html(html, ctx, { url });
+    if (p.repairs && html.includes(' { ')) {
+      let changed = false;
+      const lines = html.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trimStart(), to = p.repairs[t];
+        if (to === undefined) continue;
+        lines[i] = lines[i].slice(0, lines[i].length - t.length) + to; p.repairUsed.add(t); changed = true;
+      }
+      if (changed) html = lines.join('\n');
+    }
+    return html;
+  }
+  return {
+    apply,
+    has: id => byPack.has(id),
+    report: () => [...byPack.values()].filter(p => p.R.ops.length || p.repairs).map(p => `${p.pack}: ` + [...p.R.ops.map(o => `${String(o.id).split(':')[1]} ${o.n}`), p.repairs ? `css repairs ${p.repairUsed.size} of ${Object.keys(p.repairs).length}` : null].filter(Boolean).join(', ')),
+    unused: () => [...byPack.values()].flatMap(p => p.R.unused()),
   };
 }

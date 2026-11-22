@@ -19,7 +19,7 @@ import { assetSubstitute, fontFaceCss, mergeRows, refResolver } from '@stuntdoub
 import { pinSchemeText } from '@stuntdouble/player/app/variants.js';
 import { activePacks, packFor, packsForDemo } from '@stuntdouble/apps/index.mjs';
 import { htmlPasses, flowPacks, packPath } from '@stuntdouble/apps/build.mjs';
-import { packRules } from './pack-rules.mjs';
+import { packRules } from '@stuntdouble/core/lib/text-rules.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
