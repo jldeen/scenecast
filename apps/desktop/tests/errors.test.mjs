@@ -34,6 +34,8 @@ const KNOWN = [
   ['the demo has no apps to record', 'no-apps'],
   ['no recording: /Users/j/.scenecast/x/raw (record the demo first: scenecast record start)', 'no-recording'],
   ['1 credential found: the build stopped', 'credential'],
+  ['this demo is busy (fidelity): wait for it to finish', 'busy-comparing'],
+  ['this demo is busy (build): wait for it to finish', 'busy'],
   ['paste or open the script first', 'script-empty'],
   ['the script is empty', 'script-empty'],
   ['start presenting first: the guide follows the stage', 'guide-before-stage'],

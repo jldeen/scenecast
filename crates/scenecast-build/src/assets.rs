@@ -1,7 +1,8 @@
 //! Resolve captured resources into content-addressed local assets.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -74,6 +75,14 @@ pub struct Resolution {
     pub missing: Vec<(String, String)>,
 }
 
+/// A stylesheet or resource already resolved in this build, and what it reported missing on the way (replayed, so
+/// the result is the same as resolving it again). Pages share most of their stylesheets: each is rewritten once.
+#[derive(Clone)]
+struct Memo {
+    value: Option<String>,
+    missing: Vec<(String, String, bool)>,
+}
+
 pub struct AssetResolver {
     raw: PathBuf,
     assets: PathBuf,
@@ -82,6 +91,12 @@ pub struct AssetResolver {
     used_set: HashSet<String>,
     missing: Vec<(String, String)>,
     stream: Option<crate::streams::StreamWriter>,
+    css_memo: HashMap<(String, usize), Memo>,
+    local_memo: HashMap<String, Memo>,
+    /// A part's rules in a source page, by the two's SHA-256 (the same part goes into many pages).
+    picks: HashMap<[u8; 32], Result<crate::compose::CssPick, &'static str>>,
+    /// What's reported missing while a memoized value is worked out (one list per value in progress).
+    logs: Vec<Vec<(String, String, bool)>>,
 }
 
 impl AssetResolver {
@@ -97,7 +112,18 @@ impl AssetResolver {
             used_set: HashSet::new(),
             missing: Vec::new(),
             stream: None,
+            css_memo: HashMap::new(),
+            local_memo: HashMap::new(),
+            picks: HashMap::new(),
+            logs: Vec::new(),
         })
+    }
+
+    fn replay(&mut self, memo: Memo) -> Option<String> {
+        for (url, reason, limit) in &memo.missing {
+            self.missing(url, reason, *limit);
+        }
+        memo.value
     }
 
     fn use_asset(&mut self, name: &str) {
@@ -107,6 +133,9 @@ impl AssetResolver {
     }
 
     fn missing(&mut self, url: &str, reason: &str, limit: bool) {
+        for log in &mut self.logs {
+            log.push((url.to_owned(), reason.to_owned(), limit));
+        }
         let key = url.split('?').next().unwrap_or(url);
         let key = if limit {
             key.chars().take(140).collect()
@@ -199,6 +228,25 @@ impl AssetResolver {
                 None => self.empty(),
             };
         }
+        if let Some(memo) = self.local_memo.get(url).cloned() {
+            return Ok(self.replay(memo).expect("a resolved resource"));
+        }
+        self.logs.push(Vec::new());
+        let value = self.local_uncached(url);
+        let missing = self.logs.pop().expect("log pushed");
+        if let Ok(v) = &value {
+            self.local_memo.insert(
+                url.to_owned(),
+                Memo {
+                    value: Some(v.clone()),
+                    missing,
+                },
+            );
+        }
+        value
+    }
+
+    fn local_uncached(&mut self, url: &str) -> Result<String, AssetError> {
         let Some(src) = self.blob(url)? else {
             let reason = self
                 .index
@@ -219,9 +267,21 @@ impl AssetResolver {
             .and_then(|v| v.to_str())
             .ok_or(AssetError::Invalid("blob filename"))?
             .to_owned();
-        let bytes = fs::read(&src).map_err(|e| io(&src, e))?;
-        let prefix: String = bytes.iter().take(600).map(|&b| char::from(b)).collect();
-        if !name.ends_with(".css") && re!(r"(?i)<(!doctype html|html[\s>])").is_match(&prefix) {
+        if name.ends_with(".css") {
+            let bytes = fs::read(&src).map_err(|e| io(&src, e))?;
+            self.use_asset(&name);
+            let text = String::from_utf8_lossy(&bytes);
+            let css = self.rewrite_css(&text, url, 0)?;
+            let css = drop_missing_fonts(&css);
+            return self.asset(css.as_bytes(), "css");
+        }
+        // Only its start is read to tell a web page from an image or font; the file is copied as it is.
+        let mut head = Vec::with_capacity(600);
+        fs::File::open(&src)
+            .and_then(|f| f.take(600).read_to_end(&mut head))
+            .map_err(|e| io(&src, e))?;
+        let prefix: String = head.iter().map(|&b| char::from(b)).collect();
+        if re!(r"(?i)<(!doctype html|html[\s>])").is_match(&prefix) {
             self.missing(url, "answered with an HTML page", true);
             return if re!(r"(?i)\.(woff2?|ttf|otf|eot)(\?|$)").is_match(url) {
                 Ok("/assets/missing.woff2".into())
@@ -230,20 +290,34 @@ impl AssetResolver {
             };
         }
         self.use_asset(&name);
-        if name.ends_with(".css") {
-            let text = String::from_utf8_lossy(&bytes);
-            let css = self.rewrite_css(&text, url, 0)?;
-            let css = drop_missing_fonts(&css);
-            return self.asset(css.as_bytes(), "css");
-        }
         let dst = self.assets.join(&name);
         if !dst.exists() {
-            fs::write(&dst, bytes).map_err(|e| io(&dst, e))?;
+            fs::copy(&src, &dst).map_err(|e| io(&dst, e))?;
         }
         Ok(format!("/assets/{name}"))
     }
 
     fn css_file(&mut self, url: &str, depth: usize) -> Result<Option<String>, AssetError> {
+        let key = (url.to_owned(), depth);
+        if let Some(memo) = self.css_memo.get(&key).cloned() {
+            return Ok(self.replay(memo));
+        }
+        self.logs.push(Vec::new());
+        let value = self.css_file_uncached(url, depth);
+        let missing = self.logs.pop().expect("log pushed");
+        if let Ok(v) = &value {
+            self.css_memo.insert(
+                key,
+                Memo {
+                    value: v.clone(),
+                    missing,
+                },
+            );
+        }
+        value
+    }
+
+    fn css_file_uncached(&mut self, url: &str, depth: usize) -> Result<Option<String>, AssetError> {
         let Some(src) = self.blob(url)? else {
             return Ok(None);
         };
@@ -418,10 +492,17 @@ impl AssetResolver {
             "fragment" => Some(self.rewrite_fragment(value, false)?),
             "css-for" => {
                 let [part, source, target]: [String; 3] = serde_json::from_str(value)?;
-                Some(
-                    crate::compose::css_for(&part, &source, &target)
-                        .map_err(AssetError::Invalid)?,
-                )
+                let mut key = Sha256::new();
+                key.update((part.len() as u64).to_le_bytes());
+                key.update(&part);
+                key.update(&source);
+                let pick = self
+                    .picks
+                    .entry(key.finalize().into())
+                    .or_insert_with(|| crate::compose::css_pick(&part, &source))
+                    .clone()
+                    .map_err(AssetError::Invalid)?;
+                Some(pick.for_target(&target))
             }
             "compose" => {
                 let [html, anchor, tag, part, css]: [String; 5] = serde_json::from_str(value)?;

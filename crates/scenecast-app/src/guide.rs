@@ -143,14 +143,187 @@ pub fn make(dir: &Path, mut on: impl FnMut(Update)) -> Result<Option<GuideStatus
     }
     on(Update::stage("guide", "Writing the presenter guide"));
     run(dir, "notes", &mut on)?;
-    if pictures_stale(dir) {
-        on(Update::stage(
-            "guide-shots",
-            "Taking the presenter guide's pictures",
-        ));
-        run(dir, "guide-shots", &mut on)?;
-    }
+    make_pictures(dir, &mut on)?;
     Ok(status(dir))
+}
+
+/// The pictures that need making: from the screenshots the recording took (no browser), else rendered from the
+/// replica (`scenecast guide-shots`).
+fn make_pictures(dir: &Path, on: &mut impl FnMut(Update)) -> Result<(), AppError> {
+    if !pictures_stale(dir) {
+        return Ok(());
+    }
+    on(Update::stage(
+        "guide-shots",
+        "Taking the presenter guide's pictures",
+    ));
+    if !from_screenshots(dir).unwrap_or(false) {
+        run(dir, "guide-shots", on)?;
+    }
+    Ok(())
+}
+
+/// Each picture the guide shows, from the screenshot the recording took of its screen, at half the demo's width
+/// (what `guide-shots` renders). False, with nothing written, when a screen has no screenshot.
+pub fn from_screenshots(dir: &Path) -> Result<bool, AppError> {
+    let notes: Value = serde_json::from_slice(&std::fs::read(notes_file(dir))?)?;
+    let shots = notes["shots"].as_array().cloned().unwrap_or_default();
+    let snaps = snaps_of(dir);
+    let raw = scenecast_build::build::raw_dir(dir)?.join("shots");
+    let mut sources = Vec::new();
+    for s in &shots {
+        let state = s["state"].as_str().unwrap_or_default();
+        let Some(file) = snaps
+            .get(state)
+            .map(|snap| raw.join(format!("{snap}.png")))
+            .filter(|f| f.is_file())
+        else {
+            return Ok(false);
+        };
+        sources.push((s["name"].as_str().unwrap_or_default().to_owned(), file));
+    }
+    let width = demo_width(dir) / 2;
+    let out = shots_dir(dir);
+    std::fs::create_dir_all(&out)?;
+    let made = scenecast_build::par::map(&sources, |(name, file)| {
+        shrink_png(file, &out.join(format!("{name}.png")), width)
+    });
+    for r in made {
+        r?;
+    }
+    finish_pictures(dir, &shots)?;
+    Ok(true)
+}
+
+/// Pictures no beat uses go, and shots.json says what each one is of (so a change can tell they need making again).
+fn finish_pictures(dir: &Path, shots: &[Value]) -> Result<(), AppError> {
+    let out = shots_dir(dir);
+    let keep: std::collections::HashSet<String> = shots
+        .iter()
+        .filter_map(|s| s["name"].as_str().map(|n| format!("{n}.png")))
+        .collect();
+    for entry in std::fs::read_dir(&out)? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".png") && !keep.contains(&name) {
+            std::fs::remove_file(out.join(&name))?;
+        }
+    }
+    let list: Vec<Value> = shots
+        .iter()
+        .map(|s| serde_json::json!([s["name"], s["app"], s["state"]]))
+        .collect();
+    std::fs::write(
+        out.join("shots.json"),
+        format!("{}\n", serde_json::to_string(&list)?),
+    )?;
+    Ok(())
+}
+
+/// After real vs replica: a picture whose screen doesn't match the real one is the replica's own (the compare's
+/// render of it), so the guide shows what the stage will. Returns how many changed.
+pub fn pictures_from_compare(dir: &Path) -> Result<usize, AppError> {
+    let Ok(notes) = std::fs::read(notes_file(dir)) else {
+        return Ok(0);
+    };
+    let notes: Value = serde_json::from_slice(&notes)?;
+    let Some(fid) = crate::fidelity::last(dir) else {
+        return Ok(0);
+    };
+    let width = demo_width(dir) / 2;
+    let mut changed = 0;
+    for s in notes["shots"].as_array().into_iter().flatten() {
+        let (Some(name), Some(state)) = (s["name"].as_str(), s["state"].as_str()) else {
+            continue;
+        };
+        let item = fid.report["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|i| {
+                i["kind"] == "state" && i["state"] == state && i["z"].as_u64().unwrap_or(100) == 100
+            });
+        let Some(replica) = item
+            .filter(|i| i["pass"] == false)
+            .and_then(|i| i["replica"].as_str())
+            .map(|r| fid.dir.join(r))
+            .filter(|p| p.is_file())
+        else {
+            continue;
+        };
+        shrink_png(&replica, &shots_dir(dir).join(format!("{name}.png")), width)?;
+        changed += 1;
+    }
+    Ok(changed)
+}
+
+/// Each state's capture (flow.json, else the recording).
+fn snaps_of(dir: &Path) -> std::collections::HashMap<String, String> {
+    let read = |f: &str| {
+        std::fs::read(dir.join(f))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    };
+    let mut out = std::collections::HashMap::new();
+    for doc in [read("recording.json"), read("flow.json")]
+        .into_iter()
+        .flatten()
+    {
+        for (id, st) in doc["states"].as_object().into_iter().flatten() {
+            if let Some(snap) = st["snap"].as_str() {
+                out.insert(id.clone(), snap.to_owned());
+            }
+        }
+    }
+    out
+}
+
+fn demo_width(dir: &Path) -> u32 {
+    std::fs::read(dir.join("demo.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|c| c["viewport"]["width"].as_u64())
+        .map_or(1920, |w| w as u32)
+}
+
+/// A PNG made smaller by a whole factor (each pixel the average of a square of them), to about `width` wide.
+pub fn shrink_png(from: &Path, to: &Path, width: u32) -> Result<(), AppError> {
+    let bad = |e: &dyn std::fmt::Display| AppError::Invalid(format!("{}: {e}", from.display()));
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(from)?));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().map_err(|e| bad(&e))?;
+    let mut buf = vec![0; reader.output_buffer_size().ok_or_else(|| bad(&"too big"))?];
+    let info = reader.next_frame(&mut buf).map_err(|e| bad(&e))?;
+    let channels = info.color_type.samples();
+    let (w, h) = (info.width as usize, info.height as usize);
+    let k = ((w as f64 / width.max(1) as f64).round() as usize).max(1);
+    let (ow, oh) = ((w / k).max(1), (h / k).max(1));
+    let mut out = vec![0u8; ow * oh * channels];
+    for y in 0..oh {
+        for x in 0..ow {
+            for c in 0..channels {
+                let mut sum = 0u32;
+                for dy in 0..k {
+                    let row = &buf[(y * k + dy) * info.line_size..];
+                    for dx in 0..k {
+                        sum += u32::from(row[(x * k + dx) * channels + c]);
+                    }
+                }
+                out[(y * ow + x) * channels + c] = (sum / (k * k) as u32) as u8;
+            }
+        }
+    }
+    let tmp = to.with_extension("png.tmp");
+    {
+        let file = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
+        let mut encoder = png::Encoder::new(file, ow as u32, oh as u32);
+        encoder.set_color(info.color_type);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder.write_header().map_err(|e| bad(&e))?;
+        writer.write_image_data(&out).map_err(|e| bad(&e))?;
+    }
+    std::fs::rename(&tmp, to)?;
+    Ok(())
 }
 
 /// Before there's a script, the guide comes from the recording: each beat's steps, and a picture of the screen it starts
@@ -164,13 +337,7 @@ pub fn from_recording(
         return Ok(None);
     }
     run_with(dir, "notes", &["--from-recording"], &mut on)?;
-    if pictures_stale(dir) {
-        on(Update::stage(
-            "guide-shots",
-            "Taking the presenter guide's pictures",
-        ));
-        run(dir, "guide-shots", &mut on)?;
-    }
+    make_pictures(dir, &mut on)?;
     Ok(status(dir))
 }
 

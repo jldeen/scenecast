@@ -223,6 +223,10 @@ impl ReceiverHost {
                     }
                 })
                 .ok();
+            std::thread::Builder::new()
+                .name("prescan".into())
+                .spawn(move || self.prescan())
+                .ok();
         });
         {
             let mut g = self.inner.lock().expect("receiver lock");
@@ -322,6 +326,40 @@ impl ReceiverHost {
             "couldn't start the receiver ({})",
             why.join("; ")
         )))
+    }
+
+    /// Captures are scanned for secrets as they arrive (a look every 3 s, on two threads, while the demo's receiver
+    /// runs), so the build after Stop finds them already scanned.
+    fn prescan(&self) {
+        let mut scan: Option<scenecast_build::scrub::Prescan> = None;
+        loop {
+            std::thread::sleep(Duration::from_secs(3));
+            let dir = {
+                let g = self.inner.lock().expect("receiver lock");
+                g.dir.clone().filter(|_| g.port.is_some())
+            };
+            let Some(dir) = dir else {
+                scan = None;
+                continue;
+            };
+            let Ok(raw) = scenecast_build::build::raw_dir(&dir) else {
+                continue;
+            };
+            if !raw.is_dir() {
+                continue;
+            }
+            if scan.as_ref().is_none_or(|s| s.root() != raw) {
+                scan = Some(scenecast_build::scrub::Prescan::new(&raw));
+            }
+            let open = || {
+                let allowlist = scenecast_build::build::scrub_allowlist(&dir).ok()?;
+                let cache = scenecast_build::scrub::ScrubCache::for_demo(&dir, &allowlist)?;
+                Some((allowlist, cache))
+            };
+            if let Some(s) = scan.as_mut() {
+                s.look(open, 2);
+            }
+        }
     }
 
     /// The supervisor's round: a receiver that stopped is started again.
