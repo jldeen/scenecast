@@ -92,7 +92,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
     const pack = ((packs || {}).forApp || {})[a];
     for (const e of (pack && pack.effects) || []) {
       if (/switch/i.test(`${e.id} ${e.what}`) && !switches) continue;
-      if (e.undo && e.undo.steps) out.undo.push({ app: a, steps: e.undo.steps, undoes: `what a run leaves: ${e.what}`, note: null, manual: e.undo.steps.some(x => /^You:/i.test(x)) });
+      if (e.undo && e.undo.steps) out.undo.push({ app: a, steps: e.undo.steps, undoes: `what a run leaves: ${e.what}`, note: e.check ? 'only when its check finds something' : null, manual: e.undo.steps.some(x => /^You:/i.test(x)) });
       if (e.check && e.check.expect) out.checks.push({ app: a, text: e.check.expect.replace(/\.$/, ''), from: `${pack.id}: ${e.id}` });
     }
   }
@@ -142,6 +142,16 @@ function fromPack(w, ctx, packs) {
   const words = { task: 'the task this run made', skill: 'the skill this run saved', message: 'the message this run posted', before: 'what it was before', item: 'the item this run added', section: 'its section' };
   const fill = t => String(t).replace(/\{(\w+)\}/g, (m, k) => known[k] || words[k] || m).replace(/"(the (?:task|skill|message|item) this run (?:made|saved|posted|added))"/g, '$1');
   const out = { app: w.app, kind: pw.makes || pw.id, undo: undo && undo.steps ? undo.steps.map(fill) : [], check: check ? [fill(check.expect || (check.look && (check.look.absent ? `no "${check.look.absent}"` : check.look.text)) || '').replace(/\.$/, '')].filter(Boolean) : [], note: [undo && undo.open ? `opens ${undo.open}` : null, undo && undo.note].filter(Boolean).join('; ') || null };
+  // A private pack's API undo: named here, not written out (its host and IDs stay in the pack). The capture pass
+  // calls it in its own signed-in session, with what its run made; the steps by hand are what's left if it can't.
+  if (undo && undo.api) {
+    const from = [...new Set((JSON.stringify(undo.api).match(/\{(\w+)\}/g) || []).map(x => x.slice(1, -1)))];
+    const byHand = out.undo.length ? `if it can't: ${out.undo.join(' › ')}` : null;
+    out.undo = [`Undo with the app pack: ${pack.id}:${pw.id}`];
+    out.note = [`an API call in the capture browser's own signed-in session${from.length ? `, with ${from.map(x => `{${x}}`).join(', ')} from the run` : ''}`, byHand].filter(Boolean).join('; ');
+    if (pw.verified === false) out.needs = `${w.text}: its undo (${pack.id}: ${pw.id}) hasn't been tried yet`;
+    return out;
+  }
   if (!undo || pw.irreversible) out.needs = `${w.text} ${w.writes}: ${pw.note || 'the app pack has no undo for it'}`;
   else if (pw.verified === false) out.needs = `${w.text}: its undo (${pack.id}: ${pw.id}) hasn't been tried yet`;
   else if (out.undo.some(x => /^You:/i.test(x))) out.needs = `${w.text}: part of its undo is by hand (${out.undo.filter(x => /^You:/i.test(x)).map(x => x.slice(4).trim()).join('; ')})`;

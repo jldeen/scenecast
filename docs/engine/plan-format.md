@@ -112,7 +112,10 @@ Made from the plan's writes, in reverse (`scenecast ai reset`). The capture pass
 ```
 
 - **Undo**, per app: plan steps, run the same way as the plan's. `You:` is a step for a person. `Undoes:` says which
-  writes the group undoes; `Note:` what the app pack says about it.
+  writes the group undoes; `Note:` what the app pack says about it. `Undo with the app pack: <pack>:<write>` is a
+  private pack's API undo, named and not written out (its host and IDs stay in the pack): the capture pass calls it in
+  its own signed-in session with what its run made (`{taskId}`, `{skill}`), and the `Note:` has the steps by hand for
+  when it can't. What a run leaves besides its writes (saved memories) is undone only when its check finds something.
 - **Check**: read-only. Each line is something the screen shows, and none of them clicks anything that changes.
 - **Needs you**: what the reset can't do on its own (an undo by hand, or one nobody has tried yet).
 
