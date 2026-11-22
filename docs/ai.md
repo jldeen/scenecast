@@ -24,7 +24,8 @@ click in each, and makes the plan:
   card; the product shows **Save skill**). Steps your script leaves out, it takes from the recording and marks.
 
 When the demo has been recorded before, the plan is checked against every recorded screen, so a new version of your
-script takes minutes. **Approve and start** approves the plan exactly as it is: change it after that and it asks again.
+script takes minutes. A script written for presenting the replica works too: its ⌥ keys say where each beat starts.
+**Approve and start** approves the plan exactly as it is: change it after that and it asks again.
 
 Afterwards Scenecast writes `reset.md` (each change undone, and a checklist that only looks), and once the demo is
 built, the finish: your script for the presenter guide with its Do lines in presenter keys, ⌥1–⌥9 on your beats, the

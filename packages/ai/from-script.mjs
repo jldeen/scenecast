@@ -75,6 +75,8 @@ export function intentsOf(text, ctx, opts = {}) {
       }
       else if (key === 'F') { const t = c.slice(k.index + k[0].length).replace(/^\s*:\s*/, ''); if (t) add({ hint: hintFrom(t) }); typedKey = true; }
       else if (app) add({ app: app.id });
+      // ⌥0–⌥9 in a script for presenting the replica: where that beat starts (the player's jump, flow.beats[n]).
+      else if (/^\d$/.test(key)) add({ beat: +key });
     }
     c = c.replace(keyRe, ' ').replace(/\(\s*(?:prompt\s*\d+|the \w+ prompt|the prompt)\s*\)/ig, '').replace(/\(\s*(?:or\s*)?\)/g, '').replace(/^[\s,:]+|[\s,:.]+$/g, '').trim();
     if (typedP && !/\b(enter|send)\b/i.test(c)) { const tail = /,\s*([^,]+)$/.exec(c); if (tail) for (const x of intentsOf(tail[1], ctx, opts)) add(x); continue; }
@@ -364,10 +366,27 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       const mark = () => { const k = `${S.app}:${at()}`; if (span[span.length - 1] !== k) span.push(k); };
       mark();
       for (const it of intentsOf(text, ctx, opts)) {
+        if (opts.only && !opts.only(it)) continue;
         if (it.note) continue;
         if (it.unclear) { flag('unclear', `"${it.unclear}": which control? Name it in your script and the plan follows it`, where(line)); continue; }
         if (it.hint) { hints.push(it.hint.around === 'card' && walker ? { ...it.hint, on: at() } : it.hint); continue; }
         if (it.app) { push({ kind: 'app', app: it.app }, it.from, line); mark(); continue; }
+        if (it.beat != null) {
+          // The beat's key: its app, on the screen the beat starts on, the recorded way there when it's somewhere else.
+          const fb = walker && (walker.flow.beats || [])[it.beat];
+          const app2 = fb && fb.active, to = app2 && (fb.states || {})[app2];
+          if (!to) continue;
+          if (app2 !== S.app) { push({ kind: 'app', app: app2 }, it.from, line); mark(); }
+          if (S.cur[app2] !== to) {
+            const b = walker.bridge(S.cur[app2], (s2, id2) => id2 === to, 8);
+            if (b && b.steps.length) {
+              flag('added', `Beat key ⌥${it.beat} starts on "${to}": ${b.steps.length === 1 ? 'a step' : `${b.steps.length} steps`} your script leaves out, as recorded: ${b.steps.map(formatStep).join(' → ')}`, where(line));
+              for (const bs of b.steps) { push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, '(not in your script: as recorded)', line); mark(); }
+            }
+            if (S.cur[app2] !== to) { S.cur[app2] = to; const last = beat.steps[beat.steps.length - 1]; if (last && last.kind === 'app' && last.app === app2) last.lands = { screen: to, text: landText(null, scr(to)) }; mark(); }
+          }
+          continue;
+        }
         if (it.wait) {
           const last = beat.steps[beat.steps.length - 1];
           if (last && last.kind === 'type' && last === S.unsent) { push({ kind: 'press', key: 'Enter' }, it.from, line); S.unsent = null; mark(); }
@@ -448,9 +467,12 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       return { span, hints, clicked };
     };
 
-    const beatRun = { span: [], hints: [] };
-    if (tb.do.length) Object.assign(beatRun, run(tb.do.filter(d => !d.level).map(d => d.text).join('. '), null));
-    if (tb.screen && !tb.lines.some(l => l.do.length || l.screen)) { const r = run(tb.screen, null, { descriptive: true }); beatRun.span.push(...r.span); beatRun.hints.push(...r.hints); }
+    const beatRun = { span: [], hints: [], clicked: [] };
+    // Where the beat starts comes first: its Screen line's app or beat key ("pull request #4 (⌥7)"), then its Do.
+    const nav = it => it.app || it.beat != null;
+    if (tb.screen) beatRun.span.push(...run(tb.screen, null, { descriptive: true, only: nav }).span);
+    if (tb.do.length) { const r = run(tb.do.filter(d => !d.level).map(d => d.text).join('. '), null); beatRun.span.push(...r.span); beatRun.hints.push(...r.hints); beatRun.clicked = r.clicked; }
+    if (tb.screen && !tb.lines.some(l => l.do.length || l.screen)) { const r = run(tb.screen, null, { descriptive: true, only: it => !nav(it) }); beatRun.span.push(...r.span); beatRun.hints.push(...r.hints); }
     const given = assignHints(beatRun.hints, tb.lines);
     tb.lines.forEach((l, k) => {
       const r1 = l.do.length ? run(l.do.join('. '), l) : { span: [], hints: [], clicked: [] };

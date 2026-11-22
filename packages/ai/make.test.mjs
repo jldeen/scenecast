@@ -33,7 +33,7 @@ function demoDir() {
       'admin-seat': { app: 'admin', snap: 'admin-seat' },
     },
     streams: { ask: { to: 'chat-answer' } },
-    beats: [{ active: 'chat', states: { chat: 'chat-home', admin: 'admin-home' } }],
+    beats: [{ active: 'chat', states: { chat: 'chat-home', admin: 'admin-home' } }, { active: 'admin', states: { chat: 'chat-home', admin: 'admin-home' } }],
     path: [],
   };
   const page = body => `<!doctype html><html><head><title>t</title><style>p{color:red}</style></head><body>${body}</body></html>`;
@@ -130,6 +130,9 @@ test('"Add X" takes the recording\'s way only when that way names X', () => {
   assert.deepEqual(steps('Add a seat.'), ['Go to admin', 'Click "Add one seat"']);
   // A pull request's title isn't the Add button.
   assert.deepEqual(steps('Add worked examples to the docs.'), ['Go to admin']);
+  // A script for presenting the replica: the beat's key in its Screen line is where the beat starts, before its Do.
+  const keyed = planFromTrack(parseTalkTrack('# D\n\n## 1. A\n\n*Screen:* the admin page (⌥1)\n\n**Do**\n\n- Scroll down.\n\n**Say**\n\n> Here.\n', 'k.md'), { walker }).plan;
+  assert.deepEqual(keyed.beats[0].steps.map(s => s.text), ['Go to admin', 'Scroll down']);
 });
 
 test('a walker never writes; offline, the recording says where a write went', () => {
