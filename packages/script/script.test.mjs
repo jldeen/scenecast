@@ -129,10 +129,11 @@ test('talk tracks: quotes with Do and Screen under them, Do and Say sections, Ru
 });
 
 test('a capture read without a browser: controls as the outline names them, words as the screen shows them', () => {
-  const sc = readScreen([{ key: 'main', html: '<html><head><style>b{}</style></head><body><h1>Tools</h1><div role="tab">Users<span>Users</span></div><button aria-label="Save: Save skill"><span>Save</span></button><span aria-hidden="true">Certified</span><button style="display:none">Hidden</button><a href="/x">Agents&#x200e;</a><div role="textbox" contenteditable="true" aria-label="Message"></div></body></html>' }, { key: 'f4', html: '<button data-testid="badge">Add endorsement</button>' }]);
+  const sc = readScreen([{ key: 'main', html: '<html><head><style>b{}</style></head><body><header><h1>Catalog</h1></header><h1>Tools</h1><div role="tab">Users<span>Users</span></div><button aria-label="Save: Save skill"><span>Save</span></button><span aria-hidden="true">Certified</span><button style="display:none">Hidden</button><a href="/x">Agents&#x200e;</a><div role="textbox" contenteditable="true" aria-label="Message"></div></body></html>' }, { key: 'f4', html: '<button data-testid="badge">Add endorsement</button>' }]);
   assert.deepEqual(sc.controls.map(c => [c.role, c.name, c.frame || null]), [['tab', 'Users', null], ['button', 'Save: Save skill', null], ['link', 'Agents', null], ['textbox', 'Message', null], ['button', 'Add endorsement', 'f4']]);
   assert.equal(sc.controls[3].multiline, true);
   assert.match(sc.text, /Certified/);
   assert.doesNotMatch(sc.text, /Hidden/);
-  assert.deepEqual(sc.headings, ['Tools']);
+  // The page's own title before the app bar's.
+  assert.deepEqual(sc.headings, ['Tools', 'Catalog']);
 });

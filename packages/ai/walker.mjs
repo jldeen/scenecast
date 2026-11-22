@@ -17,7 +17,7 @@ import { readScreen } from '../script/html.mjs';
 import { findItem } from './find.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
-const READER = 6;
+const READER = 7;
 
 const norm = s => String(s || '').toLowerCase().replace(/[“”"'’]/g, '').replace(/\s+/g, ' ').trim();
 

@@ -81,7 +81,8 @@ function isControl(el) {
 
 // The page's controls, items and words, from one or more documents (the page and its frames).
 export function readScreen(docs) {
-  const controls = [], items = [], text = [], headings = [];
+  // A page's own headings come first; an app bar's or a menu's (inside a header, banner or nav) after them.
+  const controls = [], items = [], text = [], headings = [], barHeadings = [];
   let pos = 0;
   for (const { key, html } of docs) {
     const root = parseHtml(html);
@@ -95,10 +96,11 @@ export function readScreen(docs) {
       const inner = el.tag === 'input' || el.tag === 'textarea' || a.contenteditable === 'true' || a.contenteditable === '' ? '' : wordsOf(el).replace(/\n/g, ' ');
       return clean(a['aria-label'] || by || inner || a.placeholder || a['data-placeholder'] || a['aria-placeholder'] || a.title || a.alt || a.value).replace(/^(.{2,}?) ?\1$/, '$1').slice(0, 90);
     };
-    const walk = (el, aria = false) => {
+    const walk = (el, aria = false, bar = false) => {
       if (typeof el === 'string') return;
       if (el.tag !== '#root' && hiddenEl(el)) return;
       aria = aria || (el.tag !== '#root' && unreachable(el));
+      bar = bar || el.tag === 'header' || el.tag === 'nav' || /^(banner|navigation)$/.test(el.attrs.role || '');
       const start = pos++;
       if (!aria && isControl(el)) {
         const role = roleOf(el), name = nameOf(el);
@@ -111,15 +113,15 @@ export function readScreen(docs) {
           controls.push(c);
         }
       }
-      if (/^h[1-6]$/.test(el.tag) || el.attrs.role === 'heading') { const h = clean(wordsOf(el)); if (h) headings.push(h); }
+      if (/^h[1-6]$/.test(el.tag) || el.attrs.role === 'heading') { const h = clean(wordsOf(el)); if (h) (bar ? barHeadings : headings).push(h); }
       const mine = own(el);
       const item = mine && el.tag !== '#root' ? { i: items.length, kind: isControl(el) ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
       if (item) items.push(item);
-      el.children.forEach(c => walk(c, aria));
+      el.children.forEach(c => walk(c, aria, bar));
       if (item) { item.text = clean(wordsOf(el).replace(/\n/g, ' ')).slice(0, 2000); item.box = [start, 0, pos, 1]; }
     };
     walk(root);
     text.push(wordsOf(root));
   }
-  return { controls, items: items.filter(it => it.text), headings: headings.slice(0, 30), text: text.join('\n') };
+  return { controls, items: items.filter(it => it.text), headings: [...headings, ...barHeadings].slice(0, 30), text: text.join('\n') };
 }
