@@ -3,6 +3,7 @@
 //   node compile/flow.mjs --demo <dir> [--from-raw]
 // --from-raw first copies the recorder's raw recording (raw/recording.json) into the demo folder, without its log
 // and page URLs. The flow format is in docs/flow-format.md.
+import { withEngineModule } from '@stuntdouble/player/app/bundle-flow.js';
 import { statSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -183,7 +184,7 @@ export async function finishFlow(demo, flow, rec) {
   // A wording or date change (flow.edits: the editor's, scenecast text) changes the words a focus point looks for
   // too: a point made from the script still finds its sentence after "Friday" becomes "Monday".
   if ((flow.focus || []).length && (flow.edits || []).length) flow.focus = focusAfterEdits(flow.focus, flow.edits, flow.states || {});
-  if ((flow.focus || []).length) flow.modules = ['/app/focus-module.js', ...(flow.modules || [])];
+  if ((flow.focus || []).length) flow.modules = withEngineModule(flow.modules, 'focus-module.js');
   const problems = validate(flow);
   writeFileSync(demo.flowPath, JSON.stringify(flow, null, 1) + '\n');
   return { flow, problems };

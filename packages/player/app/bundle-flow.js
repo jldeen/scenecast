@@ -1,4 +1,12 @@
 // Adapt the bundle graph and its player-specific options to the morph engine's in-memory model.
+// An engine module (/app/focus-module.js) added to a flow's modules, unless the demo brings its own of that name
+// (/demo/focus-module.js, from before the engine had one): the demo's replaces the engine's, never both.
+export function withEngineModule(modules, name, { first = true } = {}) {
+  const mods = modules || [];
+  if (mods.some(m => m.split('/').pop() === name)) return mods;
+  return first ? ['/app/' + name, ...mods] : [...mods, '/app/' + name];
+}
+
 export function flowFromBundle(bundle) {
   if (bundle.schema_version !== 'scenecast.bundle.v2') throw new Error('Unsupported bundle schema');
   const playback = bundle.playback || {};
@@ -88,9 +96,7 @@ export function flowFromBundle(bundle) {
     }));
     flow.beats = [{ label: 'Reset', active: start.app, states }];
   }
-  if (flow.focus.length && !(flow.modules || []).includes('/app/focus-module.js')) {
-    flow.modules = ['/app/focus-module.js', ...(flow.modules || [])];
-  }
+  if (flow.focus.length) flow.modules = withEngineModule(flow.modules, 'focus-module.js');
   return flow;
 }
 

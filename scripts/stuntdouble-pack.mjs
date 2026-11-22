@@ -62,5 +62,14 @@ if (INTO) {
   pkg.optionalDependencies = pkg.optionalDependencies || {};
   for (const t of tars.filter(isBin)) pkg.optionalDependencies[t.replace(/^stuntdouble-(build-[a-z0-9]+-[a-z0-9]+)-.*$/, '@stuntdouble/$1')] = rel(t);
   writeFileSync(f, JSON.stringify(pkg, null, 2) + '\n');
+  // The lockfile's old StuntDouble entries go (npm would install the old tarballs from its cache by their integrity),
+  // and so does a vendored replica-kit the demo no longer depends on; npm install writes them again.
+  const lf = join(INTO, 'package-lock.json');
+  if (existsSync(lf)) {
+    const lock = JSON.parse(readFileSync(lf, 'utf8'));
+    for (const k of Object.keys(lock.packages || {})) if (/(^|\/)node_modules\/@stuntdouble\//.test(k) || ((k === 'kit' || k === 'node_modules/replica-kit') && !(pkg.dependencies || {})['replica-kit'])) delete lock.packages[k];
+    if (lock.packages && lock.packages['']) { lock.packages[''].dependencies = pkg.dependencies; lock.packages[''].optionalDependencies = pkg.optionalDependencies; }
+    writeFileSync(lf, JSON.stringify(lock, null, 2) + '\n');
+  }
   console.log(`${f}: depends on StuntDouble ${version} (vendor/stuntdouble). Now: npm install`);
 }

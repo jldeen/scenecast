@@ -576,12 +576,69 @@ fn rules() -> &'static [Rule] {
     })
 }
 
+/// Look-alikes that aren't personal data: a Teams or Skype conversation ID (`19:…@thread.v2`, `@thread.tacv2`,
+/// `@unq.gbl.spaces`) isn't an email, and Fluent's `data-tid` (a test ID) isn't a tenant ID. Redacting them broke
+/// the controls they name (the recorded clicks find Teams' chat list by them) and changed nothing a person could read.
+fn not_personal(kind: &str, text: &str, key_start: usize, matched: &str) -> bool {
+    match kind {
+        "email" => {
+            let domain = matched
+                .rsplit_once('@')
+                .map_or("", |(_, d)| d)
+                .to_ascii_lowercase();
+            domain.starts_with("thread.") || domain == "unq.gbl.spaces"
+        }
+        "tenant-id" => text[..key_start].to_ascii_lowercase().ends_with("data-"),
+        _ => false,
+    }
+}
+
 /// Redacts detected text. Allowlisted values apply to PII only, never credentials.
 /// Findings deliberately contain neither the matched value nor a preview.
 pub fn scrub_text(text: &str, allowlist: &[String]) -> (String, Vec<Finding>) {
+    scrub_text_with(text, allowlist, false)
+}
+
+/// Only credentials (tokens, keys, secrets) redacted; names, emails and IDs are left as they are.
+pub fn scrub_credentials(text: &str) -> (String, Vec<Finding>) {
+    scrub_text_with(text, &[], true)
+}
+
+/// Credentials redacted in place in every text file of a tree (raw captures from a recorder that left sign-in tokens
+/// in the markup), as plain text: nothing else in a file changes, not even a JSON file's layout. Returns how many
+/// files changed and how many credentials were redacted.
+pub fn redact_credentials(root: &Path) -> Result<(usize, usize), ScrubError> {
+    let paths = walk(root).map_err(|e| match e {
+        WalkError::Io(path, source) => io_error(&path, source),
+        WalkError::Symlink(path) => ScrubError::Symlink(path),
+    })?;
+    let (mut files, mut found) = (0, 0);
+    for path in paths {
+        let bytes = fs::read(&path).map_err(|e| io_error(&path, e))?;
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        if text.contains('\0') {
+            continue;
+        }
+        let (out, findings) = scrub_credentials(text);
+        if out != text {
+            fs::write(&path, out).map_err(|e| io_error(&path, e))?;
+            files += 1;
+            found += findings.len();
+        }
+    }
+    Ok((files, found))
+}
+
+fn scrub_text_with(
+    text: &str,
+    allowlist: &[String],
+    only_credentials: bool,
+) -> (String, Vec<Finding>) {
     let mut output = text.to_owned();
     let mut findings = Vec::new();
-    for rule in rules() {
+    for rule in rules().iter().filter(|r| r.credential || !only_credentials) {
         let current = output.clone();
         let mut next = String::with_capacity(current.len());
         let mut start = 0;
@@ -592,14 +649,24 @@ pub fn scrub_text(text: &str, allowlist: &[String]) -> (String, Vec<Finding>) {
                 .name("value")
                 .unwrap_or_else(|| captures.get(0).unwrap());
             if !rule.credential
-                && allowlist
+                && (allowlist
                     .iter()
                     .any(|value| m.as_str().eq_ignore_ascii_case(value))
+                    || not_personal(
+                        rule.kind,
+                        &current,
+                        captures.get(0).unwrap().start(),
+                        m.as_str(),
+                    ))
             {
                 continue;
             }
             next.push_str(&current[start..m.start()]);
-            next.push_str("[REDACTED]");
+            // Redacting raw captures (only_credentials), a JWT goes entirely: an empty attribute, as the recorder
+            // leaves it since Scenecast 0.4.5 and as replica-kit's build did.
+            if !(only_credentials && rule.kind == "jwt") {
+                next.push_str("[REDACTED]");
+            }
             start = m.end();
             line += current[counted..m.start()]
                 .bytes()
@@ -621,6 +688,34 @@ pub fn scrub_text(text: &str, allowlist: &[String]) -> (String, Vec<Finding>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conversation_ids_and_fluent_test_ids_are_not_personal_data() {
+        let guid = "6c1f3a2e-8d4b-4e7a-9f10-2b3c4d5e6f70";
+        let html = format!(
+            r#"<li data-tid="{guid}" id="chat_19:abc@thread.v2" data-x="19:a_b@unq.gbl.spaces">tenantId: {guid} seth@example.com</li>"#
+        );
+        let (out, findings) = scrub_text(&html, &[]);
+        assert!(out.contains(&format!(r#"data-tid="{guid}""#)), "{out}");
+        assert!(
+            out.contains("19:abc@thread.v2") && out.contains("19:a_b@unq.gbl.spaces"),
+            "{out}"
+        );
+        assert!(
+            out.contains("tenantId: [REDACTED]") && out.contains("[REDACTED]</li>"),
+            "{out}"
+        );
+        assert_eq!(findings.len(), 2);
+    }
+
+    #[test]
+    fn redacting_raw_removes_a_jwt_and_leaves_personal_data() {
+        let jwt = ["ey", "Jabcdefghij.", "abcdefghijk.", "abcdefghijk"].concat();
+        let (out, _) = scrub_credentials(&format!(
+            r#"<x powerbi-access-token="{jwt}">seth@example.com</x>"#
+        ));
+        assert_eq!(out, r#"<x powerbi-access-token="">seth@example.com</x>"#);
+    }
 
     #[test]
     fn the_cache_catches_the_same_planted_tokens_and_always_redacts_built_files() {

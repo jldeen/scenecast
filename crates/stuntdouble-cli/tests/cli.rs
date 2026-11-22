@@ -24,7 +24,11 @@ fn scrub_finds_a_credential_in_raw_captures_and_redact_removes_it() {
     let temp = tempdir().unwrap();
     let token = ["ey", "Jabcdefghij.", "abcdefghijk.", "abcdefghijk"].concat();
     let file = temp.path().join("snap.html");
-    fs::write(&file, format!("<div data-token=\"{token}\">IQ</div>")).unwrap();
+    fs::write(
+        &file,
+        format!("<div data-token=\"{token}\">IQ, ops@example.com</div>"),
+    )
+    .unwrap();
     for bin in ["stuntdouble", "scenecast"] {
         Command::cargo_bin(bin)
             .unwrap()
@@ -39,7 +43,12 @@ fn scrub_finds_a_credential_in_raw_captures_and_redact_removes_it() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""credentialsLeft":0"#));
-    assert!(!fs::read_to_string(&file).unwrap().contains(&token));
+    let after = fs::read_to_string(&file).unwrap();
+    assert!(!after.contains(&token));
+    assert!(
+        after.contains("ops@example.com"),
+        "only credentials are redacted"
+    );
 }
 
 #[test]

@@ -110,12 +110,13 @@ enum Command {
     Hovers(Passthrough),
     /// Secret scan of a folder.
     Scan(Passthrough),
-    /// The build's credential scan on a folder of raw captures, as the build runs it; --redact replaces what it finds
-    /// in place (sign-in tokens an older recorder left in the markup, before Scenecast 0.4.5 and in replica-kit).
+    /// The build's credential scan on a folder of raw captures, as the build runs it; --redact replaces the credentials
+    /// it finds in place (sign-in tokens an older recorder left in the markup, before Scenecast 0.4.5 and in
+    /// replica-kit), and nothing else.
     Scrub {
         /// The folder (a demo's raw captures).
         dir: PathBuf,
-        /// Replace each finding with [REDACTED], in place.
+        /// Replace each credential with [REDACTED], in place.
         #[arg(long)]
         redact: bool,
     },
@@ -387,24 +388,29 @@ fn run(cli: Cli) -> Result<i32> {
 }
 
 fn scrub_folder(dir: &Path, redact: bool) -> Result<i32> {
-    use stuntdouble_build::scrub::{ScrubReport, scrub_tree};
+    use stuntdouble_build::scrub::{ScrubReport, redact_credentials, scrub_tree};
     let credentials = |r: &ScrubReport| r.findings.iter().filter(|f| f.finding.credential).count();
-    let mut found = ScrubReport::default();
-    scrub_tree(dir, "raw", &[], redact, &mut found)
-        .with_context(|| format!("scrub {}", dir.display()))?;
-    let mut after = ScrubReport::default();
-    if redact {
-        scrub_tree(dir, "raw", &[], false, &mut after)
+    let scan = || -> Result<ScrubReport> {
+        let mut r = ScrubReport::default();
+        scrub_tree(dir, "raw", &[], false, &mut r)
             .with_context(|| format!("scrub {}", dir.display()))?;
-    }
+        Ok(r)
+    };
+    let found = scan()?;
+    // Only credentials: the build refuses those; names, emails and IDs stay (the build redacts what it publishes).
+    let (files, redacted) = if redact {
+        redact_credentials(dir).with_context(|| format!("redact {}", dir.display()))?
+    } else {
+        (0, 0)
+    };
     let left = if redact {
-        credentials(&after)
+        credentials(&scan()?)
     } else {
         credentials(&found)
     };
     println!(
         "{}",
-        json!({ "findings": found.findings.len(), "credentials": credentials(&found), "redacted": redact, "credentialsLeft": left })
+        json!({ "findings": found.findings.len(), "credentials": credentials(&found), "redacted": redacted, "filesChanged": files, "credentialsLeft": left })
     );
     Ok(if left > 0 { 1 } else { 0 })
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyFlowOverrides, flowFromBundle } from './app/bundle-flow.js';
+import { applyFlowOverrides, flowFromBundle, withEngineModule } from './app/bundle-flow.js';
 
 test('bundle graph drives scenes, queries, streams and focus', () => {
   const bundle = {
@@ -62,4 +62,11 @@ test('explicit fallback scenes join the live graph without becoming live pages',
   assert.equal(state.fallback.hotspots[0].target, 'live');
   bundle.graph.scenes[2].transitions = [{ trigger: 'click', target: 'still' }];
   assert.throws(() => flowFromBundle(bundle), /Cannot determine app for fallback scene still/);
+});
+
+test('an engine module is added unless the demo brings its own of that name', () => {
+  assert.deepEqual(withEngineModule(['/demo/keys-module.js'], 'focus-module.js'), ['/app/focus-module.js', '/demo/keys-module.js']);
+  assert.deepEqual(withEngineModule(['/demo/focus-module.js'], 'focus-module.js'), ['/demo/focus-module.js']);
+  assert.deepEqual(withEngineModule(['/demo/presenter-module.js', '/demo/slide-module.js'], 'presenter-module.js', { first: false }), ['/demo/presenter-module.js', '/demo/slide-module.js']);
+  assert.deepEqual(withEngineModule(['/app/focus-module.js'], 'presenter-module.js', { first: false }), ['/app/focus-module.js', '/app/presenter-module.js']);
 });

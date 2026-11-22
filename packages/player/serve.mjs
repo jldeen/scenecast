@@ -16,7 +16,7 @@ import { createReadStream, existsSync, statSync, readFileSync, readdirSync, real
 import { join, normalize, extname, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openApp } from './launch.mjs';
-import { diffFlow, flowFromBundle, applyFlowOverrides } from './app/bundle-flow.js';
+import { diffFlow, flowFromBundle, applyFlowOverrides, withEngineModule } from './app/bundle-flow.js';
 import { readFocusJson, readEditorOverrides, checkFocusJson, checkEditorOverrides, writeJsonAtomic, FOCUS_JSON, EDITOR_JSON } from '@stuntdouble/core/lib/overrides.mjs';
 import { textRe } from '@stuntdouble/core/lib/edits.mjs';
 import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
@@ -213,12 +213,13 @@ createServer(async (req, res) => {
       if (EDITING) {
         // The focus engine (for dots and previews, even before a demo has focus points) and the editor.
         const mods = [...((live.flow && live.flow.modules) || manifest.playback?.options?.modules || [])].filter(m => m !== '/app/focus-module.js' && m !== '/editor/editor.js');
-        (manifest.development_overrides ||= []).push({ path: ['modules'], value: ['/app/focus-module.js', ...mods, '/editor/editor.js'] });
+        (manifest.development_overrides ||= []).push({ path: ['modules'], value: [...withEngineModule(mods, 'focus-module.js'), '/editor/editor.js'] });
       }
       // The presenter guide's stage side (⌥G; packages/player/presenter/), on every replica this server serves (not in
       // an export: the guide needs this server). It reads presenter/notes.json (scenecast notes) when there is one.
       const mods = applyFlowOverrides(flowFromBundle(manifest), manifest.development_overrides).modules || [];
-      if (!mods.includes('/app/presenter-module.js')) (manifest.development_overrides ||= []).push({ path: ['modules'], value: [...mods, '/app/presenter-module.js'] });
+      const withGuide = withEngineModule(mods, 'presenter-module.js', { first: false });
+      if (withGuide !== mods) (manifest.development_overrides ||= []).push({ path: ['modules'], value: withGuide });
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' });
       return res.end(JSON.stringify(manifest));
     } catch (e) {
