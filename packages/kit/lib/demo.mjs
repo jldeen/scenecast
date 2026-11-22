@@ -39,6 +39,14 @@ export function findDemoDir(args = process.argv.slice(2)) {
   return dir;
 }
 
+// The window a take was recorded in (raw/viewport.json, else recording.json's), or null.
+export function recordedViewport(raw) {
+  for (const [f, pick] of [['viewport.json', v => v], ['recording.json', r => r.viewport]]) {
+    try { const v = pick(JSON.parse(readFileSync(join(raw, f), 'utf8'))); if (v && v.width > 0 && v.height > 0) return { width: v.width, height: v.height, dpr: v.dpr || 1 }; } catch (e) {}
+  }
+  return null;
+}
+
 export function loadDemo(dirOrArgs) {
   const dir = typeof dirOrArgs === 'string' ? resolve(dirOrArgs) : findDemoDir(dirOrArgs);
   const cfg = JSON.parse(readFileSync(join(dir, 'demo.json'), 'utf8'));
@@ -46,6 +54,9 @@ export function loadDemo(dirOrArgs) {
   // Raw captures hold real URLs (some with sign-in tokens): they live outside the demo folder by default.
   const raw = home(process.env.REPLICA_RAW || c.raw || `~/.scenecast/${c.name}/raw`);
   const out = home(process.env.REPLICA_OUT || c.out || '.out');
+  // No viewport in demo.json: the window it was recorded in (a real Chrome window is rarely 1920×1080 @2; Nov 2026,
+  // a take at 1374 @2.2 was compared, and its zoom bands placed, at 1920).
+  if (!cfg.viewport) { const v = recordedViewport(isAbsolute(raw) ? raw : join(dir, raw)); if (v) c.viewport = { ...c.viewport, ...v }; }
   const d = {
     dir, cfg: c, name: c.name,
     raw: isAbsolute(raw) ? raw : join(dir, raw),

@@ -20,10 +20,14 @@ pub struct Screen {
     pub shot: Option<PathBuf>,
     /// Real and replica side by side, when it's been compared.
     pub side_by_side: Option<PathBuf>,
-    /// Compared: every view of it (each zoom, each menu) within the threshold. None: not compared yet.
+    /// Compared: the screen itself (at 100%, nothing open) within the threshold, as the report counts it. None: not
+    /// compared yet. Its other views (zoom levels, menus) have their own verdicts in `views`.
     pub pass: Option<bool>,
-    /// The most different of its views, in percent of pixels.
+    /// How different the screen itself is, in percent of pixels.
     pub pct: Option<f64>,
+    /// Its other views that differ (each zoom level, each menu opened on it), each with its own verdict.
+    #[serde(default)]
+    pub views: Vec<View>,
     /// Why it differs, in a plain sentence each.
     pub why: Vec<String>,
     /// What the fixer found, in its own words (for Details).
@@ -51,6 +55,29 @@ fn plain_cause(cause: &str) -> Option<&'static str> {
     })
 }
 
+/// A view of a screen other than itself (a zoom level, a menu opened on it), compared on its own.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct View {
+    /// In plain words: "at 110% zoom", "with Settings open".
+    pub label: String,
+    pub pass: bool,
+    pub pct: Option<f64>,
+    pub side_by_side: Option<PathBuf>,
+}
+
+fn view_label(it: &Value) -> String {
+    match it["kind"].as_str() {
+        Some("zoom") => format!("at {}% zoom", it["z"].as_u64().unwrap_or(100)),
+        Some("click") => format!(
+            "with {} open",
+            it["click"]["name"].as_str().unwrap_or("a menu")
+        ),
+        Some("hover") => "with the pointer on a control".into(),
+        _ => it["id"].as_str().unwrap_or("another view").to_owned(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewBeat {
@@ -76,6 +103,9 @@ pub struct Review {
     pub comparing: bool,
     pub matching: u32,
     pub differ: u32,
+    /// Other views (zoom levels, menus) of the listed screens that differ, counted apart from the screens.
+    #[serde(default)]
+    pub views_differ: u32,
     /// Every font the real file.
     pub fonts_ok: bool,
     /// The full report, to open.
@@ -135,11 +165,23 @@ pub fn read(dir: &Path, os: &str) -> Review {
             .and_then(|i| i["sideBySide"].as_str())
             .zip(fid_dir.as_ref())
             .map(|(rel, d)| d.join(rel));
-        let pass = (!mine.is_empty()).then(|| mine.iter().all(|i| i["pass"] == true));
-        let pct = mine
+        // The screen's own verdict is its own view's (as the report counts it); a zoom level or a menu that differs
+        // is listed under it, not folded in (Nov 2026: a screen read "17.4% different", its 110% zoom's score).
+        let pass = base.map(|i| i["pass"] == true);
+        let pct = base.and_then(|i| i["pct"].as_f64());
+        let views: Vec<View> = mine
             .iter()
-            .filter_map(|i| i["pct"].as_f64())
-            .reduce(f64::max);
+            .filter(|i| base.is_none_or(|b| !std::ptr::eq(*i, b)) && i["pass"] != true)
+            .map(|i| View {
+                label: view_label(i),
+                pass: false,
+                pct: i["pct"].as_f64(),
+                side_by_side: i["sideBySide"]
+                    .as_str()
+                    .zip(fid_dir.as_ref())
+                    .map(|(rel, d)| d.join(rel)),
+            })
+            .collect();
         let (mut why, mut detail) = (Vec::new(), Vec::new());
         let add = |list: &mut Vec<String>, w: String| {
             if !list.contains(&w) {
@@ -175,6 +217,7 @@ pub fn read(dir: &Path, os: &str) -> Review {
             side_by_side,
             pass,
             pct,
+            views,
             why,
             detail,
         }
@@ -319,7 +362,7 @@ pub fn read(dir: &Path, os: &str) -> Review {
                 .unwrap_or_default();
             screen(id, app)
         })
-        .filter(|s| s.pass == Some(false))
+        .filter(|s| s.pass == Some(false) || !s.views.is_empty())
         .collect();
     let all: Vec<&Screen> = beats.iter().flat_map(|b| &b.screens).collect();
     let fonts_ok = report
@@ -330,7 +373,18 @@ pub fn read(dir: &Path, os: &str) -> Review {
         compared: report.is_some() && !comparing,
         comparing,
         matching: all.iter().filter(|s| s.pass == Some(true)).count() as u32,
-        differ: (all.iter().filter(|s| s.pass == Some(false)).count() + others.len()) as u32,
+        differ: all
+            .iter()
+            .copied()
+            .chain(&others)
+            .filter(|s| s.pass == Some(false))
+            .count() as u32,
+        views_differ: all
+            .iter()
+            .copied()
+            .chain(&others)
+            .map(|s| s.views.len() as u32)
+            .sum(),
         fonts_ok,
         report: fidelity.as_ref().map(|f| f.html.clone()),
         pictures: [shots, fid_dir].into_iter().flatten().collect(),
@@ -438,10 +492,19 @@ mod tests {
         assert_eq!(ids(&r.beats[1]), ["chat-start", "chat-01"]);
         assert_eq!(ids(&r.beats[2]), ["admin-start", "admin-01"]);
         assert_eq!(r.beats[2].key.as_deref(), Some("⌥2"));
-        // The zoom that differs makes its screen differ, with what was found, in a sentence.
+        // The screen itself matches, as the report counts it; its 150% zoom differs, listed apart with its own
+        // score and what was found, in a sentence.
         let admin = &r.beats[2].screens[1];
-        assert_eq!(admin.pass, Some(false));
-        assert_eq!(admin.pct, Some(2.8));
+        assert_eq!(admin.pass, Some(true));
+        assert_eq!(admin.pct, Some(0.0));
+        assert_eq!(
+            admin
+                .views
+                .iter()
+                .map(|v| (v.label.as_str(), v.pct))
+                .collect::<Vec<_>>(),
+            [("at 150% zoom", Some(2.8))]
+        );
         assert_eq!(
             admin.why,
             ["A date shows in a different font: the product loads it late."]
@@ -467,7 +530,11 @@ mod tests {
             r.others[0].detail,
             ["div.list is virtualized: only the rows in view at 100% were captured"]
         );
-        assert_eq!((r.screens, r.matching, r.differ), (5, 4, 2));
+        // The counts agree with the report: 5 of 5 on the path match, the menu off it differs, two zooms apart.
+        assert_eq!(
+            (r.screens, r.matching, r.differ, r.views_differ),
+            (5, 5, 1, 2)
+        );
         assert!(r.compared && r.fonts_ok);
     }
 

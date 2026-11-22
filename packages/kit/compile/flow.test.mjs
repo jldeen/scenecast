@@ -89,3 +89,26 @@ test('focus points from an earlier script that don\'t fit a new take are left ou
   assert.deepEqual(result.problems, []);
   assert.ok(result.flow.notes.some(n => /old-beat, old-screen/.test(n)));
 });
+
+test('a take recorded in a narrower window: compared at its size, zoom bands below it', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'scenecast-flow-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name: 'fixture', raw: 'raw', apps: [{ id: 'chat', key: 'C' }] }));
+  mkdirSync(join(dir, 'raw'));
+  const recording = {
+    viewport: { width: 1374, height: 733, dpr: 2.2 },
+    states: { start: { app: 'chat', snap: 'start' } }, beats: [{ active: 'chat', states: { chat: 'start' } }],
+    sides: { zoom: [
+      { app: 'chat', state: 'start', snap: 'v150-start', z: 150, vw: 916, bw: 1374, pw: 1099 },
+      { app: 'chat', state: 'start', snap: 'v200-start', z: 200, vw: 687, pw: 916 },
+    ] },
+  };
+  writeFileSync(join(dir, 'raw', 'recording.json'), JSON.stringify(recording));
+  writeFileSync(join(dir, 'raw', 'viewport.json'), JSON.stringify(recording.viewport));
+  const demo = loadDemo(dir);
+  // No viewport in demo.json: the recorded window, not 1920 × 1080 @2.
+  assert.deepEqual(demo.cfg.viewport, { width: 1374, height: 733, dpr: 2.2 });
+  const { flow } = await compileFlow(demo);
+  // The same numbers as the Rust compiler's test (flow.rs): no band at or above the 1374 window.
+  assert.deepEqual(flow.apps[0].layout.responsive[0].bands.map(b => b.below), [1008, 802]);
+});

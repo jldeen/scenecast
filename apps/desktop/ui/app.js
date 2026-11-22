@@ -756,8 +756,10 @@ function reviewHead(d, s, f, slot) {
       const nb = r.beats.filter(b => b.n > 0).length;
       const beats = nb > 1 ? ` in ${plural(nb, 'beat')}` : '';
       const talk = s.focusPoints ? ' \u00b7 talk track on its screens' : '';
-      if (!r.differ) return { title: 'Your replica matches the real product', sub: `${plural(r.screens, 'screen')}${beats} \u00b7 every one matches${talk}`, side: slot };
-      return { title: `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'needs' : 'need'} a look`, sub: `${plural(r.screens, 'screen')}${beats} \u00b7 ${r.matching} match the real product${talk}`, side: slot };
+      const views = r.viewsDiffer ? ` \u00b7 ${viewsWords(r.viewsDiffer)}` : '';
+      if (!r.differ && !r.viewsDiffer) return { title: 'Your replica matches the real product', sub: `${plural(r.screens, 'screen')}${beats} \u00b7 every one matches${talk}`, side: slot };
+      if (!r.differ) return { title: 'Every screen matches', sub: `${r.matching} of ${r.screens} match the real product${views}${talk}`, side: slot };
+      return { title: `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'needs' : 'need'} a look`, sub: `${r.matching} of ${r.screens} match the real product${beats}${views}${talk}`, side: slot };
     }
     if (!s.built) return { title: 'Build the replica', sub: `${plural(s.screens, 'screen')} recorded ${esc(ago(s.recordedAt))}.`, side: slot };
     if (!f) return { title: 'Compare it with the real product', sub: `${plural(s.liveScenes, 'screen')} built. Compare checks each one against what you recorded.`, side: slot };
@@ -1330,6 +1332,8 @@ function makingCard(d, c) {
     ${steps.map(([k, label], i) => `<div class="line">${mk(i < at ? 'ok' : i === at ? 'spin' : 'todo', i < at ? 'done' : i === at ? 'working' : 'to do')}<span${i > at ? ' class="muted"' : ''}>${label}${i === at ? '\u2026' : ''}</span></div>`).join('')}</section>`;
 }
 const pctWords = p => p == null ? '' : p < 0.01 ? 'identical' : `${(+p).toFixed(p < 1 ? 2 : 1)}% different`;
+// A zoom level or a menu that differs, apart from its screen: "1 zoom level or menu differs".
+const viewsWords = n => `${plural(n, 'zoom level or menu', 'zoom levels or menus')} ${n === 1 ? 'differs' : 'differ'}`;
 function screenState(sc) {
   return sc.pass === true ? ['ok', 'Matches'] : sc.pass === false ? ['hold', 'Needs a look'] : ['todo', 'Not compared'];
 }
@@ -1354,7 +1358,7 @@ Object.assign(REGIONS, {
     const ev = J(d.id).fidelity?.events || [];
     const of = ev.find(e => e.event === 'compare-start')?.data?.items, sofar = ev.filter(e => e.event === 'compared').length;
     const primary = comparing ? `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`
-      : r.differ ? `<button class="btn primary" data-action="review-fix" data-test="review-fix" ${fixing ? 'disabled' : ''}>Fix it for me ${I.arrow}</button>`
+      : r.differ || r.viewsDiffer ? `<button class="btn primary" data-action="review-fix" data-test="review-fix" ${fixing ? 'disabled' : ''}>Fix it for me ${I.arrow}</button>`
       : !r.compared ? `<button class="btn primary" data-action="review-compare" data-test="review-compare" ${fixing ? 'disabled' : ''}>Compare with the real product ${I.arrow}</button>`
       : `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`;
     let k = 0;
@@ -1369,7 +1373,8 @@ Object.assign(REGIONS, {
       + (r.others.length ? row(null, 'Menus and hovers', r.others) : '');
     const sub = comparing ? `Comparing each screen with the real product${of ? `: ${sofar} of ${of}` : ''}\u2026 It\u2019s ready to present meanwhile.`
       : !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
-      : r.differ ? `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'differs' : 'differ'} from the real product. Fix it for me finds why and fixes it.`
+      : r.differ ? `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'differs' : 'differ'} from the real product${r.viewsDiffer ? `, and ${viewsWords(r.viewsDiffer).replace(/ differs?$/, '')}` : ''}. Fix it for me finds why and fixes it.`
+      : r.viewsDiffer ? `Every screen matches the real product; ${viewsWords(r.viewsDiffer)}. Fix it for me finds why and fixes it.`
       : 'Every screen matches the real product.';
     // The quick checks (keys, focus points, menus, the guide): not a screen's, so said once, above the show.
     const ck = J(d.id).checks?.outcome;
@@ -1377,7 +1382,7 @@ Object.assign(REGIONS, {
     const checks = ck && !ck.pass ? `<div class="notice warn" data-test="review-checks"><div class="grow"><strong>${plural(nf, 'check')} ${nf === 1 ? 'fails' : 'fail'}.</strong> Something beyond the screens (a key, a focus point, a menu) doesn\u2019t work in the replica yet.
       <div class="row" style="margin-top:8px"><button class="btn" data-goto="build">See what fails</button></div></div></div>` : '';
     return `${err}${checks}<div class="review-grid">
-      <section class="card rundown compact" aria-label="Show" data-test="review" data-compared="${r.compared}" data-comparing="${!!comparing}" data-screens="${r.screens}" data-matching="${r.matching}" data-differ="${r.differ}">
+      <section class="card rundown compact" aria-label="Show" data-test="review" data-compared="${r.compared}" data-comparing="${!!comparing}" data-screens="${r.screens}" data-views-differ="${r.viewsDiffer || 0}" data-matching="${r.matching}" data-differ="${r.differ}">
         <div class="rd-head"><div class="grow"><h2>Show</h2><small>${sub}</small></div><div class="next">${primary}</div></div>
         <div class="rd-cols" aria-hidden="true"><span></span><span>Beat</span><span>State</span></div>
         <div>${rows}</div></section>
@@ -1398,11 +1403,13 @@ function pickPanel(d, r) {
   const said = sc.pass === true ? `<p><b>Matches.</b> Same as the real product${sc.pct ? ` (${pctWords(sc.pct)}: anti-aliasing, a caret)` : ', to the pixel'}.</p>`
     : sc.pass === false ? `<p><b>${esc(plainWhy(sc.why[0] || 'It differs from the real product.'))}</b> <span class="muted">${pctWords(sc.pct)}.</span></p>${sc.why.length > 1 ? `<ul class="also">${sc.why.slice(1).map(w => `<li>${esc(plainWhy(w))}</li>`).join('')}</ul>` : ''}${(sc.detail || []).length ? `<details class="err-detail"><summary>Details</summary><div class="log">${sc.detail.map(esc).join('\n')}</div></details>` : ''}`
     : '<p class="muted">Not compared yet.</p>';
+  // Its zoom levels and menus that differ, each with its own score (not folded into the screen's).
+  const views = (sc.views || []).length ? `<ul class="also" data-test="review-views">${sc.views.map(v => `<li>${esc(v.label[0].toUpperCase() + v.label.slice(1))}: ${pctWords(v.pct)}</li>`).join('')}</ul>${sc.pass === true && sc.why.length ? `<p class="small muted">${esc(plainWhy(sc.why[0]))}</p>` : ''}` : '';
   return `<section class="card pick" aria-live="polite" data-test="review-pick" data-screen="${esc(sc.id)}" data-state="${st}">
     <h2>${where}</h2><p class="sub">${esc(appLabel({ id: sc.app }))}</p>
     ${sc.sideBySide ? `<figure class="compare"><div class="labels"><span>Real product</span><span>Your replica</span></div><img src="${esc(sc.sideBySide)}" alt="The real product and your replica, side by side"></figure>`
       : sc.shot ? `<figure class="compare one"><div class="labels"><span>What you recorded</span></div><img src="${esc(sc.shot)}" alt="What you recorded"></figure>` : ''}
-    ${said}
+    ${said}${views}
     <div class="others"><button class="alink" data-goto="edit" data-test="review-wording">Change wording or a date</button><button class="alink" data-goto="script" data-test="review-say">Edit what you say here</button></div></section>`;
 }
 PANELS.review = async (panel, d) => {
