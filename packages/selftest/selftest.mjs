@@ -244,6 +244,14 @@ export default flow => {
   // --record-only: stop here (for timing the recorder while working on it).
   if (process.argv.includes('--record-only')) throw RECORD_ONLY;
 
+  // A demo the app made has no viewport in demo.json: from here on, everything (the build's zoom bands, the compare)
+  // takes the window it was recorded in (1600 × 900 here), not the 1920 × 1080 @2 default. Nov 2026: a take in a
+  // 1374 px window got bands for 1920; at its own size the replica swapped to its 110% layout (13% off).
+  { const c = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')); delete c.viewport; writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(c, null, 2)); }
+  {
+    const vp = loadDemo(DEMO).cfg.viewport, rv = JSON.parse(readFileSync(join(tmp, 'raw', 'recording.json'), 'utf8')).viewport;
+    check('the window it was recorded in is kept, and used when demo.json has none', rv && rv.width === 1600 && rv.height === 900 && vp.width === 1600 && vp.height === 900 && vp.dpr === 1, JSON.stringify({ rv, vp }));
+  }
   // 4 · Build: flow.json from the recording, raw captures → data/, secret scan.
   const expectedFlow = JSON.parse(JSON.stringify((await compileFlow(loadDemo(DEMO), { fromRaw: true })).flow));
   let t1 = Date.now();
@@ -269,6 +277,7 @@ export default flow => {
   // Side states: once per kind of screen (zoom, chips, drags), once per control (hovers, clicks), once per group.
   // Zoom: a level whose markup is the same as the level below isn't captured again (chat at 200% is its 150% narrow
   // rail: one band); admin's grid changes with size, so all its levels are kept.
+  check('flow: zoom bands sit below the recorded window (no swap at its own size)', flow.apps.every(a => !a.layout.responsive || a.layout.responsive[0].bands.every(b => b.below < 1600)), JSON.stringify(flow.apps.map(a => a.layout.responsive)));
   check('flow: zoom bands, once per kind of screen, a level the same as the one below not captured again', (flow.apps.find(a => a.id === 'chat').layout.responsive || [])[0].bands.length === 1 && flow.zoomRefs.length === 8 && !flow.zoomRefs.some(z => z.snap === 'v200-chat-start') && new Set(flow.zoomRefs.map(z => z.state)).size === 4, JSON.stringify(flow.zoomRefs.map(z => z.snap)));
   check('flow: hover pages and the list', flow.hoverPages.length >= 1 && flow.lists.length >= 1 && flow.lists[0].state === 'admin-start' && flow.lists[0].seen === 300, JSON.stringify([flow.hoverPages, flow.lists]));
   check('flow: one click page (no control clicked twice), sections sticky, menus not', flow.clickPages.length === 1 && flow.clickPages[0].sticky.includes('Projects') && !flow.clickPages[0].sticky.includes('More options'), JSON.stringify(flow.clickPages));

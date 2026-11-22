@@ -92,6 +92,7 @@ function where(d) {
   if (st?.recording) return { gate: 'record', word: st.held ? 'Paused' : 'Recording', note: `${plural(st.count || 0, 'screen')} so far` };
   const c = J(d.id).aiChain;
   if (c && !['done', 'error'].includes(c.stage)) return { gate: 'review', word: 'Making', note: c.stage === 'fix' ? 'fixing what differs' : 'the replica' };
+  if (c?.checking) return { gate: 'review', word: 'Ready', note: c.checking === 'compare' ? 'comparing with the real product' : 'checking' };
   if (!s.recorded && !s.built) return { gate: 'record', word: 'Record', note: 'not recorded yet' };
   const when = (what, at) => at ? `${what} ${ago(at)}` : what;
   if (!s.built || !s.fidelity?.pass) return { gate: 'review', word: 'Review', note: when('recorded', s.recordedAt) };
@@ -294,6 +295,7 @@ listen('job', ({ payload: { demo: id, job, update: u } }) => {
       break;
     case 'event':
       j.events.push(u);
+      if (job === 'fidelity' && u.event === 'compared') reloadReviewSoon(id);
       break;
     case 'saved':
       (j.saved ??= []).push(u.data);
@@ -749,12 +751,15 @@ function reviewHead(d, s, f, slot) {
     if (c && !['done', 'error'].includes(c.stage)) return { title: c.stage === 'fix' ? 'Fixing what differs' : 'Making your replica', sub: 'Scenecast is building it and checking it against the real product.', side: slot };
     if (!s.recorded) return { title: 'Nothing to review yet', sub: 'Record the demo first: each screen shows up here.' };
     const r = J(d.id).review;
+    if (r?.comparing || c?.checking === 'compare') return { title: 'Ready to present', sub: 'Each screen is being compared with the real product. You can rehearse meanwhile.', side: slot };
     if (r?.compared && S.tab === 'review') {
       const nb = r.beats.filter(b => b.n > 0).length;
       const beats = nb > 1 ? ` in ${plural(nb, 'beat')}` : '';
       const talk = s.focusPoints ? ' \u00b7 talk track on its screens' : '';
-      if (!r.differ) return { title: 'Your replica matches the real product', sub: `${plural(r.screens, 'screen')}${beats} \u00b7 every one matches${talk}`, side: slot };
-      return { title: `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'needs' : 'need'} a look`, sub: `${plural(r.screens, 'screen')}${beats} \u00b7 ${r.matching} match the real product${talk}`, side: slot };
+      const views = r.viewsDiffer ? ` \u00b7 ${viewsWords(r.viewsDiffer)}` : '';
+      if (!r.differ && !r.viewsDiffer) return { title: 'Your replica matches the real product', sub: `${plural(r.screens, 'screen')}${beats} \u00b7 every one matches${talk}`, side: slot };
+      if (!r.differ) return { title: 'Every screen matches', sub: `${r.matching} of ${r.screens} match the real product${views}${talk}`, side: slot };
+      return { title: `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'needs' : 'need'} a look`, sub: `${r.matching} of ${r.screens} match the real product${beats}${views}${talk}`, side: slot };
     }
     if (!s.built) return { title: 'Build the replica', sub: `${plural(s.screens, 'screen')} recorded ${esc(ago(s.recordedAt))}.`, side: slot };
     if (!f) return { title: 'Compare it with the real product', sub: `${plural(s.liveScenes, 'screen')} built. Compare checks each one against what you recorded.`, side: slot };
@@ -1229,6 +1234,7 @@ Object.assign(REGIONS, {
     if (!c) return '';
     if (c.stage === 'error') return errorBox(c.error);
     if (c.stage !== 'done') return `${progressBar(true)}<p class="small" data-test="ai-after" data-stage="${c.stage}">Making your replica: <button class="link" data-goto="review">see it in Review</button>.</p>`;
+    if (c.checking) return `<div class="notice ok" data-test="ai-after-ready" data-checking="${esc(c.checking)}"><div><strong>Your replica is ready to present.</strong> Each screen is being compared with the real product: <button class="link" data-goto="review">see it in Review</button>.</div></div>`;
     return `<div class="notice ok" data-test="ai-after-done" data-checks="${J(d.id).checks?.outcome?.pass ?? ''}" data-compared="${!!J(d.id).review?.compared}"><div><strong>Your replica is made.</strong> <button class="link" data-goto="review">Review it</button>: every screen next to the real product, with your talk track on its screens.</div></div>`;
   },
   coach(d) {
@@ -1255,9 +1261,10 @@ Object.assign(REGIONS, {
   },
 });
 // After the talk track exists: the replica, its focus points and guide, the checks for what changed.
-// After every recording (slice 12): the replica made and checked on its own, then Review. Copilot writes the talk
-// track first when it's Copilot's to write; the talk track goes on its screens when there is one; the quick checks; and
-// every screen compared with the real product. A step that fails stops the chain and says so in Review.
+// After every recording (slice 12): the replica made on its own, then Review. Copilot writes the talk track first when
+// it's Copilot's to write; the talk track goes on its screens when there is one; then it's ready to present. Every screen
+// compared with the real product, and the quick checks, follow in the background (checkInBackground). A step that fails
+// stops the chain and says so in Review.
 async function makeReplica(id, { write = false } = {}) {
   const set = stage => { J(id).aiChain = { ...(J(id).aiChain || {}), stage, write }; renderSidebar(); renderRegions(); if (id === S.id) renderHead(); };
   J(id).aiChain = { stage: 'start', write, recorded: J(id)['record-stop']?.outcome || J(id)['ai-record']?.outcome?.summary || null };
@@ -1273,18 +1280,35 @@ async function makeReplica(id, { write = false } = {}) {
       const sc = await step('script', 'script_run', { id });
       if (!sc) throw new Error(J(id).script?.error || 'the talk track wasn\u2019t put on its screens: see Talk track');
     }
-    set('checks');
-    await quickChecks(id);
-    set('compare');
-    const f = await step('fidelity', 'fidelity_run', { fix: false, id });
-    if (!f) throw new Error(J(id).fidelity?.error || 'the comparison stopped: see Real vs replica');
     set('done');
-    toast('Your replica is ready to review');
+    toast('Your replica is ready to present');
   } catch (e) { J(id).aiChain = { ...(J(id).aiChain || {}), stage: 'error', error: e.message }; }
   await loadReview(id);
   if (aiMode(S.demos.find(x => x.id === id)?.mode)) loadAi(id);
   renderSidebar();
   if (id === S.id) rerender(); else renderRegions();
+  if (J(id).aiChain?.stage === 'done') await checkInBackground(id);
+}
+// Once it's ready: every screen compared with the real product, then the quick checks, in the background. Review fills
+// in as each screen is compared; Present doesn't wait for either.
+async function checkInBackground(id) {
+  const c = J(id).aiChain;
+  const done = () => { renderSidebar(); if (id === S.id) rerender(); else renderRegions(); };
+  c.checking = 'compare'; done();
+  const f = await step('fidelity', 'fidelity_run', { fix: false, id });
+  if (!f) c.compareError = J(id).fidelity?.error || 'the comparison stopped: see Real vs replica';
+  await loadReview(id);
+  c.checking = 'checks'; done();
+  await quickChecks(id);
+  c.checking = null;
+  await loadReview(id);
+  done();
+}
+// Review again as screens are compared (at most every 1.5 s).
+const reviewSoon = new Map();
+function reloadReviewSoon(id) {
+  if (reviewSoon.has(id)) return;
+  reviewSoon.set(id, setTimeout(async () => { reviewSoon.delete(id); await loadReview(id); if (id === S.id) { renderHead(); renderRegions(); } }, 1500));
 }
 
 // ---- Review: the show, each beat with its screens, and how each compares with the real product ----------------------
@@ -1301,8 +1325,6 @@ const MAKING = [
   ['script', 'Copilot is writing your talk track'],
   ['build', 'Building the replica, and taking out email addresses, names and IDs'],
   ['focus', 'Putting your talk track on its screens'],
-  ['checks', 'Checking the keys, the focus points and the menus'],
-  ['compare', 'Comparing every screen with the real product'],
 ];
 function makingCard(d, c) {
   if (c.stage === 'fix') return `<section class="card making" data-test="making" data-stage="fix" aria-live="polite">
@@ -1312,11 +1334,13 @@ function makingCard(d, c) {
   const at = steps.findIndex(([k]) => k === c.stage);
   const rec = c.recorded;
   return `<section class="card making" data-test="making" data-stage="${esc(c.stage)}" aria-live="polite">
-    <p class="sub">A few minutes. You can leave this window; Review fills in when it\u2019s done.</p>
+    <p class="sub">About a minute. Then it\u2019s ready to present, and each screen is compared with the real product while you look.</p>
     ${rec?.states ? `<div class="line">${mk('ok', 'done')}<span data-test="record-done">Recorded ${plural(rec.states, 'screen')}${rec.beats > 1 ? ` in ${plural(rec.beats, 'beat')}` : ''}${rec.secs ? `, in ${secs(rec.secs)}` : ''}</span></div>` : ''}
     ${steps.map(([k, label], i) => `<div class="line">${mk(i < at ? 'ok' : i === at ? 'spin' : 'todo', i < at ? 'done' : i === at ? 'working' : 'to do')}<span${i > at ? ' class="muted"' : ''}>${label}${i === at ? '\u2026' : ''}</span></div>`).join('')}</section>`;
 }
 const pctWords = p => p == null ? '' : p < 0.01 ? 'identical' : `${(+p).toFixed(p < 1 ? 2 : 1)}% different`;
+// A zoom level or a menu that differs, apart from its screen: "1 zoom level or menu differs".
+const viewsWords = n => `${plural(n, 'zoom level or menu', 'zoom levels or menus')} ${n === 1 ? 'differs' : 'differ'}`;
 function screenState(sc) {
   return sc.pass === true ? ['ok', 'Matches'] : sc.pass === false ? ['hold', 'Needs a look'] : ['todo', 'Not compared'];
 }
@@ -1336,7 +1360,12 @@ Object.assign(REGIONS, {
       <div class="row" style="margin-top:12px"><button class="btn primary" data-action="make-replica" data-test="make-replica">Make the replica ${I.arrow}</button></div></section>`;
     if (!r) return `${err}<p class="muted">Reading the replica\u2026</p>`;
     const fixing = running('fidelity', d.id);
-    const primary = r.differ ? `<button class="btn primary" data-action="review-fix" data-test="review-fix" ${fixing ? 'disabled' : ''}>Fix it for me ${I.arrow}</button>`
+    // Compared in the background after it's made: ready to present meanwhile.
+    const comparing = r.comparing || c?.checking === 'compare';
+    const ev = J(d.id).fidelity?.events || [];
+    const of = ev.find(e => e.event === 'compare-start')?.data?.items, sofar = ev.filter(e => e.event === 'compared').length;
+    const primary = comparing ? `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`
+      : r.differ || r.viewsDiffer ? `<button class="btn primary" data-action="review-fix" data-test="review-fix" ${fixing ? 'disabled' : ''}>Fix it for me ${I.arrow}</button>`
       : !r.compared ? `<button class="btn primary" data-action="review-compare" data-test="review-compare" ${fixing ? 'disabled' : ''}>Compare with the real product ${I.arrow}</button>`
       : `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`;
     let k = 0;
@@ -1349,8 +1378,10 @@ Object.assign(REGIONS, {
     };
     const rows = r.beats.map(b => row(b, b.n === 0 || (r.beats.length === 1 && b.title === 'The show') ? esc(b.title) : `Beat ${b.n} \u00b7 ${esc(b.title)}`, b.screens)).join('')
       + (r.others.length ? row(null, 'Menus and hovers', r.others) : '');
-    const sub = !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
-      : r.differ ? `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'differs' : 'differ'} from the real product. Fix it for me finds why and fixes it.`
+    const sub = comparing ? `Comparing each screen with the real product${of ? `: ${sofar} of ${of}` : ''}\u2026 It\u2019s ready to present meanwhile.`
+      : !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
+      : r.differ ? `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'differs' : 'differ'} from the real product${r.viewsDiffer ? `, and ${viewsWords(r.viewsDiffer).replace(/ differs?$/, '')}` : ''}. Fix it for me finds why and fixes it.`
+      : r.viewsDiffer ? `Every screen matches the real product; ${viewsWords(r.viewsDiffer)}. Fix it for me finds why and fixes it.`
       : 'Every screen matches the real product.';
     // The quick checks (keys, focus points, menus, the guide): not a screen's, so said once, above the show.
     const ck = J(d.id).checks?.outcome;
@@ -1358,7 +1389,7 @@ Object.assign(REGIONS, {
     const checks = ck && !ck.pass ? `<div class="notice warn" data-test="review-checks"><div class="grow"><strong>${plural(nf, 'check')} ${nf === 1 ? 'fails' : 'fail'}.</strong> Something beyond the screens (a key, a focus point, a menu) doesn\u2019t work in the replica yet.
       <div class="row" style="margin-top:8px"><button class="btn" data-goto="build">See what fails</button></div></div></div>` : '';
     return `${err}${checks}<div class="review-grid">
-      <section class="card rundown compact" aria-label="Show" data-test="review" data-compared="${r.compared}" data-screens="${r.screens}" data-matching="${r.matching}" data-differ="${r.differ}">
+      <section class="card rundown compact" aria-label="Show" data-test="review" data-compared="${r.compared}" data-comparing="${!!comparing}" data-screens="${r.screens}" data-views-differ="${r.viewsDiffer || 0}" data-matching="${r.matching}" data-differ="${r.differ}">
         <div class="rd-head"><div class="grow"><h2>Show</h2><small>${sub}</small></div><div class="next">${primary}</div></div>
         <div class="rd-cols" aria-hidden="true"><span></span><span>Beat</span><span>State</span></div>
         <div>${rows}</div></section>
@@ -1379,11 +1410,13 @@ function pickPanel(d, r) {
   const said = sc.pass === true ? `<p><b>Matches.</b> Same as the real product${sc.pct ? ` (${pctWords(sc.pct)}: anti-aliasing, a caret)` : ', to the pixel'}.</p>`
     : sc.pass === false ? `<p><b>${esc(plainWhy(sc.why[0] || 'It differs from the real product.'))}</b> <span class="muted">${pctWords(sc.pct)}.</span></p>${sc.why.length > 1 ? `<ul class="also">${sc.why.slice(1).map(w => `<li>${esc(plainWhy(w))}</li>`).join('')}</ul>` : ''}${(sc.detail || []).length ? `<details class="err-detail"><summary>Details</summary><div class="log">${sc.detail.map(esc).join('\n')}</div></details>` : ''}`
     : '<p class="muted">Not compared yet.</p>';
+  // Its zoom levels and menus that differ, each with its own score (not folded into the screen's).
+  const views = (sc.views || []).length ? `<ul class="also" data-test="review-views">${sc.views.map(v => `<li>${esc(v.label[0].toUpperCase() + v.label.slice(1))}: ${pctWords(v.pct)}</li>`).join('')}</ul>${sc.pass === true && sc.why.length ? `<p class="small muted">${esc(plainWhy(sc.why[0]))}</p>` : ''}` : '';
   return `<section class="card pick" aria-live="polite" data-test="review-pick" data-screen="${esc(sc.id)}" data-state="${st}">
     <h2>${where}</h2><p class="sub">${esc(appLabel({ id: sc.app }))}</p>
     ${sc.sideBySide ? `<figure class="compare"><div class="labels"><span>Real product</span><span>Your replica</span></div><img src="${esc(sc.sideBySide)}" alt="The real product and your replica, side by side"></figure>`
       : sc.shot ? `<figure class="compare one"><div class="labels"><span>What you recorded</span></div><img src="${esc(sc.shot)}" alt="What you recorded"></figure>` : ''}
-    ${said}
+    ${said}${views}
     <div class="others"><button class="alink" data-goto="edit" data-test="review-wording">Change wording or a date</button><button class="alink" data-goto="script" data-test="review-say">Edit what you say here</button></div></section>`;
 }
 PANELS.review = async (panel, d) => {

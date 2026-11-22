@@ -10,9 +10,13 @@ It comes from the demo's script, the same script that makes the focus points. Th
 guide and the replica to each other. Everything runs offline, from the replica's own server.
 
 Before there's a script, every build makes the guide from the recording: each beat with a plain name ("Copilot: after
-“…”") and its steps ("Type `…` (⌥P types it)", "Press Enter: the answer streams in", "Click Library"), and the app takes its pictures
-after the build (`scenecast notes --from-recording`, then `scenecast guide-shots`). A script replaces it. A picture that
-isn't there yet leaves no frame, never an empty one.
+“…”") and its steps ("Type `…` (⌥P types it)", "Press Enter: the answer streams in", "Click Library"), and the app makes its pictures
+after the build (`scenecast notes --from-recording`). A script replaces it. A picture that isn't there yet leaves no
+frame, never an empty one.
+
+In the app, the pictures come from the screenshots the recording took (made smaller, no browser needed). When the
+comparison with the real product finds a screen that differs, its picture becomes the replica's own, so the guide shows
+what the stage will. A screen with no screenshot falls back to `scenecast guide-shots`.
 
 ## Presenting with it
 

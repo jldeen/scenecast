@@ -24,6 +24,15 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # The repo is public: every committed lockfile installs from the public registry, never an internal feed.
+      - name: Lockfiles point at the public registry only
+        if: runner.os == 'Linux'
+        run: |
+          files=$(git ls-files '*package-lock.json' '*npm-shrinkwrap.json' '*yarn.lock' '*pnpm-lock.yaml' '*uv.lock')
+          internal=$(echo "$files" | xargs -r grep -nE 'pkgs\.visualstudio\.com|pkgs\.dev\.azure\.com|packagefeedproxy|artifactory|nexus' || true)
+          offpublic=$(echo "$files" | xargs -r grep -nE '("resolved"|resolved|tarball)[": =]+"?https?://' \
+            | grep -vE 'https://(registry\.npmjs\.org|registry\.yarnpkg\.com|pypi\.org|files\.pythonhosted\.org|codeload\.github\.com|github\.com)/' || true)
+          if [ -n "$internal$offpublic" ]; then echo "Committed lockfiles must install from the public registry:"; printf '%s\n%s\n' "$internal" "$offpublic" | head -40; exit 1; fi
       - name: Check formatting
         run: |
           cargo fmt --all --check

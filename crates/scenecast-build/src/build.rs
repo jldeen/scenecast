@@ -10,10 +10,10 @@ use thiserror::Error;
 
 use crate::assets::{AssetError, AssetResolver};
 use crate::engine::{Engine, EngineError, Progress, with_demo};
-use crate::fingerprint::{FingerprintError, fingerprint_tree};
+use crate::fingerprint::{FingerprintError, fingerprint_of, fingerprint_tree};
 use crate::flow::{FlowError, compile_recording};
 use crate::publish::{PublishError, PublishMode, publish};
-use crate::scrub::{ScrubError, ScrubReport, scrub_tree};
+use crate::scrub::{ScrubCache, ScrubError, ScrubReport, scrub_tree_cached};
 use crate::sync::{SyncError, SyncReport, sync_manifest};
 
 #[derive(Debug, Error)]
@@ -179,6 +179,20 @@ pub fn raw_dir(dir: &Path) -> Result<PathBuf, BuildError> {
     raw_dir_from(dir, &config)
 }
 
+/// The demo's scrub allowlist (`demo.json` `scrub.allowlist`): PII it may keep, never credentials.
+pub fn scrub_allowlist(dir: &Path) -> Result<Vec<String>, BuildError> {
+    let config: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("demo.json"))?)?;
+    Ok(allowlist_of(&config)?)
+}
+
+fn allowlist_of(config: &serde_json::Value) -> Result<Vec<String>, serde_json::Error> {
+    Ok(config
+        .pointer("/scrub/allowlist")
+        .map(|v| serde_json::from_value::<Vec<String>>(v.clone()))
+        .transpose()?
+        .unwrap_or_default())
+}
+
 fn raw_dir_from(dir: &Path, config: &serde_json::Value) -> Result<PathBuf, BuildError> {
     let raw = config["raw"]
         .as_str()
@@ -222,15 +236,25 @@ fn build_with_raw(
         Some(raw) => resolve_raw(dir, raw)?,
         None => raw_dir_from(dir, &config)?,
     };
-    let allowlist = config
-        .pointer("/scrub/allowlist")
-        .map(|v| serde_json::from_value::<Vec<String>>(v.clone()))
-        .transpose()?
-        .unwrap_or_default();
+    let allowlist = allowlist_of(&config)?;
     let mut report = ScrubReport::default();
+    // Captures already scanned (while recording, or by an earlier build) aren't scanned again: see ScrubCache.
+    let mut cache = ScrubCache::for_demo(dir, &allowlist);
     on(BuildProgress::Stage("scrub-raw"));
-    if raw.exists() {
-        scrub_tree(&raw, "raw", &allowlist, false, &mut report)?;
+    let raw_files = if raw.exists() {
+        Some(scrub_tree_cached(
+            &raw,
+            "raw",
+            &allowlist,
+            false,
+            &mut report,
+            cache.as_mut(),
+        )?)
+    } else {
+        None
+    };
+    if let Some(c) = cache.as_mut() {
+        let _ = c.save();
     }
     if report.has_credentials() {
         write_report(dir, &report)?;
@@ -242,15 +266,18 @@ fn build_with_raw(
         });
     }
     on(BuildProgress::Stage("fingerprint"));
-    let raw_hash = if raw.is_dir() {
-        Some(fingerprint_tree(&raw, |path| {
-            on(BuildProgress::Fingerprint {
-                tree: "raw",
-                path: path.to_owned(),
-            })
-        })?)
-    } else {
-        None
+    // The raw tree's fingerprint from the hashes the scrub just took (each file read once).
+    let raw_hash = match &raw_files {
+        Some(files) if raw.is_dir() => {
+            for f in files {
+                on(BuildProgress::Fingerprint {
+                    tree: "raw",
+                    path: PathBuf::from(&f.name),
+                });
+            }
+            Some(fingerprint_of(files))
+        }
+        _ => None,
     };
     let cache_path = dir.join(".out/build-fingerprint.json");
     let previous: Option<BuildFingerprint> = match fs::read(&cache_path) {
@@ -378,13 +405,35 @@ fn build_with_raw(
     );
     drop(base);
     on(BuildProgress::Stage("scrub-built"));
+    // data/ as it is after the scrub (its files' hashes, redactions included): the output fingerprint, with no
+    // second read.
+    let mut data_files = None;
     for path in [
         dir.join("data"),
         dir.join("recording.json"),
         dir.join("flow.json"),
     ] {
         if path.exists() {
-            scrub_tree(&path, "built", &allowlist, true, &mut report)?;
+            let files = scrub_tree_cached(
+                &path,
+                "built",
+                &allowlist,
+                true,
+                &mut report,
+                cache.as_mut(),
+            )?;
+            if path == data && data.is_dir() {
+                data_files = Some(files);
+            }
+        }
+    }
+    if let Some(c) = cache.as_mut() {
+        let _ = c.save();
+        if std::env::var_os("SCENECAST_SCRUB_CACHE_STATS").is_some() {
+            eprintln!(
+                "scrub cache: {} from the cache, {} scanned",
+                c.hits, c.scanned
+            );
         }
     }
     write_report(dir, &report)?;
@@ -416,24 +465,26 @@ fn build_with_raw(
     let code = if synced.is_valid() { 0 } else { 1 };
     if code == 0
         && let Some(raw) = raw_hash
+        && let Some(files) = data_files
     {
-        let output = fingerprint_tree(&data, |path| {
-            on(BuildProgress::Fingerprint {
-                tree: "output",
-                path: path.to_owned(),
-            })
-        })?;
-        fs::write(
-            cache_path,
-            format!(
-                "{}\n",
-                serde_json::to_string_pretty(&BuildFingerprint {
-                    raw,
-                    output,
-                    algorithm
-                })?
-            ),
-        )?;
+        // (The sync writes manifest.json and .out/, never data/: the scrub's hashes are still data/ as it is.)
+        let output = fingerprint_of(&files);
+        let same = previous
+            .as_ref()
+            .is_some_and(|p| p.raw == raw && p.output == output && p.algorithm == algorithm);
+        if !same {
+            fs::write(
+                cache_path,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&BuildFingerprint {
+                        raw,
+                        output,
+                        algorithm
+                    })?
+                ),
+            )?;
+        }
     }
     Ok(BuildResult {
         exit_code: code,

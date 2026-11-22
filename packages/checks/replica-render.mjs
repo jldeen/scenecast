@@ -20,9 +20,10 @@ export async function openReplica(demo, url, kit) {
   const VP = demo.cfg.viewport;
   const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
   const pages = new Map();
-  // A page per zoom and pixel ratio; it.viewport (the size a screen was recorded at) resizes it to match.
-  async function pageAt(z, dpr = VP.dpr) {
-    const key = `${z}@${dpr}`;
+  // A page per zoom and pixel ratio (and lane: several render at once); it.viewport (the size a screen was recorded
+  // at) resizes it to match.
+  async function pageAt(z, dpr = VP.dpr, lane = 0) {
+    const key = `${z}@${dpr}#${lane}`;
     if (pages.has(key)) return pages.get(key);
     const zf = z / 100;
     const ctx = await browser.newContext({ viewport: { width: Math.round(VP.width / zf), height: Math.round(VP.height / zf) }, deviceScaleFactor: dpr * zf });
@@ -33,10 +34,10 @@ export async function openReplica(demo, url, kit) {
     return page;
   }
   const idle = page => page.evaluate(() => window.d1.idle());
-  // it: { app, state, z, click?: { name, ctl, frame } } → the page, showing it (or { error }).
-  async function show(it) {
+  // it: { app, state, z, click?: { name, ctl, frame } } → the page, showing it (or { error }). Each lane has its own pages.
+  async function show(it, lane = 0) {
     const z = it.z || 100, zf = z / 100;
-    const page = await pageAt(z, it.viewport ? it.viewport.dpr : VP.dpr);
+    const page = await pageAt(z, it.viewport ? it.viewport.dpr : VP.dpr, lane);
     if (it.viewport) {
       const want = { width: Math.round(it.viewport.width / zf), height: Math.round(it.viewport.height / zf) }, have = page.viewportSize();
       if (!have || have.width !== want.width || have.height !== want.height) { await page.setViewportSize(want); await idle(page); }

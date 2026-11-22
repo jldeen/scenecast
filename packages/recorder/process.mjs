@@ -274,24 +274,44 @@ for (const e of (flow.edits || []).filter(e => e.in)) for (const id of e.in) {
   }
   writeFileSync(f, html);
 }
-// flow.compose: parts of one capture placed into others (see compose.mjs).
-for (const step of flow.compose || []) {
-  const src = readFileSync(join(OUT, 'snaps', step.from + '.html'), 'utf8');
-  const at = src.indexOf(step.marker);
-  if (at < 0) throw new Error('compose: marker not found in ' + step.from);
-  const start = src.lastIndexOf('<' + step.tag, at);
-  let part = src.slice(start, elementEnd(src, start));
-  for (const [a, b] of step.text || []) { if (!part.includes(a)) throw new Error('compose: text not in part: ' + a); part = part.split(a).join(b); }
+// flow.compose: parts of one capture placed into others (see compose.mjs). In one pass: each page is read once and
+// written only when a step changed it, each step seeing the pages as the steps before it left them.
+if ((flow.compose || []).length) {
+  const steps = flow.compose;
+  // Each step's source and part, from its capture with the earlier steps done.
+  const parts = [];
+  const applyTo = (html, upTo, composed) => {
+    for (let k = 0; k < upTo; k++) {
+      const s = steps[k];
+      if (!html.includes(s.anchor)) continue;
+      html = compose(html, s, parts[k].part, html.includes('</head>') ? cssFor(parts[k].part, parts[k].src, html) : '');
+      if (composed) composed(k);
+    }
+    return html;
+  };
+  steps.forEach((step, i) => {
+    const src = applyTo(readFileSync(join(OUT, 'snaps', step.from + '.html'), 'utf8'), i);
+    const at = src.indexOf(step.marker);
+    if (at < 0) throw new Error('compose: marker not found in ' + step.from);
+    const start = src.lastIndexOf('<' + step.tag, at);
+    let part = src.slice(start, elementEnd(src, start));
+    for (const [a, b] of step.text || []) { if (!part.includes(a)) throw new Error('compose: text not in part: ' + a); part = part.split(a).join(b); }
+    parts.push({ src, part });
+    step.n = 0;
+  });
   const files = [...readdirSync(join(OUT, 'snaps')).filter(f => f.endsWith('.html')).map(f => join(OUT, 'snaps', f)), ...readdirSync(join(OUT, 'streams'), { recursive: true }).filter(f => f.endsWith('.html')).map(f => join(OUT, 'streams', f))];
-  step.n = 0;
+  const composedBy = steps.map(() => []);
   for (const f of files) {
     const html = readFileSync(f, 'utf8');
-    if (!html.includes(step.anchor)) continue;
-    const out = compose(html, step, part, html.includes('</head>') ? cssFor(part, src, html) : '');
-    writeFileSync(f, out); step.n++;
-    report.composed = (report.composed || []).concat(f.replace(/\\/g, '/').split('/').slice(-2).join('/'));
+    if (!steps.some(s => html.includes(s.anchor))) continue;
+    const name = f.replace(/\\/g, '/').split('/').slice(-2).join('/');
+    const out = applyTo(html, steps.length, k => { steps[k].n++; composedBy[k].push(name); });
+    if (out !== html) writeFileSync(f, out);
   }
-  if (!step.n) throw new Error('compose: anchor not found anywhere: ' + step.anchor);
+  for (const [k, step] of steps.entries()) {
+    if (!step.n) throw new Error('compose: anchor not found anywhere: ' + step.anchor);
+    report.composed = (report.composed || []).concat(composedBy[k]);
+  }
 }
 // Parts the layout rules borrow from a capture (the "+N" chip): every screen of the app gets their CSS.
 for (const app of flow.apps) for (const r of ((app.layout || {}).chips || [])) {

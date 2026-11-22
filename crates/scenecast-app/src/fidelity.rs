@@ -36,6 +36,30 @@ pub fn last(dir: &Path) -> Option<FidelityView> {
     })
 }
 
+/// The compare running now: the latest round's `compare.json` while it's partial (the screens compared so far, so
+/// Review fills in as they land). None when no compare is under way.
+pub fn live(dir: &Path) -> Option<FidelityView> {
+    let out = dir.join(".out").join("fidelity");
+    let round = std::fs::read_dir(&out)
+        .ok()?
+        .filter_map(|e| {
+            let name = e.ok()?.file_name().into_string().ok()?;
+            name.strip_prefix("round-")?.parse::<u32>().ok()
+        })
+        .max()?;
+    let compare: Value = serde_json::from_slice(
+        &std::fs::read(out.join(format!("round-{round}/compare/compare.json"))).ok()?,
+    )
+    .ok()?;
+    (compare["partial"] == true).then(|| FidelityView {
+        pass: false,
+        report: compare,
+        html: out.join("report.html"),
+        dir: out,
+        stop: None,
+    })
+}
+
 /// Runs the loop (`fix`: diagnose and patch; else compare and report only).
 pub fn run(dir: &Path, fix: bool, on: impl FnMut(Update)) -> Result<FidelityView, AppError> {
     crate::timeline::timed(dir, "compare", || run_inner(dir, fix, on))
@@ -78,12 +102,39 @@ fn run_inner(dir: &Path, fix: bool, mut on: impl FnMut(Update)) -> Result<Fideli
         .ok_or_else(|| AppError::Invalid("the fidelity loop ran but wrote no report".into()))?;
     view.pass = outcome.passed();
     view.stop = stop;
+    // The guide's pictures came from the recording's screenshots: one whose screen differs is the replica's own now.
+    if let Err(e) = crate::guide::pictures_from_compare(dir) {
+        crate::ai::app_log(
+            &format!("guide pictures ({})", dir.display()),
+            &e.to_string(),
+        );
+    }
     Ok(view)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_compare_under_way_shows_what_it_has_compared() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(live(tmp.path()).is_none());
+        let round = tmp.path().join(".out/fidelity/round-1/compare");
+        std::fs::create_dir_all(&round).unwrap();
+        std::fs::write(
+            round.join("compare.json"),
+            r#"{"partial":true,"items":[{"id":"a","kind":"state","state":"a","z":100,"pass":true,"pct":0}]}"#,
+        )
+        .unwrap();
+        let v = live(tmp.path()).unwrap();
+        assert_eq!(v.report["items"].as_array().unwrap().len(), 1);
+        std::fs::write(round.join("compare.json"), r#"{"items":[]}"#).unwrap();
+        assert!(
+            live(tmp.path()).is_none(),
+            "done: the report is the one to read"
+        );
+    }
 
     #[test]
     fn reads_the_last_report_with_its_picture_folder() {

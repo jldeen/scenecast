@@ -584,6 +584,7 @@ try {
   await waitFor('Record for me to finish', () => exists('ai-record-done'), 600000);
   await b.execute(() => { if (window.__raf) window.requestAnimationFrame = window.__raf; });
   check('Record for me: recorded, two sends after the presenter\'s go-ahead', (await attr('ai-record-done', 'data-confirmed')) === '1' && +(await attr('ai-record-done', 'data-steps')) >= 10, await text('ai-record-done'));
+  // Ready to present first, then compared and checked in the background: wait for both.
   await waitFor('the demo to be ready', async () => (await exists('ai-after-done')) || (await b.execute(() => /notice bad/.test(document.querySelector('[data-region="ai-after"]')?.innerHTML || ''))), 900000);
   check('Record for me: built, the talk track on its screens, the guide, the checks pass, compared', await exists('ai-after-done') && (await attr('ai-after-done', 'data-checks')) === 'true' && (await attr('ai-after-done', 'data-compared')) === 'true', await b.execute(() => document.querySelector('[data-region="ai-after"]')?.innerText));
   check('Record for me: what was sent to Copilot, listed', await exists('ai-sent-list'));

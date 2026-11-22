@@ -206,6 +206,8 @@ createServer(async (req, res) => {
       case '/recording-partial': writeFileSync(join(RAW, 'recording-partial.json'), JSON.stringify(data)); return json(res, 200, { ok: true });
       case '/recording': {
         writeFileSync(join(RAW, 'recording.json'), JSON.stringify(data, null, 1));
+        // The window it was recorded in, on its own (small, read by every tool that loads the demo).
+        if (data.viewport) writeFileSync(join(RAW, 'viewport.json'), JSON.stringify(data.viewport));
         rmSync(join(RAW, 'recording-partial.json'), { force: true });
         log(`recording: ${Object.keys(data.states || {}).length} states, ${Object.keys(data.streams || {}).length} streams, ${(data.path || []).length} steps`);
         return json(res, 200, { ok: true });

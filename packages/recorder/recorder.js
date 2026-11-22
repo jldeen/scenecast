@@ -397,7 +397,7 @@ async function recAuto(A) {
 // picks up from it after an interruption (the agent restarted, Chrome reloaded).
 function recSnapshot() {
   const states = Object.fromEntries(Object.entries(REC.states).map(([k, st]) => [k, { ...st }]));
-  return { kit: 1, savedAt: new Date().toISOString(), t0: REC.t0, opts: REC.opts, zooms: REC.zooms, apps: REC.apps.map(a => ({ id: a.id, match: a.match, state: a.state, n: a.n })), states, sigs: Object.fromEntries(Object.entries(REC.sigs).map(([k, m]) => [k, [...m]])), streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, seq: REC.seq, active: REC.active, actions: REC.actions, time: REC.time, tl: REC.tl, hoverStats: REC.hoverStats, autoDone: [...REC.autoDone], autos: REC.autos, seen: Object.fromEntries(Object.entries(REC.seen).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, [...v]]))])) };
+  return { kit: 1, savedAt: new Date().toISOString(), t0: REC.t0, opts: REC.opts, zooms: REC.zooms, apps: REC.apps.map(a => ({ id: a.id, match: a.match, state: a.state, n: a.n, viewport: a.viewport })), states, sigs: Object.fromEntries(Object.entries(REC.sigs).map(([k, m]) => [k, [...m]])), streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, seq: REC.seq, active: REC.active, actions: REC.actions, time: REC.time, tl: REC.tl, hoverStats: REC.hoverStats, autoDone: [...REC.autoDone], autos: REC.autos, seen: Object.fromEntries(Object.entries(REC.seen).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, [...v]]))])) };
 }
 let recSaving = null;
 function recCheckpoint() { if (!REC.on) return; const snap = recSnapshot(); recSaving = (recSaving || Promise.resolve()).then(() => post('/recording-partial', snap)).catch(() => {}); }
@@ -414,7 +414,7 @@ async function recResume(c) {
   const off = [];
   for (const a of snap.apps) {
     const p = await pageFor(a.match);
-    REC.apps.push({ id: a.id, match: a.match, page: p, state: a.state, n: a.n, typing: null });
+    REC.apps.push({ id: a.id, match: a.match, page: p, state: a.state, n: a.n, typing: null, viewport: a.viewport });
     await recInstall(p);
     const sig = await recSettle(p, 600, 8000);
     if (sig !== (REC.states[a.state] || {}).sig && (REC.sigs[a.id] || new Map()).get(sig) !== a.state) off.push(`${a.id}: bring the tab back to ${a.state} (as captured in raw/shots/${(REC.states[a.state] || {}).snap}.png), then go on`);
@@ -443,7 +443,7 @@ OPS.recordStart = async c => {
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
   // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
   // reload), and Nov 20's second take began with a click made between takes.
-  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
+  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); A.viewport = await A.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100 })).catch(() => null); recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
   for (const A of REC.apps) {
     const t1 = Date.now();
     rlogr(`start: ${A.id}: capturing its start screen`);
@@ -554,7 +554,9 @@ OPS.recordStop = async () => {
   for (const A of REC.apps) { if (A.typing && !A.typing.done) await recTyped(A); await recSetBusy(A.page, false); }
   const states = Object.fromEntries(Object.entries(REC.states).map(([k, s]) => { const { typedOf, ...rest } = s; return [k, rest]; }));
   const rec = { kit: 1, recordedAt: new Date(REC.t0).toISOString(), secs: Math.round((Date.now() - REC.t0) / 1000), opts: REC.opts,
-    timing: recTiming(), apps: REC.apps.map(a => ({ id: a.id, match: a.match, start: `${a.id}-start`, end: a.state })), states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log, timeline: REC.tl };
+    timing: recTiming(), apps: REC.apps.map(a => ({ id: a.id, match: a.match, start: `${a.id}-start`, end: a.state, viewport: a.viewport || undefined })),
+    // The window it was recorded in (the first app's): the replica is compared and laid out at this size, not demo.json's default.
+    viewport: (REC.apps.find(a => a.viewport) || {}).viewport || undefined, states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log, timeline: REC.tl };
   await post('/recording', rec);
   REC.on = false;
   // The recording's done: let go of every tab, so Chrome's debugging bar isn't on the stage when you rehearse or present.
@@ -752,7 +754,7 @@ async function recSide(A, c) {
       const out = [], t0 = Date.now();
       const domOf = () => p.mainFrame().evaluate(() => { let h = 0; const add = s => { for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; }; for (const e of document.body.getElementsByTagName('*')) { add(e.localName); add(e.getAttribute('class') || ''); add(e.getAttribute('style') || ''); add(e.childElementCount + ''); } return h; }).catch(() => null);
       // The 100% page's markup: a level that matches it needs no capture either.
-      let lastDom = await domOf();
+      let lastDom = await domOf(), prevVw = base.w;
       try {
         for (const z of c.zooms || [110, 125, 150, 175, 200]) {
           if (z === 100) continue;
@@ -770,11 +772,14 @@ async function recSide(A, c) {
           const dom = await domOf();
           // Unchanged: no capture and no band of its own; the replica shows the level below at this size (the same
           // markup), and its CSS lays it out.
-          if (dom !== null && dom === lastDom) { out.push(`${z}% as the level below`); continue; }
+          if (dom !== null && dom === lastDom) { out.push(`${z}% as the level below`); prevVw = vw; continue; }
           lastDom = dom;
           await H.snap(p, id);
           const lm = await p.evaluate(sel => { const o = {}; for (const q of sel) o[q] = [...document.querySelectorAll(q)].map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }).filter(b => b[2] > 0 && b[3] > 0).slice(0, 3); return o; }, c.landmarks || ['nav', 'main', 'aside', 'header', '[role=navigation]', '[role=main]', '[role=dialog]', '[role=grid]', '[contenteditable=true]', 'textarea', 'input[type=search]']);
-          REC.sides.zoom.push({ app: A.id, state, z, snap: id, vw, vh, dpr: base.dpr * k, landmarks: lm });
+          // bw: the window's width at 100% (the bands are placed from it); pw: the width of the last level checked, whose
+          // markup was still the one below (this level's band starts halfway between).
+          REC.sides.zoom.push({ app: A.id, state, z, snap: id, vw, vh, dpr: base.dpr * k, bw: base.w, pw: prevVw, landmarks: lm });
+          prevVw = vw;
           out.push(`${id} ${vw}x${vh}`);
         }
       } finally { await s.send('Emulation.clearDeviceMetricsOverride').catch(() => {}); await s.detach().catch(() => {}); await recViewport(p); await poll(100); }

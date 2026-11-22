@@ -20,6 +20,7 @@ pub mod fidelity;
 pub mod fingerprint;
 pub mod flow;
 pub mod interactions;
+pub mod par;
 pub mod project;
 pub mod publish;
 pub mod recorder;

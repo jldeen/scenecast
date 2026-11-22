@@ -203,7 +203,7 @@ pub fn compile_recording(cfg: &Value, rec: &Value, kit_version: &str) -> Result<
             );
         }
     }
-    compile_zoom(&mut flow, cfg, array(sides, "zoom")?)?;
+    compile_zoom(&mut flow, cfg, rec, array(sides, "zoom")?)?;
     for drag in array(rec, "drags")? {
         push(
             &mut flow,
@@ -328,11 +328,17 @@ fn compile_groups(flow: &mut Value, groups: &[Value]) -> Result<(), FlowError> {
     Ok(())
 }
 
-fn compile_zoom(flow: &mut Value, cfg: &Value, zooms: &[Value]) -> Result<(), FlowError> {
-    let base = cfg
-        .pointer("/viewport/width")
-        .and_then(Value::as_f64)
-        .filter(|v| *v != 0.0)
+fn compile_zoom(
+    flow: &mut Value,
+    cfg: &Value,
+    rec: &Value,
+    zooms: &[Value],
+) -> Result<(), FlowError> {
+    // The bands are placed from the window the zoom levels were captured in (bw, or a level's width times its zoom),
+    // then the recording's window, and only then demo.json's viewport (as flow.mjs).
+    let positive = |v: Option<&Value>| v.and_then(Value::as_f64).filter(|v| *v > 0.0);
+    let cfg_base = positive(rec.pointer("/viewport/width"))
+        .or_else(|| positive(cfg.pointer("/viewport/width")))
         .unwrap_or(1920.0);
     let apps = flow["apps"]
         .as_array()
@@ -358,10 +364,26 @@ fn compile_zoom(flow: &mut Value, cfg: &Value, zooms: &[Value]) -> Result<(), Fl
         if levels.is_empty() {
             continue;
         }
+        let base = zs
+            .iter()
+            .filter(|z| z["z"].as_f64().is_some_and(|l| l > 100.0))
+            .find_map(|z| {
+                positive(z.get("bw")).or_else(|| {
+                    positive(z.get("vw"))
+                        .map(|vw| (vw * z["z"].as_f64().unwrap_or(100.0) / 100.0).round())
+                })
+            })
+            .unwrap_or(cfg_base);
         let mut prev = base;
         let mut bands = Vec::new();
         for level in levels {
             let width = (base * 100.0 / level).round();
+            // A level whose markup was the same as the one below (not captured) moves the band's start down to it.
+            let from = zs
+                .iter()
+                .filter(|z| z["z"].as_f64() == Some(level))
+                .filter_map(|z| positive(z.get("pw")))
+                .fold(prev, f64::min);
             let mut variants = Map::new();
             for zoom in zs.iter().filter(|z| z["z"].as_f64() == Some(level)) {
                 variants.insert(
@@ -372,7 +394,7 @@ fn compile_zoom(flow: &mut Value, cfg: &Value, zooms: &[Value]) -> Result<(), Fl
                 push(flow, "zoomRefs", (*zoom).clone());
             }
             bands
-                .push(json!({"below": ((prev + width) / 2.0).round() as i64, "variant": variants}));
+                .push(json!({"below": ((from + width) / 2.0).round() as i64, "variant": variants}));
             prev = width;
         }
         flow["apps"][index]["layout"]["responsive"] =
@@ -439,6 +461,31 @@ mod tests {
             1334
         );
         assert_eq!(flow["zoomRefs"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn zoom_bands_come_from_the_recorded_window_not_demo_json() {
+        let cfg = json!({"name": "fx", "viewport": {"width": 1920}, "apps": [{"id": "chat"}]});
+        let rec = json!({
+            "viewport": {"width": 1374, "height": 733, "dpr": 2.2},
+            "states": {"start": {"app":"chat","snap":"start"}},
+            "sides": {"zoom": [
+                {"app":"chat","state":"start","snap":"v150-start","z":150,"vw":916,"bw":1374,"pw":1099},
+                {"app":"chat","state":"start","snap":"v200-start","z":200,"vw":687,"pw":916}
+            ]}
+        });
+        let flow = compile_recording(&cfg, &rec, "0.2.0").unwrap();
+        let bands = &flow["apps"][0]["layout"]["responsive"][0]["bands"];
+        // 110% and 125% looked as 100%: the 150% band starts halfway from 125% (1099), below the 1374 window.
+        assert_eq!(bands[0]["below"], 1008);
+        assert_eq!(bands[1]["below"], 802);
+        // An older recording: no bw or pw, the base from a level's width times its zoom.
+        let old = json!({"states": rec["states"], "sides": {"zoom": [{"app":"chat","state":"start","snap":"v110-start","z":110,"vw":1249}]}});
+        let flow = compile_recording(&cfg, &old, "0.2.0").unwrap();
+        assert_eq!(
+            flow["apps"][0]["layout"]["responsive"][0]["bands"][0]["below"],
+            1312
+        );
     }
 
     #[test]

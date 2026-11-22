@@ -109,19 +109,27 @@ export async function compileFlow(demo, { fromRaw = false } = {}) {
   }
   // Zoom: above 100% the page is swapped for its capture at the nearest zoom (whole body, per state); below 100%
   // the captures are references for the zoom check only.
-  const base = (cfg.viewport && cfg.viewport.width) || 1920;
+  // The bands are placed from the window the zoom levels were captured in (bw, or a level's width × its zoom), not
+  // demo.json's viewport: a real Chrome window at 1374 px got bands for 1920 and the replica swapped to its 110%
+  // layout at full size.
+  const cfgBase = (rec.viewport && rec.viewport.width) || (cfg.viewport && cfg.viewport.width) || 1920;
   for (const app of flow.apps) {
     const zs = (sides.zoom || []).filter(z => z.app === app.id);
     for (const z of zs.filter(z => z.z < 100)) flow.zoomRefs.push(z);
     const up = zs.filter(z => z.z > 100);
     if (!up.length) continue;
+    const b0 = up.find(z => z.bw > 0 || z.vw > 0);
+    const base = b0 ? (b0.bw > 0 ? b0.bw : Math.round(b0.vw * b0.z / 100)) : cfgBase;
     const levels = [...new Set(up.map(z => z.z))].sort((a, b) => a - b);
     let prevW = base;
     const bands = [];
     for (const lv of levels) {
       const at = up.filter(z => z.z === lv);
       const w = Math.round(base * 100 / lv);
-      bands.push({ below: Math.round((prevW + w) / 2), variant: Object.fromEntries(at.map(z => [z.state, z.snap])) });
+      // A level whose markup was the same as the one below (not captured) moves the band's start down to it.
+      const pws = at.map(z => z.pw).filter(v => v > 0);
+      const from = pws.length ? Math.min(prevW, ...pws) : prevW;
+      bands.push({ below: Math.round((from + w) / 2), variant: Object.fromEntries(at.map(z => [z.state, z.snap])) });
       prevW = w;
       for (const z of at) { flow.variants.push(z.snap); flow.zoomRefs.push(z); }
     }

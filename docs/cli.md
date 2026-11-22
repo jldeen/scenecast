@@ -117,6 +117,13 @@ Rust fingerprints the raw capture tree, built data and Rust processing code by c
 forces capture processing even when file sizes and modification times are unchanged. The cache is kept in
 `.out/build-fingerprint.json`.
 
+The build reads each file once, on every core (`SCENECAST_THREADS` sets how many): the same pass scans it for secrets
+and hashes it for the fingerprint. What the scan found is kept by content in `.out/scrub-cache.txt` (with the
+allowlist and the scanner's own version), so a capture already scanned isn't scanned again: a raw capture's findings
+are kept and reported every build; a built file is kept only when it's clean, so one with a finding is redacted every
+time. The desktop app scans each capture as it arrives while you record, so the build after Stop finds them done.
+`SCENECAST_SCRUB_CACHE=off` turns the cache off. Stylesheets shared by several pages are rewritten once per build.
+
 ## The fidelity loop: `scenecast fidelity`
 
 Compares every captured state of the real product with the replica, the way its real screenshot was taken: each
@@ -125,6 +132,9 @@ state at 100% (the demo's viewport), each zoom capture at its zoom, and each men
 side-by-side and a diff picture. Each state's fonts are checked too: every font the real page had loaded must be in
 the replica from the same file (SHA-256), else it's reported as substituted or a different file.
 
+Several screens are compared at once (a third of the cores, at most 4; `SCENECAST_COMPARE_LANES` sets it), and
+`compare.json` lists what's done so far while it runs. A screen whose replica looks exactly as it did last time, next
+to the same real screenshot, keeps its last comparison (`.out/fidelity/cache`).
 What's over the threshold (0.5% of pixels by default), or has a font that isn't the real file, goes to the fixer.
 Its diagnosers say why, from evidence in the raw captures and the rendered replica, and write a patch for this demo
 in `flow.fixes.json` (never a capture edited by hand, never a product-wide rule). Then the loop builds and compares

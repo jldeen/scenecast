@@ -130,7 +130,8 @@ try {
   }
   const states = rep ? rep.items.filter(i => i.kind === 'state') : [];
   check('every state within 0.5% at 100%', states.length === 3 && states.every(i => i.pct !== null && i.pct <= 0.5), JSON.stringify(states));
-  check('every zoom capture and click side state within 0.5%', rep && rep.items.filter(i => i.kind !== 'state').length === 3 && rep.items.every(i => i.pct !== null && i.pct <= 0.5), JSON.stringify(rep && rep.items));
+  // The start screen at 67% has the markup it has at 100%: it isn't captured again (its CSS lays it out), so two.
+  check('every zoom capture and click side state within 0.5%', rep && rep.items.filter(i => i.kind !== 'state').length === 2 && rep.items.some(i => i.id === 'lab-01-tasks@67') && rep.items.every(i => i.pct !== null && i.pct <= 0.5), JSON.stringify(rep && rep.items));
   const full = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity', 'report.json'), 'utf8'));
   check('fonts match by file (SHA-256)', full.fonts.length === 1 && full.fonts.every(f => f.status === 'match' && f.real.length && f.replica.includes(f.real[0].sha256)), JSON.stringify(full.fonts));
   const m = JSON.parse(readFileSync(join(DEMO, 'manifest.json'), 'utf8'));
