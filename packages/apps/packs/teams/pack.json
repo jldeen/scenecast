@@ -1,0 +1,207 @@
+{
+  "kind": "stuntdouble-app-pack",
+  "version": 1,
+  "id": "teams",
+  "title": "Microsoft Teams",
+  "names": [
+    "Teams",
+    "Microsoft Teams",
+    "Teams chat"
+  ],
+  "match": [
+    "teams.cloud.microsoft",
+    "teams.microsoft.com",
+    "teams.live.com"
+  ],
+  "start": {
+    "url": "https://teams.cloud.microsoft/",
+    "signIn": {
+      "hosts": [
+        "login.microsoftonline.com"
+      ],
+      "hint": "Sign in with the demo account in the capture browser first; Teams opens on the last chat or channel."
+    },
+    "ready": {
+      "sel": "[data-tid=\"app-layout-area--main\"]"
+    }
+  },
+  "record": {
+    "busy": [
+      {
+        "text": "Working on it"
+      },
+      {
+        "sel": "[aria-label=\"Stop\"]"
+      }
+    ],
+    "auto": {
+      "hoverMax": 30,
+      "clickMax": 12,
+      "maxS": 60
+    },
+    "hoverDelayMs": [
+      240,
+      390
+    ],
+    "zooms": [
+      110,
+      125,
+      150,
+      175,
+      200
+    ]
+  },
+  "build": {
+    "rules": [
+      {
+        "id": "launcher-tooltip",
+        "block": "Open office app launcher",
+        "tag": "div",
+        "pages": true,
+        "note": "The app launcher's tooltip comes along when the pointer rested on it during a page capture (zoom captures). Pages only: in hover data it is the launcher's real tooltip."
+      },
+      {
+        "id": "search-hint",
+        "raw": [
+          "placeholder=\"Press ⌥ ⌘ G to go right to a chat or channel\"",
+          "placeholder=\"Search or ask Copilot (⌥ ⌘ E)\""
+        ],
+        "note": "Teams rotates the search box's hint between captures; one hint, so it doesn't change as the presenter zooms."
+      }
+    ]
+  },
+  "flow": {
+    "layout": {
+      "reflow": {
+        "kind": "responsive",
+        "part": {
+          "sel": "body",
+          "css": "<body[\\s>]",
+          "up": 0
+        },
+        "note": "Teams lays itself out by script (chat list width, chip overflow, compact channel header), so each zoom level is the whole page captured at that zoom (record.zooms). The bands come from the recorded width and zoom (the engine's), never from fixed pixel widths: a demo writes { use: 'reflow' } and the recorder fills its bands."
+      },
+      "channel-stick": {
+        "kind": "stick",
+        "always": true,
+        "el": "[data-tid=\"channel-pane-viewport\"]",
+        "note": "The channel's posts stay scrolled to the newest one when the window gets shorter."
+      }
+    },
+    "drags": {
+      "chat-list": {
+        "always": true,
+        "handle": "[data-testid=\"resize-handler-divider-mid-nav\"]",
+        "slider": "[role=slider][aria-label=\"Resize left panel\"]",
+        "mode": "release",
+        "write": "teamsSlot",
+        "slot": "[data-tid=\"app-layout-area--mid-nav\"]",
+        "min": 280,
+        "max": 400,
+        "note": "The chat list: 280–400 px, applied on release, written as --slot-width in vw."
+      }
+    }
+  },
+  "theme": {
+    "system": "fluent",
+    "follows": "setting",
+    "setting": "Settings and more › Settings › Appearance › Theme (Light, Dark, High contrast, Follow operating system theme)",
+    "markers": {
+      "html": [
+        "class"
+      ],
+      "body": [
+        "class"
+      ]
+    },
+    "themes": {
+      "light": "themes/light.json",
+      "dark": "themes/dark.json",
+      "high-contrast": "themes/high-contrast.json"
+    },
+    "scores": {
+      "light-to-dark": 0.999,
+      "dark-to-light": 0.999,
+      "to-high-contrast": 0.94
+    },
+    "fallbacks": [
+      "Avatars and images keep their colors",
+      "High contrast: some Fluent v9 focus outlines and the app bar's selected pill differ"
+    ]
+  },
+  "platform": {
+    "frame": "browser",
+    "shortcuts": {
+      "⌥ ⌘ G": "Ctrl+Alt+G",
+      "⌥ ⌘ E": "Ctrl+Alt+E"
+    }
+  },
+  "writes": [
+    {
+      "id": "post-message",
+      "what": "Posts the message in the open chat or channel",
+      "on": {
+        "kind": "press",
+        "key": "Enter",
+        "field": "/type a message|reply|compose/i"
+      },
+      "makes": "message",
+      "undo": {
+        "steps": [
+          "Hover over \"{message}\"",
+          "Click \"More options\"",
+          "Click \"Delete\""
+        ],
+        "note": "Teams keeps a \"This message has been deleted\" line; post only to the demo's own chat or a test channel."
+      },
+      "check": {
+        "steps": [
+          "Go to Teams",
+          "Scroll down"
+        ],
+        "expect": "No post from the demo account after the run started, other than the demo's own."
+      },
+      "verified": false
+    },
+    {
+      "id": "theme",
+      "what": "Changes the Teams theme (a setting that follows the account to every device)",
+      "on": {
+        "kind": "click",
+        "target": "/^(Light|Dark|High contrast|Follow operating system theme)$/"
+      },
+      "undo": {
+        "steps": [
+          "Click \"Settings and more\"",
+          "Click \"Settings\"",
+          "Click \"Appearance\"",
+          "You: set Theme back to {before}"
+        ]
+      },
+      "check": {
+        "steps": [
+          "Click \"Settings and more\"",
+          "Click \"Settings\"",
+          "Click \"Appearance\""
+        ],
+        "expect": "Theme reads what the demo starts with (Light unless it says otherwise)."
+      }
+    }
+  ],
+  "effects": [
+    {
+      "id": "theme-follows-os",
+      "what": "With Theme on \"Follow operating system theme\", Teams turns dark when the Mac or Windows is in dark mode",
+      "check": {
+        "expect": "The page renders light (its background's lightness above 0.6) with the OS in either mode."
+      }
+    }
+  ],
+  "notes": "Fluent v9 tokens; Teams loads only the active theme's tokens, so the other themes come from themes/*.json (spike A). Hover cards show after 240–390 ms.",
+  "sources": [
+    "inv641 flow.overrides.mjs: Teams layout (stick), drag, edits (tooltip, search hint)",
+    "spike E presets teams.json (busy, auto budget)",
+    "spike A live captures Nov 20 (themes, scores)",
+    "demo1-reset (theme setting, check)"
+  ]
+}

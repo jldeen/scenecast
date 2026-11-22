@@ -1,0 +1,17 @@
+/* Copilot's app launcher (the header's "Apps and more" panel). Its layout rules come in a style chunk that loads only
+   when the panel opens, so no capture has them. These rules restore the measured result
+   (replica-raw/hovers/click-cop-home/0001.png, 1920x1080): a 550 x 363 panel with 532 px of content, a 32 px pill
+   search box (focused: 2 px outline 1 px out), a 24 px round clear button, and 100 x 96 px tiles in five columns with
+   the icon above the label. Each rule is keyed to the launcher's own classes. */
+.MVlTUGJn [data-testid="app-launcher-popover"]{width:532px;}
+.fx-SearchBox.RFBRMmNo{display:flex;align-items:center;box-sizing:border-box;width:100%;height:32px;padding:0 3px 0 8px;border:1px solid #242424;border-radius:9999px;background:#fff;}
+.fx-SearchBox.RFBRMmNo[data-focused]{outline:2px solid #242424;outline-offset:1px;}
+.fx-SearchBox__contentBefore.bmZWWmk5{display:flex;flex-shrink:0;font-size:20px;color:#616161;}
+.fx-SearchBox__input.QzBxYk5f{flex:1;min-width:0;height:100%;box-sizing:border-box;margin:0 0 0 8px;padding:0 4px;border:0;outline:0;background:transparent;font-family:var(--gnrc-font-family-functional);font-size:14px;line-height:20px;color:#242424;}
+.fx-SearchBox__input.QzBxYk5f::placeholder{color:#707070;opacity:1;}
+.fx-SearchBox__input.QzBxYk5f::-webkit-search-cancel-button{-webkit-appearance:none;display:none;}
+.fx-SearchBox__contentAfter.YkQyZUpH{display:flex;flex-shrink:0;}
+.fx-SearchBox__dismiss.aHE5M2V5{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:9999px;background:#f2f2f2;font-size:16px;color:#242424;cursor:pointer;}
+.___1w5ctnz{margin-top:8px;}
+.fx-MenuButton.NzYxM2dX{flex-direction:column;justify-content:flex-start;align-items:center;gap:4px;box-sizing:border-box;height:96px;padding:6px 0 0;min-width:0;}
+.fx-Divider.STNzUlp6{height:8px;flex-shrink:0;}

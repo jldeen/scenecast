@@ -1,0 +1,369 @@
+{
+  "kind": "stuntdouble-app-pack",
+  "version": 1,
+  "id": "m365-copilot",
+  "title": "Microsoft 365 Copilot",
+  "names": [
+    "Copilot",
+    "Microsoft 365 Copilot",
+    "M365 Copilot",
+    "Copilot Cowork",
+    "Cowork",
+    "Copilot Chat"
+  ],
+  "match": [
+    "m365.cloud.microsoft",
+    "copilot.cloud.microsoft",
+    "microsoft365.com/chat"
+  ],
+  "start": {
+    "url": "https://m365.cloud.microsoft/",
+    "signIn": {
+      "hosts": [
+        "login.microsoftonline.com"
+      ],
+      "hint": "Sign in with the demo account first. A new task opens on Chat or Cowork as last chosen (the Chat | Cowork switch under the message box)."
+    },
+    "ready": {
+      "sel": "[contenteditable=\"true\"]"
+    }
+  },
+  "record": {
+    "busy": [
+      {
+        "text": "Working on it"
+      },
+      {
+        "sel": "[aria-label=\"Stop\"]"
+      },
+      {
+        "sel": "[aria-label*=\"Stop generating\"]"
+      }
+    ],
+    "streamMinMs": 1500,
+    "streamMaxMs": 10000,
+    "groups": {
+      "button": "button[data-telemetry-id=\"ToolNode.ExpandGroup\"],button[data-telemetry-id=\"ToolNode.CollapseGroup\"],button[data-telemetry-id=\"ToolApprovalV2.HistoryRow.Toggle\"]",
+      "label": "[data-finalized-label]",
+      "chevron": "svg[data-group-chevron]"
+    },
+    "auto": {
+      "hoverMax": 20,
+      "clickMax": 6,
+      "maxS": 60
+    },
+    "hoverDelayMs": [
+      300,
+      420
+    ]
+  },
+  "flow": {
+    "layout": {
+      "nav": {
+        "kind": "responsive",
+        "below": 1024,
+        "part": {
+          "sel": "[role=navigation]",
+          "css": "<div[^>]*role=\"navigation\"",
+          "up": 2
+        },
+        "flag": "navCollapsed",
+        "on": [
+          {
+            "click": {
+              "sel": "button[data-testid=\"nav-toggle-button\"]"
+            },
+            "flag": "navCollapsed"
+          }
+        ],
+        "note": "The sidebar collapses to its icon rail below Copilot's own breakpoint (1024 CSS px, between the 175% and 200% captures); Collapse sidebar does the same at any width (flag). A demo gives the captured variants: { use: 'nav', variant, flagVariant }."
+      },
+      "workspace-pane": {
+        "kind": "set",
+        "sel": "div[style*=\"flex: 0 0 24.04%\"]",
+        "style": {
+          "flex": "0 0 25%"
+        },
+        "note": "The Workspace pane takes 25% of the room beside the sidebar (its own CSS keeps it 250–400 px); the inline % a capture writes is what it was at that window, so the demo names the captured value."
+      },
+      "workspace-chips": {
+        "kind": "chips",
+        "list": "aside ul[role=list]",
+        "item": "li[role=listitem]",
+        "rows": 2,
+        "gap": 4,
+        "plus": {
+          "marker": "VNextWorkspacePanel.ChipOverflow",
+          "noun": "plugins"
+        },
+        "note": "The Workspace pane's plugin chips: two rows at most, then a \"+N\" chip; clicking it shows all and it becomes \"Show less\". A demo gives { use: 'workspace-chips', state, plus: { from: <a capture with the +N chip> } }."
+      },
+      "composer-pin": {
+        "kind": "pin",
+        "always": true,
+        "el": "#coworker-main-content div[style*=\"position: fixed\"][style*=\"justify-content: flex-end\"]",
+        "anchor": "[data-testid=chat-input-panel] div[style*=\"min-height\"]",
+        "sync": true,
+        "note": "The message box is fixed and sits over its placeholder at the bottom of the chat."
+      }
+    },
+    "drags": {
+      "split-pane": {
+        "always": true,
+        "handle": "[data-testid=\"split-pane-separator\"]",
+        "mode": "live",
+        "write": "flexPercent",
+        "cursor": "col-resize",
+        "note": "The Workspace and preview panes: a share of the room beside the sidebar, written as flex %."
+      }
+    },
+    "groups": {
+      "dropLines": "<output [^>]*>[^<]*, Completed</output>",
+      "grid": {
+        "closed": [
+          "f7p4zhs",
+          "fd7fpy0"
+        ],
+        "open": [
+          "f1u7ey36"
+        ]
+      }
+    },
+    "lateItems": [
+      {
+        "placeholder": "data-testid=\"feedback-menu-item-loading\"",
+        "role": "menuitem",
+        "text": "Give feedback"
+      }
+    ],
+    "vendorCss": [
+      "vendor/fluent-react-slider.css",
+      "vendor/copilot-effort-slider.css",
+      "vendor/copilot-app-launcher.css",
+      "vendor/copilot-settings-menu.css",
+      "vendor/copilot-search.css"
+    ]
+  },
+  "theme": {
+    "system": "fluent",
+    "follows": "setting",
+    "setting": "Settings and more › Settings › Theme (System, Light, Dark)",
+    "markers": {
+      "html": [
+        "class",
+        "data-theme"
+      ]
+    },
+    "themes": {
+      "light": "themes/light.json",
+      "dark": "themes/dark.json"
+    },
+    "scores": {
+      "light-to-dark": 0.999,
+      "dark-to-light": 0.999
+    },
+    "fallbacks": [
+      "Images and file thumbnails keep their colors",
+      "Charts drawn in an answer (images) keep theirs"
+    ]
+  },
+  "platform": {
+    "frame": "browser",
+    "shortcuts": {}
+  },
+  "writes": [
+    {
+      "id": "new-task",
+      "what": "Sends the prompt: a new task in Recent (or a new turn in the open task)",
+      "on": {
+        "kind": "press",
+        "key": "Enter",
+        "field": "/message|ask|copilot|prompt/i"
+      },
+      "makes": "task",
+      "undo": {
+        "open": "https://copilot.cloud.microsoft/home",
+        "steps": [
+          "You: delete the task \"{task}\" from Recent (its More options › Delete)"
+        ],
+        "note": "A private pack can add an API undo that runs in the capture browser's own signed-in session."
+      },
+      "check": {
+        "open": "https://copilot.cloud.microsoft/home",
+        "expect": "Recent has no task from the run, other than the ones the demo keeps."
+      }
+    },
+    {
+      "id": "send",
+      "what": "The send arrow does what Enter does",
+      "on": {
+        "kind": "click",
+        "target": "Send"
+      },
+      "makes": "task",
+      "undo": {
+        "same": "new-task"
+      },
+      "check": {
+        "same": "new-task"
+      }
+    },
+    {
+      "id": "save-skill",
+      "what": "Save on the Save skill card creates a skill of her own in Plugins › Added; Copilot names it differently each run",
+      "on": {
+        "kind": "click",
+        "target": "Save",
+        "near": "Save skill"
+      },
+      "makes": "skill",
+      "undo": {
+        "open": "https://copilot.cloud.microsoft/plugins?pluginsTab=cowork&coworkPage=added",
+        "steps": [
+          "Click \"More actions for {skill}\"",
+          "Click \"Delete\"",
+          "Click \"Delete\""
+        ],
+        "note": "Only her own skills (from her OneDrive); a plugin's own skills are never deleted."
+      },
+      "check": {
+        "open": "https://copilot.cloud.microsoft/plugins?pluginsTab=cowork&coworkPage=added",
+        "look": {
+          "absent": "{skill}"
+        },
+        "expect": "Added doesn't list the skill."
+      }
+    },
+    {
+      "id": "approve",
+      "what": "Approve on a tool card runs that tool's action (it can write wherever the tool writes)",
+      "on": {
+        "kind": "click",
+        "target": "Approve"
+      },
+      "undo": null,
+      "note": "The undo depends on the tool: the demo names it (or the plan stops at Approve). Approve on a Copy file card into the skills folder makes a skill: its undo is save-skill's.",
+      "check": {
+        "expect": "The demo's own check for that tool."
+      }
+    },
+    {
+      "id": "plugin-switch",
+      "what": "A plugin's switch in Plugins › Added turns it on or off for the next task (wait about 20 s before starting one)",
+      "on": {
+        "kind": "switch",
+        "target": "/^Enable /"
+      },
+      "undo": {
+        "open": "https://copilot.cloud.microsoft/plugins?pluginsTab=cowork&coworkPage=added",
+        "steps": [
+          "Click \"Enable {plugin}\""
+        ],
+        "note": "Back to the state the demo starts with."
+      },
+      "check": {
+        "open": "https://copilot.cloud.microsoft/plugins?pluginsTab=cowork&coworkPage=added",
+        "expect": "Each plugin's switch is as the demo starts."
+      }
+    },
+    {
+      "id": "composer-mode",
+      "what": "The Chat | Cowork switch under the message box; the choice persists for new tasks",
+      "on": {
+        "kind": "click",
+        "target": "/^(Chat|Cowork)$/"
+      },
+      "undo": {
+        "open": "https://copilot.cloud.microsoft/home",
+        "steps": [
+          "Click \"{before}\""
+        ]
+      },
+      "check": {
+        "open": "https://copilot.cloud.microsoft/home",
+        "look": {
+          "sel": "[role=radiogroup][aria-label=\"Composer mode\"] [role=radio][aria-checked=true]"
+        },
+        "expect": "A new task opens on the mode the demo starts with (Cowork, for Cowork demos)."
+      }
+    },
+    {
+      "id": "theme",
+      "what": "Changes Copilot's theme setting",
+      "on": {
+        "kind": "click",
+        "target": "/^(System|Light|Dark)$/"
+      },
+      "undo": {
+        "steps": [
+          "Click \"Settings and more\"",
+          "Click \"Settings\"",
+          "You: set Theme back to {before}"
+        ]
+      },
+      "check": {
+        "steps": [
+          "Click \"Settings and more\"",
+          "Click \"Settings\""
+        ],
+        "expect": "Theme reads what the demo starts with."
+      }
+    }
+  ],
+  "effects": [
+    {
+      "id": "recent-tasks",
+      "what": "Every prompt in a new task leaves a task in Recent",
+      "check": {
+        "open": "https://copilot.cloud.microsoft/home",
+        "expect": "Recent holds only the tasks the demo keeps."
+      }
+    },
+    {
+      "id": "memories",
+      "what": "Copilot can save a memory from a run (Settings › Personalization › saved memories); Cowork keeps its own memories",
+      "undo": {
+        "steps": [
+          "Click \"Settings and more\"",
+          "Click \"Settings\"",
+          "Click \"Personalization\"",
+          "You: delete the memories the run saved (the second Manage)"
+        ]
+      },
+      "check": {
+        "steps": [
+          "Click \"Settings and more\"",
+          "Click \"Settings\"",
+          "Click \"Personalization\""
+        ],
+        "expect": "No saved memories from the run (Copilot or Cowork)."
+      }
+    },
+    {
+      "id": "personalization",
+      "what": "Custom instructions (Personalization) aren't changed by a run, but a reset checks they're the demo's wording",
+      "check": {
+        "steps": [
+          "Click \"Settings and more\"",
+          "Click \"Settings\"",
+          "Click \"Personalization\""
+        ],
+        "expect": "The custom instructions match the demo's text exactly."
+      }
+    },
+    {
+      "id": "next-task-plugins",
+      "what": "Plugin switches apply to the next task, not the open one; a task started right after switching can still miss a plugin",
+      "check": {
+        "expect": "Wait about 20 s after a switch before starting the task that needs it."
+      }
+    }
+  ],
+  "notes": "Fluent v9 (Griffel atomic classes). Step groups open and close like the product's; their lists come from the real open capture or the run's frames. vendor/: library and measured CSS for menus whose rules load the first time they open (no capture has them).",
+  "sources": [
+    "inv641 flow.overrides.mjs: layout (nav, set, chips, pin), drag, groups, lateItems, vendor CSS",
+    "spike E presets m365-copilot.json (busy, stream timings, group selectors, auto budget)",
+    "spike A live captures Nov 20 (themes, scores)",
+    "demo1-reset SKILL.md and dist (writes, undo steps, checks, effects; product behavior only)"
+  ]
+}

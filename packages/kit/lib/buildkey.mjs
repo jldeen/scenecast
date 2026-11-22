@@ -1,5 +1,5 @@
 // What a build's output depends on, hashed: the build code, the parts of the flow the build reads, the raw captures
-// (by name, size and time), and vendor CSS. data/build.json keeps the hashes of the last build, so
+// (by name, size and time), vendor CSS and the app packs' build rules. data/build.json keeps the hashes of the last build, so
 //   - scenecast build skips a build whose inputs haven't changed, and
 //   - the server knows which tweaks are already baked in, which it can apply as it serves (text edits), and which
 //     only a build can make (everything else the build reads).
@@ -8,9 +8,11 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { KIT } from './demo.mjs';
 import { editSig } from './edits.mjs';
+import { activePacks } from '../../apps/index.mjs';
+import { htmlPasses, packPath } from '../../apps/build.mjs';
 
 const sha = s => createHash('sha256').update(s).digest('hex').slice(0, 16);
-const CODE = ['recorder/process.mjs', 'recorder/compose.mjs', 'kit/lib/edits.mjs', 'fixer/patches.mjs'];
+const CODE = ['recorder/process.mjs', 'recorder/compose.mjs', 'recorder/pack-rules.mjs', 'kit/lib/edits.mjs', 'fixer/patches.mjs', 'apps/index.mjs', 'apps/build.mjs'];
 let codeHash = null;
 
 // Parts of the flow the build reads, by name (so a change can say which part needs a build).
@@ -46,12 +48,14 @@ function rawSig(raw) {
 export function buildInputs(demo, flow) {
   if (!codeHash) codeHash = sha(CODE.map(f => readFileSync(join(KIT, f), 'utf8')).join('\u0000'));
   const parts = flowParts(flow);
-  const vendor = sha((flow.clickPages || []).flatMap(c => c.vendorCss || []).map(f => { try { return readFileSync(join(demo.dir, f), 'utf8'); } catch (e) { return f + ':missing'; } }).join('\u0000'));
+  const vendor = sha((flow.clickPages || []).flatMap(c => c.vendorCss || []).map(f => { try { return readFileSync(packPath(f) || join(demo.dir, f), 'utf8'); } catch (e) { return f + ':missing'; } }).join('\u0000'));
+  // The app packs' build rules, attributes to strip and CSS repairs (packages/apps, and private packs).
+  const packs = sha(JSON.stringify(htmlPasses(activePacks(demo.cfg), { off: ((demo.cfg && demo.cfg.packs) || {}).offRules })));
   // demo.json build.hook and build.hookFiles: the demo's own text pass (capture/process.mjs) and what it reads.
   const B = (demo.cfg && demo.cfg.build) || {};
   const hook = B.hook ? sha([B.hook, ...(B.hookFiles || [])].map(f => { try { return readFileSync(join(demo.dir, f), 'utf8'); } catch (e) { return f + ':missing'; } }).join('\u0000')) : undefined;
   return {
-    code: codeHash, raw: rawSig(demo.raw), vendor, hook,
+    code: codeHash, raw: rawSig(demo.raw), vendor, hook, packs,
     parts: Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, sha(JSON.stringify(v))])),
     // Text edits, one signature each: the server applies the ones not built in yet.
     edits: (flow.edits || []).filter(e => e.remove || e.replace).map(editSig),
@@ -71,6 +75,7 @@ export function buildDiff(last, inputs) {
   if (L.raw !== inputs.raw) why.push('raw captures changed');
   if (L.vendor !== inputs.vendor) why.push('vendor CSS changed');
   if (L.hook !== inputs.hook) why.push('the demo\'s build hook changed');
+  if (L.packs !== inputs.packs) why.push('app packs changed');
   for (const [k, v] of Object.entries(inputs.parts)) if ((L.parts || {})[k] !== v) why.push(`flow ${k} changed`);
   const bakedSigs = new Set(L.edits || []), liveSigs = new Set(inputs.edits);
   const baked = (L.edits || []).filter(s => !liveSigs.has(s)).map(unsig);

@@ -1,0 +1,203 @@
+{
+  "kind": "stuntdouble-app-pack",
+  "version": 1,
+  "id": "github",
+  "title": "GitHub",
+  "names": [
+    "GitHub",
+    "github.com",
+    "the repo",
+    "the pull request"
+  ],
+  "match": [
+    "github.com"
+  ],
+  "start": {
+    "url": "https://github.com/",
+    "signIn": {
+      "hosts": [
+        "github.com/login",
+        "github.com/sessions"
+      ],
+      "hint": "Sign in in the capture browser first; staff accounts get a Site admin toggle (removed at build)."
+    },
+    "ready": {
+      "sel": "header"
+    }
+  },
+  "record": {
+    "ignore": [
+      "relative-time",
+      "time-ago"
+    ],
+    "busy": [
+      {
+        "sel": "[data-test-id=\"loading-indicator\"]"
+      }
+    ],
+    "auto": {
+      "hoverMax": 25,
+      "clickMax": 12,
+      "maxS": 40,
+      "zoom": false,
+      "chips": false
+    }
+  },
+  "build": {
+    "repairs": {
+      "css": "repairs/css.json"
+    },
+    "rules": [
+      {
+        "id": "staff-toggle",
+        "re": [
+          "<li class=\"mx-2\">\\s*<form class=\"js-stats-toggle\"[\\s\\S]*?</form>\\s*</li>",
+          ""
+        ],
+        "has": "js-stats-toggle",
+        "note": "The staff-only \"Site admin mode\" toggle (a form, in the footer and hidden in the page), with its list item."
+      },
+      {
+        "id": "staff-toggle-bare",
+        "re": [
+          "<form class=\"js-stats-toggle\"[\\s\\S]*?</form>",
+          ""
+        ],
+        "has": "js-stats-toggle"
+      },
+      {
+        "id": "code-text",
+        "css": "[class*=\"taillight-module_qW5TYa_Bitmap\"]{visibility:hidden!important}#read-only-cursor-text-area{color:#1f2328!important;-webkit-text-fill-color:#1f2328!important;font-family:ui-monospace,SFMono-Regular,\"SF Mono\",Menlo,Consolas,\"Liberation Mono\",monospace!important}",
+        "url": "/blob/",
+        "has": "taillight-module_qW5TYa_Bitmap",
+        "note": "The code view paints code as a bitmap mask made in the page (a blob: image), which a capture can't keep, so the code came out as a solid block. Its own transparent text layer is shown instead, in the default text color, without syntax colors."
+      },
+      {
+        "id": "all-diffs",
+        "css": "*{content-visibility:visible!important;contain-intrinsic-size:none!important}[data-toolbar-inline=\"true\"]>[class*=\"updatedHeaderToolbar__\"],section[class*=\"updatedHeaderToolbar__\"]{background-color:var(--bgColor-default)!important}",
+        "url": "/\\/pull\\/\\d+\\/(files|changes)/",
+        "note": "Files changed: every diff is laid out (GitHub skips off-screen ones with content-visibility: auto, so the page's height depended on what was drawn first). Its sticky toolbar is opaque, as on GitHub once its script marks it stuck."
+      },
+      {
+        "id": "heading-font",
+        "css": ".Heading__toON9Z{font:var(--text-body-shorthand-medium)!important;font-weight:var(--text-title-weight-medium)!important}",
+        "has": "Heading__toON9Z",
+        "note": "Copilot settings pages (org and repo code review): each setting's title (h4.Heading__toON9Z) gets its size from a var() font shorthand Chrome can't write back out of the live page, so titles came out 32 px. Only these pages: on the enterprise AI controls page the same fix brings out a \"More\" overflow menu the real page doesn't show.",
+        "url": "/\\/settings\\/copilot\\//"
+      }
+    ]
+  },
+  "theme": {
+    "system": "primer",
+    "follows": "setting",
+    "setting": "Settings › Appearance (theme mode, light theme, dark theme)",
+    "markers": {
+      "html": [
+        "data-color-mode",
+        "data-light-theme",
+        "data-dark-theme"
+      ]
+    },
+    "themes": {
+      "light": "themes/light.json",
+      "light-high-contrast": "themes/light-high-contrast.json",
+      "light-colorblind": "themes/light-colorblind.json",
+      "light-colorblind-high-contrast": "themes/light-colorblind-high-contrast.json",
+      "light-tritanopia": "themes/light-tritanopia.json",
+      "light-tritanopia-high-contrast": "themes/light-tritanopia-high-contrast.json",
+      "dark": "themes/dark.json",
+      "dark-dimmed": "themes/dark-dimmed.json",
+      "dark-dimmed-high-contrast": "themes/dark-dimmed-high-contrast.json",
+      "dark-high-contrast": "themes/dark-high-contrast.json",
+      "dark-colorblind": "themes/dark-colorblind.json",
+      "dark-colorblind-high-contrast": "themes/dark-colorblind-high-contrast.json",
+      "dark-tritanopia": "themes/dark-tritanopia.json",
+      "dark-tritanopia-high-contrast": "themes/dark-tritanopia-high-contrast.json"
+    },
+    "generated": "node spikes/variants/primer-packs.mjs <@primer/primitives package> <out>: one blank page per theme with only that theme's CSS (@primer/primitives 11.10.0, MIT, © GitHub Inc.)",
+    "fallbacks": [
+      "Avatars, images and syntax colors drawn as images keep their colors",
+      "Pages GitHub hasn't moved to Primer's functional variables keep their literal colors"
+    ]
+  },
+  "platform": {
+    "frame": "browser",
+    "shortcuts": {}
+  },
+  "writes": [
+    {
+      "id": "comment",
+      "what": "Comment (on an issue or pull request) posts it",
+      "on": {
+        "kind": "click",
+        "target": "Comment"
+      },
+      "makes": "comment",
+      "undo": {
+        "steps": [
+          "You: delete the comment \"{comment}\" (its options menu › Delete)"
+        ]
+      },
+      "check": {
+        "expect": "The conversation has no comment from the run."
+      }
+    },
+    {
+      "id": "commit",
+      "what": "Commit changes (the web editor) commits to the branch",
+      "on": {
+        "kind": "click",
+        "target": "Commit changes"
+      },
+      "makes": "commit",
+      "undo": null,
+      "irreversible": true,
+      "note": "Undo is a revert commit or resetting the branch outside the browser: the demo's reset does it with git.",
+      "check": {
+        "expect": "The branch's head is the commit the demo starts from."
+      }
+    },
+    {
+      "id": "merge",
+      "what": "Confirm merge merges the pull request",
+      "on": {
+        "kind": "click",
+        "target": "Confirm merge"
+      },
+      "undo": null,
+      "irreversible": true,
+      "note": "A merged pull request stays merged; demos record against a throwaway pull request, made again by the reset.",
+      "check": {
+        "expect": "The pull request the demo starts with is open."
+      }
+    },
+    {
+      "id": "re-request",
+      "what": "Re-request review notifies the reviewer",
+      "on": {
+        "kind": "click",
+        "target": "/^Re-request review/"
+      },
+      "undo": null,
+      "irreversible": true,
+      "check": {
+        "expect": "Nothing to undo; the notification has gone."
+      }
+    }
+  ],
+  "effects": [
+    {
+      "id": "notifications",
+      "what": "Comments, reviews and merges notify watchers (by email too)",
+      "check": {
+        "expect": "Record in a repository only the demo's accounts watch."
+      }
+    }
+  ],
+  "notes": "Primer ships both of the account's chosen themes in every page, so light and dark flip without a pack; the other 12 themes come from themes/. repairs/css.json: CSS declarations Chrome's CSSOM drops when GitHub's CSS overrides part of a var() shorthand (each captured rule is one line; a line found in the map is swapped whole).",
+  "sources": [
+    "ltg1189-replica and ltg1194-replica: capture/css-hook.mjs (staff toggle), capture/css-repair.json (identical in both), flow.overrides.mjs (code text, all diffs, heading font; the step ids for writes)",
+    "spike E presets github.json",
+    "spike A: Primer theme packs from @primer/primitives"
+  ]
+}

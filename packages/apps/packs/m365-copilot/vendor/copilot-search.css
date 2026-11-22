@@ -1,0 +1,16 @@
+/* Copilot's Search dialog (the header's magnifier). Copilot styles it with Griffel rules that load the first time it
+   opens, so no capture has them. These rules restore the measured result (replica-raw/hovers/click-cop-home/0002.png,
+   1920x1080): the Copilot/All tabs at y 200, a 744 x 584 card 16 px below them with a 56 px search row, a 57 px
+   filter row and 48 px result rows, over a 15% grey backdrop. The classes are this build's merge keys for the dialog. */
+.fui-DialogSurface.___1evre1f{inset:200px 0 auto 0;margin:0;height:auto;max-height:none;background:transparent;box-shadow:none;}
+.___1dafiot{flex-direction:column;flex:0 0 584px;height:584px;background:#fff;border-radius:24px;box-shadow:0 24px 96px rgba(0,0,0,.36);overflow:hidden;}
+.___uhrsqy0{flex-shrink:0;height:57px;box-sizing:border-box;border-bottom:1px solid #dedede;}
+.___1wnvt8w{flex:1;min-height:0;height:auto;flex-direction:column;overflow:auto;}
+.___ewxes80{flex-shrink:0;height:55px;box-sizing:border-box;padding-top:4px;padding-bottom:6px;border-bottom:1px solid #dedede;}
+.___qixmy00{padding:4px 15px 0;}
+.___ywoyxa0{height:48px;box-sizing:border-box;}
+.___10i4p5n{display:none;}
+.fui-TabList.___19uqrp0{width:180px;margin-left:1px;box-sizing:border-box;padding:2px;column-gap:2px;background:rgba(0,0,0,.06);border-radius:9999px;}
+.___1vk7dqm{top:2px;bottom:2px;left:2px;height:auto;background:#fafafa;border-radius:9999px;box-shadow:0 1px 2px rgba(0,0,0,.14);}
+.fui-Tab.___r3tvci0,.fui-Tab.___z4dw210{border-color:transparent;}
+.___1l1gafy{padding:5px 8px;}

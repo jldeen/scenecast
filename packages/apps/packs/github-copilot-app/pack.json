@@ -1,0 +1,54 @@
+{
+  "kind": "stuntdouble-app-pack",
+  "version": 1,
+  "id": "github-copilot-app",
+  "title": "GitHub Copilot app",
+  "names": ["GitHub Copilot app", "Copilot app", "the GitHub Copilot app", "the desktop app"],
+  "match": ["tauri.localhost", "localhost:1421", "127.0.0.1:1421"],
+  "start": {
+    "url": "http://tauri.localhost/",
+    "signIn": { "hosts": [], "hint": "The app's own frontend, read out of the installed app and run in a browser StuntDouble owns, connected to the app's local backend read-only (spike C). The app must be running and signed in." },
+    "ready": { "sel": "main" }
+  },
+  "record": {
+    "auto": { "hoverMax": 20, "clickMax": 8, "maxS": 45 },
+    "errorPage": { "text": ["Something went wrong"], "note": "The app's error page (a native call the stand-in didn't answer): the capture fails instead of saving it." }
+  },
+  "theme": {
+    "system": "primer",
+    "follows": "setting",
+    "markers": { "html": ["data-color-mode", "data-theme-tone"] },
+    "themes": { "light": "themes/light.json", "dark": "themes/dark.json" },
+    "scores": { "light-to-dark": 0.98, "dark-to-light": 0.98 },
+    "fallbacks": ["Avatars and repository images keep their colors"]
+  },
+  "platform": {
+    "frame": "app",
+    "platforms": { "windows": "platforms/windows.json" },
+    "note": "Window chrome after the fact: Mac traffic lights, or a Windows title bar (app icon and name, minimize, maximize, close). The header's own controls move to where the Windows build puts them (platforms/windows.json)."
+  },
+  "privacy": {
+    "labels": ["aria-label of the user menu (it holds the account's name)"],
+    "note": "Personal labels never go in a pack: the platform pack keeps only the window controls' names and positions."
+  },
+  "writes": [
+    {
+      "id": "prompt",
+      "what": "Sends the prompt: a new session (or a new turn), and the agent runs",
+      "on": { "kind": "press", "key": "Enter", "field": "/message|prompt|ask/i" },
+      "makes": "session",
+      "undo": null,
+      "note": "Captures don't send prompts: the read-only stand-in answers every write itself, and a run is recorded from the real app's events instead (spike C, option c). Allowing a narrow set of writes needs the presenter's go-ahead and lives only in a private pack.",
+      "check": { "expect": "No new session from the capture." }
+    }
+  ],
+  "effects": [
+    { "id": "read-state", "what": "Opening a session marks it read in the real app", "check": { "expect": "The capture drops read-state writes, so the app's unread dots stay as they were." } }
+  ],
+  "notes": "The frontend is embedded in the app's binary (Tauri) and served at tauri.localhost; on Windows the same Tauri build embeds it the same way (WebView2). Which backend messages are reads, and the defaults a stand-in gives for native calls, name the app's internal message types: they live only in a private pack (~/.stuntdouble/packs/github-copilot-app), versioned per app build.",
+  "sources": [
+    "spike C (Copilot app capture): match, error page, read-only capture, recorded events",
+    "spike A and B: themes, Windows platform pack",
+    "spike E presets github-copilot-app.json (auto budget)"
+  ]
+}

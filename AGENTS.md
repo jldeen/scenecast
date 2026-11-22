@@ -18,6 +18,7 @@ browser (the recorder extension, the player, the checks).
 | `crates/scenecast-build`, `scenecast-core`, `scenecast-cli` | The build, the bundle model and schema, the CLI. |
 | `packages/recorder` | The recorder extension, capture, preflight, the receiver. |
 | `packages/player` | The replica: server, player, presenter keys, focus points, the presenter guide. |
+| `packages/apps` | App packs: each app's recording, build, layout, theme and platform rules and its writes, once per app (`packages/apps/README.md`). Private parts live in `~/.stuntdouble/packs`, never here. |
 | `packages/kit`, `checks`, `fixer`, `script`, `editor`, `ai`, `selftest` | Engine entry and flow compiler, the checklist, the fidelity fixer, script to focus points, the in-replica editor, Copilot modes, end-to-end tests. |
 | `docs/` | The docs ([index](docs/README.md)). |
 

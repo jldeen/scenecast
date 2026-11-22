@@ -15,6 +15,7 @@ New to Scenecast? Start with the [README](../README.md).
 - [The recorder](recorder.md): the browser extension, preflight, and how a recording works.
 - [Bundle format](bundle-format.md): what's in a `.scenecast` bundle and its manifest.
 - [Engine flow format](engine/flow-format.md): `flow.json`, the recorded flow the replica plays.
+- [App packs](../packages/apps/README.md): what each real app needs to be recorded, built and themed, once per app.
 - [Speed](engine/speed.md): where a recording's time goes, the benchmark, and the fixture's time budget.
 
 ## How it works

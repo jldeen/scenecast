@@ -17,6 +17,9 @@ import { compileEdits, applyEdits } from '../kit/lib/edits.mjs';
 import { buildInputs, buildKey } from '../kit/lib/buildkey.mjs';
 import { assetSubstitute, fontFaceCss, mergeRows, refResolver } from '../fixer/patches.mjs';
 import { pinSchemeText } from '../player/app/variants.js';
+import { activePacks, packFor, packsForDemo } from '../apps/index.mjs';
+import { htmlPasses, flowPacks, packPath } from '../apps/build.mjs';
+import { packRules } from './pack-rules.mjs';
 
 const args = process.argv.slice(2);
 const demo = loadDemo(args);
@@ -26,6 +29,8 @@ const OUT = join(DATA, '.next');
 const FINAL_ASSETS = join(DATA, 'assets');
 let ASSETS = process.env.SCENECAST_RUST_PUBLISH === '1' ? join(OUT, 'assets') : FINAL_ASSETS;
 const flow = JSON.parse(readFileSync(demo.flowPath, 'utf8'));
+// App packs over the flow (flow compile did it already; again for a flow written by hand: it changes nothing twice).
+flowPacks(flow, demo.cfg);
 const T0 = Date.now();
 const INPUTS = buildInputs({ ...demo, raw: RAW }, flow), KEY = buildKey(INPUTS);
 const MANIFEST = join(DATA, 'build.json');
@@ -169,10 +174,22 @@ const EDITS = ALL_EDITS.filter(e => !e.in);
 // part (ctx 'hover:<app>' / 'click:<app>'). The build fails on anything it reports left over or unused.
 const HOOK_SPEC = (demo.cfg.build || {}).hook;
 const HOOK = HOOK_SPEC ? (await import(pathToFileURL(join(demo.dir, HOOK_SPEC)).href)).default({ elementEnd }) : null;
-const edit = (s, ctx = '', opt) => { s = applyEdits(s, EDITS); return HOOK ? HOOK.html(s, ctx, opt) : s; };
+// App packs (packages/apps): each app's build rules (markup fixes, attributes to strip, CSS repairs), once per app,
+// after the demo's edits and hook. A page or frame finds its pack by its own URL; a stream frame and a hover or
+// click part by its app. demo.json packs.off / packs.offRules / apps[].pack: false leave packs or rules out.
+const PACKS = activePacks(demo.cfg);
+const PACK_RULES = packRules(htmlPasses(PACKS, { off: ((demo.cfg.packs) || {}).offRules }), { elementEnd });
+const APP_PACK = Object.fromEntries(Object.entries(packsForDemo(demo.cfg, PACKS)).map(([app, p]) => [app, p.id]));
+const packOfUrl = url => { const p = url && packFor(url, PACKS); return p ? p.id : null; };
+const docUrl = doc => (doc.key !== 'main' && doc.frameUrl) || (doc.meta && doc.meta.url) || doc.frameUrl || '';
+const edit = (s, ctx = '', opt, pack, url) => {
+  s = applyEdits(s, EDITS); if (HOOK) s = HOOK.html(s, ctx, opt);
+  return pack ? PACK_RULES.apply(s, pack, { url, ctx }) : s;
+};
 
 function rewriteDoc(doc, snapId, docsByKey) {
-  if (process.env.SCENECAST_RUST_ASSETS === '1') return edit(pinStyles(rustAsset('document', snapId, JSON.stringify({ doc, keys: Object.keys(docsByKey) }))), snapId);
+  const url = docUrl(doc), pack = packOfUrl(url);
+  if (process.env.SCENECAST_RUST_ASSETS === '1') return edit(pinStyles(rustAsset('document', snapId, JSON.stringify({ doc, keys: Object.keys(docsByKey) }))), snapId, undefined, pack, url);
   let h = doc.html;
   h = h.replace(/<style([^>]*) data-d1-fetch="d1res:\/\/(\d+)"([^>]*)><\/style>/g, (m, a, n, b) => {
     const url = doc.urls[+n]; const t = cssFile(url);
@@ -184,7 +201,7 @@ function rewriteDoc(doc, snapId, docsByKey) {
   h = h.replace(/data-d1-canvas="(canvas\d+)"/g, (m, k) => `data-d1-canvas="${doc.inline[k] ? fromData(doc.inline[k]) : ''}"`);
   h = h.replace(/(<iframe\b[^>]*?)\s(?:sandbox|csp)="[^"]*"/g, '$1').replace(/(<iframe\b[^>]*?)\s(?:sandbox|csp)="[^"]*"/g, '$1');
   h = h.replace(/d1frame:\/\/(f\d+)/g, (m, k) => docsByKey[k] ? `/snaps/${snapId}.${k}.html` : 'about:blank');
-  return edit(pinStyles(scrub(quiet(dropMissingFonts(h)))), snapId);
+  return edit(pinStyles(scrub(quiet(dropMissingFonts(h)))), snapId, undefined, pack, url);
 }
 // Declarations Chrome warns about in the console (deprecated values the real apps still ship).
 // focusgroup (an experimental attribute): Chrome warns whenever a morph changes or removes it.
@@ -240,6 +257,7 @@ for (const [name, def] of Object.entries(flow.streams || {})) {
   const dir = join(RAW, 'streams', def.raw || name);
   if (!existsSync(dir)) { console.log(`stream ${name}: no raw frames (${def.raw || name})`); continue; }
   const all = readdirSync(dir).sort().map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')));
+  const streamPack = APP_PACK[((flow.states || {})[def.to] || {}).app] || null;
   for (const fr of all) fr.urls = subUrls(fr.urls);
   const [first, last] = def.frames || [0, all.length - 1];
   const frames = all.filter(fr => fr.n >= first && fr.n <= last);
@@ -250,7 +268,7 @@ for (const [name, def] of Object.entries(flow.streams || {})) {
     const rawHtml = process.env.SCENECAST_RUST_ASSETS === '1' ? rustAsset('frame', JSON.stringify(fr))
       : scrub(quiet(fr.html.replace(/d1res:\/\/(\d+)/g, (m, n) => local(fr.urls[+n], fr.inline))
         .replace(/data-d1-canvas="(canvas\d+)"/g, (m, k) => `data-d1-canvas="${fr.inline && fr.inline[k] ? fromData(fr.inline[k]) : ''}"`)));
-    const html = edit(rawHtml, 'stream:' + name, { partial: true });
+    const html = edit(rawHtml, 'stream:' + name, { partial: true }, streamPack);
     if (process.env.SCENECAST_RUST_ASSETS === '1') {
       rustAsset('stream-frame', JSON.stringify({ html, t: fr.t, raw: fr.n }));
       continue;
@@ -455,7 +473,7 @@ const appSeenOf = Object.fromEntries(flow.apps.map(a => [a.id, new Map()]));
     const d = snap.docs.find(x => (x.frameUrl || '').split('?')[0] === fu) || snap.docs.find(x => x.key === 'main');
     srcHtml = isolateHover(rewriteDoc(d, 'hov-' + hp.page, {}), prefix);
   }
-  const fixPart = (h, rec) => isolateHover(edit(rewritePart(h, rec), 'hover:' + hp.app).replace(/\sdata-d1-hpart="\d+"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, ''), prefix);
+  const fixPart = (h, rec) => isolateHover(edit(rewritePart(h, rec), 'hover:' + hp.app, undefined, (rec.frameUrl && packOfUrl(rec.frameUrl)) || APP_PACK[hp.app], rec.frameUrl).replace(/\sdata-d1-hpart="\d+"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, ''), prefix);
   const seen = new Map(); const appSeen = appSeenOf[hp.app]; const used = []; let n = 0;
   // Old audits (Teams) didn't time the tooltip itself: use the page's usual tooltip delay (the median time of
   // hovers that showed only a tooltip).
@@ -580,7 +598,7 @@ report.clicks = {};
   const prefix = `d1c${k}-`;
   const recs = readdirSync(dir).filter(f => f.endsWith('.json')).sort().map(f => JSON.parse(readFileSync(join(dir, f), 'utf8'))).filter(r => r.kind === 'click');
   const out = hoverOut[cp.app]; out.clicks = out.clicks || []; out.css = out.css || {};
-  const fixPart = (h, rec) => isolateHover(edit(rewritePart(h, rec), 'click:' + cp.app).replace(/\sdata-d1-(hpart|ctl)="[^"]*"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, '').replace(/\sfocusgroup="[^"]*"/g, ''), prefix);
+  const fixPart = (h, rec) => isolateHover(edit(rewritePart(h, rec), 'click:' + cp.app, undefined, (rec.frameUrl && packOfUrl(rec.frameUrl)) || APP_PACK[cp.app], rec.frameUrl).replace(/\sdata-d1-(hpart|ctl)="[^"]*"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, '').replace(/\sfocusgroup="[^"]*"/g, ''), prefix);
   const used = []; let n = 0; let lazy = '';
   for (const rec of recs) {
     const r = rec.res;
@@ -657,7 +675,7 @@ report.clicks = {};
   // in the demo folder; the rules whose classes the parts use are added last, so they win over captured rules).
   for (const vf of cp.vendorCss || []) {
     const classes = new Set(used.join(' ').match(/[A-Za-z0-9_-]+/g));
-    const rules = readFileSync(join(demo.dir, vf), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(r => r.trim());
+    const rules = readFileSync(packPath(vf, PACKS) || join(demo.dir, vf), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(r => r.trim());
     const keep = rules.filter(r => { const u = [...r.matchAll(/\.([A-Za-z0-9_-]+)/g)].map(m => m[1]); return u.length && u.every(c => classes.has(c)); });
     out.css['click-' + cp.page] = (out.css['click-' + cp.page] || '') + '\n' + keep.join('\n');
     report.vendorCss = (report.vendorCss || 0) + keep.length;
@@ -868,6 +886,8 @@ for (const file of files) {
 }
 for (const f of readdirSync(ASSETS)) if (/<script/i.test(readFileSync(join(ASSETS, f)).toString('latin1'))) leaks.push('assets/' + f + ' script');
 if (HOOK) { for (const u of HOOK.unused()) leaks.push('build hook: matched nothing: ' + u); report.hook = HOOK.report(); }
+for (const u of PACK_RULES.unused()) leaks.push('app pack rule matched nothing: ' + u);
+report.packs = { used: flow.packs || [], rules: PACK_RULES.report() };
 const ms = Date.now() - T0;
 console.log(JSON.stringify({ ...report, edits: EDITS.map(e => `${e.n}× ${e.what.slice(0, 50)}`), assets: used.size, missing: [...missing].slice(0, 40), missingCount: missing.size, leaks, ms }, null, 1));
 if (leaks.length) process.exit(1);
