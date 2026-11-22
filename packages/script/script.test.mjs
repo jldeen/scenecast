@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseScript } from './parse.mjs';
 import { words, facts, align, pickItems, textMatcher } from './match.mjs';
 import { applyEditorOverrides, checkFocusJson, checkEditorOverrides } from '@stuntdouble/core/lib/overrides.mjs';
-import { stateSequence, beatPositions, beatAt, orderFocus } from '@stuntdouble/player/app/focus-order.js';
+import { stateSequence, beatPositions, beatAt, orderFocus, mergeFocus } from '@stuntdouble/player/app/focus-order.js';
 
 test('Markdown: headings are beats, quotes are lines, Do: is the line\'s cue', () => {
   const s = parseScript('# Demo\n\nnotes here\n\n## Beat 1 · Open\n\n> Hello there,\n> everyone.\n\n**Do:** Start (⌥0).\n\n> Second line.\n\n## Money\n> It costs $5.\n');
@@ -136,4 +136,12 @@ test('a capture read without a browser: controls as the outline names them, word
   assert.doesNotMatch(sc.text, /Hidden/);
   // The page's own title before the app bar's.
   assert.deepEqual(sc.headings, ['Tools', 'Catalog']);
+
+test('focus.mjs points keep their order within a beat; focus.json points go in by beat and screen', () => {
+  const flow = { states: { a: { app: 'x' }, b: { app: 'x' }, c: { app: 'y' } }, beats: [{ active: 'x', states: { x: 'a' } }, { active: 'x', states: { x: 'b' } }], path: [{ checkpoint: 'a' }, { checkpoint: 'b' }, { checkpoint: 'c' }] };
+  // Beat 1 goes b, then c, then back to b: the hand order stays, though b comes before c in the run-through.
+  const hand = [{ id: 'b1', beat: 1, states: ['b'] }, { id: 'c1', beat: 1, states: ['c'] }, { id: 'b2', beat: 1, states: ['b'] }, { id: 'a0', beat: 0, states: ['a'] }];
+  assert.deepEqual(mergeFocus([], hand, flow).map(p => p.id), ['a0', 'b1', 'c1', 'b2']);
+  const json = [{ id: 'jc', beat: 1, states: ['c'] }, { id: 'jb', beat: 1, states: ['b'] }, { id: 'j2', beat: 2, states: ['a'] }];
+  assert.deepEqual(mergeFocus(json, hand, flow).map(p => p.id), ['a0', 'jb', 'b1', 'jc', 'c1', 'b2', 'j2']);
 });

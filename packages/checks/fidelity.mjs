@@ -67,7 +67,8 @@ const release = () => { const w = waiting.shift(); if (w) w(); else slots++; };
 const REST = SPEED > 1 ? 250 : 900, AFTER = SPEED > 1 ? 180 : 400;
 // demo.json checks.known: differences from the real product the demo has accepted (text each one starts with); they
 // show as warnings, not failures.
-const known = msg => ((demo.cfg.checks || {}).known || []).some(k => msg.startsWith(k));
+// replica-kit's wording is accepted too, so a demo from it keeps its list ("replica screen is dark").
+const known = msg => { const alt = msg.replace(/: replica screen reads (dark|light) /, ': replica screen is $1 '); return ((demo.cfg.checks || {}).known || []).some(k => msg.startsWith(k) || alt.startsWith(k)); };
 const withSpeed = (u, sp) => { const x = new globalThis.URL(u); if (sp > 1) x.searchParams.set('speed', String(sp)); return x.href; };
 // A fresh replica page at a zoom (1 = the demo's viewport), with errors and off-site requests collected.
 async function open(z = 1, speed = SPEED) {
@@ -934,6 +935,10 @@ try {
     // Quick: only when the notes, the script, the pictures, the beats or the focus points changed.
     if (!want('notes') || (QUICK && !notesChanged)) return;
     if (!existsSync(join(demo.dir, 'presenter', 'notes.json'))) { if (!QUICK) add('notes', 'Presenter guide and notes', 'skip', 'no presenter/notes.json (scenecast notes)'); return; }
+    // A demo with its own presenter window and notes format (replica-kit 1.5's LTG demos: no stage section) checks
+    // them itself (its tools/notes-check.mjs).
+    let own = false; try { own = !JSON.parse(readFileSync(join(demo.dir, 'presenter', 'notes.json'), 'utf8')).stage; } catch (e) {}
+    if (own) { if (!QUICK) add('notes', 'Presenter guide and notes', 'skip', "the demo's own presenter window and notes format (no stage section in presenter/notes.json): its own check covers them"); return; }
     const r = await node('checks/notes-check.mjs', ['--demo', demo.dir, '--url', URL]);
     let rep = null; try { rep = JSON.parse(readFileSync(join(demo.out, 'notes-check.json'), 'utf8')); } catch (e) {}
     if (!rep) return add('notes', 'Presenter guide and notes', 'fail', r.out.slice(-800));

@@ -11,7 +11,7 @@
 // them); nothing needs a build. Done (or the key again) leaves edit mode.
 import { presenterKey } from '/app/presenter-key.js';
 import { snap, describe, markFor, norm } from '/app/focus-target.js';
-import { orderFocus, stateSequence, beatPositions, beatAt } from '/app/focus-order.js';
+import { orderFocus, mergeFocus, stateSequence, beatPositions, beatAt } from '/app/focus-order.js';
 
 const RED = 'rgb(255, 56, 60)';
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -33,7 +33,7 @@ export default function editor(api) {
     st.hand = (api.flow.focus || []).filter(p => !own.has(p.id));
   }).catch(e => { st.status = 'editor: ' + e.message; });
 
-  const all = () => orderFocus([...st.focus.points, ...st.hand], api.flow);
+  const all = () => mergeFocus(st.focus.points, st.hand, api.flow);
   const mine = p => !!p && st.focus.points.includes(p);
   function applyPoints() { const list = all(); api.flow.focus = list; if (focus()) focus().setPoints(list); }
 
