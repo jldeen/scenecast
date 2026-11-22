@@ -1,0 +1,12 @@
+/* Copilot's effort slider in the model picker. Copilot styles it with its own Griffel rules on top of the Fluent ones
+   (fluent-react-slider.css); those load only while the picker is open, so no capture has them. These rules restore
+   the measured result (replica-raw/hovers/click-cop-task/0015.png, 1920x1080): a 270 x 32 px row, a 16 px rail
+   #e6e6e6 filled #242424 to the thumb, a 24 px white thumb centred at 12px + 25% of (width - 24px) for Medium, and
+   4 px ticks inset by the thumb radius. The classes are this build's merge keys, so the rules touch only this slider. */
+.___gnjpz80{grid-template-rows:32px;grid-template-columns:100%;}
+.___gnjpz80>.fui-Slider,.___gnjpz80>.___nwy3rh0{grid-area:1/1;}
+.fui-Slider.___uuk4sq0{grid-template-rows:32px;grid-template-columns:100%;min-height:32px;width:100%;}
+.___uuk4sq0>.fui-Slider__input,.___uuk4sq0>.fui-Slider__rail{grid-area:1/1;}
+.fui-Slider__rail.___y6of6t0{height:16px;width:100%;border-radius:9999px;background:linear-gradient(90deg,#242424 0,#242424 calc(12px + (100% - 24px) * 0.25),#e6e6e6 calc(12px + (100% - 24px) * 0.25));}
+.fui-Slider__thumb.___1elkgov{grid-area:1/1/-1/-1;position:absolute;box-sizing:border-box;width:24px;height:24px;top:50%;left:calc(12px + (100% - 24px) * 0.25);transform:translate(-50%,-50%);border-radius:9999px;background:#fff;border:1px solid #adadad;box-shadow:0 0 3px rgba(0,0,0,.14);z-index:1;}
+.___nwy3rh0{align-self:center;box-sizing:border-box;width:100%;padding:0 10px;pointer-events:none;}

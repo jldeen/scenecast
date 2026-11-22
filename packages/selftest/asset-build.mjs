@@ -8,7 +8,8 @@ import { join, resolve } from 'node:path';
 const temp = mkdtempSync(join(tmpdir(), 'scenecast-assets-'));
 const demo = join(temp, 'fixture'), raw = join(temp, 'raw');
 const binary = process.env.SCENECAST_BIN ? resolve(process.env.SCENECAST_BIN) : resolve('target/debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
-const env = { ...process.env, REPLICA_RAW: raw };
+// STUNTDOUBLE_PACKS empty: built-in app packs only, never a private pack on this computer.
+const env = { ...process.env, REPLICA_RAW: raw, STUNTDOUBLE_PACKS: '' };
 const run = (command, args) => {
   const result = spawnSync(command, args, { env, encoding: 'utf8', timeout: 60000 });
   assert.equal(result.status, 0, `${command}: ${result.stderr}\n${result.stdout}`);
@@ -45,9 +46,10 @@ try {
     meta: { title: 'Fixture', url: 'https://fixture.invalid/', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
     html: '<!doctype html><html><head><style data-d1-fetch="d1res://0"></style><style data-d1-fetch="d1res://2"></style></head><body focusgroup="x" style="appearance:slider-vertical"><div>replace this</div><img src="d1res://1"><canvas data-d1-canvas="canvas1"></canvas><iframe sandbox="" csp="" src="d1frame://f1"></iframe><iframe src="d1frame://f9"></iframe></body></html>',
   }, {
-    key: 'f1', parent: 'main', frameUrl: 'https://fixture.invalid/frame', urls: [], inline: {},
-    meta: { title: 'Frame', url: 'https://fixture.invalid/frame', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
-    html: '<!doctype html><html><body>Frame</body></html>',
+    // A GitHub page in a frame: the github app pack's build rules apply to it by its own URL (the staff toggle goes).
+    key: 'f1', parent: 'main', frameUrl: 'https://github.com/o/r', urls: [], inline: {},
+    meta: { title: 'Frame', url: 'https://github.com/o/r', viewport: { w: 800, h: 600, dpr: 1 }, colorScheme: 'light', customElements: [] },
+    html: '<!doctype html><html><body>Frame<form class="js-stats-toggle">staff</form></body></html>',
   }] }));
   writeFileSync(join(raw, 'snaps', 'part.json'), JSON.stringify({ docs: [{
     key: 'main', parent: null, frameUrl: '', urls: [], inline: {},
@@ -93,6 +95,7 @@ try {
   assert.match(readFileSync(join(demo, 'data', 'snaps', 'start.html'), 'utf8'), /data-d1-compose=""[^]*@keyframes spin/);
   assert.match(readFileSync(join(demo, 'data', 'streams', 's1', '000.html'), 'utf8'), /<div><div class="card root-123">source part<\/div><\/div>/);
   assert.match(readFileSync(join(demo, 'data', 'snaps', 'part.html'), 'utf8'), /class="card d1v-root-123"/);
+  assert.equal(readFileSync(join(demo, 'data', 'snaps', 'start.f1.html'), 'utf8'), '<!doctype html><html><body>Frame</body></html>');
   const interactions = JSON.parse(readFileSync(join(demo, 'data', 'snaps', 'hovers-app.json'), 'utf8'));
   assert.equal(interactions.defs[0].ops.length, 1);
   assert.equal(interactions.clicks[0].ops.length, 1);

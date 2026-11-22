@@ -156,6 +156,10 @@ switch and streamed answer. The path is what was done, step by step: `{ app }`, 
 The real apps place some things with script, in pixels, and redo it when the window changes size. Captures hold
 those pixels from one size, so these rules redo that work on every resize and scroll:
 
+Most of these are an app's, not a demo's: they live in its app pack (`packages/apps`), named. A demo's rule can be
+`{ use: '<name>', …its own fields }` (the captured variants, a frame key), and rules the pack marks `always` are added
+to every demo of the app. Drags work the same way. Flow compile writes `packs` (`[{ app, pack }]`): the packs it used.
+
 | Rule | What |
 |---|---|
 | `responsive` | Below a width, a part of the page is swapped for the same part captured at that width: `{ part: { sel, css, up }, below, variant: { default, <state>: snap } }` or `bands: [{ below, variant }]` (the narrowest band the width falls under wins; a band's variant is a snap or `{ default, <state>: snap }`). `record side zoom` writes bands for zooms above 100%. With `flag` and `flagVariant` (a snap or `{ default, <state>: snap }`), the part is also swapped while that flag is on (a sidebar she collapsed). |
@@ -320,6 +324,9 @@ the next focus point (**⌥⇧F** the one before; while zoomed, **Esc** zooms ou
 
 - **1**: added, optional: focus points' `via` (from replica-kit's LTG1189/LTG1194 replicas); `source: "plan"` points
   in `focus.json`, from Make it from my script.
+- **1** (scenecast 0.5, stage E): added, all optional: `{ use }` in `apps[].layout` and `drags`, `packs` in
+  flow.json, `pack:<id>/<file>` in `clickPages[].vendorCss`; demo.json `packs` (`false`, or `{ off, offRules }`) and
+  `apps[].pack` (a pack id, or `false`).
 - **1** (scenecast 0.2, Phase 4): added, all optional: `focus.json` (with `source`, `label`) and
   `flow.editor.json` in the demo folder; focus points `line` may be a script line id (`"2.1"`).
 - **1** (kit 1.4.0): added, all optional: `focus`, `focusOptions`, `modules` (from `focus.mjs` and demo.json

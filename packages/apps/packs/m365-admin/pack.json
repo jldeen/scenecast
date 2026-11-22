@@ -1,0 +1,46 @@
+{
+  "kind": "stuntdouble-app-pack",
+  "version": 1,
+  "id": "m365-admin",
+  "title": "Microsoft 365 admin center",
+  "names": ["admin center", "Microsoft 365 admin center", "M365 admin center", "Agent 365", "the admin portal"],
+  "match": ["admin.cloud.microsoft", "admin.microsoft.com"],
+  "start": {
+    "url": "https://admin.cloud.microsoft/",
+    "signIn": { "hosts": ["login.microsoftonline.com"], "hint": "Sign in with an admin of the demo tenant; the account picker can show twice." },
+    "ready": { "sel": "nav" }
+  },
+  "record": {
+    "busy": [{ "sel": "[role=progressbar]" }],
+    "auto": { "hoverMax": 10, "clickMax": 6, "maxS": 45, "groups": false }
+  },
+  "flow": {
+    "layout": {
+      "nav": { "kind": "responsive", "below": 1024, "part": { "sel": "nav", "css": "<nav[\\s>]", "up": 2 }, "note": "The left navigation collapses below the admin center's own breakpoint (1024 CSS px). A demo gives the captured variant: { use: 'nav', variant }." },
+      "header": { "kind": "responsive", "below": 1190, "part": { "sel": "header", "css": "<header[\\s>]", "up": 0 }, "note": "The top bar compacts (search becomes an icon) between 1097 and 1280 CSS px (the 175% and 150% captures)." },
+      "tools-grid": { "kind": "gridfit", "columns": ["Name", "Type", "Status", "Publisher", "Source"], "ideal": [360, 200, 220, 240], "min": [200, 160, 180, 160, 140], "extra": 95, "note": "Agents › Tools grid (Fluent DataGrid): column fitting. Minimums and the space beside the columns were measured at each zoom; the ideal widths are a capture's." }
+    }
+  },
+  "theme": {
+    "system": "fluent-v8",
+    "follows": "setting",
+    "setting": "The header's \"Switch to Dark Mode\" toggle",
+    "markers": { "body": ["class"] },
+    "themes": { "light": "themes/light.json", "dark": "themes/dark.json" },
+    "scores": { "light-to-dark": 0.89, "dark-to-light": 0.97 },
+    "fallbacks": ["Fluent v8 writes colors as literals in its CSS: the theme packs carry the literal pairs learned from one screen in both themes, so a color only some screens use can stay", "Charts in Reports (images, canvas) keep their colors"]
+  },
+  "platform": { "frame": "browser", "shortcuts": {} },
+  "writes": [],
+  "safe": [
+    { "id": "tools-search", "on": { "kind": "press", "key": "Enter", "field": "/^Search/" }, "what": "Agents › Tools: typing in \"Search by name\" filters only after Enter; Enter changes nothing." }
+  ],
+  "effects": [],
+  "notes": "No write of a demo has been recorded here yet: the admin center was only read (Agents › Tools, a tool's details, Users). Step groups find nothing to open (auto.groups false: 58.6 s spent for nothing in the Nov 19 acceptance run); hovers found 1 of 15.",
+  "sources": [
+    "inv641 flow.overrides.mjs: layout (nav, header, tools grid), Enter in search",
+    "spike E presets m365-admin.json",
+    "spike A live captures Nov 20 (themes, literal pairs, scores)",
+    "demo1-reset SKILL.md (Tools search filters after Enter)"
+  ]
+}

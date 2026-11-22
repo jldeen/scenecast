@@ -16,6 +16,7 @@ New to Scenecast? Start with the [README](../README.md).
 - [Bundle format](bundle-format.md): what's in a `.scenecast` bundle and its manifest.
 - [Engine flow format](engine/flow-format.md): `flow.json`, the recorded flow the replica plays.
 - [Plan format](engine/plan-format.md): `plan.md`, the demo in plain words that Copilot runs and you approve.
+- [App packs](../packages/apps/README.md): what each real app needs to be recorded, built and themed, once per app.
 - [Speed](engine/speed.md): where a recording's time goes, the benchmark, and the fixture's time budget.
 
 ## How it works

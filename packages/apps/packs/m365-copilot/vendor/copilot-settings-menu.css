@@ -1,0 +1,5 @@
+/* The footer of Copilot's "Settings and more" menu (Privacy, Terms, FAQ). Its rules load with the menu, so no capture
+   has them. Measured from replica-raw/hovers/click-cop-task/0010.png: links centred 8 px apart in #5c5c5c, 34 px below
+   the last item's centre and 22 px above the menu's bottom edge. */
+.QUF5eHV5{display:flex;justify-content:center;column-gap:8px;padding:8px 0 7px;}
+.fx-Link.YVJMMG9D{color:#5c5c5c;text-decoration:none;}

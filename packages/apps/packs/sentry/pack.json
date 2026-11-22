@@ -1,0 +1,59 @@
+{
+  "kind": "stuntdouble-app-pack",
+  "version": 1,
+  "id": "sentry",
+  "title": "Sentry",
+  "names": [
+    "Sentry"
+  ],
+  "match": [
+    "sentry.io"
+  ],
+  "start": {
+    "url": "https://sentry.io/",
+    "signIn": {
+      "hosts": [
+        "sentry.io/auth/login"
+      ],
+      "hint": "Sign in in the capture browser first; an organization's pages are on <org>.sentry.io."
+    },
+    "ready": {
+      "sel": "main"
+    }
+  },
+  "record": {},
+  "build": {
+    "rules": [
+      {
+        "id": "no-replay-ad",
+        "css": "section#replay,section[aria-label=\"Session Replay\"],a[href$=\"#replay\"],section#seer{display:none!important}",
+        "url": "/\\/issues\\/\\d+\\//",
+        "note": "An issue page's \"Set up Session Replay\" ad and Seer pitch (with the Jump to: Replay link), when they aren't the demo's topic: hidden, and the sections around them close up. A demo about Replay or Seer turns it off (packs.offRules: [\"sentry:no-replay-ad\"])."
+      }
+    ]
+  },
+  "theme": {
+    "system": "sentry",
+    "follows": "system",
+    "markers": {
+      "html": [
+        "class"
+      ]
+    },
+    "themes": {},
+    "fallbacks": [
+      "Sentry's theme tokens come from prefers-color-scheme: both themes are in every page, so the scheme flip covers it without a pack (not scored yet)"
+    ]
+  },
+  "platform": {
+    "frame": "browser",
+    "shortcuts": {}
+  },
+  "writes": [],
+  "effects": [],
+  "notes": "Recorded once (LTG1189: the issues list and two issue pages). Busy markers, things to ignore and hover delays aren't known yet: the recorder's defaults apply.",
+  "sources": [
+    "ltg1189-replica flow.overrides.mjs (no replay)",
+    "ltg1189-replica capture/css-hook.mjs (Sentry's theme tokens follow prefers-color-scheme)"
+  ]
+}

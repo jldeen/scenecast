@@ -1,0 +1,67 @@
+{
+  "kind": "stuntdouble-app-pack",
+  "version": 1,
+  "id": "microsoft-iq",
+  "title": "Microsoft IQ",
+  "names": ["Microsoft IQ", "the IQ portal", "Microsoft IQ portal", "business plugin page"],
+  "match": ["iq.microsoft.com"],
+  "frames": {
+    "match": ["powerbi.com"],
+    "skip": ["^https://[a-z]+\\.powerbi\\.com/extension\\.html"]
+  },
+  "start": {
+    "url": "https://iq.microsoft.com/",
+    "signIn": { "hosts": ["login.microsoftonline.com"], "hint": "The business plugin page is a Power BI frame inside the portal; it can ask for the account again. \"Plugins could not be loaded\" in the add picker: press Retry." },
+    "ready": { "frame": "powerbi.com", "text": "curated here" }
+  },
+  "record": {
+    "auto": { "hoverMax": 0, "clickMax": 0, "zoom": true, "maxS": 30 }
+  },
+  "build": {
+    "strip": { "attrs": ["powerbi-access-token"] }
+  },
+  "flow": {
+    "layout": {
+      "endorsement-menu": { "kind": "float", "el": "div[role=presentation][style*=\"translate3d\"]", "anchor": { "sel": "[data-testid=endorsement-badge]" }, "place": "bottom-start", "gap": 0, "note": "The endorsement menu is placed by script under its badge. A demo gives the frame: { use: 'endorsement-menu', frame: 'f4' }." }
+    },
+    "drags": {
+      "side-pane": { "handle": "[data-testid=\"side-pane-resize-handle\"]", "mode": "live", "write": "px", "target": "nav[data-testid=\"side-pane\"]", "min": 200, "max": 480, "cursor": "col-resize", "note": "The navigation: 200–480 px, live. A demo gives the frame: { use: 'side-pane', app, frame }." }
+    }
+  },
+  "theme": {
+    "system": "fabric",
+    "follows": "none",
+    "themes": {},
+    "fallbacks": ["No dark theme: Microsoft IQ renders light whatever the OS is set to", "Power BI visuals are drawn in canvas and SVG with literal colors"]
+  },
+  "platform": { "frame": "browser", "shortcuts": {} },
+  "writes": [
+    {
+      "id": "add-to-plugin",
+      "what": "Adds an item (a plugin, a document) to a section of the business plugin; the landing's \"N curated here\" goes up by one",
+      "on": { "kind": "click", "target": "/^Add( all)?$/", "sel": "[data-testid=\"context-picker-review-add-all\"]" },
+      "makes": "item",
+      "steps": ["Click \"Add content to {section}\"", "Type \"{search}\"", "Click \"Plugins\"", "Click \"{item}\"", "Type \"{summary}\" in \"Summary\"", "Type \"{whenToUse}\" in \"When to use\"", "Click \"Add\""],
+      "undo": { "steps": ["You: remove \"{item}\" from {section}"], "note": "The UI path to remove an item isn't recorded yet; a private pack adds the API undo, run in the capture browser's signed-in session." },
+      "check": { "expect": "The item isn't in its section, and the landing shows the count the demo starts with." }
+    },
+    {
+      "id": "endorse",
+      "what": "The endorsement badge › Certified (or Promoted) endorses the business plugin",
+      "on": { "kind": "click", "target": "/^(Certified|Promoted)$/", "sel": "[data-testid^=\"endorsement-option\"]" },
+      "undo": { "steps": ["Click \"{endorsement}\"", "You: choose no endorsement"], "note": "A private pack can add the API undo." },
+      "check": { "look": { "sel": "[data-testid=\"endorsement-badge\"]", "text": "Add endorsement" }, "expect": "The badge reads \"Add endorsement\" (no endorsement)." }
+    }
+  ],
+  "effects": [
+    { "id": "curated-count", "what": "The landing's \"N curated here\" counts the items in every section", "check": { "look": { "text": "curated here" }, "expect": "The count the demo starts with." } },
+    { "id": "rename", "what": "The business plugin can be renamed by its owners between runs (the page title and the add picker follow)", "check": { "expect": "The page title is the name the demo expects; if not, the demo's names need updating." } }
+  ],
+  "notes": "The portal is a shell around Power BI frames: hovers and clicks failed in the extension frame (frames.skip), zoom captured 9 levels in 13.9 s. On All, searching the add picker doesn't list plugins; the Plugins tab does. The review dialog's summary and when-to-use boxes start empty. Pre-release hosts (the daily ring) and the API undo live only in a private pack.",
+  "sources": [
+    "inv641 flow.overrides.mjs: layout (float), drag",
+    "spike E presets microsoft-iq.json (auto, frames.skip)",
+    "scenecast recorder: powerbi-access-token stripped at capture",
+    "demo1-reset SKILL.md and dist (add, certify, checks; product behavior only)"
+  ]
+}

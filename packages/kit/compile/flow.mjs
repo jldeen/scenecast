@@ -13,11 +13,13 @@ import { plainLabels } from '../lib/beats.mjs';
 import { writeRecordingNotes } from '../lib/notes.mjs';
 import { readEditorOverrides, applyEditorOverrides, readFocusJson } from '../lib/overrides.mjs';
 import { compileEdits } from '../lib/edits.mjs';
+import { flowPacks } from '../../apps/build.mjs';
 
 export async function compileFlow(demo, { fromRaw = false } = {}) {
   // A demo without a recording (a flow written by hand) is its own flow.json.
   if (!fromRaw && !existsSync(join(demo.dir, 'recording.json')) && !existsSync(join(demo.raw, 'recording.json')) && existsSync(demo.flowPath)) {
     const flow = JSON.parse(readFileSync(demo.flowPath, 'utf8'));
+    flowPacks(flow, demo.cfg);
     return { flow, problems: validate(flow), handWritten: true };
   }
   const recFile = join(demo.dir, 'recording.json');
@@ -154,6 +156,10 @@ export async function finishFlow(demo, flow, rec) {
     const out = await mod.default(flow, { recording: rec, demo: cfg });
     if (out) Object.assign(flow, out);
   }
+  // App packs (packages/apps): the named layout and drag rules the demo references ({ use: name }), the rules every
+  // demo of an app gets, step-group selectors, menu items that load late and menu CSS. After the hand edits (they can
+  // replace flow.apps), and the demo's own entries always win.
+  flowPacks(flow, cfg);
   // The editor's changes (flow.editor.json: wording and date edits, beat starts), after the hand edits, so what was
   // set in the replica wins.
   applyEditorOverrides(flow, readEditorOverrides(demo.dir));
