@@ -27,6 +27,7 @@ const ping = () => fetch(`http://127.0.0.1:${RX}/ping`).then(r => r.json()).catc
 // The app on 127.0.0.1; its frame on localhost (another site, so its own process) loads, then never answers again.
 const web = createServer((q, s) => {
   s.setHeader('content-type', 'text/html');
+  if (q.url.startsWith('/darkapp')) return s.end('<title>dark</title><style>body{background:#fff}@media (prefers-color-scheme: dark){body{background:#111}}</style><h1>dark</h1><button>Open</button>');
   if (q.url.startsWith('/boxes')) return s.end('<title>boxes</title><input id="i" value="left over"><div id="ce" contenteditable="true"><p>an unsent prompt\u200b</p></div>');
   if (q.url.startsWith('/slowframe')) return s.end('<p>slow</p><script>setInterval(() => { const t = Date.now(); while (Date.now() - t < 1500) {} }, 1600)</script>');
   if (q.url.startsWith('/stuck')) return s.end('<p>frame</p><script>setTimeout(() => { for (;;) {} }, 6000)</script>');
@@ -100,6 +101,16 @@ try {
   const stop3 = await send({ op: 'recordStop' }, 120, RX);
   const h3 = await send({ op: 'eval', tab: slow, expr: 'document.querySelector("h1").textContent' }, 30, RX);
   check('Stop right after a click still does it and records it', stop3.ok && stop3.value.steps >= 1 && h3.value === 'slow opened', JSON.stringify({ stop: stop3.value || stop3, h1: h3.value }).slice(0, 400));
+  // Recorded light on a dark system: a tab that follows the system (here the page is told it's dark) is shown light
+  // for the take, that tab only (Nov 22: the fixture recorded dark on Jessica's dark Mac).
+  const darkM = `127.0.0.1:${WEB}/darkapp`;
+  const dp = await ctx.newPage(); await dp.goto(`http://${darkM}`); await dp.emulateMedia({ colorScheme: 'dark' });
+  const bg = pg => pg.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const before = await bg(dp);
+  const rs = await send({ op: 'recordStart', apps: [{ id: 'dark', match: darkM }], record: { auto: false } }, 120, RX);
+  const during = await bg(dp);
+  await send({ op: 'recordAbort' }, 60, RX);
+  check('a tab that renders dark is recorded light', rs.ok && before === 'rgb(17, 17, 17)' && during === 'rgb(255, 255, 255)', JSON.stringify({ before, during, rs: rs.ok }));
   // Typing replaces what's already in a box: Copilot puts back the last unsent prompt (Nov 20: typed on top, doubled).
   const boxes = `127.0.0.1:${WEB}/boxes`;
   const bp = await ctx.newPage(); await bp.goto(`http://${boxes}`);

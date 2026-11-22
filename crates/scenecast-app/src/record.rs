@@ -420,6 +420,9 @@ fn preflight_inner(
     })?)
 }
 
+/// How recent a passing Check and fix is, for Start to only look again (ms).
+const FRESH_CHECK_MS: u64 = 10 * 60 * 1000;
+
 pub fn start(dir: &Path, resume: bool) -> Result<Value, AppError> {
     start_ready(dir, resume, None, |_| {})
 }
@@ -440,10 +443,22 @@ fn start_ready_inner(
     dir: &Path,
     resume: bool,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    on: impl FnMut(Update),
+    mut on: impl FnMut(Update),
 ) -> Result<Value, AppError> {
     if !resume {
-        let report = preflight_with(dir, true, cancel, on)?;
+        // Check and fix passed a moment ago: a check that only looks (nothing reloaded or opened again) is enough;
+        // anything it finds wrong gets the fixing check, as before.
+        let fresh = crate::timeline::recent_ok(dir, "check-fix", FRESH_CHECK_MS);
+        let report = if fresh {
+            let r = preflight_with(dir, false, cancel.clone(), &mut on)?;
+            if r.ready {
+                r
+            } else {
+                preflight_with(dir, true, cancel, &mut on)?
+            }
+        } else {
+            preflight_with(dir, true, cancel, &mut on)?
+        };
         if !report.ready {
             return Err(AppError::Invalid(not_ready(&report)));
         }

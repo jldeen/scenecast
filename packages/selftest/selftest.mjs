@@ -267,7 +267,9 @@ export default flow => {
   check('flow: send arrow carries the typed text', ids.some(i => (S[i].on || []).some(t => t.click && t.typedFrom && t.stream)), '');
   check('flow: Escape closes the details', byApp('admin').some(i => S[i].esc), byApp('admin').map(i => JSON.stringify(S[i])).join('\n'));
   // Side states: once per kind of screen (zoom, chips, drags), once per control (hovers, clicks), once per group.
-  check('flow: zoom bands, once per kind of screen', (flow.apps.find(a => a.id === 'chat').layout.responsive || [])[0].bands.length === 2 && flow.zoomRefs.length === 12 && new Set(flow.zoomRefs.map(z => z.state)).size === 4, JSON.stringify(flow.zoomRefs.map(z => z.snap)));
+  // Zoom: a level whose markup is the same as the level below isn't captured again (chat at 200% is its 150% narrow
+  // rail: one band); admin's grid changes with size, so all its levels are kept.
+  check('flow: zoom bands, once per kind of screen, a level the same as the one below not captured again', (flow.apps.find(a => a.id === 'chat').layout.responsive || [])[0].bands.length === 1 && flow.zoomRefs.length === 8 && !flow.zoomRefs.some(z => z.snap === 'v200-chat-start') && new Set(flow.zoomRefs.map(z => z.state)).size === 4, JSON.stringify(flow.zoomRefs.map(z => z.snap)));
   check('flow: hover pages and the list', flow.hoverPages.length >= 1 && flow.lists.length >= 1 && flow.lists[0].state === 'admin-start' && flow.lists[0].seen === 300, JSON.stringify([flow.hoverPages, flow.lists]));
   check('flow: one click page (no control clicked twice), sections sticky, menus not', flow.clickPages.length === 1 && flow.clickPages[0].sticky.includes('Projects') && !flow.clickPages[0].sticky.includes('More options'), JSON.stringify(flow.clickPages));
   const G = (flow.groups || [])[0] || {};

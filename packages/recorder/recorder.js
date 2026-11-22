@@ -29,6 +29,9 @@ const withFrame = (m, fk) => fk ? { frame: fk, ...m } : m;
 // time), and one that doesn't answer in REC_FRAME_MS is left out (frameEval).
 const REC_FRAME_MS = 5000;
 const recEval = (p, f, fn, arg) => frameEval(p, f, fn, arg, REC_FRAME_MS, { noContext: 'skip' });
+// Recorded light (unless the demo's theme is dark): each app's tab is shown light for the take (H.light), so a dark
+// Mac or Windows doesn't make a dark replica. Again after the tab was let go (Go on): it lasts while attached.
+async function recLight(A) { if (REC.opts.theme === 'dark' || REC.opts.light === false) return; await H.light(A.page, true).catch(e => rlogr(`${A.id}: couldn't show it light: ${String(e.message || e).slice(0, 100)}`)); }
 async function recInstall(p) { if (p.prune) await p.prune(); for (const f of p.frames()) await recEval(p, f, RECX(REC.opts)).catch(() => {}); }
 async function recEach(p, fn, arg) { const out = []; for (const f of p.frames()) { const r = await recEval(p, f, fn, arg).catch(() => undefined); if (r !== undefined) out.push([f, r]); } return out; }
 async function recSig(p) {
@@ -354,7 +357,7 @@ async function recAuto(A) {
     let n = null;
     try {
       const r = await recSide(A, { kind, ...c });
-      const what = r.error ? 'failed: ' + r.error : kind === 'hovers' ? `${r.n} of ${r.tried}${r.skipped ? ` (${r.skipped} seen before)` : ''}` : kind === 'clicks' ? `${(r.clicks || []).length} of ${(r.controls || []).length}` : kind === 'groups' ? `${(r.groups || []).length}` : kind === 'chips' ? (r.rule ? 'found' : 'none') : kind === 'drags' ? `${(r.rules || []).length}` : kind === 'zoom' ? `${(r.zooms || []).length}` : kind === 'list' ? `${r.list && r.list.seen} rows` : 'done';
+      const what = r.error ? 'failed: ' + r.error : kind === 'hovers' ? `${r.n} of ${r.tried}${r.skipped ? ` (${r.skipped} seen before)` : ''}${r.skippedKinds ? ` (${r.skippedKinds} of kinds that never show)` : ''}, waits ${c.waitMs} ms` : kind === 'clicks' ? `${(r.clicks || []).length} of ${(r.controls || []).length}` : kind === 'groups' ? `${(r.groups || []).length}` : kind === 'chips' ? (r.rule ? 'found' : 'none') : kind === 'drags' ? `${(r.rules || []).length}` : kind === 'zoom' ? `${(r.zooms || []).length}` : kind === 'list' ? `${r.list && r.list.seen} rows` : 'done';
       n = kind === 'hovers' ? r.n : kind === 'clicks' ? (r.clicks || []).length : kind === 'groups' ? (r.groups || []).length : kind === 'zoom' ? (r.zooms || []).length : kind === 'drags' ? (r.rules || []).length : kind === 'chips' ? (r.rule ? 1 : 0) : null;
       did.push(`${kind}${c.frameRe ? ' (frame)' : ''} ${what}, ${((Date.now() - t1) / 1000).toFixed(1)} s (${((SLEPT.ms - s1) / 1000).toFixed(1)} s fixed waits)`);
     } catch (e) { did.push(`${kind} failed: ${String(e.message || e).slice(0, 120)}`); REC.notes.push(`${state}: the automatic ${kind} failed (${String(e.message || e).slice(0, 120)}); record side ${kind} on it if it matters`); }
@@ -363,7 +366,13 @@ async function recAuto(A) {
   const gseen = recSeen('groups', A.id);
   if (o.groups && f.groups.some(id => !gseen.has(id))) { await run('groups'); f.groups.forEach(id => gseen.add(id)); }
   if (o.chips && newKind) await run('chips', { widths: o.chipWidths });
-  const hv = c => ({ waitMs: 900, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, ...c });
+  // How long to wait for a hover to show: learned per app from its own (a Fluent tooltip shows after 250–400 ms in
+  // Teams and the admin center, up to 800 ms in Copilot): 1.5× the slowest seen, 450–900 ms, once three have shown.
+  // A control that shows nothing costs that wait, and most show nothing.
+  const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
+  const learned = hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900;
+  const skipSels = Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel);
+  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...c });
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)] });
   for (const [i, fu] of f.frames.entries()) {
@@ -388,7 +397,7 @@ async function recAuto(A) {
 // picks up from it after an interruption (the agent restarted, Chrome reloaded).
 function recSnapshot() {
   const states = Object.fromEntries(Object.entries(REC.states).map(([k, st]) => [k, { ...st }]));
-  return { kit: 1, savedAt: new Date().toISOString(), t0: REC.t0, opts: REC.opts, zooms: REC.zooms, apps: REC.apps.map(a => ({ id: a.id, match: a.match, state: a.state, n: a.n })), states, sigs: Object.fromEntries(Object.entries(REC.sigs).map(([k, m]) => [k, [...m]])), streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, seq: REC.seq, active: REC.active, actions: REC.actions, time: REC.time, tl: REC.tl, autoDone: [...REC.autoDone], autos: REC.autos, seen: Object.fromEntries(Object.entries(REC.seen).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, [...v]]))])) };
+  return { kit: 1, savedAt: new Date().toISOString(), t0: REC.t0, opts: REC.opts, zooms: REC.zooms, apps: REC.apps.map(a => ({ id: a.id, match: a.match, state: a.state, n: a.n })), states, sigs: Object.fromEntries(Object.entries(REC.sigs).map(([k, m]) => [k, [...m]])), streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, seq: REC.seq, active: REC.active, actions: REC.actions, time: REC.time, tl: REC.tl, hoverStats: REC.hoverStats, autoDone: [...REC.autoDone], autos: REC.autos, seen: Object.fromEntries(Object.entries(REC.seen).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, [...v]]))])) };
 }
 let recSaving = null;
 function recCheckpoint() { if (!REC.on) return; const snap = recSnapshot(); recSaving = (recSaving || Promise.resolve()).then(() => post('/recording-partial', snap)).catch(() => {}); }
@@ -398,7 +407,7 @@ function recCheckpoint() { if (!REC.on) return; const snap = recSnapshot(); recS
 async function recResume(c) {
   const snap = await page0.request.get(RX + '/recording-partial', { timeout: 30000 }).then(r => r.ok() ? r.json() : null).catch(() => null);
   if (!snap || !snap.states) { REC.on = false; return { error: 'nothing to resume (no checkpoint in the raw folder)' }; }
-  Object.assign(REC, { t0: snap.t0, opts: { ...snap.opts, ...(c.record || {}) }, zooms: snap.zooms || c.zooms, states: snap.states, streams: snap.streams, beats: snap.beats, path: snap.path, notes: snap.notes, drags: snap.drags, sides: snap.sides, seq: snap.seq, active: snap.active, actions: snap.actions, time: snap.time || REC.time, tl: snap.tl || [], autos: snap.autos || [], autoDone: new Set(snap.autoDone || []) });
+  Object.assign(REC, { t0: snap.t0, opts: { ...snap.opts, ...(c.record || {}) }, zooms: snap.zooms || c.zooms, states: snap.states, streams: snap.streams, beats: snap.beats, path: snap.path, notes: snap.notes, drags: snap.drags, sides: snap.sides, seq: snap.seq, active: snap.active, actions: snap.actions, time: snap.time || REC.time, tl: snap.tl || [], hoverStats: snap.hoverStats || {}, autos: snap.autos || [], autoDone: new Set(snap.autoDone || []) });
   REC.opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(REC.opts.groups || {}) };
   REC.sigs = Object.fromEntries(Object.entries(snap.sigs).map(([k, v]) => [k, new Map(v)]));
   REC.seen = Object.fromEntries(Object.entries(snap.seen || {}).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, new Set(v)]))]));
@@ -421,7 +430,7 @@ OPS.recordStart = async c => {
   if (REC.on) return { error: 'already recording' };
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
-  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start' });
+  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {} });
   if (c.resume) return recResume(c);
   // Every app's tab, or nothing starts: which aren't open, all at once.
   const missing = [];
@@ -434,7 +443,7 @@ OPS.recordStart = async c => {
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
   // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
   // reload), and Nov 20's second take began with a click made between takes.
-  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
+  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
   for (const A of REC.apps) {
     const t1 = Date.now();
     rlogr(`start: ${A.id}: capturing its start screen`);
@@ -482,6 +491,7 @@ OPS.recordGoOn = async c => {
     A.page.detachReason = null;
     // After the bar was closed the tab was let go: attaching again shows the bar again.
     if (A.page.attach) await A.page.attach().catch(e => rlogr(`going on: ${A.id}: ${e.message || e}`));
+    await recLight(A);
     await recInstall(A.page);
     for (const f of A.page.frames()) await recEval(A.page, f, 'window.__rkrec ? window.__rkrec.drain() : null').catch(() => {});
     A.typing = null;
@@ -723,6 +733,9 @@ async function recSide(A, c) {
       let frame = null;
       if (out.frameUrl) { const f = p.frames().find(x => x.url().split('?')[0] === out.frameUrl); if (f) frame = await recFrameKey(p, f); }
       const seen = recSeen('hovers', A.id + (out.frameUrl || '')); for (const k of out.keys || []) seen.add(k);
+      const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
+      hs.firsts.push(...(out.firsts || []));
+      for (const [sel, k] of Object.entries(out.kinds || {})) { const t = hs.kinds[sel] = hs.kinds[sel] || { tried: 0, shown: 0 }; t.tried += k.tried; t.shown += k.shown; }
       if (out.n) REC.sides.hovers.push({ page: c.page || state, app: A.id, base: state, frame: frame || undefined });
       return { ...out, frame };
     }
@@ -737,6 +750,9 @@ async function recSide(A, c) {
       const base = await p.evaluate(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
       const s = await ctx.newCDPSession(p);
       const out = [], t0 = Date.now();
+      const domOf = () => p.mainFrame().evaluate(() => { let h = 0; const add = s => { for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; }; for (const e of document.body.getElementsByTagName('*')) { add(e.localName); add(e.getAttribute('class') || ''); add(e.getAttribute('style') || ''); add(e.childElementCount + ''); } return h; }).catch(() => null);
+      // The 100% page's markup: a level that matches it needs no capture either.
+      let lastDom = await domOf();
       try {
         for (const z of c.zooms || [110, 125, 150, 175, 200]) {
           if (z === 100) continue;
@@ -747,6 +763,15 @@ async function recSide(A, c) {
           await s.send('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: base.dpr * k, mobile: false });
           await poll(100); await recSettle(p, 900, 12000);
           const id = `v${z}-${state}`;
+          // The page's markup at this size (every element, its classes and inline style): unchanged since the last
+          // level captured, its snapshot is used again. The page's CSS (media queries) already lays it out at any
+          // size in the replica; a capture is only needed where script changed the page. Each one took up to a
+          // minute on a heavy page (Copilot, Nov 20: 279 s for one screen's five levels).
+          const dom = await domOf();
+          // Unchanged: no capture and no band of its own; the replica shows the level below at this size (the same
+          // markup), and its CSS lays it out.
+          if (dom !== null && dom === lastDom) { out.push(`${z}% as the level below`); continue; }
+          lastDom = dom;
           await H.snap(p, id);
           const lm = await p.evaluate(sel => { const o = {}; for (const q of sel) o[q] = [...document.querySelectorAll(q)].map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }).filter(b => b[2] > 0 && b[3] > 0).slice(0, 3); return o; }, c.landmarks || ['nav', 'main', 'aside', 'header', '[role=navigation]', '[role=main]', '[role=dialog]', '[role=grid]', '[contenteditable=true]', 'textarea', 'input[type=search]']);
           REC.sides.zoom.push({ app: A.id, state, z, snap: id, vw, vh, dpr: base.dpr * k, landmarks: lm });

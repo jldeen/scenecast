@@ -187,7 +187,8 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   // Each app's tab: open, on its start screen (its theme said, never a reason to stop). Only with the recorder there to look.
   if (rec.status === 'ok') {
     // Each app it opens can take up to a minute (load, its start screen, marking the tab): the wait grows with them.
-    const r = await op(port, { op: 'preflight', apps: cfg.apps, fix, waitS: 20 }, fix ? Math.max(120, 40 + 70 * cfg.apps.length) : 120);
+    // Apps load side by side now: the wait is the slowest one's, not their sum.
+    const r = await op(port, { op: 'preflight', apps: cfg.apps, fix, waitS: 20, light: cfg.theme !== 'dark' }, fix ? Math.max(120, 110 + 10 * cfg.apps.length) : 120);
     const tabs = r.ok ? r.value._tabs : undefined;
     for (const a of cfg.apps) {
       const o = r.ok ? r.value[a.id] || {} : {};

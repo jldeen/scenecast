@@ -73,7 +73,9 @@ async function landed(p, a, o) {
 }
 const out = {};
 let missing = false;
-for (const a of ARGS.apps || []) {
+// Every app at once: each one's load and start screen take their own time (up to a minute when it opens), and they
+// don't depend on each other. One after another, a four-app demo's check took minutes.
+async function checkApp(a) {
   const o = out[a.id] = { fixed: [] };
   let p = null; try { p = await H.pageFor(a.match); } catch (e) {}
   if (!p && ARGS.fix && a.url) {
@@ -86,7 +88,7 @@ for (const a of ARGS.apps || []) {
     o.fixed.push('opened'); o.r = await waitStart(p, a, ARGS.waitS || 20);
     await landed(p, a, o);
   }
-  if (!p) { o.missing = true; missing = true; continue; }
+  if (!p) { o.missing = true; missing = true; return; }
   o.r = o.r || await probe(p, a.start);
   // No start rule (a demo made in the app): Check and fix still brings a tab that's elsewhere in the app (an old
   // Copilot chat from the last take, Nov 20) back to the app's address. Never a reason to fail: apps redirect.
@@ -100,8 +102,18 @@ for (const a of ARGS.apps || []) {
     await landed(p, a, o);
   }
   o.light = o.r.error ? null : o.r.lum >= DARK;
+  // Recorded light (demo.json theme: "light", the default): a tab that renders dark (it follows a dark Mac or
+  // Windows) is shown light, in this tab only, by the browser's own color-scheme setting. An app with its own dark
+  // setting doesn't follow it: it stays dark, and says so.
+  if (ARGS.fix && ARGS.light && o.light === false) {
+    await H.light(p, true).catch(e => say(`${a.id}: light: ${e.message || e}`));
+    await sleep(600);
+    const r2 = await probe(p, a.start);
+    if (!r2.error) { o.r = r2; o.light = r2.lum >= DARK; if (o.light) o.fixed.push('shown light'); }
+  }
   o.onStart = o.r.error ? null : startOk(o.r);
 }
+await Promise.all((ARGS.apps || []).map(a => checkApp(a).catch(e => { out[a.id] = { fixed: [], r: { error: String(e.message || e).slice(0, 160) } }; })));
 // Which tab is it? The open tabs, by title and address, for an app it couldn't find.
 if (missing) { try { out._tabs = (await H.tabs()).filter(t => /^https?:/.test(t.url)).map(t => ({ title: t.title, url: t.url.split(/[?#]/)[0], host: hostOf(t.url) })); } catch (e) { out._tabs = []; } }
 return out;

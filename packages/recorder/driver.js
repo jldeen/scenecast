@@ -226,8 +226,20 @@ async function stream(p, name, { everyMs = 600, maxS = 900, until = 'quiet', set
   return st;
 }
 
+// The tab shown light (or back as the system has it): prefers-color-scheme for this tab only, for as long as the
+// recorder is attached to it (the take). Apps that follow the system's theme go light; the presenter's other tabs
+// and the system don't change.
+const LIGHT = new WeakMap();
+async function light(p, on) {
+  const media = { features: on ? [{ name: 'prefers-color-scheme', value: 'light' }] : [] };
+  if (p.cmd) { await p.cmd(undefined, 'Emulation.setEmulatedMedia', media); LIGHT.set(p, on); return on; }
+  let s = LIGHT.get(p);
+  if (!s || s === true) { s = await ctx.newCDPSession(p); LIGHT.set(p, s); }
+  await s.send('Emulation.setEmulatedMedia', media);
+  return on;
+}
 const H = {
-  sleep, poll, isQuiet, waitQuiet, post, rlog, snap, stream, STREAMS, pageFor, frameFor, SERX, fetchResources,
+  sleep, poll, light, isQuiet, waitQuiet, post, rlog, snap, stream, STREAMS, pageFor, frameFor, SERX, fetchResources,
   async mark(p, kind) { await p.evaluate(k => sessionStorage.setItem('d1tab', k), kind); },
   async tabs() { const out = []; for (const p of ctx.pages()) { let m = null; try { if (p.attached !== false) m = await p.evaluate(() => sessionStorage.getItem('d1tab')); } catch (e) {} out.push({ url: p.url().slice(0, 160), title: (await p.title().catch(() => '')).slice(0, 80), mark: m }); } return out; },
   // Centre of the smallest visible element whose text matches, in page coordinates (frame offsets included).

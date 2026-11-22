@@ -66,8 +66,9 @@ for (let step = 0; step <= steps; step++) {
   const cands = ARGS.only
     ? await ev(only => only.map(m => { const els = [...document.querySelectorAll(m.sel)].filter(e => { const t = (e.innerText || '').replace(/\s+/g, ' ').trim(); return (m.text === undefined || t === m.text) && (m.textStarts === undefined || t.startsWith(m.textStarts)); }); const e = els[m.nth || 0]; if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(r.width / 2, 40)), y: Math.round(r.y + r.height / 2), id: -1, sel: m.sel, text: m.text || m.textStarts || '' }; }).filter(Boolean), ARGS.only)
     : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel });
-  const skip = new Set(ARGS.skipKeys || []);
-  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text));
+  const skip = new Set(ARGS.skipKeys || []), skipSels = new Set(ARGS.skipSels || []);
+  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && !skipSels.has(c.sel));
+  out.skippedKinds = (out.skippedKinds || 0) + cands.filter(c => skipSels.has(c.sel)).length;
   out.skipped = (out.skipped || 0) + cands.length - todo.length;
   out.steps.push(todo.length);
   // After a control that showed nothing (not one change in the page since the rest copy), the page is still at
@@ -87,7 +88,11 @@ for (let step = 0; step <= steps; step++) {
       await sleep(70);
       if ((await ev(() => window.__d1h.count())) > 0 && (await ev(() => window.__d1h.sig()))) { first = Date.now() - s; break; }
     }
+    // Per kind of control (its selector), how often it was tried and showed something: the recorder stops trying a
+    // kind that never shows anything in this app (sweep by sweep, ARGS.skipSels).
+    const kind = (out.kinds = out.kinds || {})[c.sel] = (out.kinds || {})[c.sel] || { tried: 0, shown: 0 }; kind.tried++;
     if (first === null) { atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
+    kind.shown++; (out.firsts = out.firsts || []).push(first);
     let last = await ev(() => window.__d1h.sig()), stable = Date.now(), farMs = null;
     while (Date.now() - s < (ARGS.settleMaxMs || 4000)) {
       if (farMs === null && await ev(([x, y]) => window.__d1h.farVisible(x, y), [c.x, c.y])) farMs = Date.now() - s;

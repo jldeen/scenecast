@@ -87,6 +87,16 @@ pub fn timed<T, E>(dir: &Path, phase: &str, f: impl FnOnce() -> Result<T, E>) ->
     r
 }
 
+/// A passing `phase` that finished within `ms` (Start after a fresh Check and fix).
+pub fn recent_ok(dir: &Path, phase: &str, ms: u64) -> bool {
+    let now = now_ms();
+    read(dir)
+        .iter()
+        .rev()
+        .find(|e| e.phase == phase)
+        .is_some_and(|e| e.ok && now.saturating_sub(e.at + e.ms) <= ms)
+}
+
 /// The newest of each phase (the take's own length and split from the recording).
 pub fn summary(dir: &Path, recording: Option<&Value>) -> Timing {
     let all = read(dir);
@@ -125,6 +135,12 @@ mod tests {
         add(d, "build", t, false, Value::Null);
         add(d, "check-fix", t, true, serde_json::json!({ "apps": 4 }));
         assert_eq!(read(d).len(), 3);
+        // The newest of a phase decides: the last build failed.
+        assert!(
+            recent_ok(d, "check-fix", 60_000)
+                && !recent_ok(d, "build", 60_000)
+                && !recent_ok(d, "stop", 60_000)
+        );
         let rec = serde_json::json!({ "secs": 512, "timing": { "presenterSecs": 300 } });
         let s = summary(d, Some(&rec));
         assert!(s.build_secs.is_some() && s.check_secs.is_some() && s.compare_secs.is_none());
