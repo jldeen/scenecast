@@ -60,6 +60,11 @@ async function loadFrame(iframe, url, html = null) {
     }
   });
 }
+function imagesArriving() {
+  const app = apps[active];
+  if (!app) return false;
+  try { return docsOf(app.iframe.contentDocument).some(d => [...d.images].some(i => !i.complete && i.loading !== 'lazy')); } catch (e) { return false; }
+}
 function docsOf(doc, out = []) {
   out.push(doc);
   for (const f of doc.querySelectorAll('iframe')) { try { if (f.contentDocument && f.contentDocument.body) docsOf(f.contentDocument, out); } catch (e) {} }
@@ -1548,7 +1553,9 @@ window.d1 = {
   // Whether the field a matcher finds has the cursor (for the checks).
   focused(m, id) { const el = findEl(apps[id || active].iframe.contentDocument, m); if (!el) return false; const a = el.ownerDocument.activeElement; return !!a && (a === el || el.contains(a)); },
   // Settled: nothing playing and no hover waiting to show or hide.
-  idle: async () => { while (busy || fontWaits.size || Object.values(apps).some(a => a.filling || (a.hv && (a.hv.timers.size || a.hv.sweepPending)) || (a.grp && a.grp.timers.size))) await sleep(50); },
+  // Settled: no move under way, fonts in, no hover or group timer, and the active screen's images arrived (up to 3 s:
+  // a cold start's first visit to a screen of icons, such as Copilot's Plugins, drew them a moment late).
+  idle: async () => { const t0 = Date.now(); while (busy || fontWaits.size || Object.values(apps).some(a => a.filling || (a.hv && (a.hv.timers.size || a.hv.sweepPending)) || (a.grp && a.grp.timers.size)) || (Date.now() - t0 < 3000 && imagesArriving())) await sleep(50); },
   // Which captured hovers apply at a point, and whether their in-place changes fit (for tests/hover-check.mjs).
   hoverAt(x, y, id) {
     const app = apps[id || active];

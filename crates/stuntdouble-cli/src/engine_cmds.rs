@@ -54,7 +54,8 @@ pub fn new_project(args: NewArgs) -> Result<()> {
     })?;
     println!("Created {}", created.dir.display());
     println!(
-        "  scenes: live-page (recorded by scenecast record); apps: {}",
+        "  scenes: live-page (recorded by {} record); apps: {}",
+        crate::program(),
         created
             .apps
             .iter()
@@ -70,7 +71,8 @@ pub fn new_project(args: NewArgs) -> Result<()> {
     );
     println!("  replica port: {}", created.port);
     println!(
-        "next: edit demo.json (apps, browser profile, busy markers), then scenecast record start (docs/cli.md)"
+        "next: edit demo.json (apps, browser profile, busy markers), then {} record start (docs/cli.md)",
+        crate::program()
     );
     Ok(())
 }
@@ -90,8 +92,9 @@ fn project_dir(args: &[OsString]) -> Result<PathBuf> {
     stuntdouble_build::find_project_dir(given.as_deref(), &cwd).with_context(|| match &given {
         Some(dir) => format!("no demo.json in {}", dir.display()),
         None => format!(
-            "no demo.json in {} or above it (pass --demo <dir>, or run scenecast new first)",
-            cwd.display()
+            "no demo.json in {} or above it (pass --demo <dir>, or run {} new first)",
+            cwd.display(),
+            crate::program()
         ),
     })
 }

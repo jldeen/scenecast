@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -52,7 +52,8 @@ console.log(`StuntDouble ${version}: ${made.length} tarball(s) in ${OUT}`);
 
 if (INTO) {
   const f = join(INTO, 'package.json');
-  const pkg = JSON.parse(readFileSync(f, 'utf8'));
+  // A demo `stunt new` just made has no package.json yet: it gets a private one.
+  const pkg = existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : { name: basename(resolve(INTO)).toLowerCase().replace(/[^a-z0-9._-]+/g, '-'), private: true };
   const rel = t => 'file:' + relative(INTO, join(OUT, t)).split('\\').join('/');
   const tars = readdirSync(OUT).filter(t => t.endsWith('.tgz'));
   const tarOf = name => tars.find(t => t === `${name.replace('@', '').replace('/', '-')}-${version}.tgz`);

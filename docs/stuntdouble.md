@@ -37,8 +37,10 @@ cd ~/git/my-demo && npm install          # gh detour run -- npm install, on a ma
 npx stunt serve --open                    # or: stunt build, stunt check, stunt notes, …
 ```
 
-Every `replica <command>` from replica-kit is `stunt <command>` (`replica build` is `stunt build`, and so on). A
-replica-kit demo builds and serves unchanged: `demo.json`, `recording.json`, `flow.overrides.mjs`, `focus.mjs`,
+Every `replica <command>` from replica-kit is `stunt <command>` (`replica build` is `stunt build`, and so on),
+except two: the full checklist (`replica fidelity`) is `stunt check`, and the recorded path twice (`replica check`)
+is `stunt check --only two-run`. `stunt fidelity` is something new: every captured state of the real product against
+the replica, each difference diagnosed and fixed. A replica-kit demo builds and serves unchanged: `demo.json`, `recording.json`, `flow.overrides.mjs`, `focus.mjs`,
 `build.hook`, `engine.modules`, `static` folders and `checks.known` all mean what they meant. Raw captures from a
 recorder older than Scenecast 0.4.5 can still hold sign-in tokens in their markup (Power BI's): the build refuses
 them, so redact them once with `stunt scrub --redact <raw folder>` before the first build.

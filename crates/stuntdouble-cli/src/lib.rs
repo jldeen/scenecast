@@ -324,9 +324,20 @@ impl From<GuideMarkStyleArg> for GuideMarkStyle {
     }
 }
 
+static PROGRAM: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// The command to name in what the CLI prints: `stunt` (npm's name for the `stuntdouble` binary) or `scenecast`.
+pub(crate) fn program() -> &'static str {
+    match PROGRAM.get().copied().unwrap_or("scenecast") {
+        "stuntdouble" => "stunt",
+        other => other,
+    }
+}
+
 /// The CLI, under the name it was started as: `stuntdouble` (StuntDouble's own; `stunt` from npm runs it) or
 /// `scenecast` (Scenecast's, the same commands).
 pub fn main_as(name: &'static str) -> Result<()> {
+    let _ = PROGRAM.set(name);
     init_tracing();
     let matches = Cli::command().name(name).bin_name(name).get_matches();
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());

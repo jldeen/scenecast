@@ -14,7 +14,9 @@ let cmd = null;
 try { cmd = [binaryPath(), args]; } catch (e) {
   const BINARY_ONLY = new Set(['new', 'init', 'sync', 'schema', 'validate', 'inspect', 'add-scene', 'add-hotspot', 'add-guide-mark', 'add-section', 'export-html', 'migrate', 'install-skill', 'fidelity', 'build', 'scrub']);
   if (!args.length || BINARY_ONLY.has(args[0])) { console.error('stunt: ' + e.message); process.exit(1); }
-  cmd = [process.execPath, [join(core, 'bin', 'engine.mjs'), ...args]];
+  // As the binary means it: check is the full checklist (the engine's own `check` is the two-run check alone).
+  const engineArgs = args[0] === 'check' ? ['checklist', ...args.slice(1)] : args;
+  cmd = [process.execPath, [join(core, 'bin', 'engine.mjs'), ...engineArgs]];
 }
 const env = { ...process.env, STUNTDOUBLE_JS: dirname(core), STUNTDOUBLE_NODE: process.env.STUNTDOUBLE_NODE || process.execPath };
 const child = spawn(cmd[0], cmd[1], { stdio: 'inherit', env });
