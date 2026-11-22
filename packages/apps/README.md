@@ -96,7 +96,10 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
   a `note` says there is none. `{ "same": "<write id>" }` reuses another write's undo or check.
 - `check`: read-only (`steps` may only look; `checkPack` refuses a check step that could change something).
 - `effects`: what a run leaves besides its writes (memories, tasks in Recent), each with a check.
-- `safe`: steps that look like writes but aren't (Enter in the admin center's tool search only filters).
+- `safe`: clicks that look like writes but only open a picker or a menu (Microsoft IQ's "Add content to …" opens the
+  add picker; "Add to business plugin" is the write). `checkPack` holds each to that: `on` is a click, `what` says it
+  "only opens" a picker or menu, it's never a sign-in or account control, and no write in the pack has the same step.
+  `safeFor(pack, step)` finds one.
 
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
@@ -124,6 +127,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `applyPacks(cfg)` | recording settings: `{ record, used }` (below) |
 | `themePack(app, theme)`, `platformPack(app, platform)` | a theme or platform pack, by demo app id or pack id |
 | `writeFor(pack, step, field)` | the write a parsed plan step makes, or null |
+| `safeFor(pack, step, field)` | the safe entry for a plan step (it only opens a picker or menu), or null |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice

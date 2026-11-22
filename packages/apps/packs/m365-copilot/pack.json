@@ -178,7 +178,7 @@
       "on": {
         "kind": "press",
         "key": "Enter",
-        "field": "/message|ask|copilot|prompt/i"
+        "field": "/chat input|message|prompt/i"
       },
       "makes": "task",
       "undo": {
@@ -359,7 +359,7 @@
       }
     }
   ],
-  "notes": "Fluent v9 (Griffel atomic classes). Step groups open and close like the product's; their lists come from the real open capture or the run's frames. vendor/: library and measured CSS for menus whose rules load the first time they open (no capture has them).",
+  "notes": "Fluent v9 (Griffel atomic classes). Step groups open and close like the product's; their lists come from the real open capture or the run's frames. vendor/: library and measured CSS for menus whose rules load the first time they open (no capture has them). The message box is \"Message Copilot\" on a new task and \"Chat input\" in an open one.",
   "sources": [
     "inv641 flow.overrides.mjs: layout (nav, set, chips, pin), drag, groups, lateItems, vendor CSS",
     "spike E presets m365-copilot.json (busy, stream timings, group selectors, auto budget)",
