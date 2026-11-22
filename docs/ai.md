@@ -9,6 +9,28 @@ Presenters don't need to know the demo's beats. When you make a **New demo**, Sc
 | **Coach me** | Click through yourself. | Shows the next step and what to say, live: on the Record step and in a small **coach window** for your laptop screen (never on the stage). It follows a plan (drafted from your goal) and keeps up as you go; if you go your own way, it suggests what's next. Afterwards, the same as above. |
 | **I know my demo** | Record it yourself and bring your own script (as before). | Nothing. |
 
+## Make it from my script
+
+Already have your talk track? On the Record step, **Make it from my script…** and pick it: a Word document, Markdown,
+a RunLines `.sk` file, or plain text with `Do:` and `Say:` lines. Scenecast reads your beats, your lines and what you
+click in each, and makes the plan:
+
+- each Do line becomes steps on the real controls, with your prompts typed word for word;
+- each step says the screen it lands on;
+- the steps that change something (send a prompt, save, add, certify) are marked, and approving the plan approves
+  those, and only those;
+- what each line points at becomes a focus point;
+- where the product isn't what your script says, it says so once (your script says **Approve** on a **Copy file**
+  card; the product shows **Save skill**). Steps your script leaves out, it takes from the recording and marks.
+
+When the demo has been recorded before, the plan is checked against every recorded screen, so a new version of your
+script takes minutes. **Approve and start** approves the plan exactly as it is: change it after that and it asks again.
+
+Afterwards Scenecast writes `reset.md` (each change undone, and a checklist that only looks), and once the demo is
+built, the finish: your script for the presenter guide with its Do lines in presenter keys, ⌥1–⌥9 on your beats, the
+focus points, and one page to look at (`.out/review/index.html`): every screen, the timings, and anything that needs
+you. One walkthrough works the same way (`scenecast ai plan --walkthrough recording.json`).
+
 ## GitHub Copilot, through your own sign-in
 
 The AI is **GitHub Copilot**, through your own GitHub account and its Copilot plan: no keys to hand out. On the
@@ -89,6 +111,13 @@ one beat per beat of the replica: edit it under **Script** like any script.
   redaction, the sent log; pluggable), `stub.mjs` (the deterministic stand-in), `plan.mjs` (the plain-words plan and
   what asks first), `draft.mjs`, `drive.mjs` (Record for me), `write.mjs` (the talk track from a recording),
   `coach.mjs`, `cli.mjs` (`scenecast ai …`, docs/cli.md).
+- Make it from my script: `packages/script/docx.mjs` (Word to Markdown, no dependencies), `talk.mjs` (a talk track's
+  beats, Say, Do and Screen lines and prompts), `html.mjs` (a capture's controls and words, without a browser);
+  `packages/ai/walker.mjs` (the recorded screens and where each step leads, the capture browser's interface),
+  `from-script.mjs` (Do lines to steps, grounded, with writes, landings, differences and focus), `walkthrough.mjs`,
+  `reset.mjs`, `make.mjs` (plan, approval, reset), `finish.mjs` (guide script, beat keys, focus points, the review).
+  The plan's format: [engine/plan-format.md](engine/plan-format.md). App packs (`packages/apps`) give each app's names,
+  writes and their undos when they're there; without them, plain rules.
 - The recorder's `observe` command (`packages/recorder/outline-page.js`) gives the page as the AI sees it; the AI
   clicks, types and presses through the recorder's own `click`, `type` and `press` commands, so the extension (or the
   Playwright agent) captures it exactly as it would a person's clicks. The receiver serves the coach window (`/coach`).

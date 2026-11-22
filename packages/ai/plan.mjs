@@ -22,17 +22,79 @@
 // Anything else is read by the AI at that point ("Open the first tool in the list").
 // "> " lines are what to say. Steps that could send, post, approve, buy, delete or change a setting are marked
 // "ask first": they never run without the presenter's go-ahead in the app (risk()).
+//
+// Version 2 (docs/engine/plan-format.md) adds details: indented "Key: value" lines under a step (Writes, Undo,
+// Lands on, Script, Differs) or a line (Focus). A version 1 reader skips them, so v2 plans run anywhere v1 plans do.
 
-const Q = String.raw`["“”']([^"“”']*)["“”']`;
+// A quoted name or text, its quotes paired: "Kestrel's ship date" keeps its apostrophe (three groups: "…", “…”, '…').
+const Q = String.raw`(?:"([^"]*)"|“([^”]*)”|'([^']*)')`;
+const q = (m, i) => m[i] ?? m[i + 1] ?? m[i + 2];
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
+const STEP_DETAILS = [['script', 'Script'], ['differs', 'Differs'], ['writes', 'Writes'], ['undo', 'Undo']];
+const DETAIL = /^(writes|undo|lands on|script|differs|focus)\s*:\s*(.*)$/i;
+const DIRS = /^(n|s|e|w|ne|nw|se|sw)$/i;
+
+// " · " outside quotes: a Focus detail's target, then its options.
+function splitDots(s) {
+  const out = []; let cur = '', q = null;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (q) { cur += ch; if (ch === q || (q === '“' && ch === '”')) q = null; continue; }
+    if (ch === '"' || ch === '“') { q = ch; cur += ch; continue; }
+    if (ch === '·' && /\s/.test(s[i - 1] || '') && /\s/.test(s[i + 1] || '')) { out.push(cur.trim()); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out.filter(Boolean);
+}
+const quotes = s => [...String(s).matchAll(/["“]([^"“”]+)["”]/g)].map(m => m[1]);
+
+// A Focus detail: '"words"', '"a", "b"' or 'the card around "words"', then " · arrow sw", " · via Click "x"",
+// " · on <screen>".
+export function parseFocus(spec) {
+  const [head = '', ...opts] = splitDots(clean(spec));
+  const around = /^(?:the\s+)?([a-z]+)\s+around\s+["“]/i.exec(head);
+  const texts = quotes(head);
+  const f = { texts, ...(around ? { around: around[1].toLowerCase() } : {}) };
+  if (!texts.length) f.what = head;
+  for (const o of opts) {
+    let m;
+    if ((m = /^arrow(?:\s+(\w+))?$/i.exec(o))) { f.mark = 'arrow'; if (m[1] && DIRS.test(m[1])) f.dir = m[1].toLowerCase(); }
+    else if ((m = /^via\s+(.+)$/i.exec(o))) f.via = parseStep(m[1]);
+    else if ((m = /^on\s+(.+)$/i.exec(o))) f.on = m[1];
+  }
+  return f;
+}
+export function formatFocus(f) {
+  const list = (f.texts || []).map(t => `"${t}"`).join(', ');
+  let s = f.around && list ? `the ${f.around} around ${list}` : list || f.what || '';
+  if (f.mark === 'arrow') s += ` · arrow${f.dir ? ' ' + f.dir : ''}`;
+  if (f.via) s += ` · via ${formatStep(f.via)}`;
+  if (f.on) s += ` · on ${f.on}`;
+  return s;
+}
+// "chat-answer · "Kestrel moved the ship date"": the screen, then words on it (either may be left out).
+function parseLands(v) {
+  const [first = '', ...rest] = splitDots(v);
+  const text = quotes([first, ...rest].join(' '))[0] || null;
+  const screen = /^["“]/.test(first) ? null : first || null;
+  return { screen, text };
+}
+const formatLands = l => [l.screen, l.text ? `"${l.text}"` : null].filter(Boolean).join(' · ');
+function addDetail(at, key, value) {
+  if (at.kind) {
+    if (key === 'lands on') at.lands = parseLands(value);
+    else if (key !== 'focus' && value) at[key] = value;
+  } else if (key === 'focus' && value) at.focus.push(parseFocus(value));
+}
 
 export function parseStep(text) {
   const t = clean(text).replace(/\s*[—-]\s*ask (me )?first\.?$/i, '');
   let m;
   if ((m = new RegExp(`^(?:go|switch) to (?:the )?(.+?)(?: app| tab)?$`, 'i').exec(t)) && !/["“”]/.test(t)) return { kind: 'app', app: clean(m[1]).toLowerCase(), text: t };
-  if ((m = new RegExp(`^(?:click|open|select|choose|tap)(?: on)? ${Q}`, 'i').exec(t))) return { kind: 'click', target: m[1], text: t };
-  if ((m = new RegExp(`^hover(?: over| on)? ${Q}`, 'i').exec(t))) return { kind: 'hover', target: m[1], text: t };
-  if ((m = new RegExp(`^type ${Q}(?: (?:in|into) ${Q})?`, 'i').exec(t))) return { kind: 'type', value: m[1], target: m[2] || null, text: t };
+  if ((m = new RegExp(`^(?:click|open|select|choose|tap)(?: on)? ${Q}`, 'i').exec(t))) return { kind: 'click', target: q(m, 1), text: t };
+  if ((m = new RegExp(`^hover(?: over| on)? ${Q}`, 'i').exec(t))) return { kind: 'hover', target: q(m, 1), text: t };
+  if ((m = new RegExp(`^type ${Q}(?: (?:in|into) ${Q})?`, 'i').exec(t))) return { kind: 'type', value: q(m, 1), target: q(m, 4) || null, text: t };
   if ((m = /^press (?:the )?([a-z0-9+]+)(?: key)?\.?$/i.exec(t))) return { kind: 'press', key: normKey(m[1]), text: t };
   if (/^wait\b/i.test(t)) return { kind: 'wait', text: t };
   if ((m = /^scroll (down|up)\b/i.exec(t))) return { kind: 'scroll', dir: m[1].toLowerCase(), text: t };
@@ -58,19 +120,27 @@ export function formatStep(s) {
 
 export function parsePlan(text) {
   const plan = { title: '', beats: [] };
-  let beat = null;
-  const ensure = () => { if (!beat) { beat = { title: 'Beat 1', steps: [], say: [] }; plan.beats.push(beat); } return beat; };
+  let beat = null, last = null;
+  const ensure = () => { if (!beat) { beat = { title: 'Beat 1', steps: [], say: [], lines: [] }; plan.beats.push(beat); } return beat; };
   for (const raw of String(text || '').replace(/\r/g, '').split('\n')) {
     const r = raw.trim();
     if (!r) continue;
     let m;
-    if ((m = /^#\s+(.+)$/.exec(r)) && !plan.title && !plan.beats.length) { plan.title = clean(m[1]); continue; }
-    if ((m = /^#{2,6}\s+(.+)$/.exec(r))) { beat = { title: clean(m[1].replace(/^(?:beat|scene|part)\s+\d+\s*[:·.\-–—]?\s*/i, '')) || `Beat ${plan.beats.length + 1}`, steps: [], say: [] }; plan.beats.push(beat); continue; }
-    if ((m = /^>\s?(.*)$/.exec(r))) { if (clean(m[1])) ensure().say.push(clean(m[1])); continue; }
-    if ((m = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(r))) { ensure().steps.push(parseStep(m[1])); continue; }
+    if ((m = /^#\s+(.+)$/.exec(r)) && !plan.title && !plan.beats.length) { plan.title = clean(m[1]); last = null; continue; }
+    if ((m = /^#{2,6}\s+(.+)$/.exec(r))) { beat = { title: clean(m[1].replace(/^(?:beat|scene|part)\s+\d+\s*[:·.\-–—]?\s*/i, '')) || `Beat ${plan.beats.length + 1}`, steps: [], say: [], lines: [] }; plan.beats.push(beat); last = null; continue; }
+    if ((m = /^>\s?(.*)$/.exec(r))) { if (clean(m[1])) { const b = ensure(); b.say.push(clean(m[1])); b.lines.push(last = { text: clean(m[1]), focus: [] }); } continue; }
+    if ((m = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(r))) { ensure().steps.push(last = parseStep(m[1])); continue; }
+    if ((m = DETAIL.exec(r)) && last) addDetail(last, m[1].toLowerCase(), clean(m[2]));
   }
   plan.beats = plan.beats.filter(b => b.steps.length || b.say.length);
   return plan;
+}
+
+// A step's details, as written under it.
+function stepDetails(s) {
+  const out = STEP_DETAILS.filter(([k]) => s[k]).map(([k, label]) => `${label}: ${clean(s[k])}`);
+  if (s.lands && (s.lands.screen || s.lands.text)) out.push(`Lands on: ${formatLands(s.lands)}`);
+  return out;
 }
 
 export function formatPlan(plan) {
@@ -79,15 +149,26 @@ export function formatPlan(plan) {
     out.push(`## Beat ${i + 1} · ${b.title || `Beat ${i + 1}`}`, '');
     let field = null;
     for (const s of b.steps) {
-      out.push(`- ${formatStep(s)}${risk(s, null, s.kind === 'press' ? field : undefined) ? ' — ask first' : ''}`);
+      out.push(`- ${formatStep(s)}${s.writes || risk(s, null, s.kind === 'press' ? field : undefined) ? ' — ask first' : ''}`);
+      for (const d of stepDetails(s)) out.push(`  ${d}`);
       if (s.kind === 'type') field = s.target ? { name: s.target } : null;
       else if (s.kind !== 'press') field = null;
     }
-    if (b.steps.length && b.say.length) out.push('');
-    for (const l of b.say) out.push(`> ${l}`);
+    const lines = b.lines && b.lines.length ? b.lines : (b.say || []).map(text => ({ text, focus: [] }));
+    if (b.steps.length && lines.length) out.push('');
+    for (const l of lines) {
+      out.push(`> ${l.text}`);
+      for (const f of l.focus || []) out.push(`  Focus: ${formatFocus(f)}`);
+    }
     out.push('');
   });
   return out.join('\n');
+}
+
+// The steps approving the plan approves: each with what it writes and how it's undone.
+export function writesOf(plan) {
+  return plan.beats.flatMap((b, bi) => b.steps.map((s, si) => ({ s, bi, si })).filter(x => x.s.writes)
+    .map(({ s, bi, si }) => ({ beat: bi, step: si, text: formatStep(s), writes: s.writes, undo: s.undo || null, lands: s.lands || null })));
 }
 
 // Would this step send, post, approve, buy, delete or change something? Then the presenter says go first.

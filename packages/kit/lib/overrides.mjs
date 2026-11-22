@@ -44,6 +44,7 @@ export function checkFocusJson(v) {
     if (!(str(p.find) || (Array.isArray(p.union) && p.union.length && p.union.every(u => str(u) || (u && typeof u === 'object' && Object.keys(u).every(k => MATCHER_KEYS.has(k))))))) bad.push(`${w}: find or union`);
     if (p.mark !== undefined && !['rect', 'arrow', 'box', 'zoom'].includes(p.mark)) bad.push(`${w}: mark`);
     if (p.dir !== undefined && !['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(p.dir)) bad.push(`${w}: dir`);
+    if (p.via !== undefined && !(p.via && Array.isArray(p.via.from) && p.via.from.length && p.via.from.every(s => str(s, 200)) && str(p.via.to, 200))) bad.push(`${w}: via is { from: [states], to: state }`);
   }
   return bad;
 }

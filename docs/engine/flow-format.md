@@ -266,7 +266,9 @@ default export is the list, or a function of the flow that returns it. With any 
 
 `beat` is the ⌥ key that lands just before it: after that key, ⌥F starts at the beat's first point that's on the
 screen, and skips points that aren't. `{ text, up }` is the element around a text (`up`: a selector for `closest()`,
-or a number of parents). `open` opens step groups first. The view zooms to fit the target and its mark with a 9%
+or a number of parents). `open` opens step groups first. `via: { from: [states], to: state }` is a point one step on from where the
+presenter is (a tab, a panel): on a `from` screen, ⌥F counts it as next, moves the app to `to` the way that click
+would, and frames it. At a beat's last point ⌥F stays put. The view zooms to fit the target and its mark with a 9%
 margin, never past `zoom`; a target against the screen's edge gets the most zoom that keeps the mark on screen.
 
 ### `focus.json` and `flow.editor.json`
@@ -316,6 +318,8 @@ the next focus point (**⌥⇧F** the one before; while zoomed, **Esc** zooms ou
 
 ## Changes
 
+- **1**: added, optional: focus points' `via` (from replica-kit's LTG1189/LTG1194 replicas); `source: "plan"` points
+  in `focus.json`, from Make it from my script.
 - **1** (scenecast 0.2, Phase 4): added, all optional: `focus.json` (with `source`, `label`) and
   `flow.editor.json` in the demo folder; focus points `line` may be a script line id (`"2.1"`).
 - **1** (kit 1.4.0): added, all optional: `focus`, `focusOptions`, `modules` (from `focus.mjs` and demo.json

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parsePlan, parseStep, formatPlan, risk } from './plan.mjs';
+import { parsePlan, parseStep, formatPlan, risk, writesOf } from './plan.mjs';
 import { redact, compactOutline, makeModel } from './model.mjs';
 import { findItem } from './find.mjs';
 import { matches } from './coach.mjs';
@@ -22,6 +22,34 @@ test('plan: plain words to steps and back', () => {
   assert.deepEqual(parsePlan(formatPlan(p)).beats[0].steps.map(s => s.kind), p.beats[0].steps.map(s => s.kind));
   assert.match(formatPlan(p), /- Press Enter — ask first/);
   assert.equal(parseStep('Press Enter — ask first').key, 'Enter');
+  // A prompt with an apostrophe keeps all its words (it was cut at "I").
+  assert.deepEqual(parseStep(`Type "I'll check Kestrel's date" in "Message"`), { kind: 'type', value: "I'll check Kestrel's date", target: 'Message', text: `Type "I'll check Kestrel's date" in "Message"` });
+  assert.equal(parseStep('Click “Copy file”').target, 'Copy file');
+  assert.equal(parseStep("Click 'Save'").target, 'Save');
+});
+
+test('plan v2: details under steps and lines, written back as read; steps the same as without them', () => {
+  const text = [
+    '# Demo', '', '## Beat 1 · Keep it', '',
+    '- Type "Summarize it" in "Message"',
+    '- Press Enter — ask first', '  Writes: sends a prompt (a new chat)', '  Lands on: chat-answer · "Kestrel moved the ship date"',
+    '- Click "Save" — ask first', '  Script: Click "Approve" on the "Copy file" card', '  Differs: this screen has "Save", not "Approve"',
+    '  Writes: saves the skill "triage"', '  Undo: delete the skill "triage"', '  Lands on: chat-saved', '',
+    '> Now I can share it · with my team.', '  Focus: "Share" · arrow sw', '  Focus: the card around "Work IQ", "Fabric IQ · Semantic model" · via Hover over "Work IQ" · on chat-saved', '',
+  ].join('\n');
+  const p = parsePlan(text);
+  const [, enter, save] = p.beats[0].steps;
+  assert.deepEqual([enter.writes, enter.lands], ['sends a prompt (a new chat)', { screen: 'chat-answer', text: 'Kestrel moved the ship date' }]);
+  assert.deepEqual([save.kind, save.target, save.script, save.undo, save.lands], ['click', 'Save', 'Click "Approve" on the "Copy file" card', 'delete the skill "triage"', { screen: 'chat-saved', text: null }]);
+  assert.deepEqual(p.beats[0].say, ['Now I can share it · with my team.']);
+  const [share, card] = p.beats[0].lines[0].focus;
+  assert.deepEqual(share, { texts: ['Share'], mark: 'arrow', dir: 'sw' });
+  assert.deepEqual([card.around, card.texts, card.via.kind, card.via.target, card.on], ['card', ['Work IQ', 'Fabric IQ · Semantic model'], 'hover', 'Work IQ', 'chat-saved']);
+  assert.equal(formatPlan(p), text);
+  assert.deepEqual(writesOf(p).map(w => [w.beat, w.step, w.text]), [[0, 1, 'Press Enter'], [0, 2, 'Click "Save"']]);
+  // A version 1 reader sees only the steps and lines: the same steps, details or not.
+  const v1 = parsePlan(text.split('\n').filter(l => !/^\s+\w[\w ]*:/.test(l)).join('\n'));
+  assert.deepEqual(v1.beats[0].steps.map(s => [s.kind, s.target || s.key || s.value]), p.beats[0].steps.map(s => [s.kind, s.target || s.key || s.value]));
 });
 
 test('ask first: sends, approvals, purchases, deletes and settings; not reading or searching', () => {

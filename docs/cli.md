@@ -194,6 +194,11 @@ scenecast ai sign-in                  # GitHub device flow: a code to enter at g
 scenecast ai status                   # signed in? the model, the settings, Copilot's runtime
 scenecast ai settings --set pageText=false --set model=auto
 scenecast ai plan   --demo <dir>      # plan.md from ai.json's goal and/or source.md, and each app's start screen
+scenecast ai plan   --demo <dir> --script <file>        # Make it from my script: Word, Markdown, RunLines or text
+scenecast ai plan   --demo <dir> --walkthrough <recording.json> [--script <file>]   # the same from one walkthrough
+scenecast ai approve --demo <dir>     # approve plan.md as it is (its writes); any edit needs approving again
+scenecast ai reset  --demo <dir>      # reset.md: each write undone, and a read-only checklist
+scenecast ai finish --demo <dir>      # after the build: script.md for the guide, ⌥1–⌥9, focus points, .out/review/
 scenecast ai record --demo <dir>      # Record for me: the approved plan, in the browser, while recording; then script.md
 scenecast ai script --demo <dir>      # the talk track (script.md) from the recording: one beat per replica beat
 scenecast ai coach  --demo <dir>      # Coach me: the next step and line, live, until the recording stops

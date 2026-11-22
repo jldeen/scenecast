@@ -35,6 +35,11 @@ const KNOWN = [
   ['no recording: /Users/j/.scenecast/x/raw (record the demo first: scenecast record start)', 'no-recording'],
   ['1 credential found: the build stopped', 'credential'],
   ['paste or open the script first', 'script-empty'],
+  ['/Users/j/Documents/Act 1 talk track.docx: there\u2019s no such file', 'script-file-gone'],
+  ['/Users/j/Documents/notes.docx: there\'s no such file', 'script-file-gone'],
+  ['notes.docx: no lines to say in it (a table with a Say column, > quotes, \u201cquoted\u201d lines, or Say: lines)', 'script-no-lines'],
+  ['make the plan first', 'plan-first'],
+  ['build the demo first: the finish needs its screens', 'build-first'],
   ['the script is empty', 'script-empty'],
   ['start presenting first: the guide follows the stage', 'guide-before-stage'],
   ['couldn\u2019t read the browser\u2019s profiles', 'profiles-unreadable'],
@@ -80,7 +85,7 @@ test('titles and sentences are short and never in the engine\u2019s words', () =
 });
 
 test('at most one action, and only ones the window knows', () => {
-  const known = new Set(['preflight', 'preflight-fix', 'install', 'receiver-fix', 'record-start', 'record-stop', 'ai-sign-in', 'present-start', 'show-logs']);
+  const known = new Set(['preflight', 'preflight-fix', 'install', 'receiver-fix', 'record-start', 'record-stop', 'ai-sign-in', 'present-start', 'show-logs', 'ai-plan-script']);
   for (const [message] of KNOWN) {
     const a = explain(message, { ...ctx, retry: 'ai-sign-in' }).action;
     if (a) assert.ok(a.label && (known.has(a.action) || a.goto || a.copy), `${message}: ${JSON.stringify(a)}`);

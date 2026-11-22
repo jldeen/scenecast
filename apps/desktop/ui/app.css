@@ -208,6 +208,9 @@ select.inline { width: auto; padding: 6px 10px; }
 .rd-row .steps li { position: relative; padding-left: 18px; font-size: 14px; color: var(--ink-2); }
 .rd-row .steps li::before { content: ""; position: absolute; left: 3px; top: .55em; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-top: 1.5px solid var(--muted); transform: rotate(45deg); }
 .tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
+/* A plan step's details: what it changes, and where the product isn't what her script says. */
+.rd-row .steps li small { display: block; font-size: var(--t-label); color: var(--muted); }
+.rd-row .steps li small.differs { color: var(--warn); }
 .rd-head small details { display: inline; }
 .rd-head small details summary { display: inline; margin-left: 4px; }
 .rd-head .next .alink svg.i { width: 16px; height: 16px; }

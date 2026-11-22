@@ -550,6 +550,7 @@ try {
   await shot('15-new-record-for-me');
   await chat.goto(fx.chat); await admin.goto(fx.admin); await chat.bringToFront();
   await waitFor('the recorder to connect', async () => (await attr('recorder-state', 'data-connected')) === 'true', 60000);
+  check('Copilot mode can make the demo from her script', await exists('ai-plan-script'));
   // Draft the plan checks the tabs first (it reads each start screen), the same check as Start's.
   await click('ai-plan');
   // Done, or an error (then what it said, in the failure).

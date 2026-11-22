@@ -1033,7 +1033,20 @@ async fn ai_save(
 }
 
 #[tauri::command]
-async fn ai_plan(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+async fn ai_plan(
+    state: State<'_, Shared>,
+    app: AppHandle,
+    id: String,
+    script: Option<String>,
+) -> Res<Value> {
+    // Make it from my script: her talk track, mapped onto the screens the demo has recorded (or her words alone for
+    // a new demo). Nothing in the browser is needed.
+    if let Some(file) = script {
+        return job(state, app, id, "ai-plan", move |dir, busy| {
+            scenecast_app::ai::run(Some(dir), &["plan", "--script", &file], |u| busy.emit(u))
+        })
+        .await;
+    }
     let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
     let (to, who) = (app.clone(), id.clone());
     job(state, app, id, "ai-plan", move |dir, busy| {
@@ -1046,6 +1059,13 @@ async fn ai_plan(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Va
         scenecast_app::ai::run(Some(dir), &["plan"], |u| busy.emit(u))
     })
     .await
+}
+
+/// The presenter's one approval: plan.md as it is now, with the writes it lets the run do (any edit needs another).
+#[tauri::command]
+async fn ai_approve(state: State<'_, Shared>, id: String) -> Res<Value> {
+    let dir = state.library.dir(&id)?;
+    blocking(move || scenecast_app::ai::run(Some(&dir), &["approve"], |_| {})).await
 }
 
 /// Record for me: the approved plan, in the presenter's browser, while it records; then the talk track.
@@ -1150,6 +1170,28 @@ async fn ai_coach(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<(
 
 /// A text file the presenter picks (notes, a doc saved as text or Markdown, an email, a script, a RunLines .sk):
 /// `{ name, text }`, or nothing when they cancel.
+/// Her talk track for Make it from my script: Word, Markdown, RunLines or text. The engine reads it where it is.
+#[tauri::command]
+async fn pick_script_file(app: AppHandle) -> Res<Option<Value>> {
+    blocking(move || {
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title("Open your script")
+            .add_filter("Talk track", &["docx", "md", "markdown", "txt", "sk"])
+            .blocking_pick_file()
+            .and_then(|f| f.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(json!({
+            "name": file.file_name().map(|n| n.to_string_lossy().into_owned()),
+            "path": file,
+        })))
+    })
+    .await
+}
+
 #[tauri::command]
 async fn pick_text_file(app: AppHandle) -> Res<Option<Value>> {
     blocking(move || {
@@ -1922,6 +1964,7 @@ fn main() {
             ai_get,
             ai_save,
             ai_plan,
+            ai_approve,
             ai_record,
             ai_script,
             ai_answer,
@@ -1929,6 +1972,7 @@ fn main() {
             ai_coach,
             ai_coach_window,
             pick_text_file,
+            pick_script_file,
             logs_dir,
             edit_start,
             edit_stop,

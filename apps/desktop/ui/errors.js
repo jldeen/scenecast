@@ -82,6 +82,17 @@ export const CATALOG = [
 
   { id: 'script-empty', test: /the script is empty|paste or open the script first|no script at/i,
     title: () => 'Add your talk track first', body: () => 'Paste it, or open a file.', action: () => null },
+  // Make it from my script.
+  { id: 'script-file-gone', test: /: there.s no such file$/i,
+    title: () => 'Scenecast can\u2019t find that script', body: () => 'It may have moved. Open it again from where it is now.',
+    action: () => A('Open my script', { action: 'ai-plan-script' }) },
+  { id: 'script-no-lines', test: /no lines to say in it/i,
+    title: () => 'There\u2019s nothing to say in that file', body: () => 'Scenecast reads a Say column, lines in quotes, > lines or Say: lines. Open your talk track.',
+    action: () => A('Open another file', { action: 'ai-plan-script' }) },
+  { id: 'plan-first', test: /^make the plan first$/i,
+    title: () => 'Make the plan first', body: () => 'Draft it, or make it from your script.', action: () => null },
+  { id: 'build-first', test: /build the demo first/i,
+    title: () => 'Build the demo first', body: () => 'Finishing it needs its screens.', action: () => A('Go to Review', { goto: 'review' }) },
   { id: 'guide-before-stage', test: /start presenting first/i,
     title: () => 'Start presenting first', body: () => 'The presenter guide follows the stage, so it opens once the stage is up.',
     action: () => A('Start presenting', { action: 'present-start' }) },
