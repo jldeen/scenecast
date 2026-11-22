@@ -173,20 +173,31 @@ export function platformPack(appOrPack, platform, cfg) {
 // The pack write a plan step makes (or null). step is a parsed plan step ({ kind: 'click', target } or { kind: 'press',
 // key }); field is the focused field for a key press ({ name, role }). A write's on.target / on.field is text or /regex/.
 const like = (m, s) => m == null || (s != null && (m.length > 2 && m.startsWith('/') && m.lastIndexOf('/') > 0 ? new RegExp(m.slice(1, m.lastIndexOf('/')), m.slice(m.lastIndexOf('/') + 1) || 'i').test(s) : String(s).toLowerCase() === m.toLowerCase()));
+const isRe = m => typeof m === 'string' && m.length > 2 && m.startsWith('/') && m.lastIndexOf('/') > 0;
+const stepIs = (on = {}, step, field) => {
+  if (on.kind === 'switch') return step.kind === 'click' && like(on.target, step.target);
+  if (on.kind !== step.kind) return false;
+  if (on.kind === 'press') return on.key === step.key && like(on.field, field && field.name);
+  if (on.kind === 'type') return like(on.field, step.target || (field && field.name));
+  return like(on.target, step.target);
+};
 export function writeFor(pack, step, field) {
   if (!pack || !step) return null;
-  return (pack.writes || []).find(w => {
-    const on = w.on || {};
-    if (on.kind === 'switch') return step.kind === 'click' && like(on.target, step.target);
-    if (on.kind !== step.kind) return false;
-    if (on.kind === 'press') return on.key === step.key && like(on.field, field && field.name);
-    if (on.kind === 'type') return like(on.field, step.target || (field && field.name));
-    return like(on.target, step.target);
-  }) || null;
+  return (pack.writes || []).find(w => stepIs(w.on, step, field)) || null;
+}
+// The pack's safe entry for a plan step (or null): a control that looks like a write but only opens a picker or a
+// menu ("Add content to Our numbers"); the write is a later step (Add to business plugin).
+export function safeFor(pack, step, field) {
+  if (!pack || !step) return null;
+  return (pack.safe || []).find(s => stepIs(s.on, step, field)) || null;
 }
 
 // A check step only looks: no step that could send, save, delete or change a setting.
 const WRITE_WORDS = /^(?:click|select|choose|tap|press|type)\b.*\b(?:send|post|save|delete|remove|approve|add|submit|certif|endorse|merge|publish|enable|disable|switch|turn (?:on|off)|create|resolve|archive)\b/i;
+// A safe entry only opens a picker or a menu, and is never a sign-in or account control.
+const OPENS = /\bonly opens\b[^.;]*\b(?:picker|menu)\b/i;
+const SIGN_IN = /\b(?:sign|log)[ -]?(?:in|on|out)\b|\baccount\b|\bpassword\b|\bauthenticat|\bconsent\b/i;
+const WRITE_NAME = /^(?:send|post|save|delete|remove|approve|submit|merge|publish|confirm|certified|promoted|commit|resolve|archive)\b/i;
 const SECRET = /(?:authorization"\s*:\s*"|\bbearer\s+[a-z0-9._-]{12,}|\beyJ[a-zA-Z0-9_-]{20,}\.|\bghp_[A-Za-z0-9]{20,}|\bgithub_pat_|\bxox[bp]-|\bsk-[A-Za-z0-9]{20,}|access[_-]?token"\s*:\s*"[^"]{8,}|password"\s*:\s*"[^"]+)/i;
 
 // Problems with a pack's shape (the tests and the drafting tool check every pack with it).
@@ -216,6 +227,17 @@ export function checkPack(p) {
       for (const s of ((w.check || {}).steps || [])) if (WRITE_WORDS.test(s)) out.push(`${at}: check step "${s}" could change something; checks only look`);
       if (w.undo && w.undo.api && !w.undo.api.use) out.push(`${at}: undo.api.use names an api (apis.<name>) whose host comes from the browser's own requests`);
     }
+  }
+  for (const s of p.safe || []) {
+    const at = `safe ${s.id || '?'}`, on = s.on || {};
+    if (!s.id) out.push(`${at}: id`);
+    if (on.kind !== 'click' || !on.target) out.push(`${at}: on { kind: 'click', target } (the control that opens a picker or a menu)`);
+    if (!OPENS.test(s.what || '')) out.push(`${at}: what says it only opens a picker or a menu ("… only opens the add picker; … is what adds")`);
+    if (SIGN_IN.test([on.target, on.field, s.what].filter(Boolean).join(' '))) out.push(`${at}: a sign-in or account control is never safe`);
+    const literal = on.target && !isRe(on.target) ? on.target : null;
+    if (literal && WRITE_NAME.test(literal)) out.push(`${at}: "${literal}" names a write`);
+    const hits = (p.writes || []).filter(w => literal ? stepIs(w.on, { kind: 'click', target: literal }) : w.on && w.on.target && !isRe(w.on.target) && like(on.target, w.on.target));
+    for (const w of hits) out.push(`${at}: write ${w.id} has the same step; a safe step never writes`);
   }
   for (const [name, a] of Object.entries(p.apis || {})) if (!a.open || !(a.host || a.hostPattern)) out.push(`apis ${name}: open (the page that signs in) and host or hostPattern`);
   const text = JSON.stringify(p, (k, v) => k.startsWith('_') ? undefined : v);

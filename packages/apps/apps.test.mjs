@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, checkPack, themePack } from './index.mjs';
+import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack } from './index.mjs';
 import { flowDefaults, htmlPasses } from './build.mjs';
 import { packRules } from '../recorder/pack-rules.mjs';
 import { elementEnd } from '../recorder/compose.mjs';
@@ -114,6 +114,8 @@ test('build rules (the stand-in applier): conditions, kinds, attributes stripped
 test('a plan step maps to the write it makes, and checks only look', () => {
   const cop = byId('m365-copilot');
   assert.equal(writeFor(cop, parseStep('Press Enter'), { name: 'Message Copilot' }).id, 'new-task');
+  assert.equal(writeFor(cop, parseStep('Press Enter'), { name: 'Chat input' }).id, 'new-task', 'the composer in an open task');
+  assert.equal(writeFor(cop, parseStep('Press Enter'), { name: 'Search' }), null);
   assert.equal(writeFor(cop, parseStep('Click "Save"')).id, 'save-skill');
   assert.equal(writeFor(cop, parseStep('Click "Approve"')).id, 'approve');
   assert.equal(writeFor(cop, parseStep('Click "Enable Fabric IQ"')).id, 'plugin-switch');
@@ -121,4 +123,17 @@ test('a plan step maps to the write it makes, and checks only look', () => {
   const bad = { ...cop, writes: [{ id: 'w', what: 'x', on: { kind: 'click', target: 'X' }, undo: null, check: { steps: ['Click "Delete"'] } }], apis: { a: { open: 'https://x', host: 'h' } }, notes: ['Bear', 'er ', 'x'.repeat(24)].join('') };
   const problems = checkPack(bad);
   assert.ok(problems.some(p => /could change something/.test(p)) && problems.some(p => /credential or token/.test(p)));
+});
+
+test('safe steps only open a picker or a menu: never a write, never a sign-in', () => {
+  const iq = byId('microsoft-iq');
+  assert.equal(safeFor(iq, parseStep('Click "Add content to Our numbers"')).id, 'add-content');
+  assert.equal(safeFor(iq, parseStep('Click "Add endorsement"')).id, 'endorse-menu');
+  assert.equal(writeFor(iq, parseStep('Click "Add content to Our numbers"')), null);
+  assert.equal(safeFor(iq, parseStep('Click "Certified"')), null);
+  const bad = safe => checkPack({ ...iq, safe: [safe] });
+  assert.match(bad({ id: 's', on: { kind: 'click', target: 'Sign in' }, what: 'Sign in only opens the account menu' }).join(), /sign-in or account/);
+  assert.match(bad({ id: 's', on: { kind: 'click', target: 'Filter' }, what: 'Filter changes nothing' }).join(), /only opens a picker or a menu/);
+  assert.match(bad({ id: 's', on: { kind: 'click', target: 'Certified' }, what: 'Certified only opens a menu' }).join(), /write endorse has the same step/);
+  assert.match(bad({ id: 's', on: { kind: 'press', key: 'Enter' }, what: 'Enter only opens the menu' }).join(), /kind: 'click'/);
 });
