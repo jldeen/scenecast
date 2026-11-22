@@ -399,6 +399,17 @@ pub fn preflight_with(
     dir: &Path,
     fix: bool,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    on: impl FnMut(Update),
+) -> Result<PreflightReport, AppError> {
+    crate::timeline::timed(dir, if fix { "check-fix" } else { "check" }, || {
+        preflight_inner(dir, fix, cancel, on)
+    })
+}
+
+fn preflight_inner(
+    dir: &Path,
+    fix: bool,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     mut on: impl FnMut(Update),
 ) -> Result<PreflightReport, AppError> {
     let _ = crate::receiver::host().ensure(dir);
@@ -417,6 +428,15 @@ pub fn start(dir: &Path, resume: bool) -> Result<Value, AppError> {
 /// disagree. Each item lands through `on` as it's checked. Not ready is an error that starts with "not ready to
 /// record:" and names what failed first. A resume skips the check (a fix could move a tab off its screen).
 pub fn start_ready(
+    dir: &Path,
+    resume: bool,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    on: impl FnMut(Update),
+) -> Result<Value, AppError> {
+    crate::timeline::timed(dir, "start", || start_ready_inner(dir, resume, cancel, on))
+}
+
+fn start_ready_inner(
     dir: &Path,
     resume: bool,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -498,6 +518,10 @@ fn recorded_answer(answer: Value) -> Result<Value, AppError> {
 
 /// Stops recording. Nothing recorded is an error that says why, never an empty success.
 pub fn stop(dir: &Path) -> Result<RecordSummary, AppError> {
+    crate::timeline::timed(dir, "stop", || stop_inner(dir))
+}
+
+fn stop_inner(dir: &Path) -> Result<RecordSummary, AppError> {
     let summary = recorder::record_stop(&crate::receiver::engine_for(dir)?, dir).map_err(|e| {
         match e {
             recorder::RecorderError::Recorder(m) if m == "not recording" => AppError::Invalid(

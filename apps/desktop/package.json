@@ -1,6 +1,6 @@
 {
   "name": "scenecast-desktop",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "description": "Scenecast's desktop app (Tauri, macOS and Windows): the window, its UI test and its installers.",

@@ -120,7 +120,11 @@ fn summarize(findings: Vec<ScrubFinding>) -> ScrubSummary {
 }
 
 /// Builds the demo: the recording's captures into the replica, scrubbed, then the manifest.
-pub fn build(
+pub fn build(dir: &Path, force: bool, on: impl FnMut(Update)) -> Result<BuildOutcome, AppError> {
+    crate::timeline::timed(dir, "build", || build_inner(dir, force, on))
+}
+
+fn build_inner(
     dir: &Path,
     force: bool,
     mut on: impl FnMut(Update),
@@ -235,7 +239,11 @@ pub fn parse_check_line(line: &str) -> Option<(String, String, String)> {
 
 /// The checklist on the built replica (`quick`: only what changed since the last passing check). The engine makes
 /// the presenter guide's notes again from the script first, when the demo has a guide.
-pub fn checks(
+pub fn checks(dir: &Path, quick: bool, on: impl FnMut(Update)) -> Result<ChecksOutcome, AppError> {
+    crate::timeline::timed(dir, "checks", || checks_inner(dir, quick, on))
+}
+
+fn checks_inner(
     dir: &Path,
     quick: bool,
     mut on: impl FnMut(Update),

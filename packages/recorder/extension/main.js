@@ -21,10 +21,10 @@ OPS.stageWindow = async c => {
     if (t) {
       if (c.place) await chrome.windows.update(t.windowId, { state: 'normal', left: c.place.x, top: c.place.y, width: c.place.width, height: c.place.height });
       await chrome.windows.update(t.windowId, { state: 'fullscreen', focused: true });
-      await sleep(300);
+      await poll(300);
       return { window: t.windowId, state: (await chrome.windows.get(t.windowId)).state };
     }
-    await sleep(500);
+    await poll(500);
   }
   return { error: 'no stage window' };
 };
@@ -94,7 +94,7 @@ setInterval(() => {
   startLoop();
   // A recording was running when the worker stopped: pick it up from the receiver's checkpoint.
   if (st.recording) {
-    for (let i = 0; i < 30; i++) { if (await findReceiver().catch(() => null)) break; await sleep(2000); }
+    for (let i = 0; i < 30; i++) { if (await findReceiver().catch(() => null)) break; await poll(2000); }
     const r = await START({ ...st.recording, resume: true }).catch(e => ({ error: String(e) }));
     await rlog('service worker restarted mid-recording: ' + JSON.stringify(r).slice(0, 400));
     if (r && r.error) await chrome.storage.local.remove('recording');

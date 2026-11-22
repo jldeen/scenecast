@@ -4,6 +4,9 @@
 // (bash). Nothing here clicks or types unless a command says so; the recorder (recorder.js) only watches.
 const ctx = page0.context();
 // Every fixed wait is counted (SLEPT.ms), so the recorder can say how much of its time was waiting rather than work.
+// Only deliberate waits inside work (settle delays in a sweep, before a click): timeouts, polling loops and the command
+// loop use poll(), which isn't counted. Counting those too made "fixed waits" more than the time it measured (a 3 s
+// timeout counted in full each time, and loops running side by side counted twice).
 const SLEPT = { ms: 0 };
 const sleep = ms => { SLEPT.ms += ms; return new Promise(r => setTimeout(r, ms)); };
 const poll = ms => new Promise(r => setTimeout(r, ms));
@@ -36,7 +39,7 @@ const exposeShadow = typeof EXPOSE_SHADOW === 'function' ? EXPOSE_SHADOW : async
 // already watches are asked for a mark, and a tab is attached before it's handed back.
 async function pageFor(spec) {
   if (!spec) return (ctx.activePage && await ctx.activePage()) || page0;
-  const markOf = p => Promise.race([p.evaluate(() => sessionStorage.getItem('d1tab')), sleep(3000).then(() => null)]).catch(() => null);
+  const markOf = p => Promise.race([p.evaluate(() => sessionStorage.getItem('d1tab')), poll(3000).then(() => null)]).catch(() => null);
   for (const p of ctx.pages()) { if (p.attached === false) continue; if ((await markOf(p)) === spec) return p; }
   // A marked tab among the ones whose address matches wins even if it isn't attached yet (after the recorder reloads).
   const hits = ctx.pages().filter(p => p.url().includes(spec));
@@ -215,7 +218,7 @@ async function stream(p, name, { everyMs = 600, maxS = 900, until = 'quiet', set
       if (s.approve && quiet * everyMs > settleS * 1000) { st.state = 'approve'; break; }
       if ((!spec.done || s.said) && !s.working && !s.approve && quiet * everyMs > settleS * 1000) { st.state = 'done'; break; }
     } else if (until === 'quiet' && quiet * everyMs > settleS * 1000) { st.state = 'done'; break; }
-    await sleep(everyMs);
+    await poll(everyMs);
   }
   if (st.state === 'running') st.state = st.stop ? 'stopped' : 'timeout';
   st.secs = Math.round((Date.now() - st.t0) / 1000);
@@ -317,7 +320,7 @@ function startLoop() { (async () => {
   await rlog('agent started; pages ' + ctx.pages().length);
   while (RUNNING) {
     const c = await get('/cmd' + (typeof AGENT_QS === 'function' ? await AGENT_QS() : ''));
-    if (c.error) { await sleep(2000); continue; }
+    if (c.error) { await poll(2000); continue; }
     if (!c.op || c.op === 'idle') continue;
     if (c.op === 'quit') { RUNNING = false; await post('/cmd/result', { id: c.id, ok: true, value: 'bye' }); break; }
     const t0 = Date.now(), quiet = QUIET_OPS.has(c.op);

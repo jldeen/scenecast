@@ -324,6 +324,7 @@ try {
     (await exists('making-failed')) ? await text('making-failed') : JSON.stringify({ screens: await attr('review', 'data-screens'), differ: await attr('review', 'data-differ') }));
   const differ = +(await attr('review', 'data-differ'));
   check('Review: the one next step (Fix it for me, or Next: rehearse)', differ ? await exists('review-fix') : await exists('review-next'), differ);
+  check('Review says where the time went: recorded in, finished in, built in', +(await attr('times', 'data-record')) > 0 && (await attr('times', 'data-build')) !== '' && /Recorded in .* built in/.test(await text('times')), await exists('times') ? await text('times') : 'no times line');
   await shot('06b-review');
   // Its build and checks, in full, a tab away.
   await click('tab-build');

@@ -37,7 +37,11 @@ pub fn last(dir: &Path) -> Option<FidelityView> {
 }
 
 /// Runs the loop (`fix`: diagnose and patch; else compare and report only).
-pub fn run(dir: &Path, fix: bool, mut on: impl FnMut(Update)) -> Result<FidelityView, AppError> {
+pub fn run(dir: &Path, fix: bool, on: impl FnMut(Update)) -> Result<FidelityView, AppError> {
+    crate::timeline::timed(dir, "compare", || run_inner(dir, fix, on))
+}
+
+fn run_inner(dir: &Path, fix: bool, mut on: impl FnMut(Update)) -> Result<FidelityView, AppError> {
     let opts = FidelityOptions {
         fix,
         ..FidelityOptions::default()

@@ -34,6 +34,7 @@ pub mod rundown;
 pub mod script;
 pub mod servers;
 pub mod share;
+pub mod timeline;
 
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};

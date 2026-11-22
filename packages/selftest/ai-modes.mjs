@@ -24,7 +24,7 @@ const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) :
 if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p scenecast-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 const keep = process.argv.includes('--keep');
 const REAL = process.argv.includes('--real');
-const only = (process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : REAL ? '1' : '1,2,3').split(',').map(Number);
+const only = (process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : REAL ? '1' : '1,2,3,4').split(',').map(Number);
 const RX_PORT = 47695, REPLICA_PORT = 4695;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-ai-'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -256,6 +256,19 @@ try {
     await finish('coach', DEMO);
     times.coach = Math.round((Date.now() - t0) / 1000);
   }
+  // ---- 4 · The benchmark: a saved plan run unattended, every phase timed -----------------------------------------
+  // "May I?" is answered from --yes only (Enter is allowed, Send isn't: skipped, never done).
+  if (only.includes(4) && !REAL) {
+    const DEMO = await newDemo('bench', { mode: 'record', goal: 'bench' });
+    const plan = join(tmp, 'bench-plan.md');
+    writeFileSync(plan, '# Bench\n\n## Beat 1 · Ask\n\n- Go to chat\n- Type "Summarize the supplier delay on PO-450101" in "Message"\n- Press Enter — ask first\n- Wait for the answer\n\n## Beat 2 · Admin\n\n- Go to admin\n- Click "Plugins"\n- Go to chat\n- Click "Send" — ask first\n');
+    const pr = aiProc(['bench', '--demo', DEMO, '--plan', plan, '--yes', '^Press Enter', '--no-script'], DEMO);
+    const res = await pr.done;
+    const b = existsSync(join(DEMO, '.out', 'bench.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'bench.json'), 'utf8')) : {};
+    const ph = Object.fromEntries((b.phases || []).map(p => [p.name, p]));
+    check('bench: check and record timed, unattended', res.code === 0 && ph.check?.ok && ph.record?.ok && b.secs > 0 && b.take && b.take.wallSecs > 0 && b.screens >= 3, JSON.stringify(b).slice(0, 800) + res.err.slice(-500));
+    check('bench: only the allowed "May I?" is done', b.answered?.length === 1 && /Enter/.test(b.answered[0]) && b.skipped?.some(s => /Send/.test(s)), JSON.stringify({ answered: b.answered, skipped: b.skipped }));
+  }
 } catch (e) {
   check('ai modes ran to the end', false, String(e.stack || e));
 } finally {
@@ -266,5 +279,5 @@ try {
   console.log('TIMES ' + JSON.stringify(times));
   if (keep) console.log(`kept: ${tmp}`); else rmSync(tmp, { recursive: true, force: true, maxRetries: 5 });
 }
-console.log(fails.length ? `\n${fails.length} failing: ${fails.join(', ')}` : '\nai modes: all three pass');
+console.log(fails.length ? `\n${fails.length} failing: ${fails.join(', ')}` : '\nai modes: all pass');
 process.exit(fails.length ? 1 : 0);

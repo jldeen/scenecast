@@ -21,7 +21,7 @@ const exitWhenOut = code => process.stdout.write('', () => process.exit(code));
 const args = process.argv.slice(2);
 const sub = args[0];
 const emit = e => console.log('@ai ' + JSON.stringify(e));
-const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model'].includes(args[i - 1]));
+const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model', '--plan', '--yes'].includes(args[i - 1]));
 
 async function main() {
   const settings = readSettings();
@@ -61,6 +61,10 @@ async function main() {
       const s = await writeScript({ demo: d, model: m, settings, emit });
       return { ...r, script: { beats: s.beats, lines: s.lines } };
     }
+    case 'bench': {
+      const d = demo(), { bench } = await import('./bench.mjs');
+      return bench({ demo: d, model: await model(d), settings, emit, plan: arg(args, '--plan', null), yes: arg(args, '--yes', null), build: args.includes('--build'), script: !args.includes('--no-script') });
+    }
     case 'script': { const d = demo(); const { writeScript } = await import('./write.mjs'); const s = await writeScript({ demo: d, model: await model(d), settings, emit }); return { beats: s.beats, lines: s.lines, file: s.file }; }
     case 'coach': {
       const d = demo();
@@ -78,7 +82,7 @@ async function main() {
       return { sent: readdirSync(dir).sort().map(f => { const r = JSON.parse(readFileSync(join(dir, f), 'utf8')); return { file: join(dir, f), task: r.task, model: r.model, at: r.at, chars: r.prompt.length, pageText: r.pageText }; }) };
     }
     default:
-      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|record|script|coach|answer|stop|sent');
+      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|record|bench|script|coach|answer|stop|sent');
       return null;
   }
 }

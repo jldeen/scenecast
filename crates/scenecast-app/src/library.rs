@@ -79,6 +79,9 @@ pub struct DemoStatus {
     /// When it was last rehearsed (a rehearsal that reached the first beat).
     #[serde(default)]
     pub rehearsed_at: Option<u64>,
+    /// Where the time went: the take, the finishing after Stop, the build (timeline.rs).
+    #[serde(default)]
+    pub timing: crate::timeline::Timing,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -505,9 +508,12 @@ pub fn status(dir: &Path, manifest: Option<&scenecast_core::BundleManifest>) -> 
         if recording.is_file() {
             s.recorded = true;
             s.recorded_at = millis(&recording);
-            s.screens = read_json(&recording)
+            let r = read_json(&recording);
+            s.screens = r
+                .as_ref()
                 .and_then(|r| r["states"].as_object().map(|o| o.len()))
                 .unwrap_or(0);
+            s.timing = crate::timeline::summary(dir, r.as_ref());
         }
     }
     if let Some(m) = manifest {

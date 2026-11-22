@@ -228,6 +228,17 @@ export default flow => {
     console.log(`TIME recorder ${T.recorderSecs} s (side states ${T.sweepSecs} s, captures ${T.captureSecs} s, confirming ${T.confirmSecs} s); product ${T.productSecs} s`);
     console.log(`TIME per screen: an app's first ${times.startScreenSecs} s, later ${times.laterScreenSecs} s, capture+confirm ${times.perStateSecs} s → Demo 1's shape (4 apps, 38 screens) at this density: ${times.demo1RecorderMin} min (budget 15)`);
     check('recorder time measured apart from the product\'s', T.recorderSecs > 0 && T.productSecs > 0, JSON.stringify(T));
+    // The wall-clock split (the take's timeline): what the recorder did, what the presenter waited for, the rest the
+    // presenter's own time. Fixed waits are part of each sweep, never more (they were counted twice before 0.5.1).
+    const K = T.sweepKinds || {};
+    console.log(`TIME take ${T.wallSecs} s: start ${T.startSecs} s, start-screen sweeps ${T.startSweepSecs} s, later sweeps ${T.screenSweepSecs} s, actions ${T.actionSecs} s (product ${T.productSecs} s), typed ${T.typedSecs} s, held for the recorder ${T.heldSecs} s, presenter ${T.presenterSecs} s\n  ` +
+      Object.entries(K).map(([k, v]) => `${k}: ${v.secs} s in ${v.runs} runs (${v.waitSecs} s fixed waits, ${v.found} found)`).join('\n  '));
+    const parts = T.startSecs + T.startSweepSecs + T.screenSweepSecs + T.sideSweepSecs + T.actionSecs + T.typedSecs + T.stopSecs + T.presenterSecs;
+    check('the take\'s timeline adds up to its wall clock', T.wallSecs > 0 && Math.abs(parts - T.wallSecs) <= 1 && Object.values(K).every(v => v.waitSecs <= v.secs + 0.1), JSON.stringify(T));
+    // The speed budget: the fixture take (its side states included) must not get slower than this. Lowered as each
+    // stage of the speed plan lands (docs/engine/speed.md). SCENECAST_TAKE_BUDGET overrides it for a slow machine.
+    const budget = +(process.env.SCENECAST_TAKE_BUDGET || 240);
+    check(`the fixture take stays within its time budget (${budget} s)`, T.wallSecs <= budget, `${T.wallSecs} s`);
   }
   if (MODE === 'extension') { await ctx.close(); ctx = null; } else { await browser.close(); browser = null; }
   // --record-only: stop here (for timing the recorder while working on it).

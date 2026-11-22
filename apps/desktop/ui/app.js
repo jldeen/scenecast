@@ -104,6 +104,14 @@ const q = p => /[\s"]/.test(p) ? `"${p}"` : p;
 
 // Each screen's head: what it is, one line under it, and Details (the technical view: folders, files, the matching
 // command, diagnostics) behind a button.
+// Where the time went (timeline.rs): Recorded in X · finished in Y · built in Z, with what's known.
+function timesLine(s) {
+  const t = s?.timing; if (!t || t.recordSecs == null) return '';
+  const parts = [`Recorded in ${secs(t.recordSecs)}`];
+  if (t.finishSecs != null) parts.push(`finished in ${secs(t.finishSecs)}`);
+  if (t.buildSecs != null) parts.push(`built in ${secs(t.buildSecs)}`);
+  return `<span class="small muted" data-test="times" data-record="${t.recordSecs}" data-finish="${t.finishSecs ?? ''}" data-build="${t.buildSecs ?? ''}">${parts.join(' \u00b7 ')}</span>`;
+}
 function pageHead({ title, sub = '', test = '', side = '', details = true }) {
   document.title = S.view === 'demo' && demo() ? `${demo().title} · Scenecast` : 'Scenecast';
   return `<div class="page-head"><div class="grow"><h1 ${test ? `data-test="${test}"` : ''}>${esc(title)}</h1>${sub ? `<p>${sub}</p>` : ''}</div>${side}
@@ -729,6 +737,14 @@ function headFor(d) {
   if (g === 'record' && recState(d).recording) return { title: 'Recording', sub: `Click through in ${esc(BNAME[d.browser] || 'your browser')}. Wait for \u201cReady\u201d before each click.`, side: slot };
   if (g === 'record') return { title: d.title, test: 'demo-title', sub: esc(listWords(d.apps.map(appLabel))), side: slot };
   if (g === 'review') {
+    const h = reviewHead(d, s, f, slot), tl = timesLine(s);
+    return tl && h.sub !== undefined ? { ...h, sub: `${h.sub}<br>${tl}` } : h;
+  }
+  if (g === 'present') return presentHead(d);
+  return { title: 'Send it to another presenter', sub: 'They get the replica and your guide. Not your recording, not your sign-ins.' };
+}
+function reviewHead(d, s, f, slot) {
+  {
     const c = J(d.id).aiChain;
     if (c && !['done', 'error'].includes(c.stage)) return { title: c.stage === 'fix' ? 'Fixing what differs' : 'Making your replica', sub: 'Scenecast is building it and checking it against the real product.', side: slot };
     if (!s.recorded) return { title: 'Nothing to review yet', sub: 'Record the demo first: each screen shows up here.' };
@@ -746,8 +762,6 @@ function headFor(d) {
     const n = f.total - f.within;
     return { title: `${plural(n, 'screen')} ${n === 1 ? 'needs' : 'need'} a look`, sub: `${f.within} of ${f.total} match the real product.`, side: slot };
   }
-  if (g === 'present') return presentHead(d);
-  return { title: 'Send it to another presenter', sub: 'They get the replica and your guide. Not your recording, not your sign-ins.' };
 }
 function renderHead() {
   const d = demo(), el = $('#demo-head');

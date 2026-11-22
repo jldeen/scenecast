@@ -16,6 +16,12 @@ const REC = { on: false };
 const rslug = s => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28) || 'x';
 const rlogr = msg => { const l = `${((Date.now() - (REC.t0 || Date.now())) / 1000).toFixed(1)}s ${msg}`; (REC.log = REC.log || []).push(l); if (REC.log.length > 400) REC.log.shift(); return rlog('rec: ' + msg); };
 const recApp = id => { const A = REC.apps.find(a => a.id === id); if (!A) throw new Error('no app ' + id); return A; };
+// The take's timeline (recording.json "timeline", summed up in "timing"): one entry per span of the recorder's work,
+// wall clock, in ms from the start. what: start.ready, start.capture (each app's start screen), action (a click, Enter
+// or Escape: from the action until its screen was captured; productMs is the product's own part, an answer
+// streaming), typed, sweep (one kind of side state on one screen: why start | screen | side, waits: its deliberate
+// waits), held (the presenter's action waiting for the recorder), stop. The rest of the take is the presenter's.
+const recTl = (what, t0, meta = {}) => { const e = { what, at: t0 - REC.t0, ms: Date.now() - t0, ...meta }; (REC.tl = REC.tl || []).push(e); if (REC.tl.length > 5000) REC.tl.shift(); return e; };
 
 async function recFrameKey(p, f) { if (f === p.mainFrame()) return null; const keys = await frameKeys(p); return keys.get(f) || null; }
 const withFrame = (m, fk) => fk ? { frame: fk, ...m } : m;
@@ -148,13 +154,14 @@ async function recTyped(A) {
     return recFill(A, T);
   }
   if (!T.value) return;
-  const id = recUniq(`${A.state}-typed`);
+  const id = recUniq(`${A.state}-typed`), tTyped = Date.now();
   await recSetBusy(A.page, true);
   try { await recAddState(A, id); } finally { await recSetBusy(A.page, false); }
   recOn(A.state, { type: T.spec, to: id });
   REC.states[id].on.push({ type: T.spec, empty: A.state });
   REC.states[id].typedOf = { key, base: A.state, spec: T.spec };
   REC.path.push({ type: T.spec, text: T.value, checkpoint: id });
+  recTl('typed', tTyped, { app: A.id, state: id });
   A.state = id;
   recFill(A, T);
 }
@@ -199,15 +206,16 @@ async function recCapture(A, ev, trigger) {
   // (capturing frames and making sure it's done).
   const tEnd = Date.now() - t0, product = last === null ? 0 : last;
   REC.time.product += product; REC.time.confirm += tEnd - product;
+  let to = null;
   try {
     if (sig === from.sig && first === null) return { changed: false };
-    let to = REC.sigs[A.id].get(sig);
+    to = REC.sigs[A.id].get(sig);
     if (!to) { to = recUniq(`${A.id}-${String(++A.n).padStart(2, '0')}-${rslug(ev.desc || ev.kind)}`); await recAddState(A, to, sig); }
     const isStream = frames.length >= o.streamMinFrames && last !== null && last >= o.streamMinMs;
     if (isStream) REC.streams[name] = { raw: name, frames: [0, frames.length - 1], to, timing: 'real', ms: Math.max(600, Math.min(o.streamMaxMs || 10000, last + 300)), realMs: last };
     rlogr(`${ev.kind} ${ev.desc ? '"' + ev.desc + '" ' : ''}→ ${to}${isStream ? ` (stream ${name}, ${frames.length} frames, ${(last / 1000).toFixed(1)} s)` : ''}`);
     return { changed: true, to, stream: isStream ? name : undefined };
-  } finally { await recSetBusy(p, false); }
+  } finally { await recSetBusy(p, false); recTl('action', t0, { kind: ev.kind, app: A.id, from: from.snap, to, productMs: product, frames: frames.length }); }
 }
 async function recEnter(A, e) {
   const fk = await recFrameKey(A.page, e.f);
@@ -285,8 +293,9 @@ async function recLoop() {
       // The start screens' side states first (and after a resume, the screens left without them).
       if (!REC.paused && REC.autoQueue.length) {
         REC.busyNow = true;
+        REC.sweepWhy = 'start';
         try { while (REC.autoQueue.length && !REC.stop) { const A = recApp(REC.autoQueue.shift()); await recAuto(A); recCheckpoint(); } const act = REC.apps.find(a => a.id === REC.active); if (act) await act.page.bringToFront(); }
-        finally { REC.busyNow = false; }
+        finally { REC.busyNow = false; REC.sweepWhy = 'screen'; }
       }
       let got = 0;
       if (!REC.paused) {
@@ -301,7 +310,11 @@ async function recLoop() {
         }
         evs.sort((a, b) => a.t - b.t || a.seq - b.seq);
         got = evs.length;
-        for (const e of evs) { if (REC.stop) break; REC.busyNow = true; recAt(`${e.kind} in ${e.A.id}`); try { await recHandle(e); REC.actions++; } catch (err) { rlogr('error: ' + String(err.stack || err).slice(0, 300)); } finally { REC.busyNow = false; } }
+        for (const e of evs) {
+          if (REC.stop) break;
+          // How long the presenter's action waited for the recorder (the page holds it while a screen is captured).
+          if (e.kind !== 'input' && e.t && Date.now() - e.t > 300) recTl('held', e.t, { kind: e.kind, app: e.A.id });
+          REC.busyNow = true; recAt(`${e.kind} in ${e.A.id}`); try { await recHandle(e); REC.actions++; } catch (err) { rlogr('error: ' + String(err.stack || err).slice(0, 300)); } finally { REC.busyNow = false; } }
         if (evs.some(e => e.kind !== 'input')) recCheckpoint();
         for (const A of REC.apps) if (A.typing && !A.typing.done && Date.now() - A.typing.at > REC.opts.typeIdleMs) { recAt(`capturing what was typed in ${A.id}`); await recTyped(A); }
       }
@@ -338,11 +351,14 @@ async function recAuto(A) {
     if (kind === 'hovers' || kind === 'clicks' || kind === 'zoom') c = { ...c, maxS: Math.min(c.maxS || left, left) };
     REC.side = `${kind} on ${state}`;
     const t1 = Date.now(), s1 = SLEPT.ms;
+    let n = null;
     try {
       const r = await recSide(A, { kind, ...c });
       const what = r.error ? 'failed: ' + r.error : kind === 'hovers' ? `${r.n} of ${r.tried}${r.skipped ? ` (${r.skipped} seen before)` : ''}` : kind === 'clicks' ? `${(r.clicks || []).length} of ${(r.controls || []).length}` : kind === 'groups' ? `${(r.groups || []).length}` : kind === 'chips' ? (r.rule ? 'found' : 'none') : kind === 'drags' ? `${(r.rules || []).length}` : kind === 'zoom' ? `${(r.zooms || []).length}` : kind === 'list' ? `${r.list && r.list.seen} rows` : 'done';
+      n = kind === 'hovers' ? r.n : kind === 'clicks' ? (r.clicks || []).length : kind === 'groups' ? (r.groups || []).length : kind === 'zoom' ? (r.zooms || []).length : kind === 'drags' ? (r.rules || []).length : kind === 'chips' ? (r.rule ? 1 : 0) : null;
       did.push(`${kind}${c.frameRe ? ' (frame)' : ''} ${what}, ${((Date.now() - t1) / 1000).toFixed(1)} s (${((SLEPT.ms - s1) / 1000).toFixed(1)} s fixed waits)`);
     } catch (e) { did.push(`${kind} failed: ${String(e.message || e).slice(0, 120)}`); REC.notes.push(`${state}: the automatic ${kind} failed (${String(e.message || e).slice(0, 120)}); record side ${kind} on it if it matters`); }
+    finally { recTl('sweep', t1, { why: REC.sweepWhy || 'screen', kind, app: A.id, state, frame: !!c.frameRe || undefined, n, waits: SLEPT.ms - s1 }); }
   };
   const gseen = recSeen('groups', A.id);
   if (o.groups && f.groups.some(id => !gseen.has(id))) { await run('groups'); f.groups.forEach(id => gseen.add(id)); }
@@ -360,7 +376,9 @@ async function recAuto(A) {
   // Last: the drag audit moves panes (and puts them back).
   if (o.drags && newKind && f.handles) await run('drags', { range: 240, step: 40 });
   REC.side = null;
+  const tRest = Date.now();
   await recSetBusy(p, true); await recSettle(p, 700, 8000); await recSetBusy(p, false);
+  recTl('sweep', tRest, { why: REC.sweepWhy || 'screen', kind: 'restore', app: A.id, state });
   if ((await recSig(p)) !== st.sig) REC.notes.push(`${state}: after the automatic side paths the page isn't as it was; check it (reload the tab if a panel stayed open)`);
   REC.time.sweep += Date.now() - t0;
   REC.autos.push({ state, secs: Math.round((Date.now() - t0) / 1000), did });
@@ -370,7 +388,7 @@ async function recAuto(A) {
 // picks up from it after an interruption (the agent restarted, Chrome reloaded).
 function recSnapshot() {
   const states = Object.fromEntries(Object.entries(REC.states).map(([k, st]) => [k, { ...st }]));
-  return { kit: 1, savedAt: new Date().toISOString(), t0: REC.t0, opts: REC.opts, zooms: REC.zooms, apps: REC.apps.map(a => ({ id: a.id, match: a.match, state: a.state, n: a.n })), states, sigs: Object.fromEntries(Object.entries(REC.sigs).map(([k, m]) => [k, [...m]])), streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, seq: REC.seq, active: REC.active, actions: REC.actions, time: REC.time, autoDone: [...REC.autoDone], autos: REC.autos, seen: Object.fromEntries(Object.entries(REC.seen).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, [...v]]))])) };
+  return { kit: 1, savedAt: new Date().toISOString(), t0: REC.t0, opts: REC.opts, zooms: REC.zooms, apps: REC.apps.map(a => ({ id: a.id, match: a.match, state: a.state, n: a.n })), states, sigs: Object.fromEntries(Object.entries(REC.sigs).map(([k, m]) => [k, [...m]])), streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, seq: REC.seq, active: REC.active, actions: REC.actions, time: REC.time, tl: REC.tl, autoDone: [...REC.autoDone], autos: REC.autos, seen: Object.fromEntries(Object.entries(REC.seen).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, [...v]]))])) };
 }
 let recSaving = null;
 function recCheckpoint() { if (!REC.on) return; const snap = recSnapshot(); recSaving = (recSaving || Promise.resolve()).then(() => post('/recording-partial', snap)).catch(() => {}); }
@@ -380,7 +398,7 @@ function recCheckpoint() { if (!REC.on) return; const snap = recSnapshot(); recS
 async function recResume(c) {
   const snap = await page0.request.get(RX + '/recording-partial', { timeout: 30000 }).then(r => r.ok() ? r.json() : null).catch(() => null);
   if (!snap || !snap.states) { REC.on = false; return { error: 'nothing to resume (no checkpoint in the raw folder)' }; }
-  Object.assign(REC, { t0: snap.t0, opts: { ...snap.opts, ...(c.record || {}) }, zooms: snap.zooms || c.zooms, states: snap.states, streams: snap.streams, beats: snap.beats, path: snap.path, notes: snap.notes, drags: snap.drags, sides: snap.sides, seq: snap.seq, active: snap.active, actions: snap.actions, time: snap.time || REC.time, autos: snap.autos || [], autoDone: new Set(snap.autoDone || []) });
+  Object.assign(REC, { t0: snap.t0, opts: { ...snap.opts, ...(c.record || {}) }, zooms: snap.zooms || c.zooms, states: snap.states, streams: snap.streams, beats: snap.beats, path: snap.path, notes: snap.notes, drags: snap.drags, sides: snap.sides, seq: snap.seq, active: snap.active, actions: snap.actions, time: snap.time || REC.time, tl: snap.tl || [], autos: snap.autos || [], autoDone: new Set(snap.autoDone || []) });
   REC.opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(REC.opts.groups || {}) };
   REC.sigs = Object.fromEntries(Object.entries(snap.sigs).map(([k, v]) => [k, new Map(v)]));
   REC.seen = Object.fromEntries(Object.entries(snap.seen || {}).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([kk, v]) => [kk, new Set(v)]))]));
@@ -403,7 +421,7 @@ OPS.recordStart = async c => {
   if (REC.on) return { error: 'already recording' };
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
-  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms });
+  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start' });
   if (c.resume) return recResume(c);
   // Every app's tab, or nothing starts: which aren't open, all at once.
   const missing = [];
@@ -416,8 +434,9 @@ OPS.recordStart = async c => {
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
   // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
   // reload), and Nov 20's second take began with a click made between takes.
-  for (const A of REC.apps) { rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); }
+  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
   for (const A of REC.apps) {
+    const t1 = Date.now();
     rlogr(`start: ${A.id}: capturing its start screen`);
     await A.page.bringToFront();
     if (c.neutral) await A.page.mouse.move(c.neutral[0], c.neutral[1]);
@@ -425,6 +444,7 @@ OPS.recordStart = async c => {
     await recSetBusy(A.page, true);
     try { await recAddState(A, `${A.id}-start`, sig); } finally { await recSetBusy(A.page, false); }
     A.state = `${A.id}-start`;
+    recTl('start.capture', t1, { app: A.id, state: A.state });
   }
   const first = c.first ? recApp(c.first) : REC.apps[0];
   await first.page.bringToFront();
@@ -486,7 +506,29 @@ OPS.testCloseBar = async () => {
 OPS.recordAbort = async () => { if (!REC.on) return { error: 'not recording' }; REC.stop = true; await REC.loopP; await recSaving; for (const A of REC.apps) await recSetBusy(A.page, false).catch(() => {}); REC.on = false; await CDPX_release(); return { aborted: true }; };
 // Where the time went: the recorder's own work (side states swept, screens captured, making sure an action was done)
 // apart from the product's (its answers), in seconds.
-const recTiming = () => { const t = REC.time, r = x => Math.round(x / 100) / 10; return { recorderSecs: r(t.sweep + t.capture + t.confirm), productSecs: r(t.product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm) }; };
+// From the timeline: the take's wall clock split into what the recorder did (start, start-screen sweeps, each screen's
+// sweeps by kind, captures), the product (answers streaming), the presenter's actions held for the recorder, and the
+// presenter's own time (everything else: reading, moving, typing). Spans don't overlap (one loop does the work).
+function recTiming() {
+  const t = REC.time, r = x => Math.round(x / 100) / 10, tl = REC.tl || [];
+  const sum = f => tl.filter(f).reduce((n, e) => n + e.ms, 0);
+  const wall = Date.now() - REC.t0;
+  const start = sum(e => /^start\./.test(e.what)), stop = sum(e => e.what === 'stop');
+  const startSweeps = sum(e => e.what === 'sweep' && e.why === 'start'), screenSweeps = sum(e => e.what === 'sweep' && e.why === 'screen'), sideSweeps = sum(e => e.what === 'sweep' && e.why === 'side');
+  const actions = sum(e => e.what === 'action'), typed = sum(e => e.what === 'typed');
+  const product = tl.filter(e => e.what === 'action').reduce((n, e) => n + (e.productMs || 0), 0);
+  const kinds = {};
+  for (const e of tl.filter(e => e.what === 'sweep')) { const k = kinds[e.kind] = kinds[e.kind] || { secs: 0, waitSecs: 0, runs: 0, found: 0 }; k.secs += e.ms; k.waitSecs += e.waits || 0; k.runs++; k.found += e.n || 0; }
+  for (const k of Object.values(kinds)) { k.secs = r(k.secs); k.waitSecs = r(k.waitSecs); }
+  const busy = start + startSweeps + screenSweeps + sideSweeps + actions + typed + stop;
+  return {
+    wallSecs: r(wall), startSecs: r(start), startSweepSecs: r(startSweeps), screenSweepSecs: r(screenSweeps), sideSweepSecs: r(sideSweeps),
+    actionSecs: r(actions), typedSecs: r(typed), productSecs: r(product), heldSecs: r(sum(e => e.what === 'held')), stopSecs: r(stop),
+    presenterSecs: r(Math.max(0, wall - busy)), sweepKinds: kinds, screens: Object.keys(REC.states || {}).length,
+    // As before (the app's Recorded line): the recorder's own time and the product's.
+    recorderSecs: r(start + startSweeps + screenSweeps + sideSweeps + actions + typed - product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm),
+  };
+}
 OPS.recordStatus = async () => REC.on ? { recording: true, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
@@ -495,12 +537,14 @@ OPS.recordStop = async () => {
   // Paused (Pause, or the debugging bar closed): nothing done since counts, so there's nothing to wait for.
   REC.quiet = 0;
   if (REC.held) for (const A of REC.apps) A.typing = null;
-  for (const t0 = Date.now(); !REC.paused && !REC.held && REC.quiet < 2 && Date.now() - t0 < 300000;) await sleep(150);
+  const tStop = Date.now();
+  for (const t0 = Date.now(); !REC.paused && !REC.held && REC.quiet < 2 && Date.now() - t0 < 300000;) await poll(150);
   REC.stop = true; await REC.loopP;
+  recTl('stop', tStop);
   for (const A of REC.apps) { if (A.typing && !A.typing.done) await recTyped(A); await recSetBusy(A.page, false); }
   const states = Object.fromEntries(Object.entries(REC.states).map(([k, s]) => { const { typedOf, ...rest } = s; return [k, rest]; }));
   const rec = { kit: 1, recordedAt: new Date(REC.t0).toISOString(), secs: Math.round((Date.now() - REC.t0) / 1000), opts: REC.opts,
-    timing: recTiming(), apps: REC.apps.map(a => ({ id: a.id, match: a.match, start: `${a.id}-start`, end: a.state })), states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log };
+    timing: recTiming(), apps: REC.apps.map(a => ({ id: a.id, match: a.match, start: `${a.id}-start`, end: a.state })), states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log, timeline: REC.tl };
   await post('/recording', rec);
   REC.on = false;
   // The recording's done: let go of every tab, so Chrome's debugging bar isn't on the stage when you rehearse or present.
@@ -724,5 +768,6 @@ OPS.recordSide = async c => {
   const A = recApp(c.app || REC.active);
   while (REC.busyNow) await sleep(100);
   REC.paused = true;
-  try { const r = await recSide(A, c); recCheckpoint(); return r; } finally { REC.paused = false; }
+  const t1 = Date.now(), s1 = SLEPT.ms;
+  try { const r = await recSide(A, c); recCheckpoint(); return r; } finally { REC.paused = false; recTl('sweep', t1, { why: 'side', kind: c.kind, app: A.id, state: A.state, waits: SLEPT.ms - s1 }); }
 };
