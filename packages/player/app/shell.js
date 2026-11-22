@@ -91,7 +91,9 @@ function prepare(doc, app) {
   post(doc, 'target', []);
   hvCssAll(doc, app);
   for (const f of doc.querySelectorAll('iframe')) {
-    f.__d1src = f.getAttribute('src');
+    // Resolved (f.src), as morphFrames' wanted URL is: the attribute is root-relative, so comparing it never
+    // matched, and every morph morphed every frame again and reset the scrolling inside it.
+    f.__d1src = f.src;
     f.addEventListener('load', () => { try { prepare(f.contentDocument, app); } catch (e) { note(e); } });
     try { if (f.contentDocument && f.contentDocument.readyState === 'complete' && f.contentDocument.body && f.contentDocument.body.childElementCount) prepare(f.contentDocument, app); } catch (e) {}
   }
@@ -1274,7 +1276,7 @@ async function go(app, stateId, { scroll = 'target', keep } = {}) {
   const kept = keep ? detachKeep(doc, keep) : [];
   morphDocument(doc, target);
   app.morphGen = (app.morphGen || 0) + 1;
-  for (const f of doc.querySelectorAll('iframe')) if (!f.__d1src) { f.__d1src = f.getAttribute('src'); f.addEventListener('load', () => prepare(f.contentDocument, app)); }
+  for (const f of doc.querySelectorAll('iframe')) if (!f.__d1src) { f.__d1src = f.src; f.addEventListener('load', () => prepare(f.contentDocument, app)); }
   const later = [];
   morphFrames(doc, S[stateId].snap, scroll, frames, later);
   restoreKeep(doc, kept);

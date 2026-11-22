@@ -577,7 +577,7 @@ fn rules() -> &'static [Rule] {
 }
 
 /// Look-alikes that aren't personal data: a Teams or Skype conversation ID (`19:…@thread.v2`, `@thread.tacv2`,
-/// `@unq.gbl.spaces`) isn't an email, and Fluent's `data-tid` (a test ID) isn't a tenant ID. Redacting them broke
+/// `@unq.gbl.spaces`) and a package version (`name@1.0.0`) aren't emails, and Fluent's `data-tid` (a test ID) isn't a tenant ID. Redacting them broke
 /// the controls they name (the recorded clicks find Teams' chat list by them) and changed nothing a person could read.
 fn not_personal(kind: &str, text: &str, key_start: usize, matched: &str) -> bool {
     match kind {
@@ -586,11 +586,66 @@ fn not_personal(kind: &str, text: &str, key_start: usize, matched: &str) -> bool
                 .rsplit_once('@')
                 .map_or("", |(_, d)| d)
                 .to_ascii_lowercase();
-            domain.starts_with("thread.") || domain == "unq.gbl.spaces"
+            // A package and its version (npm's `> ticketbooth@1.0.0 test`): a domain's last label has a letter.
+            let tld = domain.rsplit('.').next().unwrap_or("");
+            domain.starts_with("thread.")
+                || domain == "unq.gbl.spaces"
+                || !tld.bytes().any(|b| b.is_ascii_alphabetic())
         }
         "tenant-id" => text[..key_start].to_ascii_lowercase().ends_with("data-"),
         _ => false,
     }
+}
+
+/// A `token: …` that isn't one: a CSS selector (`.pl-token:hover {`, `.access-token::before`), whose "value" is a
+/// pseudo-class, or a placeholder in a code sample (`Authorization: Bearer $GITHUB_TOKEN`). GitHub's pages are full of
+/// both, and the build refused every capture of them.
+fn not_a_secret(text: &str, end: usize, value: &str) -> bool {
+    const PSEUDO: &[&str] = &[
+        "hover",
+        "focus",
+        "focus-visible",
+        "focus-within",
+        "active",
+        "visited",
+        "link",
+        "before",
+        "after",
+        "not",
+        "is",
+        "where",
+        "has",
+        "first-child",
+        "last-child",
+        "nth-child",
+        "nth-of-type",
+        "first-of-type",
+        "last-of-type",
+        "only-child",
+        "disabled",
+        "enabled",
+        "checked",
+        "empty",
+        "root",
+        "placeholder",
+        "selection",
+        "marker",
+        "target",
+        "hover:not",
+        "focus:not",
+    ];
+    let v = value.to_ascii_lowercase();
+    let rest = &text[end..];
+    let selector_follows = rest
+        .trim_start_matches([' ', '\t'])
+        .starts_with(['{', ',', '(', ':', ')', '.', '[', '>', '+', '~']);
+    if PSEUDO.contains(&v.as_str()) && selector_follows {
+        return true;
+    }
+    (v == "bearer" || v == "basic" || v == "token")
+        && rest
+            .trim_start_matches([' ', '\t'])
+            .starts_with(['$', '<', '{', '%'])
 }
 
 /// Redacts detected text. Allowlisted values apply to PII only, never credentials.
@@ -648,6 +703,11 @@ fn scrub_text_with(
             let m = captures
                 .name("value")
                 .unwrap_or_else(|| captures.get(0).unwrap());
+            if rule.kind == "credential"
+                && not_a_secret(&current, captures.get(0).unwrap().end(), m.as_str())
+            {
+                continue;
+            }
             if !rule.credential
                 && (allowlist
                     .iter()
@@ -690,15 +750,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn css_selectors_and_placeholders_are_not_credentials() {
+        let css = ".pl-token:hover { color: red }\n.access-token::before{content:\"\"}\n.x-token:not(.y), .z {}";
+        assert_eq!(scrub_text(css, &[]), (css.to_owned(), vec![]));
+        let doc = r#"curl -H "Authorization: Bearer $GITHUB_TOKEN" -H 'Authorization: token <your-token>'"#;
+        assert!(
+            scrub_text(doc, &[]).1.is_empty(),
+            "{:?}",
+            scrub_text(doc, &[])
+        );
+        let real = r#"{"access_token":"gho16charsecretvalue","cookie":"session=abc123def"}"#;
+        assert_eq!(
+            scrub_text(real, &[])
+                .1
+                .iter()
+                .filter(|f| f.credential)
+                .count(),
+            2
+        );
+        assert!(!scrub_text("?token=hover-but-real", &[]).1.is_empty());
+    }
+
+    #[test]
     fn conversation_ids_and_fluent_test_ids_are_not_personal_data() {
         let guid = "6c1f3a2e-8d4b-4e7a-9f10-2b3c4d5e6f70";
         let html = format!(
-            r#"<li data-tid="{guid}" id="chat_19:abc@thread.v2" data-x="19:a_b@unq.gbl.spaces">tenantId: {guid} seth@example.com</li>"#
+            r#"<li data-tid="{guid}" id="chat_19:abc@thread.v2" data-x="19:a_b@unq.gbl.spaces">&gt; ticketbooth@1.0.0 test tenantId: {guid} seth@example.com</li>"#
         );
         let (out, findings) = scrub_text(&html, &[]);
         assert!(out.contains(&format!(r#"data-tid="{guid}""#)), "{out}");
         assert!(
-            out.contains("19:abc@thread.v2") && out.contains("19:a_b@unq.gbl.spaces"),
+            out.contains("19:abc@thread.v2")
+                && out.contains("19:a_b@unq.gbl.spaces")
+                && out.contains("ticketbooth@1.0.0"),
             "{out}"
         );
         assert!(
