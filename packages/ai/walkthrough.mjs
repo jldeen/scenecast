@@ -3,7 +3,7 @@
 // With the presenter's script, its lines go on the beats (beat by beat when the counts match).
 import { formatStep } from './plan.mjs';
 import { specName } from './walker.mjs';
-import { writeOf } from './from-script.mjs';
+import { writeOf, packWrite } from './from-script.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
@@ -25,7 +25,7 @@ export function planFromRecording(rec, { walker = null, title = '', track = null
     if (p.app || (to && !app)) {
       const a = p.app || appOf(to);
       if (a && a !== app) { app = a; startBeat(cap(appTitle(a))); step = { kind: 'app', app: a }; }
-    } else if (p.click) step = { kind: 'click', target: specName(p.click) || clean(p.click.sel) };
+    } else if (p.click) step = { kind: 'click', target: specName(p.click) || (walker && before ? walker.nameOf(before, p.click) : null) || clean(p.click.sel) };
     else if (p.type) { typed = p.text || ''; field = specName(p.type) || null; step = { kind: 'type', value: typed, target: field }; }
     else if (p.enter) step = { kind: 'press', key: 'Enter' };
     else if (p.key) step = { kind: 'press', key: p.key };
@@ -35,10 +35,13 @@ export function planFromRecording(rec, { walker = null, title = '', track = null
     // What the step wrote: the same rules as a script's plan, on the screens the recording reached.
     const sc = walker && before ? walker.screen(before) : null;
     const el = step.kind === 'click' && sc ? (walker.control(sc, step.target) || {}).el : step.kind === 'press' && sc ? sc.controls.find(c => c.editable && c.multiline && (!field || c.name === field)) || null : null;
-    if (step.kind === 'type' && sc) { const box = sc.controls.find(c => c.editable && (!field || c.name === field)); if (box && box.multiline) prompts++; }
-    const w = writeOf(step, el, { next: to && to !== before ? S[to] : null, nextScreen: walker && to && to !== before ? walker.screen(to) : null, prompt: step.kind === 'press' && typed ? { n: prompts, label: '', text: typed } : null, appTitle: appTitle(app) });
+    // A prompt is what's sent from a message box: the review's text boxes and a search box aren't prompts.
+    if (step.kind === 'press' && step.key === 'Enter' && typed && el && el.multiline) prompts++;
+    let w = writeOf(step, el, { next: to && to !== before ? S[to] : null, nextScreen: walker && to && to !== before ? walker.screen(to) : null, prompt: step.kind === 'press' && typed ? { n: prompts, label: '', text: typed } : null, appTitle: appTitle(app) });
     const pack = ((packs || {}).forApp || {})[app];
-    const pw = pack && packs.writeFor ? packs.writeFor(pack, { ...step, target: String(step.target || '').split(':')[0].trim() }, el) : null;
+    const pw = pack && packs.writeFor ? packWrite(packs.writeFor, pack, step, el, el) : null;
+    const safe = !pw && pack && packs.writeFor && (pack.safe || []).length ? packWrite(packs.writeFor, { ...pack, writes: pack.safe }, step, el, el) : null;
+    if (safe) { step.safe = `${safe.what.replace(/\.$/, '')} · ${pack.id}:${safe.id}`; w = null; }
     if (w || pw) step.writes = `${w ? w.what : pw.what.split(/[;:(]/)[0].trim()}${pw ? ` · ${pack.id}:${pw.id}` : ''}`;
     if (to && to !== before && step.kind !== 'app') step.lands = { screen: to, text: walker ? landWords(walker, before, to) : null };
     if (step.kind === 'app' && to) step.lands = { screen: to, text: walker ? landWords(walker, null, to) : null };

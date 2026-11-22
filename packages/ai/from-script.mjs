@@ -64,15 +64,20 @@ export function intentsOf(text, ctx, opts = {}) {
     let c = raw, m;
     // ⌥ keys (Ctrl+Alt on Windows): an app's key switches to it, ⌥P types the prompt, ⌥F is a focus point.
     const keyRe = /(?:⌥|\b(?:ctrl\s*\+\s*alt|option)\s*\+\s*)([A-Z0-9])(?![a-z])/gi;
-    let typedKey = false;
+    let typedKey = false, typedP = false;
     for (const k of c.matchAll(keyRe)) {
       const key = k[1].toUpperCase();
       const app = ctx.apps.find(a => a.key && a.key.toUpperCase() === key);
-      if (key === 'P') { typedKey = true; add(/\bin each (box|field)\b/i.test(c) ? { fillEach: true } : { prompt: promptRef(c, ctx) || { n: null, label: '', text: null } }); }
+      if (key === 'P') {
+        typedKey = typedP = true;
+        const said = /\btype\s+(.+?)\s*\(\s*$/i.exec(c.slice(0, k.index));
+        add(/\bin each (box|field)\b/i.test(c) ? { fillEach: true } : { prompt: promptRef(c, ctx) || (said ? { n: null, label: '', text: unq(clean(said[1])) } : { n: null, label: '', text: null }) });
+      }
       else if (key === 'F') { const t = c.slice(k.index + k[0].length).replace(/^\s*:\s*/, ''); if (t) add({ hint: hintFrom(t) }); typedKey = true; }
       else if (app) add({ app: app.id });
     }
     c = c.replace(keyRe, ' ').replace(/\(\s*(?:prompt\s*\d+|the \w+ prompt|the prompt)\s*\)/ig, '').replace(/\(\s*(?:or\s*)?\)/g, '').replace(/^[\s,:]+|[\s,:.]+$/g, '').trim();
+    if (typedP && !/\b(enter|send)\b/i.test(c)) { const tail = /,\s*([^,]+)$/.exec(c); if (tail) for (const x of intentsOf(tail[1], ctx, opts)) add(x); continue; }
     if (typedKey && !/\b(enter|send)\b/i.test(c)) continue;
     if (!c || /^(?:press|or|then|and|and then)$/i.test(c)) continue;
     const named = appNamed(c, ctx);
@@ -107,7 +112,9 @@ export function intentsOf(text, ctx, opts = {}) {
       const card = /\bon the (.+?) card\b/i.exec(what);
       // The card a click is on is what the line points at ("Click Approve on the Copy file card").
       if (card) add({ hint: { texts: [card[1]], around: 'card' } });
-      add({ click: cleanTarget(what), card: card ? card[1] : null, role: roleNoun(what) });
+      const t = timesOf(what);
+      if (PRONOUN.test(cleanTarget(t.name))) { add({ unclear: c }); continue; }
+      for (let k = 0; k < t.n; k++) add({ click: cleanTarget(t.name), card: card ? card[1] : null, role: roleNoun(t.name) });
       if (close) add({ close: true });
       continue;
     }
@@ -117,14 +124,22 @@ export function intentsOf(text, ctx, opts = {}) {
     const d = /^([^:“"]+?)\s*:\s*(.+)$/.exec(c);
     const name = d ? d[1] : c;
     if (opts.bare !== 'click' && /^the\s/i.test(name)) { for (const h of namesIn(d ? d[2] : c, !!d)) add({ hint: h }); continue; }
-    if (opts.bare === 'click') add({ click: cleanTarget(name), role: roleNoun(name) });
+    const t = timesOf(name);
+    if (opts.bare === 'click') for (let k = 0; k < t.n; k++) add({ click: cleanTarget(t.name), role: roleNoun(t.name) });
     else if (opts.bare === 'maybe') { add({ click: cleanTarget(name), role: roleNoun(name), maybe: true }); for (const h of namesIn(name)) add({ hint: h }); }
     else if (opts.descriptive) { for (const h of namesIn(c)) add({ hint: h }); continue; }
-    else add({ click: cleanTarget(name), role: roleNoun(name), maybe: true });
+    else for (let k = 0; k < t.n; k++) add({ click: cleanTarget(t.name), role: roleNoun(t.name), maybe: true });
     if (d) for (const h of namesIn(d[2], true)) add({ hint: h });
   }
   return out;
 }
+// "VIP Lounge + twice": the name, and how many times.
+const TIMES = { once: 1, twice: 2, 'two times': 2, thrice: 3, 'three times': 3 };
+function timesOf(t) {
+  const m = /^(.*?)\s+(once|twice|thrice|two times|three times|(\d+)\s*(?:times|x))$/i.exec(clean(t));
+  return m ? { name: m[1], n: Math.min(5, TIMES[m[2].toLowerCase()] || +m[3] || 1) } : { name: t, n: 1 };
+}
+const PRONOUN = /^(?:it|them|this|that|these|those|here|there|one)$/i;
 function splitChain(s) {
   return String(s).split(/\s*(?:›|»|\s>\s)\s*/).map(x => clean(x)).filter(Boolean).map(x => {
     if (/in each (box|field)/i.test(x)) return { fillEach: true };
@@ -136,6 +151,9 @@ function splitChain(s) {
 // "Plugins in the sidebar" → "Plugins", "Add to business plugin (17 → 18)" → "Add to business plugin".
 export function cleanTarget(t) {
   t = unq(t).replace(/\s*\([^)]*\)\s*/g, ' ').replace(/[.:]$/, '').trim();
+  t = t.replace(/^(?:the\s+)?[▾▼▸⋯…⟳↻]\s+(?:next to|beside|by)\s+/i, '');
+  if (/^[⋯…]$/.test(t)) return 'More';
+  t = t.replace(/\s+[+−-]$/, '').trim();
   // What the click is for isn't its name: "the open issue, Prevent expiry, to jump to its comment" → "Prevent expiry".
   t = t.replace(/,?\s+to\s+(?:jump|open|show|see|re-request|go|get|start|close|expand|collapse|view|read|reach|check)\b.*$/i, '').replace(/^(?:the\s+)?(?:open|closed)?\s*(?:issue|item|row|link|comment),\s*(.+?),?$/i, '$1').trim();
   // "Show more for Sales": the Show more control (what it shows is what the line is about).
@@ -210,7 +228,7 @@ export function writeOf(step, el, at = {}) {
 }
 
 // A pack's write for a step: by the control's name, its visible words (before a ":"), or its test id.
-function packWrite(writeFor, pack, step, field, el) {
+export function packWrite(writeFor, pack, step, field, el) {
   const name = String(step.target || '');
   const tries = [step, { ...step, target: name.split(':')[0].trim() }, { ...step, kind: step.kind === 'click' && el && /^(switch|checkbox)$/.test(el.role) ? 'click' : step.kind }];
   for (const t of tries) { const w = writeFor(pack, t, field); if (w) return w; }
@@ -324,10 +342,13 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       if (step.kind === 'click' && r.control && PICKED.test(r.control.role)) S.picked = cleanTarget(s.target).length > 2 ? cleanTarget(s.target) : r.control.name;
       const to = r.to || id;
       const field = step.kind === 'press' ? ((S.field[S.app] && walker.control(sc, S.field[S.app], 'field')) || {}).el || composer(sc.controls) : r.control;
-      const w = writeOf(step, field, { next: to !== id ? walker.flow.states[to] : null, nextScreen: to !== id ? scr(to) : null, picked: S.picked, prompt: S.prompt, appTitle: appTitle(S.app) });
+      let w = writeOf(step, field, { next: to !== id ? walker.flow.states[to] : null, nextScreen: to !== id ? scr(to) : null, picked: S.picked, prompt: S.prompt, appTitle: appTitle(S.app) });
       // The app's pack names the write when it knows it (packages/apps writes): its id goes with it, for the reset.
       const pack = ((packs || {}).forApp || {})[S.app];
       const pw = pack && packs.writeFor ? packWrite(packs.writeFor, pack, step, field, r.control) : null;
+      // What the pack knows only looks like a change ("Add content to…" opens a picker): no write, no asking.
+      const safe = !pw && pack && packs.writeFor && (pack.safe || []).length ? packWrite(packs.writeFor, { ...pack, writes: pack.safe }, step, field, r.control) : null;
+      if (safe) { step.safe = `${safe.what.replace(/\.$/, '')} · ${pack.id}:${safe.id}`; w = null; }
       if (pw && !w) step.writes = `${pw.what.split(/[;:(]/)[0].trim()} · ${pack.id}:${pw.id}`;
       else if (w) step.writes = pw ? `${w.what} · ${pack.id}:${pw.id}` : w.what;
       if (w || pw) S.wrote = { kind: w ? w.kind : 'change', picked: S.picked, target: step.target };
@@ -344,6 +365,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       mark();
       for (const it of intentsOf(text, ctx, opts)) {
         if (it.note) continue;
+        if (it.unclear) { flag('unclear', `"${it.unclear}": which control? Name it in your script and the plan follows it`, where(line)); continue; }
         if (it.hint) { hints.push(it.hint.around === 'card' && walker ? { ...it.hint, on: at() } : it.hint); continue; }
         if (it.app) { push({ kind: 'app', app: it.app }, it.from, line); mark(); continue; }
         if (it.wait) {
@@ -389,8 +411,11 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         }
         if (it.key) { push({ kind: 'press', key: it.key }, it.from, line); if (it.key === 'Enter') S.unsent = null; mark(); continue; }
         if (it.add && walker) {
-          // "Add X": the recording's way to where X gets added (its Add button, a picker, the confirm).
-          const b = walker.bridge(at(), (s2, id2, m) => m && m.steps.some(x => x.kind === 'click' && /^add\b/i.test(x.target) && !(walker.flow.states[id2] || {}).esc), 12);
+          // "Add X": the recording's way to where X gets added (its Add button, a picker, the confirm), on a way that
+          // names X. "Add worked examples to the docs" (a title) isn't the "Add one ticket" button.
+          const xw = words(it.add);
+          const names = st => { const nw = new Set(words(`${st.target || ''} ${st.value || ''}`)); return xw.length && xw.filter(x => nw.has(x)).length / xw.length >= 0.6; };
+          const b = walker.bridge(at(), (s2, id2, m, path) => m && m.steps.some(x => x.kind === 'click' && /^add\b/i.test(x.target) && !(walker.flow.states[id2] || {}).esc) && path.steps.some(names), 12);
           if (b) {
             flag('added', `"Add ${it.add}" is ${b.steps.length} steps, as recorded: ${b.steps.map(formatStep).join(' → ')}`, where(line));
             for (const bs of b.steps) { if (bs.kind === 'click' && /^add\b/i.test(bs.target) && b.steps.indexOf(bs) === b.steps.length - 1) S.picked = it.add; S.wrote = null; const done = push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, it.from, line); mark(); if (done && S.wrote && S.wrote.kind === 'add') hints.push({ texts: [it.add], around: 'row' }); }
@@ -508,7 +533,10 @@ function focusFor(x, walker, onPath, weight, typed) {
   // What backs the line's words: on each app's screens when the line moves from one app to another.
   const apps = [...new Set(x.span.map(k => k.split(':')[0]))];
   const groups = apps.length > 1 ? apps.map(a => x.span.filter(k => k.startsWith(a + ':')).map(k => k.split(':')[1])) : [ids];
-  for (const g of groups) for (const f of backing(x.say, g, walker, weight, onPath, typed, groups.length > 1 ? 1 : 3, x.clicked || [])) if (!dupe(f) && out.length < 4) out.push(f);
+  const backed = [];
+  for (const g of groups) for (const f of backing(x.say, g, walker, weight, onPath, typed, groups.length > 1 ? 1 : 3, x.clicked || [])) if (!dupe(f) && out.length + backed.length < 4) backed.push(f);
+  // ⌥F goes through a line's points in order: in the order she says them.
+  out.push(...backed.map((f, i) => ({ f, i })).sort((a, b) => (a.f.pos ?? Infinity) - (b.f.pos ?? Infinity) || a.i - b.i).map(({ f }) => { const { pos, ...rest } = f; return rest; }));
   for (const h of x.hints.filter(h => h.weak)) { const f = place(h); if (f && !dupe(f) && out.length < 2) out.push(f); }
   return out;
 }
@@ -517,6 +545,8 @@ function focusFor(x, walker, onPath, weight, typed) {
 // said in words ("about thirty-five thousand dollars") is the figure on screen near it ("$35,073").
 function backing(say, ids, walker, w, onPath, typed = new Set(), limit = 3, clicked = []) {
   const lw = words(say);
+  // Where the line says these words (the middle one, so one stray word early on doesn't move it).
+  const at = ws => { const i = ws.map(x => lw.indexOf(x)).filter(k => k >= 0).sort((a, b) => a - b); return i.length ? i[(i.length - 1) >> 1] : Infinity; };
   // The names a line says ("Work IQ", "Fabric IQ"): an item that shows one backs it more.
   const named = facts(say).map(f => norm(f.text)).filter(f => f.length > 3);
   const clip = t => t.length > 120 ? t.slice(0, 117).replace(/\s+\S*$/, '') : t;
@@ -527,7 +557,7 @@ function backing(say, ids, walker, w, onPath, typed = new Set(), limit = 3, clic
     for (const it of (walker.shown(id) || { items: [] }).items) {
       if (!(it.text.match(/\$?\d[\d,]*(?:\.\d+)?/g) || []).some(x => near(+x.replace(/[$,]/g, '')))) continue;
       const hit = sentences(it.text).find(t => (t.match(/\$?\d[\d,]*/g) || []).some(x => near(+x.replace(/[$,]/g, '')))) || it.text;
-      out.push({ texts: [clip(hit)], on: id });
+      out.push({ texts: [clip(hit)], on: id, pos: lw.findIndex(x => /\d/.test(x) || x in UNITS || x in SCALES) });
       break numbers;
     }
   }
@@ -557,13 +587,13 @@ function backing(say, ids, walker, w, onPath, typed = new Set(), limit = 3, clic
     const steps = o.screen.items.filter(i => !closed.has(norm(i.text)));
     if (own) for (const f of named.filter(f => f.includes(' '))) {
       const it = steps.filter(i => norm(i.text).includes(f) && i.text.split(' ').length >= 3).sort((a, b) => a.text.length - b.text.length)[0];
-      if (it && !out.some(o2 => o2.texts[0] === it.text)) out.push({ texts: [clip(it.text)], on: id, ...(via ? { via } : {}) });
+      if (it && !out.some(o2 => o2.texts[0] === it.text)) out.push({ texts: [clip(it.text)], on: id, ...(via ? { via } : {}), pos: at(words(f)) });
     }
     considerShown({ items: steps }, id, via, own ? ids.length + 1 : k, own);
   });
   if (best) for (const p of best.picks.slice(0, Math.max(0, limit - out.length))) {
     const it = best.items.find(x => x.i === p.item);
-    out.push({ texts: [clip(p.phrase || it.text)], on: best.id, ...(best.via ? { via: best.via } : {}) });
+    out.push({ texts: [clip(p.phrase || it.text)], on: best.id, ...(best.via ? { via: best.via } : {}), pos: at(p.words) });
   }
   return out;
 }

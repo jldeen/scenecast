@@ -8,7 +8,9 @@
 //   recorded(screen, step) → { screen, landed, wrote: false }   where the recording went from here, writes included
 //                                            (nothing is done: it's what was captured)
 //   view(sig) / shown(sig) / opened(sig)     the product's controls and words / the replica's / with step groups open
+//   nameOf(sig, matcher)                     the name of the control a recorded matcher picks there
 //   moves(sig) / bridge(sig, goal)           what the recording did from a screen / its way to a screen that has goal
+//                                            (goal(screen, sig, lastMove, path so far))
 import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readScreen } from '../script/html.mjs';
@@ -205,7 +207,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
         if (seen.has(m.to)) continue;
         seen.add(m.to);
         const next = { id: m.to, steps: [...n.steps, ...m.steps.map((s, i) => ({ ...s, lands: i === m.steps.length - 1 ? m.to : null, recorded: m.recorded, control: m.control }))], path: [...n.path, m.to] };
-        if (goal(screen(m.to), m.to, m)) return next;
+        if (goal(screen(m.to), m.to, m, next)) return next;
         queue.push(next);
       }
     }
@@ -221,5 +223,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     return shaped(sigOf(at), follow(sigOf(at), s, typed));
   }
   const recorded = (at, s, typed = '') => shaped(sigOf(at), follow(sigOf(at), s, typed));
-  return { flow, apps, start, screen, view, shown, opened, step, recorded, moves, bridge, control, find, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
+  // The name of the control a recorded matcher picks on a screen (one recorded by its test id has no name of its own).
+  const nameOf = (sig, m) => { for (const sc of [screen(sig), shown(sig)]) { const c = sc && sc.controls.find(x => specMatches(m, x)); if (c && c.name) return c.name; } return null; };
+  return { flow, apps, start, screen, view, shown, opened, step, recorded, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
 }

@@ -23,15 +23,15 @@
 // "> " lines are what to say. Steps that could send, post, approve, buy, delete or change a setting are marked
 // "ask first": they never run without the presenter's go-ahead in the app (risk()).
 //
-// Version 2 (docs/engine/plan-format.md) adds details: indented "Key: value" lines under a step (Writes, Undo,
+// Version 2 (docs/engine/plan-format.md) adds details: indented "Key: value" lines under a step (Writes, Safe, Undo,
 // Lands on, Script, Differs) or a line (Focus). A version 1 reader skips them, so v2 plans run anywhere v1 plans do.
 
 // A quoted name or text, its quotes paired: "Kestrel's ship date" keeps its apostrophe (three groups: "…", “…”, '…').
 const Q = String.raw`(?:"([^"]*)"|“([^”]*)”|'([^']*)')`;
 const q = (m, i) => m[i] ?? m[i + 1] ?? m[i + 2];
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
-const STEP_DETAILS = [['script', 'Script'], ['differs', 'Differs'], ['writes', 'Writes'], ['undo', 'Undo']];
-const DETAIL = /^(writes|undo|lands on|script|differs|focus)\s*:\s*(.*)$/i;
+const STEP_DETAILS = [['script', 'Script'], ['differs', 'Differs'], ['writes', 'Writes'], ['safe', 'Safe'], ['undo', 'Undo']];
+const DETAIL = /^(writes|safe|undo|lands on|script|differs|focus)\s*:\s*(.*)$/i;
 const DIRS = /^(n|s|e|w|ne|nw|se|sw)$/i;
 
 // " · " outside quotes: a Focus detail's target, then its options.
@@ -149,7 +149,8 @@ export function formatPlan(plan) {
     out.push(`## Beat ${i + 1} · ${b.title || `Beat ${i + 1}`}`, '');
     let field = null;
     for (const s of b.steps) {
-      out.push(`- ${formatStep(s)}${s.writes || risk(s, null, s.kind === 'press' ? field : undefined) ? ' — ask first' : ''}`);
+      // Safe: an app pack knows it only looks like a change (it opens a picker, Enter only filters).
+      out.push(`- ${formatStep(s)}${s.writes || (!s.safe && risk(s, null, s.kind === 'press' ? field : undefined)) ? ' — ask first' : ''}`);
       for (const d of stepDetails(s)) out.push(`  ${d}`);
       if (s.kind === 'type') field = s.target ? { name: s.target } : null;
       else if (s.kind !== 'press') field = null;

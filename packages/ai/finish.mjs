@@ -133,8 +133,31 @@ figcaption{font-size:12px;margin-top:4px}figcaption span{display:block;color:#66
 </body></html>`;
 }
 
+// How long each beat's lines take to say, at a steady stage pace, against the time her script gives the beat
+// ("~40s", "~1m15s", "0:45–1:30", "2 min").
+const WPM = 150;
+export function slotSecs(t) {
+  const s = String(t || '');
+  let m;
+  if ((m = /(\d+):(\d{2})\s*[–—-]\s*(\d+):(\d{2})/.exec(s))) return (+m[3] * 60 + +m[4]) - (+m[1] * 60 + +m[2]);
+  const min = /(\d+(?:\.\d+)?)\s*(?:m(?![a-z])|mins?\b|minutes?\b)/i.exec(s), sec = /(\d+)\s*(?:s(?![a-z])|secs?\b|seconds?\b)/i.exec(s);
+  if (min || sec) return Math.round((min ? +min[1] * 60 : 0) + (sec ? +sec[1] : 0));
+  if ((m = /^~?\s*(\d+):(\d{2})$/.exec(s.trim()))) return +m[1] * 60 + +m[2];
+  return null;
+}
+export function beatTimings(plan, slots = []) {
+  const rows = plan.beats.map((b, i) => {
+    const said = Math.round((b.lines || []).reduce((n, l) => n + String(l.text || '').split(/\s+/).filter(Boolean).length, 0) / WPM * 60);
+    const slot = slotSecs(slots[i]);
+    return [`Beat ${i + 1} · ${b.title}`, `about ${said} s to say${slot ? `, in ${slot} s${said > slot * 1.2 ? ' (long)' : ''}` : ''}`, said, slot];
+  });
+  const said = rows.reduce((n, r) => n + r[2], 0), slot = rows.every(r => r[3]) ? rows.reduce((n, r) => n + r[3], 0) : null;
+  const mins = x => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`;
+  return [...rows.map(r => [r[0], r[1]]), ['All of it', `about ${mins(said)} to say${slot ? `, in ${mins(slot)}` : ''}`]];
+}
+
 // The review, with each screen's picture (the capture's own screenshot) copied next to it.
-export function writeReview(demo, { plan, planReview, reset, flow, out = join(demo.out, 'review') }) {
+export function writeReview(demo, { plan, planReview, reset, flow, slots = [], out = join(demo.out, 'review') }) {
   mkdirSync(join(out, 'shots'), { recursive: true });
   const S = flow ? flow.states || {} : {};
   const shotOf = id => {
@@ -150,6 +173,7 @@ export function writeReview(demo, { plan, planReview, reset, flow, out = join(de
   if (rec && rec.timing) timings.push(['Recording', `${Math.round(rec.timing.totalSecs || rec.timing.secs || 0)} s (the product ${Math.round(rec.timing.productSecs || 0)} s, the recorder ${Math.round(rec.timing.recorderSecs || 0)} s)`]);
   if (bench) for (const p of bench.phases || []) timings.push([`Unattended: ${p.name}`, `${p.secs} s${p.ok ? '' : ' (failed)'}`]);
   if (fidelity) timings.push(['Checks', `${fidelity.secs} s · ${fidelity.items.filter(i => i.status === 'pass').length} of ${fidelity.items.length} pass`]);
+  timings.push(...beatTimings(plan, slots));
   const points = (readFocusJson(demo.dir).points || []).filter(p => p.source === 'plan');
   const needs = needsYou({ planReview, reset, plan, fidelity, points });
   const writes = plan.beats.flatMap(b => b.steps).filter(s => s.writes).length;
@@ -167,11 +191,13 @@ export async function finish({ demo, packs, emit = () => {} }) {
   const flow = walker.flow;
   const planReview = readJson(join(aiDir(demo), 'plan-review.json'));
   const result = { script: null, beats: 0, points: 0 };
+  let slots = [];
   // Her script for the guide: from her talk track (source.md, kept when the plan was made), unless she wrote her own.
   const src = join(demo.dir, 'source.md');
   if (existsSync(src)) {
     const text = readFileSync(src, 'utf8'), name = (/^<!-- From: (.+?) -->/.exec(text) || [, 'source.md'])[1];
     const track = parseTalkTrack(text.replace(/^<!-- From: .+? -->\s*/, ''), name.replace(/\.docx$/i, '.md'));
+    slots = plan.beats.map((b, i) => (track.beats.find(tb => norm(tb.title) === norm(b.title)) || track.beats[i] || {}).time);
     const starts = beatStarts(plan, flow);
     // The beat keys: ⌥n starts her beat n where it starts (flow.editor.json; edits and other beats kept).
     const ed = readEditorOverrides(demo.dir);
@@ -195,7 +221,7 @@ export async function finish({ demo, packs, emit = () => {} }) {
   const { resetFor } = await import('./reset.mjs');
   const { loadPacks } = await import('./make.mjs');
   const reset = existsSync(join(demo.dir, 'reset.md')) ? resetFor(plan, { walker, packs: packs === undefined ? await loadPacks(demo) : packs }) : null;
-  const r = writeReview(demo, { plan, planReview, reset, flow });
+  const r = writeReview(demo, { plan, planReview, reset, flow, slots });
   emit({ event: 'finish', step: 'review', needs: r.needs.length });
   return { ...result, review: r.file, needs: r.needs.length };
 }

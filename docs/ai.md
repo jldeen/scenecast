@@ -28,8 +28,9 @@ script takes minutes. **Approve and start** approves the plan exactly as it is: 
 
 Afterwards Scenecast writes `reset.md` (each change undone, and a checklist that only looks), and once the demo is
 built, the finish: your script for the presenter guide with its Do lines in presenter keys, ⌥1–⌥9 on your beats, the
-focus points, and one page to look at (`.out/review/index.html`): every screen, the timings, and anything that needs
-you. One walkthrough works the same way (`scenecast ai plan --walkthrough recording.json`).
+focus points, and one page to look at (`.out/review/index.html`): every screen, the timings (how long each beat takes
+to say against the time your script gives it), and anything that needs you. One walkthrough works the same way
+(`scenecast ai plan --walkthrough recording.json`).
 
 ## GitHub Copilot, through your own sign-in
 

@@ -119,8 +119,14 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
     const shown = mine.filter(c => /^shows "/.test(c.text));
     out.checks = out.checks.filter(c => !(c.app === a && /^the count the demo starts with$/i.test(c.text) && shown.length));
   }
-  const undone = new Set();
-  out.undo = out.undo.filter(u => { const k = `${u.app}|${u.steps.join('|')}`; if (undone.has(k)) return false; undone.add(k); return true; });
+  // The same undo for two writes (two new tasks the captures title the same) is one group, done once for each.
+  const undone = new Map();
+  out.undo = out.undo.filter(u => {
+    const k = `${u.app}|${u.steps.join('|')}`, was = undone.get(k);
+    if (!was) { undone.set(k, u); return true; }
+    was.undoes += `; ${u.undoes}`; was.times = (was.times || 1) + 1;
+    return false;
+  });
   out.appTitle = appTitle;
   return out;
 }
@@ -155,7 +161,13 @@ export function formatReset(r) {
   for (const u of r.undo) { let g = byApp.find(x => x.app === u.app); if (!g) byApp.push(g = { app: u.app, items: [] }); g.items.push(u); }
   for (const g of byApp) {
     out.push(`## Undo · ${r.appTitle ? r.appTitle(g.app) : g.app}`, '', `- Go to ${g.app}`);
-    for (const u of g.items) u.steps.forEach((s, i) => { out.push(`- ${s}`); if (i === 0) { out.push(`  Undoes: ${u.undoes}`); if (u.note) out.push(`  Note: ${u.note}`); } });
+    for (const u of g.items) u.steps.forEach((s, i) => {
+      out.push(`- ${s}`);
+      if (i) return;
+      out.push(`  Undoes: ${u.undoes}`);
+      const note = [u.times > 1 ? `do these steps ${u.times} times, once for each` : null, u.note].filter(Boolean).join('; ');
+      if (note) out.push(`  Note: ${note}`);
+    });
     out.push('');
   }
   if (r.checks.length) {
