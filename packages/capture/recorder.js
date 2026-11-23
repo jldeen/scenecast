@@ -443,7 +443,7 @@ OPS.recordStart = async c => {
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
   // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
   // reload), and Nov 20's second take began with a click made between takes.
-  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); A.viewport = await A.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100 })).catch(() => null); recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
+  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); A.viewport = await A.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100 })).catch(() => null); if (A.viewport) { A.viewport.zoom = Math.round(((A.page.zoom ? await A.page.zoom() : 1) || 1) * 1000) / 1000; A.viewport.browser = await A.page.evaluate(() => { const b = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map(x => x.brand).join(' '); return /Microsoft Edge/.test(b) ? 'msedge' : /Google Chrome/.test(b) ? 'chrome' : 'chromium'; }).catch(() => 'chromium'); const ts = A.page.tabSize ? await A.page.tabSize() : null; if (ts) { A.viewport.tabWidth = ts.width; A.viewport.tabHeight = ts.height; } } recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
   for (const A of REC.apps) {
     const t1 = Date.now();
     rlogr(`start: ${A.id}: capturing its start screen`);
@@ -762,7 +762,11 @@ async function recSide(A, c) {
           if (c.maxS && Date.now() - t0 > c.maxS * 1000) { REC.notes.push(`${state}: zoom stopped at the screen's time budget before ${z}%; record side zoom on it if it matters`); break; }
           const k = z / 100;
           const vw = Math.round(base.w / k), vh = Math.round(base.h / k);
-          await s.send('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: base.dpr * k, mobile: false });
+          // The override is in the tab's own pixels, and a tab at Chrome's 110% scales them again: the page has to be
+          // vw CSS px wide (Nov 2026: a 110% tab's "110%" level was 1135 px, not 1249, and its layout the 125% one).
+          const pz = (A.viewport && A.viewport.zoom) || 1;
+          const ov = { width: Math.round(vw * pz), height: Math.round(vh * pz), deviceScaleFactor: base.dpr * k / pz, mobile: false };
+          await s.send('Emulation.setDeviceMetricsOverride', ov);
           await poll(100); await recSettle(p, 900, 12000);
           const id = `v${z}-${state}`;
           // The page's markup at this size (every element, its classes and inline style): unchanged since the last
@@ -778,7 +782,7 @@ async function recSide(A, c) {
           const lm = await p.evaluate(sel => { const o = {}; for (const q of sel) o[q] = [...document.querySelectorAll(q)].map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }).filter(b => b[2] > 0 && b[3] > 0).slice(0, 3); return o; }, c.landmarks || ['nav', 'main', 'aside', 'header', '[role=navigation]', '[role=main]', '[role=dialog]', '[role=grid]', '[contenteditable=true]', 'textarea', 'input[type=search]']);
           // bw: the window's width at 100% (the bands are placed from it); pw: the width of the last level checked, whose
           // markup was still the one below (this level's band starts halfway between).
-          REC.sides.zoom.push({ app: A.id, state, z, snap: id, vw, vh, dpr: base.dpr * k, bw: base.w, pw: prevVw, landmarks: lm });
+          REC.sides.zoom.push({ app: A.id, state, z, snap: id, vw, vh, dpr: base.dpr * k, bw: base.w, pw: prevVw, ov, landmarks: lm });
           prevVw = vw;
           out.push(`${id} ${vw}x${vh}`);
         }
