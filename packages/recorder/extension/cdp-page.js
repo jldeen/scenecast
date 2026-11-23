@@ -264,6 +264,10 @@ const CDPX = (() => {
       } finally { await this.cmd(undefined, 'Runtime.evaluate', { expression: 'document.getElementById("__sc_caret")?.remove()' }).catch(() => {}); }
     }
     viewportSize() { return null; }
+    // The tab's page zoom (Chrome's own, ⌘+ / Ctrl+): the checker renders the replica at the same zoom.
+    async zoom() { return chrome.tabs.getZoom(this.tabId).catch(() => 1); }
+    // The tab's size as Chrome has it (before page zoom): the page's own innerWidth is rounded down.
+    async tabSize() { const t = await chrome.tabs.get(this.tabId).catch(() => null); return t && t.width ? { width: t.width, height: t.height } : null; }
     async setViewportSize() {}
     getByText(text, o = {}) { return locator(this.mainFrame(), text, o); }
     async close() { await chrome.tabs.remove(this.tabId).catch(() => {}); }

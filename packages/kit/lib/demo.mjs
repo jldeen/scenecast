@@ -42,7 +42,7 @@ export function findDemoDir(args = process.argv.slice(2)) {
 // The window a take was recorded in (raw/viewport.json, else recording.json's), or null.
 export function recordedViewport(raw) {
   for (const [f, pick] of [['viewport.json', v => v], ['recording.json', r => r.viewport]]) {
-    try { const v = pick(JSON.parse(readFileSync(join(raw, f), 'utf8'))); if (v && v.width > 0 && v.height > 0) return { width: v.width, height: v.height, dpr: v.dpr || 1 }; } catch (e) {}
+    try { const v = pick(JSON.parse(readFileSync(join(raw, f), 'utf8'))); if (v && v.width > 0 && v.height > 0) return { width: v.width, height: v.height, dpr: v.dpr || 1, ...(v.zoom ? { zoom: v.zoom } : {}), ...(v.browser ? { browser: v.browser } : {}), ...(v.tabWidth ? { tabWidth: v.tabWidth, tabHeight: v.tabHeight } : {}) }; } catch (e) {}
   }
   return null;
 }

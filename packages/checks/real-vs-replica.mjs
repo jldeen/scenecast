@@ -46,7 +46,7 @@ const fallback = ((manifest.graph || {}).scenes || []).filter(s => s.kind && s.k
 const items = [];
 const shot = (...p) => { const f = join(demo.raw, ...p); return existsSync(f) ? f : null; };
 if (ONLY.has('state')) for (const [id, st] of Object.entries(S)) items.push({ id, kind: 'state', state: id, app: st.app, snap: st.snap, z: 100, real: shot('shots', st.snap + '.png') });
-if (ONLY.has('zoom')) for (const z of flow.zoomRefs || []) if (S[z.state]) items.push({ id: `${z.state}@${z.z}`, kind: 'zoom', state: z.state, app: z.app, snap: z.snap, z: z.z, real: shot('shots', z.snap + '.png') });
+if (ONLY.has('zoom')) for (const z of flow.zoomRefs || []) if (S[z.state]) items.push({ id: `${z.state}@${z.z}`, kind: 'zoom', state: z.state, app: z.app, snap: z.snap, z: z.z, ov: z.ov, real: shot('shots', z.snap + '.png') });
 if (ONLY.has('click')) for (const cp of flow.clickPages || []) {
   const f = join(demo.data, 'snaps', `hovers-${cp.app}.json`);
   const defs = existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')).clicks || []) : [];
@@ -159,11 +159,11 @@ function keep(key, id, d) {
 let reused = 0;
 
 const LANES = Math.max(1, Math.min(items.length || 1, +arg(args, '--lanes', process.env.SCENECAST_COMPARE_LANES || Math.min(4, Math.max(1, Math.floor(availableParallelism() / 3))))));
-const cmps = await Promise.all(Array.from({ length: LANES }, async () => (await R.browser.newContext({ viewport: { width: 800, height: 600 } })).newPage()));
+const cmps = await Promise.all(Array.from({ length: LANES }, async () => (await R.cmpBrowser.newContext({ viewport: { width: 800, height: 600 } })).newPage()));
 async function render(it, lane) {
   const r = await R.show(it, lane);
   if (r.error) return r;
-  const png = await r.page.screenshot({ animations: 'disabled', caret: 'hide' });
+  const png = await R.shoot(r.page);
   const fonts = it.kind === 'state' ? await r.page.evaluate(replicaFontsIn, it.app) : null;
   return { png, fonts };
 }
