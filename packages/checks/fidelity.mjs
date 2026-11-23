@@ -64,8 +64,9 @@ if (!(await up())) {
   // Not on the demo's own port unless asked for (--url): the editor or the stage may start there while this runs.
   if (!arg(args, '--url')) URL = `http://127.0.0.1:${await new Promise(res => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); })}/`;
   server = spawn(process.execPath, [__at('player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
-  for (let i = 0; i < 150 && !(await up()); i++) await sleep(100);
-  if (!(await up())) throw new Error(`the replica server didn't start in 15 s (${URL})`);
+  for (let i = 0, n = arg(args, '--url') ? 50 : 150; i < n && !(await up()); i++) await sleep(100);
+  // (At --url a static export's own server answers pages, not the status: there, the pages are checked as they are.)
+  if (!arg(args, '--url') && !(await up())) throw new Error(`the replica server didn't start in 15 s (${URL})`);
 }
 // The flow the replica plays: its bundle, with the server's live overrides (tweaks in flow.overrides.mjs).
 const flow = await bundleFlow(URL);

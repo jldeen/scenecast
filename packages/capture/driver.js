@@ -266,7 +266,7 @@ async function stream(p, name, { everyMs = 600, maxS = 900, until = 'quiet', set
 const LIGHT = new WeakMap();
 async function light(p, on) {
   const media = { features: on ? [{ name: 'prefers-color-scheme', value: 'light' }] : [] };
-  if (p.cmd) { await p.cmd(undefined, 'Emulation.setEmulatedMedia', media); LIGHT.set(p, on); return on; }
+  if (p.cmd) { if (p.attach) await p.attach(); await p.cmd(undefined, 'Emulation.setEmulatedMedia', media); p.media = on ? media : null; LIGHT.set(p, on); return on; }
   let s = LIGHT.get(p);
   if (!s || s === true) { s = await ctx.newCDPSession(p); LIGHT.set(p, s); }
   await s.send('Emulation.setEmulatedMedia', media);

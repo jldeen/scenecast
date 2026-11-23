@@ -154,6 +154,10 @@ const CDPX = (() => {
         if (e) throw new Error('attach: ' + e.message);
         this.attached = true;
         await this.enableSession(undefined);
+        // Emulation lasts only as long as the debugger session: a new one (the worker restarted, or the tab let go and
+        // taken again) shows the tab in the system's theme again unless it's set again (Nov 23: shots after a worker
+        // restart came out dark on Jessica's dark Mac).
+        if (this.media) await this.cmd(undefined, 'Emulation.setEmulatedMedia', this.media).catch(() => {});
       })().finally(() => { this._attaching = null; });
       return this._attaching;
     }
@@ -199,7 +203,7 @@ const CDPX = (() => {
     async release() {
       if (!this.attached) return;
       await chrome.debugger.detach({ tabId: this.tabId }).catch(() => {});
-      this.onDetach(); this.detachReason = 'released';
+      this.onDetach(); this.detachReason = 'released'; this.media = null;
     }
     onDetach() { this.attached = false; this._frames.clear(); this._ctx.clear(); this._main = null; this.net.clear(); }
     url() { return this._main ? this._main._url : this._tabUrl; }

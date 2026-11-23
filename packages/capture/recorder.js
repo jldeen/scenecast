@@ -415,6 +415,8 @@ async function recResume(c) {
   for (const a of snap.apps) {
     const p = await pageFor(a.match);
     REC.apps.push({ id: a.id, match: a.match, page: p, state: a.state, n: a.n, typing: null, viewport: a.viewport });
+    // Light again: the worker that set it is gone, and with it the tab's emulation.
+    await recLight(REC.apps[REC.apps.length - 1]);
     await recInstall(p);
     const sig = await recSettle(p, 600, 8000);
     if (sig !== (REC.states[a.state] || {}).sig && (REC.sigs[a.id] || new Map()).get(sig) !== a.state) off.push(`${a.id}: bring the tab back to ${a.state} (as captured in raw/shots/${(REC.states[a.state] || {}).snap}.png), then go on`);

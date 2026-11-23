@@ -9,13 +9,14 @@
 import './reap.mjs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { buildExtension } from '@stuntdouble/capture/build.mjs';
 import { send } from '@stuntdouble/capture/cli.mjs';
+import { luminance } from '@stuntdouble/checks/compare.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RX = 47698, WEB = 47896;
@@ -28,7 +29,7 @@ const ping = () => fetch(`http://127.0.0.1:${RX}/ping`).then(r => r.json()).catc
 // The app on 127.0.0.1; its frame on localhost (another site, so its own process) loads, then never answers again.
 const web = createServer((q, s) => {
   s.setHeader('content-type', 'text/html');
-  if (q.url.startsWith('/darkapp')) return s.end('<title>dark</title><style>body{background:#fff}@media (prefers-color-scheme: dark){body{background:#111}}</style><h1>dark</h1><button>Open</button>');
+  if (q.url.startsWith('/darkapp')) return s.end('<title>dark</title><style>body{background:#fff}@media (prefers-color-scheme: dark){body{background:#111}}</style><h1>dark</h1><button onclick="document.querySelector(\'h1\').textContent=\'dark opened\'">Open</button>');
   if (q.url.startsWith('/boxes')) return s.end('<title>boxes</title><input id="i" value="left over"><div id="ce" contenteditable="true"><p>an unsent prompt\u200b</p></div>');
   if (q.url.startsWith('/slowframe')) return s.end('<p>slow</p><script>setInterval(() => { const t = Date.now(); while (Date.now() - t < 1500) {} }, 1600)</script>');
   if (q.url.startsWith('/stuck')) return s.end('<p>frame</p><script>setTimeout(() => { for (;;) {} }, 6000)</script>');
@@ -108,10 +109,36 @@ try {
   const dp = await ctx.newPage(); await dp.goto(`http://${darkM}`); await dp.emulateMedia({ colorScheme: 'dark' });
   const bg = pg => pg.evaluate(() => getComputedStyle(document.body).backgroundColor);
   const before = await bg(dp);
+  const preDark = new Set(readdirSync(join(raw, 'shots')));
   const rs = await send({ op: 'recordStart', apps: [{ id: 'dark', match: darkM }], record: { auto: false } }, 120, RX);
   const during = await bg(dp);
-  await send({ op: 'recordAbort' }, 60, RX);
   check('a tab that renders dark is recorded light', rs.ok && before === 'rgb(17, 17, 17)' && during === 'rgb(255, 255, 255)', JSON.stringify({ before, during, rs: rs.ok }));
+  // The browser stops the extension's worker mid-take (MV3 may, any time): the worker that comes back resumes the
+  // take, and the tab stays light, its shots included (Nov 23: four shots after a restart came out dark).
+  const shotsBefore = new Set(readdirSync(join(raw, 'shots')));
+  const bp0 = await ctx.newPage(); await dp.bringToFront();
+  const sw = ctx.serviceWorkers()[0];
+  const cdp = await ctx.browser()?.newBrowserCDPSession?.().catch(() => null) || await ctx.newCDPSession(dp);
+  const { targetInfos } = await cdp.send('Target.getTargets');
+  const swT = targetInfos.find(x => x.type === 'service_worker' && (!sw || x.url === sw.url()));
+  if (swT) await cdp.send('Target.closeTarget', { targetId: swT.targetId }).catch(e => console.log('closeTarget: ' + e.message));
+  console.log(`worker: ${swT ? 'stopped' : 'not found'} (${targetInfos.map(x => x.type).join(' ')})`);
+  await sleep(1500);
+  // Switching tabs starts the worker again (as on her Mac).
+  await bp0.bringToFront(); await sleep(300); await dp.bringToFront();
+  let st = null;
+  for (const t0 = Date.now(); Date.now() - t0 < 60000;) { st = await send({ op: 'recordStatus' }, 5, RX).catch(() => null); if (st?.value?.resumed) break; await sleep(500); }
+  const afterRestart = await bg(dp);
+  console.log('after restart: ' + JSON.stringify({ resumed: st?.value?.resumed, afterRestart }));
+  const darkBox = await send({ op: "find", tab: darkM, text: "Open" }, 30, RX);
+  await send({ op: 'click', tab: darkM, x: darkBox.value.x, y: darkBox.value.y }, 30, RX);
+  for (let i = 0; i < 40 && readdirSync(join(raw, 'shots')).filter(f => !shotsBefore.has(f)).length < 1; i++) await sleep(500);
+  await send({ op: 'recordAbort' }, 60, RX);
+  const shots = readdirSync(join(raw, 'shots')).filter(f => f.endsWith('.png') && !preDark.has(f));
+  const lum = await luminance(dp, shots.map(f => readFileSync(join(raw, 'shots', f)).toString('base64')));
+  const newShots = shots.filter(f => !shotsBefore.has(f));
+  check('the worker restarts mid-take: the take resumes and the tab stays light', !!swT && !!st?.value?.resumed && afterRestart === 'rgb(255, 255, 255)', JSON.stringify({ worker: !!swT, resumed: st?.value?.resumed, afterRestart }));
+  check('every shot of the dark tab is light, after the restart too', newShots.length >= 1 && shots.length >= 2 && lum.every(l => l > 0.6), JSON.stringify(Object.fromEntries(shots.map((f, i) => [f, lum[i]]))));
   // Typing replaces what's already in a box: Copilot puts back the last unsent prompt (Nov 20: typed on top, doubled).
   const boxes = `127.0.0.1:${WEB}/boxes`;
   const bp = await ctx.newPage(); await bp.goto(`http://${boxes}`);
