@@ -93,6 +93,8 @@ try {
     return r && r.ok && r.value.version === newVersion && r;
   }, 240000, 1000).catch(e => ({ error: e.message }));
   check(`relaunched on ${newVersion}`, v1.ok && v1.value.pid !== v0.value.pid, JSON.stringify(v1));
+  // The test feed doesn't outlive this run: the app the update relaunched checks the release feed (tauri.conf.json).
+  if (!WIN) check('after the update, the release feed (the test feed isn\'t passed on)', v1.ok && v1.value.testFeed == null, JSON.stringify(v1.value || v1));
   check(`the installed app is ${newVersion}`, installedVersion() === newVersion, installedVersion());
   check('the demo is still there', existsSync(join(LIB, made.value.id, 'demo.json')));
   if (v1.value?.pid) try { process.kill(v1.value.pid); } catch { /* gone */ }

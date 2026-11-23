@@ -349,7 +349,8 @@ function matchWords(s) {
   const f = s.fidelity;
   if (!s.built) return s.recorded ? 'not built yet' : '';
   if (!f) return 'not compared yet';
-  return f.pass ? 'every screen matches' : `${plural(f.total - f.within, 'screen')} to look at`;
+  const views = f.viewsDiffer ? ` \u00b7 ${viewsWords(f.viewsDiffer)}` : '';
+  return f.within === f.total ? (f.viewsDiffer ? `every screen matches${views}` : 'every screen matches') : `${plural(f.total - f.within, 'screen')} to look at${views}`;
 }
 function renderLibrary() {
   S.view = 'library';
@@ -764,8 +765,9 @@ function reviewHead(d, s, f, slot) {
     if (!s.built) return { title: 'Build the replica', sub: `${plural(s.screens, 'screen')} recorded ${esc(ago(s.recordedAt))}.`, side: slot };
     if (!f) return { title: 'Compare it with the real product', sub: `${plural(s.liveScenes, 'screen')} built. Compare checks each one against what you recorded.`, side: slot };
     if (f.pass) return { title: 'Every screen matches', sub: `${f.total} of ${f.total} match the real product${s.focusPoints ? ` · ${plural(s.focusPoints, 'focus point')}` : ''}.`, side: slot };
-    const n = f.total - f.within;
-    return { title: `${plural(n, 'screen')} ${n === 1 ? 'needs' : 'need'} a look`, sub: `${f.within} of ${f.total} match the real product.`, side: slot };
+    const n = f.total - f.within, views = f.viewsDiffer ? ` \u00b7 ${viewsWords(f.viewsDiffer)}` : '';
+    if (!n) return { title: 'Every screen matches', sub: `${f.total} of ${f.total} match the real product${views}.`, side: slot };
+    return { title: `${plural(n, 'screen')} ${n === 1 ? 'needs' : 'need'} a look`, sub: `${f.within} of ${f.total} match the real product${views}.`, side: slot };
   }
 }
 function renderHead() {
@@ -1378,6 +1380,11 @@ Object.assign(REGIONS, {
     };
     const rows = r.beats.map(b => row(b, b.n === 0 || (r.beats.length === 1 && b.title === 'The show') ? esc(b.title) : `Beat ${b.n} \u00b7 ${esc(b.title)}`, b.screens)).join('')
       + (r.others.length ? row(null, 'Menus and hovers', r.others) : '');
+    // Compared before 0.5.3 (drawn headless): text can read about 1% different though it matches. One button checks it
+    // again, drawn in Chrome or Edge as it was recorded.
+    const all = [...r.beats.flatMap(b => b.screens), ...r.others];
+    const oldCheck = r.compared && !comparing && all.some(x => x.pass != null) && !all.some(x => x.realChecker)
+      ? `<p class="small muted" data-test="review-old-check">Checked by an older Scenecast, which draws text a little differently. <button class="link" data-action="review-recheck" data-test="review-recheck" ${fixing ? 'disabled' : ''}>Check again in Chrome</button></p>` : '';
     const sub = comparing ? `Comparing each screen with the real product${of ? `: ${sofar} of ${of}` : ''}\u2026 It\u2019s ready to present meanwhile.`
       : !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
       : r.differ ? `${plural(r.differ, 'screen')} ${r.differ === 1 ? 'differs' : 'differ'} from the real product${r.viewsDiffer ? `, and ${viewsWords(r.viewsDiffer).replace(/ differs?$/, '')}` : ''}. Fix it for me finds why and fixes it.`
@@ -1390,7 +1397,7 @@ Object.assign(REGIONS, {
       <div class="row" style="margin-top:8px"><button class="btn" data-goto="build">See what fails</button></div></div></div>` : '';
     return `${err}${checks}<div class="review-grid">
       <section class="card rundown compact" aria-label="Show" data-test="review" data-compared="${r.compared}" data-comparing="${!!comparing}" data-screens="${r.screens}" data-views-differ="${r.viewsDiffer || 0}" data-matching="${r.matching}" data-differ="${r.differ}">
-        <div class="rd-head"><div class="grow"><h2>Show</h2><small>${sub}</small></div><div class="next">${primary}</div></div>
+        <div class="rd-head"><div class="grow"><h2>Show</h2><small>${sub}</small>${oldCheck}</div><div class="next">${primary}</div></div>
         <div class="rd-cols" aria-hidden="true"><span></span><span>Beat</span><span>State</span></div>
         <div>${rows}</div></section>
       ${pickPanel(d, r)}</div>`;
@@ -1671,7 +1678,8 @@ function readyRows(d, p) {
   const ready = '<span class="state ok">Ready</span>';
   const rows = [];
   rows.push(f?.pass ? row('ok', 'Every screen matches the real product', `${f.total} of ${f.total}`, ready, 'ready-matches')
-    : f ? row('hold', `${plural(f.total - f.within, 'screen')} ${f.total - f.within === 1 ? 'doesn\u2019t' : 'don\u2019t'} match yet`, `${f.within} of ${f.total} match`, '<button class="alink" data-goto="review">Fix on Review</button>', 'ready-matches')
+    : f && f.within === f.total ? row('hold', `Every screen matches; ${viewsWords(f.viewsDiffer || 0)}`, `${f.within} of ${f.total} match`, '<button class="alink" data-goto="review">See them on Review</button>', 'ready-views')
+    : f ? row('hold', `${plural(f.total - f.within, 'screen')} ${f.total - f.within === 1 ? 'doesn\u2019t' : 'don\u2019t'} match yet`, `${f.within} of ${f.total} match${f.viewsDiffer ? ` \u00b7 ${viewsWords(f.viewsDiffer)}` : ''}`, '<button class="alink" data-goto="review">Fix on Review</button>', 'ready-matches')
       : row('todo', 'Not compared with the real product yet', 'Review compares each screen with what you recorded.', '<button class="alink" data-goto="review">Compare on Review</button>', 'ready-matches'));
   rows.push(g && !g.missingPictures ? row('ok', 'Presenter guide', 'Talk track, clicks and pictures for each beat', ready, 'ready-guide')
     : g ? row('hold', 'Presenter guide', `${plural(g.missingPictures, 'picture')} not made yet`, '<button class="alink" data-goto="script">Make them</button>', 'ready-guide')
@@ -2019,6 +2027,7 @@ const ACTIONS = {
   },
   'make-replica': () => makeReplica(S.id),
   'review-compare': async () => { const id = S.id; await step('fidelity', 'fidelity_run', { fix: false }); await loadReview(id); rerender(); },
+  'review-recheck': async () => { const id = S.id; await step('fidelity', 'fidelity_run', { fix: false, real: true }); await loadReview(id); renderSidebar(); rerender(); },
   'review-fix': async () => {
     const id = S.id;
     J(id).aiChain = { stage: 'fix' }; renderSidebar(); rerender();
@@ -2205,7 +2214,8 @@ async function checkUpdates(quiet) {
   renderUpdate();
   if (U.available && quiet) announce(`Scenecast ${U.available} is ready to install`);
   if (quiet) return u;
-  if (u.error) dialog({ title: 'Updates', body: `<p>Couldn\u2019t check for updates: ${esc(u.error)}</p>`, cancel: null });
+  // The updater's own words go under Details; the address and the error are in the app's log.
+  if (u.error) dialog({ title: 'Updates', body: `<p>${/valid release JSON|ReleaseNotFound|status|connect|dns|timed out/i.test(u.error) ? 'Scenecast couldn\u2019t reach the update server, or it had no update information. Try again later.' : 'Scenecast couldn\u2019t check for updates. Try again later.'}</p><details class="err-detail"><summary>Details</summary><div class="log">${esc(u.error)}</div></details>`, cancel: null });
   else if (!u.available) dialog({ title: 'Updates', body: `<p>You have the newest Scenecast (v${esc(u.current)}).</p>`, cancel: null });
   return u;
 }
@@ -2230,7 +2240,7 @@ $('#check-updates').onclick = () => checkUpdates(false);
 
 listen('open-file', ({ payload }) => openShared(payload));
 S.info = await call('app_info');
-$('#version').textContent = `v${S.info.version}`;
+$('#version').textContent = `v${S.info.version}${S.info.testFeed ? ' \u00b7 test updates' : ''}`;
 document.documentElement.dataset.os = S.info.os;
 await loadDemos();
 await refreshServers();
