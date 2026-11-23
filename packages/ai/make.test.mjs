@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
-import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom } from './from-script.mjs';
+import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
@@ -227,6 +227,27 @@ test('one box for what a line names together: rows of one list, a step and the s
   // A step and the ones it goes on to, to the next step of its kind; what every step has isn't one.
   const steps = [item(1, 'Reviewed custom skill Contoso IQ'), item(2, 'Thought process'), item(3, 'Retrieve memories'), item(4, 'Thought process'), item(5, 'Thought process'), item(6, 'Reviewed custom skill Supply chain disruption'), item(7, 'Get purchase order')];
   assert.deepEqual(stepsFrom(steps, steps[0]).map(x => x.text), ['Reviewed custom skill Contoso IQ', 'Retrieve memories']);
+  // "My plugin" is the one she named before.
+  const mine = myNames();
+  assert.deepEqual(mine('Under Added: our business plugin, and my Supply chain disruption plugin.'), []);
+  assert.deepEqual(mine('Then it calls my plugin to check our orders.'), [{ name: 'Supply chain disruption', word: 'plugin' }]);
+});
+
+test('a list framed the way she shows one: its heading and first step; a section by its first card', () => {
+  const item = (i, text, more = {}) => ({ i, kind: 'text', role: 'generic', tag: 'span', text, box: [i * 10, 0, i * 10 + 1, 1], ...more });
+  const h = (i, text, tag = 'h5') => item(i, text, { role: 'heading', tag });
+  const skill = [h(1, 'Inputs'), h(2, 'Workflow'), h(3, 'Step 1: Find the notice', 'h6'), h(4, 'Step 2: Extract the facts', 'h6'), h(5, 'Output Format')];
+  assert.deepEqual(firstOfKind('Every step is in plain language.', { items: skill }).map(x => x.text), ['Workflow', 'Step 1: Find the notice']);
+  assert.equal(firstOfKind('It reads in plain language.', { items: skill }), null);
+  // Sections: labels of one kind, each over a list of cards (something to click with its own line under it).
+  const label = (i, text) => item(i, text, { role: 'textbox' });
+  const card = (i, name, sub) => [item(i, name, { role: 'button' }), item(i + 1, sub)];
+  const page = { items: [label(10, 'Our process'), ...card(12, 'Spend policy', 'File'), ...card(15, 'Escalation steps', 'Skill'), ...card(18, 'Shipping exceptions', 'Skill'),
+    label(30, 'Our people'), ...card(32, 'Avery Chen', 'People'), ...card(35, 'Sam Ortiz', 'People'), ...card(38, 'Lee Park', 'People'),
+    item(50, 'Delete group', { role: 'button' }), item(51, 'Delete group', { role: 'button' })] };
+  assert.deepEqual(sectionsOf(page).map(s => [s.label.text, s.cards[0].text]), [['Our process', 'Spend policy'], ['Our people', 'Avery Chen']]);
+  // Headings over buttons that do things aren't sections.
+  assert.deepEqual(sectionsOf({ items: [h(1, 'Comments', 'h2'), item(2, 'Write a reply', { role: 'button' }), item(3, 'Skip comments', { role: 'button' }), h(4, 'Footer', 'h2'), item(5, 'Manage cookies', { role: 'button' })] }), []);
 });
 
 test('a walker never writes; offline, the recording says where a write went', () => {
