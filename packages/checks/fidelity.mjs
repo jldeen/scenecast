@@ -45,6 +45,17 @@ const taskSecs = id => started[id] ? Math.round((Date.now() - started[id]) / 100
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const node = (script, a) => new Promise(res => { const p = spawn(process.execPath, [__at(script), ...a], { stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => o += d); p.on('close', code => res({ code, out: o })); });
 mkdirSync(demo.out, { recursive: true });
+// A run that stops part way (a browser or server gone) still leaves its report, saying why, with what it found so
+// far: without one the app could only say the checks didn't run.
+const stoppedEarly = e => {
+  const why = String(e && e.stack || e).slice(0, 1500);
+  console.log(`FAIL   run: the checks stopped: ${why.split('\n')[0]}`);
+  try { writeFileSync(join(demo.out, QUICK ? 'quick.json' : 'fidelity.json'), JSON.stringify({ demo: demo.name, at: new Date().toISOString(), quick: QUICK, pass: false, items: [...items, { id: 'run', title: 'The checks ran to the end', status: 'fail', detail: 'the checks stopped: ' + why }] }, null, 1)); } catch (x) { /* the folder's gone */ }
+  try { server?.kill(); } catch (x) { /* gone */ }
+  process.exit(2);
+};
+process.on('uncaughtException', stoppedEarly);
+process.on('unhandledRejection', stoppedEarly);
 
 // The replica server: started here if it isn't running.
 let server = null;
@@ -53,7 +64,8 @@ if (!(await up())) {
   // Not on the demo's own port unless asked for (--url): the editor or the stage may start there while this runs.
   if (!arg(args, '--url')) URL = `http://127.0.0.1:${await new Promise(res => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); })}/`;
   server = spawn(process.execPath, [__at('player/serve.mjs'), '--demo', demo.dir, '--port', String(new globalThis.URL(URL).port)], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
-  for (let i = 0; i < 50 && !(await up()); i++) await sleep(100);
+  for (let i = 0; i < 150 && !(await up()); i++) await sleep(100);
+  if (!(await up())) throw new Error(`the replica server didn't start in 15 s (${URL})`);
 }
 // The flow the replica plays: its bundle, with the server's live overrides (tweaks in flow.overrides.mjs).
 const flow = await bundleFlow(URL);
@@ -978,7 +990,7 @@ try {
     ['manual-rehearse', 'Rehearsed on the venue display in full screen (⌃⌘F), with the presenter keys'],
   ]) if (want(id) && !only.size && !QUICK) add(id, t, 'manual', '');
 } finally {
-  await browser.close();
+  await browser.close().catch(e => console.log('the checks browser had already closed: ' + String(e).split('\n')[0]));
   if (server) server.kill();
 }
 const fails = items.filter(i => i.status === 'fail');
