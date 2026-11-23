@@ -41,7 +41,7 @@ jobs:
           export DIAG_DIR="$PWD/diag"
           for kv in ${{ inputs.env }}; do export "$kv"; done
           set +e
-          ${{ inputs.command }} 2>&1 | tee diag/output.log
+          ( ${{ inputs.command }} ) 2>&1 | tee "$DIAG_DIR/output.log"
           echo "exit $?" >> diag/output.log
           exit 0
       - uses: actions/upload-artifact@v4

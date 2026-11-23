@@ -642,6 +642,7 @@ try {
       await sleep(400);
     }
     const tBack = Date.now();
+    console.log('window recovery, the app says:\n' + appLog.join('').split('\n').filter(l => /window_not_drawing/.test(l)).slice(-8).join('\n'));
     check('a window that stops drawing is seen (no frame for 6 s, on screen)', stall > 6000, `stalled ${stall} ms, gpu stopped: ${[...stopped].join(' ')}`);
     check('and the page is started again by itself', back, `after ${((tBack - tStop) / 1000).toFixed(1)} s; told ${told}`);
     // Any GPU process this test stopped and still there: let it go (so the rest of the run isn't stuck), then judge.
