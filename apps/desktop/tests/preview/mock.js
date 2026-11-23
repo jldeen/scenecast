@@ -41,7 +41,7 @@
   const apps = [
     { id: 'teams', url: 'https://teams.cloud.microsoft/', key: 't' },
     { id: 'copilot', url: 'https://m365.cloud.microsoft/chat', key: 'c' },
-    { id: 'iq', url: 'https://daily.iq.microsoft.com/', key: 'i' },
+    { id: 'iq', url: 'https://preview.iq.example.com/', key: 'i' },
     { id: 'admin', url: 'https://admin.cloud.microsoft/', key: 'a' },
   ];
   const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', recording: 'new', paused: 'new', recorded: 'recorded', review: 'built', 'review-ok': 'built', making: 'new', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
@@ -106,7 +106,7 @@
       { title: 'Procurement chat | Microsoft Teams', url: 'https://teams.cloud.microsoft/', active: false },
       { title: 'Inbox - Jessica Deen - Outlook', url: 'https://outlook.cloud.microsoft/mail/', active: false },
       { title: 'Microsoft 365 Copilot', url: 'https://m365.cloud.microsoft/chat', active: true },
-      { title: 'Supply Chain Operations | Microsoft IQ', url: 'https://daily.iq.microsoft.com/workspaces/supply', active: false },
+      { title: 'Supply Chain Operations | Microsoft IQ', url: 'https://preview.iq.example.com/workspaces/supply', active: false },
       { title: 'Home | Microsoft 365 admin center', url: 'https://admin.cloud.microsoft/', active: false },
       { title: 'Scenecast keynote run of show - Google Docs', url: 'https://docs.google.com/document/d/1x', active: false },
       { title: 'jldeen/scenecast: Live demos, replicated', url: 'https://github.com/jldeen/scenecast', active: false },
@@ -162,7 +162,7 @@
     pending_opens: () => [], pick_share_file: () => null, share_import: () => demo,
     present_stop: () => null, present_guide: () => 'http://127.0.0.1:47811/presenter.html',
     preflight: async ({ id }) => {
-      const items = SC === 'record-pick' ? preflightItems.map(i => i.id === 'app iq' ? { id: 'app iq', status: 'fail', detail: 'no tab for iq (daily.iq.microsoft.com)', missing: true,
+      const items = SC === 'record-pick' ? preflightItems.map(i => i.id === 'app iq' ? { id: 'app iq', status: 'fail', detail: 'no tab for iq (preview.iq.example.com)', missing: true,
         tabs: [{ title: 'Supply Chain Operations | Microsoft IQ', url: 'https://iq.cloud.microsoft/workspaces/supply', host: 'iq.cloud.microsoft' }, { title: 'Procurement chat | Teams', url: 'https://teams.cloud.microsoft/', host: 'teams.cloud.microsoft' }, { title: 'Inbox | Outlook', url: 'https://outlook.cloud.microsoft/mail/', host: 'outlook.cloud.microsoft' }] } : i) : preflightItems;
       for (const item of items) { job(id, 'preflight', { type: 'preflight', item }); await wait(60); }
       return { ready: items.every(i => i.status !== 'fail'), secs: 0.8, items };
