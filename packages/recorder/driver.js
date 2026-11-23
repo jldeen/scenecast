@@ -184,16 +184,19 @@ async function cleanFor(p) {
     }, [CLEAN_CSS, CLEAN_BARS], 3000, { noContext: 'skip' }).catch(() => false);
     if (ok) done.push(f);
   }
-  // Parked, unless that changes the screen (a menu or card open because the pointer is on it): then back where it was.
+  // Parked, unless that changes the screen (a menu or card open because the pointer is on it); back where it was after
+  // the picture, so nothing the page does with the pointer changes (it held a click otherwise, real-tabs).
   const look = () => p.evaluate(() => (document.body ? document.body.innerText.length : 0) + '|' + document.querySelectorAll('[aria-expanded="true"],[role=dialog],[role=menu],[role=tooltip]').length).catch(() => null);
-  const at = await p.evaluate(() => ({ w: innerWidth, ptr: window.__rkrec && window.__rkrec.pointer })).catch(() => null);
-  if (at) {
+  const w = await p.evaluate(() => innerWidth).catch(() => null), was = p._pos ? { ...p._pos } : null;
+  let parked = false;
+  if (w && was) {
     const before = await look();
-    await p.mouse.move(at.w - 1, 2).catch(() => {});
+    await p.mouse.move(w - 1, 2).catch(() => {});
     await poll(150);
-    if ((await look()) !== before && at.ptr) { await p.mouse.move(at.ptr[0], at.ptr[1]).catch(() => {}); await poll(250); }
+    parked = true;
+    if ((await look()) !== before) { await p.mouse.move(was.x, was.y).catch(() => {}); await poll(250); parked = false; }
   }
-  return async () => { for (const f of done) await frameEval(p, f, () => { for (const s of document.querySelectorAll('style[data-sc-clean]')) s.remove(); }, undefined, 3000, { noContext: 'skip' }).catch(() => {}); };
+  return async () => { if (parked) await p.mouse.move(was.x, was.y).catch(() => {}); for (const f of done) await frameEval(p, f, () => { for (const s of document.querySelectorAll('style[data-sc-clean]')) s.remove(); }, undefined, 3000, { noContext: 'skip' }).catch(() => {}); };
 }
 async function snap(p, id, opts = {}) {
   const t0 = Date.now();
