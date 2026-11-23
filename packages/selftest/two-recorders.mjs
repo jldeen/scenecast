@@ -4,6 +4,7 @@
 //   2. Preflight says the recorder is in two places, by name, instead of passing.
 //   3. A recorder built for a test's port never finds a presenter's Scenecast (an app's receiver on 47621-47630).
 //   node packages/selftest/two-recorders.mjs
+import './reap.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

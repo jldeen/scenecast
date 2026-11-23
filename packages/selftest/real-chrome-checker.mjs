@@ -6,6 +6,7 @@
 //      at the 0.5% bar, and the spot or area it's found in is where it was planted.
 // Needs Google Chrome (or Edge) installed: on a machine without either it says so and stops (CI's Linux runner).
 //   node packages/selftest/real-chrome-checker.mjs
+import './reap.mjs';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
 import { launchRealChrome, browserApp } from '../checks/real-chrome.mjs';

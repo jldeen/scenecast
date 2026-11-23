@@ -6,6 +6,7 @@
 //   2. The editor, in Chrome and Edge: hidden until its key; a scripted new user adds a dot and changes a date (and
 //      sets a beat start, moves, deletes and reorders points, and undoes) in under 5 minutes of simulated steps; the
 //      changes show at once, persist (focus.json, flow.editor.json, the served pages) and replay identically.
+import './reap.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, rmSync, copyFileSync } from 'node:fs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
