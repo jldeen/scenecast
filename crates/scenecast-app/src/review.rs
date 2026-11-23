@@ -18,6 +18,10 @@ pub struct Screen {
     pub app: String,
     /// What was recorded (the real product), when the recording's pictures are there.
     pub shot: Option<PathBuf>,
+    /// A small copy of it for the filmstrip (the shot is about 3000 px wide; dozens of them in a row loaded the
+    /// window's GPU for nothing). None: no shot, or it couldn't be made (the filmstrip uses the shot).
+    #[serde(default)]
+    pub thumb: Option<PathBuf>,
     /// Real and replica side by side, when it's been compared.
     pub side_by_side: Option<PathBuf>,
     /// Compared: the screen itself (at 100%, nothing open) within the threshold, as the report counts it. None: not
@@ -121,6 +125,18 @@ pub struct Review {
     pub pictures: Vec<PathBuf>,
 }
 
+/// The filmstrip's copy of a shot, 360 px wide, made once (again when the shot is newer).
+const THUMB_WIDTH: u32 = 360;
+fn thumb_of(shot: &Path, thumb: &Path) -> Option<PathBuf> {
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let fresh = matches!((modified(thumb), modified(shot)), (Some(t), Some(s)) if t >= s);
+    if !fresh {
+        std::fs::create_dir_all(thumb.parent()?).ok()?;
+        crate::guide::shrink_png(shot, thumb, THUMB_WIDTH).ok()?;
+    }
+    Some(thumb.to_owned())
+}
+
 fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
@@ -132,6 +148,7 @@ pub fn read(dir: &Path, os: &str) -> Review {
         .or_else(|| read_json(&raw.as_ref()?.join("recording.json")))
         .unwrap_or(Value::Null);
     let shots = raw.as_ref().map(|r| r.join("shots"));
+    let thumbs = raw.as_ref().map(|r| r.join("thumbs"));
     let live = crate::fidelity::live(dir);
     let comparing = live.is_some();
     let fidelity = live.or_else(|| crate::fidelity::last(dir));
@@ -163,6 +180,10 @@ pub fn read(dir: &Path, os: &str) -> Review {
             .as_ref()
             .map(|s| s.join(format!("{snap}.png")))
             .filter(|p| p.is_file());
+        let thumb = shot
+            .as_ref()
+            .zip(thumbs.as_ref())
+            .and_then(|(s, t)| thumb_of(s, &t.join(format!("{snap}.png"))));
         let mine = views.get(id).cloned().unwrap_or_default();
         let base = mine
             .iter()
@@ -234,6 +255,7 @@ pub fn read(dir: &Path, os: &str) -> Review {
             id: id.to_owned(),
             app: app.to_owned(),
             shot,
+            thumb,
             side_by_side,
             pass,
             pct,
@@ -409,7 +431,7 @@ pub fn read(dir: &Path, os: &str) -> Review {
             .sum(),
         fonts_ok,
         report: fidelity.as_ref().map(|f| f.html.clone()),
-        pictures: [shots, fid_dir].into_iter().flatten().collect(),
+        pictures: [shots, thumbs, fid_dir].into_iter().flatten().collect(),
         beats,
         others,
     }
@@ -567,6 +589,31 @@ mod tests {
             (5, 5, 2, 2)
         );
         assert!(r.compared && r.fonts_ok);
+    }
+
+    #[test]
+    fn the_filmstrip_gets_a_small_copy_of_each_shot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (shot, thumb) = (tmp.path().join("s.png"), tmp.path().join("t").join("s.png"));
+        let mut enc = png::Encoder::new(std::fs::File::create(&shot).unwrap(), 3024, 40);
+        enc.set_color(png::ColorType::Rgba);
+        enc.write_header()
+            .unwrap()
+            .write_image_data(&vec![200; 3024 * 40 * 4])
+            .unwrap();
+        assert_eq!(thumb_of(&shot, &thumb), Some(thumb.clone()));
+        let width = png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(&thumb).unwrap(),
+        ))
+        .read_info()
+        .unwrap()
+        .info()
+        .width;
+        assert!(width <= 2 * THUMB_WIDTH, "{width}");
+        // Not a picture: no copy (the filmstrip shows the shot).
+        std::fs::write(&shot, b"png").unwrap();
+        std::fs::remove_file(&thumb).unwrap();
+        assert_eq!(thumb_of(&shot, &thumb), None);
     }
 
     #[test]
