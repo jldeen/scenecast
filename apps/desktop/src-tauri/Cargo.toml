@@ -1,7 +1,7 @@
 [package]
 name = "scenecast-desktop"
 description = "Scenecast's desktop app (Tauri, macOS and Windows) on the scenecast-app library"
-version = "0.5.4"
+version = "0.5.5-rc.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/jldeen/scenecast"

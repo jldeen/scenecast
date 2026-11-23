@@ -12,7 +12,9 @@
 //! 6 s a read on a loaded Mac.) A GPU process WebKit says exited that's still running 5 s later is ended (only if it's
 //! this app's: see `mac::ours`), then the web process. Frames, the window's place on screen and the process's state
 //! play no part: a covered window draws again once it's uncovered. If the stream can't be read (its marker, written at
-//! the start, doesn't come back), recovery is off and the app's log says so once.
+//! the start, doesn't come back), recovery is off and the app's log says why, once. macOS lets only administrators
+//! stream the log ("Must be admin to run 'stream' command", checked with a standard account): on other accounts a
+//! blank window is fixed by quitting and opening Scenecast again.
 
 #[cfg(target_os = "macos")]
 use std::time::Duration;
@@ -215,7 +217,7 @@ pub fn start(app: tauri::AppHandle) {
         .args(["-c", &script, "gpu-watch", &predicate])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn();
     let mut child = match child {
         Ok(c) => c,
@@ -224,6 +226,22 @@ pub fn start(app: tauri::AppHandle) {
     let Some(out) = child.stdout.take() else {
         return off("no output");
     };
+    // Its first complaint, if any ("log: Must be admin to run 'stream' command" for a standard account): the reason given
+    // when recovery is off.
+    let said = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    if let Some(err) = child.stderr.take() {
+        let said = said.clone();
+        let _ = std::thread::Builder::new()
+            .name("gpu-watch-err".into())
+            .spawn(move || {
+                for l in std::io::BufReader::new(err).lines().map_while(Result::ok) {
+                    let mut s = said.lock().expect("said");
+                    if s.is_empty() && !l.trim().is_empty() {
+                        *s = l.trim().trim_start_matches("log: ").to_owned();
+                    }
+                }
+            });
+    }
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let _ = std::thread::Builder::new()
         .name("gpu-watch-read".into())
@@ -253,7 +271,12 @@ pub fn start(app: tauri::AppHandle) {
             }
             if !live {
                 let _ = child.kill();
-                return off("its marker didn't come back");
+                let why = said.lock().map(|s| s.clone()).unwrap_or_default();
+                return off(if why.is_empty() {
+                    "its marker didn't come back"
+                } else {
+                    &why
+                });
             }
             eprintln!("gpu-watch: reading this app's log");
             let mut seen: Vec<i32> = Vec::new();
