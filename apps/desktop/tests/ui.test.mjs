@@ -130,7 +130,9 @@ async function shot(name) {
   await b.saveScreenshot(join(SHOTS, `${name}.png`));
 }
 // The app's own state: whether a demo's job (the quick checks it starts after a build, a script or an edit) runs.
-const checksAfter = (since, id = 'fixture-demo') => b.execute((since, id) => { const j = window.__scenecast?.jobs?.[id]?.checks; return j && j.startedAt > since && !window.__scenecast.jobs[id].running.checks ? (j.outcome || { error: j.error }) : null; }, since, id);
+const checksAfter = (since, id = 'fixture-demo') => b.execute((since, id) => { const j = window.__scenecast?.jobs?.[id]?.checks; return j && j.startedAt > since && !window.__scenecast.jobs[id].running.checks ? (j.outcome || { error: j.error, lines: (j.lines || []).slice(-30) }) : null; }, since, id);
+// Why a checks run didn't pass: its failing items, or its error with the end of its output and the app's log.
+const checksWhy = o => o?.items ? JSON.stringify(o.items.filter(i => i.status === 'fail')) : `error: ${o?.error}\n${(o?.lines || []).map(l => typeof l === 'string' ? l : JSON.stringify(l)).join('\n')}\n--- app output ---\n${appLog.join('').slice(-3000)}`;
 // The checks the app starts on its own after a step that began at `since`: wait for them to start and end.
 const quickAfter = (what, since, timeout = 600000) => waitFor(`the checks after ${what}`, () => checksAfter(since), timeout, 500);
 async function type(t, value) {
@@ -376,7 +378,7 @@ try {
   await click('cues-tab');
   check('the cue sheet shows', await waitFor('the cue sheet', () => b.execute(() => /cues\.html$/.test(document.querySelector('[data-test=sheet-frame]')?.src || '')), 20000));
   const afterScript = await quickAfter('the script', tScript);
-  check('the script runs the quick checks on its own', afterScript.quick && afterScript.pass, JSON.stringify(afterScript.items?.filter(i => i.status === 'fail')));
+  check('the script runs the quick checks on its own', afterScript.quick && afterScript.pass, checksWhy(afterScript));
   lap('script');
 
   // ---- 7 · Edit: a dot and a date ------------------------------------------------------------------------------
@@ -434,7 +436,7 @@ try {
   const tq = Date.now();
   const afterEdit = await quickAfter('the edits', tEdit);
   times.quickAfterEdit = Math.round((Date.now() - tq) / 1000);
-  check('edits: the quick checks run on their own, pass, and take under 3 minutes', afterEdit.quick && afterEdit.pass && times.quickAfterEdit < 180, JSON.stringify([times.quickAfterEdit, afterEdit.items?.filter(i => i.status === 'fail')]));
+  check('edits: the quick checks run on their own, pass, and take under 3 minutes', afterEdit.quick && afterEdit.pass && times.quickAfterEdit < 180, `${times.quickAfterEdit} s ${checksWhy(afterEdit)}`);
   lap('edit');
 
   // ---- 8 · Present ---------------------------------------------------------------------------------------------
@@ -632,7 +634,7 @@ try {
     const inv = (cmd, args = {}) => b.executeAsync((cmd, args, done) => window.__TAURI__.core.invoke(cmd, args).then(done, e => done({ error: String(e) })), cmd, args);
     await b.execute(() => { window.__before = 1; });
     const gpu = await inv('test_webkit_gpu_pids');
-    check('the app finds its GPU process', Array.isArray(gpu) && gpu.length > 0, JSON.stringify(gpu));
+    check('the app finds its GPU process', Array.isArray(gpu) && gpu.length > 0, JSON.stringify([gpu, await inv('test_webkit_gpu_all')]));
     for (const pid of Array.isArray(gpu) ? gpu : []) try { process.kill(pid, 'SIGSTOP'); } catch (e) {}
     const said = await inv('window_not_drawing', { ms: 10000 });
     let back = false;
