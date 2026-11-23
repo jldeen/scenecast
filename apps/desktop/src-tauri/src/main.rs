@@ -1937,6 +1937,7 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
                     let visible: bool = unsafe { msg_send![win, isVisible] };
                     let mini: bool = unsafe { msg_send![win, isMiniaturized] };
                     let occlusion: usize = unsafe { msg_send![win, occlusionState] };
+                    eprintln!("window_not_drawing: visible {visible}, minimized {mini}, occlusion {occlusion}");
                     visible && !mini && occlusion & 2 != 0
                 };
                 *got.lock().expect("pids") = (web, if on_screen { 2 } else { 1 });
@@ -1950,6 +1951,7 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
             tokio_sleep_ms(20).await;
         }
         let (web, seen) = *pids.lock().expect("pids");
+        eprintln!("window_not_drawing: {ms} ms, on screen {}", seen == 2);
         if seen != 2 {
             return Ok(serde_json::json!({ "restarted": null, "why": "not on screen" }));
         }

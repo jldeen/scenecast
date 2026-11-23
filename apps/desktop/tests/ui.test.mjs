@@ -654,6 +654,7 @@ try {
   check('the UI test ran to the end', false, e.stack || e);
   if (b && SHOTS) await b.saveScreenshot(join(SHOTS, 'zz-failure.png')).catch(() => {});
   console.log('--- app output ---\n' + appLog.join('').slice(-6000));
+  try { console.log('--- scenecast.log ---\n' + readFileSync(join(tmp, 'ai-home', 'logs', 'scenecast.log'), 'utf8').slice(-3000)); } catch (e) {}
 } finally {
   await ctx?.close().catch(() => {});
   await viewer?.close().catch(() => {});
