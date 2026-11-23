@@ -44,7 +44,7 @@ const aiLines = out => out.split('\n').filter(l => l.startsWith('@ai ')).map(l =
 function aiProc(args, cwd, onEvent) {
   const p = spawn(BIN, ['ai', ...args], { cwd, env: ENV, stdio: ['pipe', 'pipe', 'pipe'] });
   const events = []; let buf = '', err = '';
-  p.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.startsWith('@ai ')) { const e = JSON.parse(l.slice(4)); events.push(e); Promise.resolve(onEvent && onEvent(e)).catch(x => console.log('handler: ' + x.stack)); } } });
+  p.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.startsWith('@ai ')) { const e = JSON.parse(l.slice(4)); if (process.env.SCENECAST_AI_TRACE) console.log('  @ai ' + JSON.stringify(e).slice(0, 600)); events.push(e); Promise.resolve(onEvent && onEvent(e)).catch(x => console.log('handler: ' + x.stack)); } } });
   p.stderr.on('data', d => { err += d; });
   const done = new Promise(res => p.on('close', code => res({ code, events, err })));
   return { p, events, done };
