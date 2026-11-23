@@ -40,7 +40,7 @@ test('an external pack merges over the built-in one: writes by id, null removes,
 
 test('packs are found by URL (a frame by its own host) and by the names a talk track uses', () => {
   assert.equal(packFor('https://teams.cloud.microsoft/v2/', builtin).id, 'teams');
-  assert.equal(packFor('https://daily.iq.microsoft.com/home', builtin).id, 'microsoft-iq');
+  assert.equal(packFor('https://iq.microsoft.com/home', builtin).id, 'microsoft-iq');
   assert.equal(packFor('https://app.powerbi.com/groups/me', builtin).id, 'microsoft-iq');
   assert.equal(packFor('https://example.com/', builtin), null);
   assert.equal(packForName('In the admin center, open Tools', builtin).id, 'm365-admin');
