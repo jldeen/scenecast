@@ -1978,6 +1978,7 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
     }
 }
 
+#[cfg(target_os = "macos")]
 async fn tokio_sleep_ms(ms: u64) {
     let _ = tauri::async_runtime::spawn_blocking(move || {
         std::thread::sleep(std::time::Duration::from_millis(ms))
