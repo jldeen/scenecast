@@ -169,6 +169,7 @@ fn app_info(state: State<'_, Shared>, app: AppHandle) -> Value {
         "engine": engine.as_ref().map(|e| e.packages.display().to_string()).ok(),
         "engineError": engine.err().map(|e| e.to_string()),
         "noOpen": std::env::var_os("REPLICA_NO_OPEN").is_some(),
+        "testFeed": test_feed().is_some(),
     })
 }
 
@@ -560,6 +561,7 @@ fn selftest_hook(state: Shared, app: AppHandle) {
                         "version" => Ok(json!({
                             "version": app.package_info().version.to_string(),
                             "pid": std::process::id(),
+                            "testFeed": test_feed(),
                         })),
                         "create" => {
                             serde_json::from_value::<scenecast_app::NewDemo>(req["spec"].clone())
@@ -864,9 +866,10 @@ async fn fidelity_run(
     app: AppHandle,
     id: String,
     fix: bool,
+    real: Option<bool>,
 ) -> Res<scenecast_app::fidelity::FidelityView> {
     job(state, app, id, "fidelity", move |dir, busy| {
-        scenecast_app::fidelity::run(dir, fix, |u| busy.emit(u))
+        scenecast_app::fidelity::run(dir, fix, real.unwrap_or(false), |u| busy.emit(u))
     })
     .await
 }
@@ -1700,17 +1703,44 @@ struct UpdateCheck {
     error: Option<String>,
 }
 
-/// The updater: the release feed in tauri.conf.json, or `SCENECAST_UPDATE_URL` (the update test's local server).
+/// A test feed (`SCENECAST_UPDATE_URL`: the update test's local server, a release check's test release), read once at
+/// start and taken out of the environment, so the app the updater relaunches and anything it starts uses the release
+/// feed (Nov 2026: a test release's feed, deleted after the release, stayed in Jessica's app through an update, and
+/// every check failed). Shown next to the version while it's on.
+static TEST_FEED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+fn take_test_feed() {
+    let feed = std::env::var("SCENECAST_UPDATE_URL")
+        .ok()
+        .filter(|u| !u.trim().is_empty());
+    // SAFETY: at the start of main, before any thread.
+    unsafe { std::env::remove_var("SCENECAST_UPDATE_URL") };
+    let _ = TEST_FEED.set(feed);
+}
+fn test_feed() -> Option<&'static str> {
+    TEST_FEED.get().and_then(|f| f.as_deref())
+}
+
+/// The updater: the release feed in tauri.conf.json, or the test feed.
 fn updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, tauri_plugin_updater::Error> {
     use tauri_plugin_updater::UpdaterExt;
     let mut b = app.updater_builder();
-    if let Some(url) = std::env::var("SCENECAST_UPDATE_URL")
-        .ok()
-        .and_then(|u| u.parse().ok())
-    {
+    if let Some(url) = test_feed().and_then(|u| u.parse().ok()) {
         b = b.endpoints(vec![url])?;
     }
     b.build()
+}
+
+/// Where updates come from, for the log: the test feed, or the release feed's address.
+fn feed_url(app: &AppHandle) -> String {
+    test_feed().map(str::to_owned).unwrap_or_else(|| {
+        app.config()
+            .plugins
+            .0
+            .get("updater")
+            .and_then(|u| u["endpoints"][0].as_str())
+            .unwrap_or("the release feed")
+            .to_owned()
+    })
 }
 
 async fn update_check_now(app: &AppHandle) -> UpdateCheck {
@@ -1729,12 +1759,15 @@ async fn update_check_now(app: &AppHandle) -> UpdateCheck {
                 notes: None,
                 error: None,
             },
-            Err(e) => UpdateCheck {
-                current,
-                available: None,
-                notes: None,
-                error: Some(e.to_string()),
-            },
+            Err(e) => {
+                scenecast_app::ai::app_log("update check", &format!("{}: {e}", feed_url(app)));
+                UpdateCheck {
+                    current,
+                    available: None,
+                    notes: None,
+                    error: Some(e.to_string()),
+                }
+            }
         },
         Err(e) => UpdateCheck {
             current,
@@ -2012,6 +2045,7 @@ async fn tokio_sleep_ms(ms: u64) {
 }
 
 fn main() {
+    take_test_feed();
     use_bundled_engine();
     default_check_browser();
     let library = Library::new(Library::default_root());

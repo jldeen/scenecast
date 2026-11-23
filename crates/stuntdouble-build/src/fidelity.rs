@@ -35,6 +35,8 @@ pub struct FidelityOptions {
     pub fix: bool,
     /// The replica's URL (default: the demo's own server, started if it isn't up).
     pub url: Option<String>,
+    /// Which browser draws the replica: "real" (the installed Chrome or Edge), "headless", or None (as recorded).
+    pub checker: Option<String>,
 }
 
 impl Default for FidelityOptions {
@@ -44,6 +46,7 @@ impl Default for FidelityOptions {
             threshold: 0.5,
             fix: true,
             url: None,
+            checker: None,
         }
     }
 }
@@ -226,13 +229,20 @@ pub fn run(
     fs::create_dir_all(&out)?;
     let fallback_before = fallback_scenes(dir)?.len();
     let step = |name: &'static str, args: Vec<OsString>, on: &mut dyn FnMut(FidelityProgress)| {
-        let code = engine.run_with_progress(with_demo(name, &args, dir), |p| match &p {
-            Progress::Stdout(line) => match parse_event(line) {
-                Some(event) => on(FidelityProgress::Event(event)),
-                None => on(FidelityProgress::Engine(p)),
-            },
-            Progress::Stderr(_) => on(FidelityProgress::Engine(p)),
-        })?;
+        let env: Vec<(&str, &str)> = opts
+            .checker
+            .as_deref()
+            .map(|c| ("SCENECAST_CHECKER", c))
+            .into_iter()
+            .collect();
+        let code =
+            engine.run_with_progress_env(with_demo(name, &args, dir), env, |p| match &p {
+                Progress::Stdout(line) => match parse_event(line) {
+                    Some(event) => on(FidelityProgress::Event(event)),
+                    None => on(FidelityProgress::Engine(p)),
+                },
+                Progress::Stderr(_) => on(FidelityProgress::Engine(p)),
+            })?;
         if code != 0 {
             return Err(FidelityError::Step { step: name, code });
         }

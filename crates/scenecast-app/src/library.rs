@@ -30,14 +30,17 @@ pub struct DemoApp {
     pub key: Option<String>,
 }
 
-/// The fidelity loop's last result: screens within the threshold out of all compared. A screen is compared at each
-/// zoom and with each menu open; it's within when every one of those is (as Review counts it).
+/// The fidelity loop's last result: screens within the threshold out of all compared, each by its own verdict (as
+/// Review counts it); its zoom levels and menus that differ are counted apart (`views_differ`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FidelityScore {
     pub pass: bool,
     pub within: usize,
     pub total: usize,
+    /// Zoom levels and menus that differ, apart from the screens.
+    #[serde(default)]
+    pub views_differ: usize,
     /// `within / total`, as a percentage.
     pub score: f64,
     pub fonts_ok: bool,
@@ -538,11 +541,22 @@ pub fn status(dir: &Path, manifest: Option<&scenecast_core::BundleManifest>) -> 
     let report = dir.join(".out/fidelity/report.json");
     if let Some(r) = read_json(&report) {
         let items = r["items"].as_array().cloned().unwrap_or_default();
+        // A screen is its own view (kind "state"; an older report without kinds: an id with no "@" or "+").
+        let own = |i: &Value| {
+            i["kind"].as_str().map_or_else(
+                || !i["id"].as_str().unwrap_or_default().contains(['@', '+']),
+                |k| k == "state",
+            )
+        };
         let mut screens: BTreeMap<String, bool> = BTreeMap::new();
+        let mut views_differ = 0;
         for i in &items {
-            let key = i["state"].as_str().or(i["id"].as_str()).unwrap_or_default();
-            let ok = screens.entry(key.to_owned()).or_insert(true);
-            *ok &= i["pass"] == true;
+            if own(i) {
+                let key = i["state"].as_str().or(i["id"].as_str()).unwrap_or_default();
+                screens.insert(key.to_owned(), i["pass"] == true);
+            } else if i["pass"] != true {
+                views_differ += 1;
+            }
         }
         let total = screens.len();
         let within = screens.values().filter(|ok| **ok).count();
@@ -553,6 +567,7 @@ pub fn status(dir: &Path, manifest: Option<&scenecast_core::BundleManifest>) -> 
             pass: r["pass"] == true,
             within,
             total,
+            views_differ,
             score: if total == 0 {
                 0.0
             } else {
@@ -869,8 +884,11 @@ mod tests {
         fs::write(a.dir.join("focus.json"), r#"{"points":[{},{},{}]}"#).unwrap();
         let s = lib.get(&a.id).unwrap().status;
         let f = s.fidelity.unwrap();
-        // Screens, not views: b differs at 150%, so only a matches.
-        assert_eq!((f.within, f.total, f.score, f.pass), (1, 3, 33.3, false));
+        // Each screen by its own verdict, as Review: a and b match, c doesn't; b's 150% differs, counted apart.
+        assert_eq!(
+            (f.within, f.total, f.views_differ, f.score, f.pass),
+            (2, 3, 1, 66.7, false)
+        );
         assert!(f.fonts_ok);
         let c = s.checks.unwrap();
         assert_eq!((c.passed, c.failed, c.quick, c.pass), (1, 1, true, false));

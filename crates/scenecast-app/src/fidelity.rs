@@ -61,13 +61,26 @@ pub fn live(dir: &Path) -> Option<FidelityView> {
 }
 
 /// Runs the loop (`fix`: diagnose and patch; else compare and report only).
-pub fn run(dir: &Path, fix: bool, on: impl FnMut(Update)) -> Result<FidelityView, AppError> {
-    crate::timeline::timed(dir, "compare", || run_inner(dir, fix, on))
+/// `real`: drawn in the installed Chrome or Edge whatever the recording says (Check again on a demo compared before
+/// 0.5.3, headless).
+pub fn run(
+    dir: &Path,
+    fix: bool,
+    real: bool,
+    on: impl FnMut(Update),
+) -> Result<FidelityView, AppError> {
+    crate::timeline::timed(dir, "compare", || run_inner(dir, fix, real, on))
 }
 
-fn run_inner(dir: &Path, fix: bool, mut on: impl FnMut(Update)) -> Result<FidelityView, AppError> {
+fn run_inner(
+    dir: &Path,
+    fix: bool,
+    real: bool,
+    mut on: impl FnMut(Update),
+) -> Result<FidelityView, AppError> {
     let opts = FidelityOptions {
         fix,
+        checker: real.then(|| "real".to_owned()),
         ..FidelityOptions::default()
     };
     let outcome = fidelity::run(dir, &opts, |p| match p {

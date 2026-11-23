@@ -236,6 +236,7 @@ pub fn fidelity(args: &FidelityArgs) -> Result<i32> {
         threshold: args.threshold,
         fix: !args.no_fix,
         url: args.url.clone(),
+        checker: None,
     };
     let str_of = |v: &serde_json::Value| {
         v.as_str()
