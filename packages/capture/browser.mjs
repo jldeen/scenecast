@@ -17,12 +17,15 @@
 //           window ('auto' | 'minimized' | 'offscreen' | 'visible'), viewport ({ width, height, dpr }: emulated),
 //           light (true: pages draw light, as captures are), zoom (page zoom, throwaway profiles only),
 //           flags (more Chrome switches, e.g. an app pack's), extension (an unpacked folder), mockKeychain,
-//           launch ('auto' | 'open' | 'direct': on macOS, through open unless on CI), log
+//           launch ('auto' | 'open' | 'direct': on macOS, through open unless on CI),
+//           macSso (false: the Mac's own single sign-on off in this profile), log
 //   cb.open(app | url, { light, viewport, window, width, height }) → Page   a window of its own, loaded
 //   cb.twins(app | url, n, opts) → Page[]          n windows of one app at once, for side sweeps in parallel
 //   cb.probe(page) → { raf, timer250, fonts, dark, hidden, size, screen, dpr }
 //   cb.signedIn(apps) → { apps: [{ id, at: 'app' | 'signin' | 'blocked', host, secs }], cookies }
 //   cb.guard({ hosts, allow, mode }) → { pass(fn, { hosts }), counts(), held(), stop() }
+//   cb.pinAccount({ loginHint, domainHint }) → { pinned(), stop() }   no account picker at Entra's sign-in
+//   cb.tenantsOf({ id: page }) → { id: [tenant ids] }                 what each page is signed in to
 //   cb.info(), cb.cpu(), cb.close()
 //   signInWindow({ profile, apps, timeoutS }) → { ok, secs, apps, cookies }   the one window that shows on her screen
 //   launchRealChrome({ zoom, channel, log }) → { browser, ctx, newPage(), close() }   the checker's shape (Phase 6)
@@ -80,9 +83,13 @@ export const BLOCKED_TEXT = /can.t get there from here|you can.t access this|set
 // Pages on the way that aren't a block: a second factor, and "Stay signed in?" (what keeps the profile signed in).
 export const MFA_TEXT = /approve (?:the )?sign.in request|verify your identity|enter (?:the )?code|authenticator app|number (?:shown|you see)/i;
 export const KMSI_TEXT = /stay signed in\?/i;
+// A signed-out page on the app's own host: its account picker, or a "sign in to start" landing (measured: M365
+// Copilot shows one when the profile has more than one work account, as a managed Mac's single sign-on gives it).
+export const SIGNED_OUT_TEXT = /\bpick an account\b|\bsign in to (?:start|continue|get started)\b/i;
 export function landedOn(url, text = '', match = null) {
   let host = ''; try { host = new URL(url).host; } catch (e) {}
   if (BLOCKED_TEXT.test(text)) return { at: 'blocked', host };
+  if (SIGNED_OUT_TEXT.test(text)) return { at: 'signin', host };
   if (match && host.includes(match)) return { at: 'app', host };
   if (SIGN_IN_HOST.test(host)) return { at: 'signin', host };
   return { at: 'app', host };
@@ -116,6 +123,65 @@ export function guardVerdict({ method, url }, { hosts = null, allow = [], local 
   return 'hold';
 }
 
+// Entra's sign-in page asked for an account (authorize) gets the demo's account pinned: login_hint and domain_hint
+// added, and an app's "pick an account" (prompt=select_account) dropped, so a profile holding more than one work
+// account (a managed Mac's single sign-on offers its own) never stops on the picker. null when it isn't one.
+const ENTRA = /^(login\.microsoftonline\.com|login\.microsoft\.com|login\.windows\.net)$/i;
+export function pinnedAuthorizeUrl(url, { loginHint = null, domainHint = null } = {}) {
+  let u; try { u = new URL(url); } catch (e) { return null; }
+  if (!ENTRA.test(u.host) || !/\/oauth2(?:\/v2\.0)?\/authorize$/i.test(u.pathname)) return null;
+  const q = u.searchParams; let changed = false;
+  if (loginHint && !q.get('login_hint')) { q.set('login_hint', loginHint); changed = true; }
+  if (domainHint && !q.get('domain_hint')) { q.set('domain_hint', domainHint); changed = true; }
+  if (loginHint && q.get('prompt') === 'select_account') { q.delete('prompt'); changed = true; }
+  return changed ? u.toString() : null;
+}
+
+// The tenants an app's sign-in library holds accounts for, from the names of what it keeps in the page's storage
+// (MSAL: "<object id>.<tenant id>" in its account and token keys), never their values beyond MSAL's own key lists.
+const GUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const HOME_ACCOUNT = new RegExp(`(${GUID})\\.(${GUID})`, 'gi');
+export const isTenantId = v => new RegExp(`^${GUID}$`, 'i').test(String(v || ''));
+export function tenantsInKeys(keys) {
+  const out = new Set();
+  for (const k of keys) for (const m of String(k).matchAll(HOME_ACCOUNT)) out.add(m[2].toLowerCase());
+  return [...out];
+}
+// The verdict on what the pages are signed in to. want: the demo tenant's id. Any other tenant, or none to be seen
+// where a tenant is wanted, is a refusal: a wrong account picked silently must never be recorded.
+export function tenantVerdict(seen, want) {
+  const all = [...new Set(Object.values(seen).flat())];
+  if (!want) return all.length ? { ok: false, why: `signed in to ${all.length > 1 ? `${all.length} tenants` : 'a tenant'}, and the demo doesn't name its own (capture.tenant in demo.json)`, all } : { ok: true, all };
+  const other = all.filter(t => t !== want.toLowerCase());
+  if (other.length) return { ok: false, why: `signed in to another tenant (${other.join(', ')}), not the demo's`, all, other };
+  const unseen = Object.entries(seen).filter(([, t]) => !t.length).map(([id]) => id);
+  if (unseen.length) return { ok: false, why: `couldn't tell which tenant ${unseen.join(', ')} ${unseen.length > 1 ? 'are' : 'is'} signed in to`, all, unseen };
+  return { ok: true, all };
+}
+// A tenant named by its domain, as its id (Entra's public sign-in metadata says it).
+export async function resolveTenant(nameOrId) {
+  if (!nameOrId || isTenantId(nameOrId)) return nameOrId ? nameOrId.toLowerCase() : null;
+  const r = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(nameOrId)}/v2.0/.well-known/openid-configuration`);
+  const m = r.ok && new RegExp(`/(${GUID})/`, 'i').exec((await r.json()).issuer || '');
+  if (!m) throw new Error(`no tenant called ${nameOrId}`);
+  return m[1].toLowerCase();
+}
+// What a page's frames keep (key names; MSAL's own lists of its account keys), for tenantsInKeys.
+export async function storageKeys(page) {
+  const out = [];
+  for (const f of page.frames()) {
+    const ks = await f.evaluate(() => {
+      const r = [];
+      for (const st of [localStorage, sessionStorage]) {
+        try { for (let i = 0; i < st.length; i++) { const k = st.key(i); r.push(k); if (/account\.keys$|\.account\.keys\b/i.test(k)) r.push(String(st.getItem(k) || '').slice(0, 20000)); } } catch (e) {}
+      }
+      return r;
+    }).catch(() => []);
+    out.push(...ks);
+  }
+  return out;
+}
+
 const freePort = () => new Promise((res, rej) => { const s = createServer(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 // A profile a running browser has open (Chrome hands a second start on it to the first, which never answers us).
@@ -144,7 +210,7 @@ const urlOf = t => typeof t === 'string' ? t : t && t.url || 'about:blank';
 const PROBE_URL = 'data:text/html,<title>capture probe</title><body style="margin:0;background:%23fff">';
 
 export async function openCaptureBrowser({ profile = null, channel = 'chrome', window: win = 'auto', viewport = null, light = true, zoom = 1,
-  flags: extraFlags = [], extension = null, mockKeychain, launch = 'auto', width = 1600, height = 1000, log = () => {} } = {}) {
+  flags: extraFlags = [], extension = null, mockKeychain, launch = 'auto', macSso = false, width = 1600, height = 1000, log = () => {} } = {}) {
   const where = browserApp(channel);
   if (!where) { log(`capture browser: no ${channel} installed here`); return null; }
   const throwaway = !profile;
@@ -160,6 +226,15 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       browser: { has_seen_welcome_page: true, check_default_browser: false },
       ...(throwaway && zoom !== 1 ? { partition: { default_zoom_level: { x: Math.log(zoom) / Math.log(1.2) } } } : {}),
     }));
+  }
+  // macOS single sign-on (Chrome's Extensible Enterprise SSO) off in this profile alone: it would offer the Mac's
+  // own work accounts to every sign-in page, so a capture could pick one silently. Its switch is a Local State pref
+  // (the ExtensibleEnterpriseSSOBlocklist policy sets it, device-wide, where IT does; a policy still wins).
+  if (process.platform === 'darwin' && !macSso) {
+    const f = join(dir, 'Local State');
+    let ls = {}; try { ls = JSON.parse(readFileSync(f, 'utf8')); } catch (e) {}
+    ls.extensible_enterprise_sso = { ...(ls.extensible_enterprise_sso || {}), enabled: 0, enabled_idps: [] };
+    writeFileSync(f, JSON.stringify(ls));
   }
   // A port the last run wrote must not be taken for this one's (another program could be on it now).
   rmSync(join(dir, 'DevToolsActivePort'), { force: true });
@@ -392,36 +467,64 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     return { ok: out.every(r => r.at === 'app'), apps: out, cookies: cookieExpiries(await ctx.cookies()), secs: +((Date.now() - t0) / 1000).toFixed(1) };
   }
 
-  // Read-only steps: every request that isn't a read, to a guarded host, held before it leaves (Fetch, on the browser:
-  // every page and frame). pass(fn) lets them through while fn runs (a planned write). mode 'watch' only counts.
-  // WebSocket messages don't go through Fetch: a guard doesn't cover them.
+  // One Fetch dispatcher on the browser (every page and frame): the read-only guard and the pinned account each
+  // add a hook with the requests it wants; a hook may change the address or fail the request.
+  const hooks = new Set();
+  let fetching = false;
+  const onPaused = async e => {
+    let url = e.request.url;
+    for (const h of hooks) {
+      const r = await h.on(e.request, url).catch(() => null);
+      if (r && r.fail) return top.send('Fetch.failRequest', { requestId: e.requestId, errorReason: 'BlockedByClient' }).catch(() => {});
+      if (r && r.url) url = r.url;
+    }
+    await top.send('Fetch.continueRequest', { requestId: e.requestId, ...(url !== e.request.url ? { url } : {}) }).catch(() => {});
+  };
+  const refetch = async () => {
+    const pats = [...hooks].flatMap(h => h.patterns);
+    if (!pats.length) { if (fetching) { top.off('Fetch.requestPaused', onPaused); fetching = false; await top.send('Fetch.disable').catch(() => {}); } return; }
+    if (!fetching) { top.on('Fetch.requestPaused', onPaused); fetching = true; }
+    await top.send('Fetch.enable', { patterns: pats.some(p => p.urlPattern === '*' && !p.resourceType) ? [{ urlPattern: '*', requestStage: 'Request' }] : pats });
+  };
+  const addHook = async h => { hooks.add(h); await refetch(); return async () => { hooks.delete(h); await refetch(); }; };
+
+  // Read-only steps: every request that isn't a read, to a guarded host, held before it leaves. pass(fn) lets them
+  // through while fn runs (a planned write). mode 'watch' only counts. WebSocket messages don't go through Fetch:
+  // a guard doesn't cover them.
   let guarding = null;
   async function guard({ hosts = null, allow = [], mode: gm = 'hold', local = false } = {}) {
     if (guarding) await guarding.stop();
     const st = { open: [], counts: {}, held: [] };
     const passing = u => st.open.some(o => !o || o.some(h => hostIs(u.host, h)));
-    const onPaused = async e => {
-      const { method, url } = e.request;
+    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method }, url) => {
       let u = null; try { u = new URL(url); } catch (x) {}
       let v = guardVerdict({ method, url }, { hosts, allow, local });
       if (v === 'hold' && u && passing(u)) v = 'pass';
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
       st.counts[k] = (st.counts[k] || 0) + 1;
-      if (v === 'hold' && gm === 'hold') {
-        st.held.push({ method, host: u && u.host, at: new Date().toISOString() });
-        await top.send('Fetch.failRequest', { requestId: e.requestId, errorReason: 'BlockedByClient' }).catch(() => {});
-      } else await top.send('Fetch.continueRequest', { requestId: e.requestId }).catch(() => {});
-    };
-    top.on('Fetch.requestPaused', onPaused);
-    await top.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+      if (v === 'hold' && gm === 'hold') { st.held.push({ method, host: u && u.host, at: new Date().toISOString() }); return { fail: true }; }
+      return null;
+    } });
     guarding = {
       async pass(fn, { hosts: only = null } = {}) { const o = only; st.open.push(o); try { return await fn(); } finally { st.open.splice(st.open.indexOf(o), 1); } },
       counts: () => ({ ...st.counts }),
       held: () => st.held.slice(),
-      async stop() { top.off('Fetch.requestPaused', onPaused); await top.send('Fetch.disable').catch(() => {}); guarding = null; },
+      async stop() { await remove(); guarding = null; },
     };
     return guarding;
   }
+
+  // The demo's account, pinned at Entra's sign-in (pinnedAuthorizeUrl): no account picker, whatever else the
+  // profile holds. Counts how often it pinned.
+  async function pinAccount({ loginHint = null, domainHint = null } = {}) {
+    let n = 0;
+    const remove = await addHook({ patterns: ['login.microsoftonline.com', 'login.microsoft.com', 'login.windows.net'].map(h => ({ urlPattern: `*://${h}/*authorize*`, resourceType: 'Document', requestStage: 'Request' })),
+      on: async (req, url) => { const to = pinnedAuthorizeUrl(url, { loginHint, domainHint }); if (to) n++; return to ? { url: to } : null; } });
+    return { pinned: () => n, stop: remove };
+  }
+
+  // Which tenants each page is signed in to (tenantsInKeys over its storage's key names, every frame).
+  const tenantsOf = async pages => Object.fromEntries(await Promise.all(Object.entries(pages).map(async ([id, p]) => [id, tenantsInKeys(await storageKeys(p))])));
 
   const info = async () => {
     const wins = [];
@@ -436,7 +539,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   async function close() {
     process.removeListener('exit', kill);
     for (const sig of ['SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal);
-    if (guarding) await guarding.stop();
+    hooks.clear(); await refetch().catch(() => {});
     await top.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
     if (bpid) for (let i = 0; i < 30; i++) { if (!alive(bpid.id)) break; await sleep(150); if (i === 29) try { process.kill(bpid.id, 'SIGKILL'); } catch (e) {} }
@@ -444,15 +547,16 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     killAll();
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
-  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, info, cpu, close, dir };
+  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, pinAccount, tenantsOf, info, cpu, close, dir };
 }
 
 // The one window that shows on her screen: the capture profile, visible, on the first app that needs a sign-in. She
 // signs in there (and says Yes to staying signed in); it closes itself once every app lands on its own host.
-export async function signInWindow({ profile, apps, channel = 'chrome', timeoutS = 600, viewport = { width: 1280, height: 800 }, flags = [], onState = () => {}, log = () => {} } = {}) {
+export async function signInWindow({ profile, apps, channel = 'chrome', timeoutS = 600, viewport = { width: 1280, height: 800 }, flags = [], pin = null, onState = () => {}, log = () => {} } = {}) {
   const cb = await openCaptureBrowser({ profile, channel, window: 'visible', light: false, flags, width: viewport.width, height: viewport.height, log });
   if (!cb) return { ok: false, error: 'the capture browser did not start' };
-  const t0 = Date.now(), states = {};
+  if (pin) await cb.pinAccount(pin);
+  const t0 = Date.now(), states = {}, tenants = {};
   try {
     const p = await cb.open('about:blank', { window: 'visible', viewport: null, ...viewport, focus: false });
     // This one window comes to the front: it's hers to sign in on.
@@ -467,22 +571,23 @@ export async function signInWindow({ profile, apps, channel = 'chrome', timeoutS
       return l;
     };
     // Each app in turn: opened once, then only watched. While it's on a sign-in or policy page the page is hers:
-    // nothing navigates under her. It counts as signed in once it's been on the app for two looks in a row.
+    // nothing navigates under her. It counts as signed in once it's been on the app for three looks in a row.
     for (const a of apps) {
       await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
       let onApp = 0, last = null;
       while (Date.now() - t0 < timeoutS * 1000) {
         await p.waitForLoadState('load', { timeout: 30000 }).catch(() => {});
-        await sleep(2500);
+        await sleep(3000);
         const l = await read(a);
         if (!last || l.at !== last.at) { states[a.id] = { ...l, secs: Math.round((Date.now() - t0) / 1000) }; onState(apps.map(x => ({ id: x.id, at: states[x.id] ? states[x.id].at : null }))); }
         last = l;
-        if (l.at === 'app') { if (++onApp >= 2) break; } else onApp = 0;
+        // Three looks in a row: an app can redirect to its sign-in seconds after it loads.
+        if (l.at === 'app') { if (++onApp >= 3) { tenants[a.id] = tenantsInKeys(await storageKeys(p)); break; } } else onApp = 0;
       }
       if (!(states[a.id] && states[a.id].at === 'app')) break;
     }
     const ok = apps.every(a => states[a.id] && states[a.id].at === 'app');
-    return { ok, secs: Math.round((Date.now() - t0) / 1000), seen: [...seen], apps: apps.map(a => ({ id: a.id, ...states[a.id] })), cookies: cookieExpiries(await cb.ctx.cookies()) };
+    return { ok, secs: Math.round((Date.now() - t0) / 1000), seen: [...seen], tenants, apps: apps.map(a => ({ id: a.id, ...states[a.id] })), cookies: cookieExpiries(await cb.ctx.cookies()) };
   } finally { await cb.close(); }
 }
 

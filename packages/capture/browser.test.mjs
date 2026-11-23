@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict } from './browser.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
 
@@ -103,4 +103,44 @@ test("the capture browser's recorder tells the receiver where it runs, and hands
   assert.match(code, /async function EXPOSE_SHADOW/);
   assert.equal(typeof new Function('return ' + code)(), 'function');
   assert.match(agentCode(47621), /&browser=agent&/);
+});
+
+test('the demo account is pinned at Entra\'s sign-in: hints added, the app\'s account picker dropped', () => {
+  const pin = { loginHint: 'demo@contoso.example', domainHint: 'contoso.example' };
+  const u = new URL(pinnedAuthorizeUrl('https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?client_id=x&prompt=select_account&scope=openid', pin));
+  assert.equal(u.searchParams.get('login_hint'), 'demo@contoso.example');
+  assert.equal(u.searchParams.get('domain_hint'), 'contoso.example');
+  assert.equal(u.searchParams.get('prompt'), null);
+  assert.equal(u.searchParams.get('client_id'), 'x');
+  // An app's own hint stays; anything but Entra's authorize is left alone.
+  assert.equal(new URL(pinnedAuthorizeUrl('https://login.microsoftonline.com/common/oauth2/authorize?login_hint=a@b.example', pin)).searchParams.get('login_hint'), 'a@b.example');
+  assert.equal(pinnedAuthorizeUrl('https://login.microsoftonline.com/common/oauth2/v2.0/token', pin), null);
+  assert.equal(pinnedAuthorizeUrl('https://teams.example.com/oauth2/v2.0/authorize', pin), null);
+  assert.equal(pinnedAuthorizeUrl('https://login.microsoftonline.com/common/oauth2/v2.0/authorize?login_hint=x&domain_hint=y', pin), null);
+});
+
+test('tenants from an app\'s storage key names (MSAL: object id.tenant id)', () => {
+  const oid = '11111111-1111-1111-1111-111111111111', t1 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', t2 = 'BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB';
+  assert.deepEqual(tenantsInKeys([`${oid}.${t1}-login.windows.net-${t1}`, `msal.token.keys.x`, `${oid}.${t1}-login.windows.net-accesstoken-c-${t1}-scope`, 'theme']), [t1]);
+  assert.deepEqual(tenantsInKeys([`["${oid}.${t2}-login.windows.net-${t2}"]`]), [t2.toLowerCase()]);
+  assert.deepEqual(tenantsInKeys(['nothing', 'here']), []);
+});
+
+test('the tenant guard: only the demo tenant, and never a page it can\'t read when a tenant is named', () => {
+  const demo = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', work = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  assert.equal(tenantVerdict({ teams: [demo], admin: [demo] }, demo).ok, true);
+  const other = tenantVerdict({ teams: [demo], copilot: [work] }, demo);
+  assert.equal(other.ok, false); assert.deepEqual(other.other, [work]);
+  assert.match(tenantVerdict({ teams: [demo], iq: [] }, demo).why, /couldn't tell .* iq/);
+  // No tenant named: an app signed in to any tenant isn't captured; one with none (a test page) is.
+  assert.match(tenantVerdict({ teams: [demo] }, null).why, /doesn't name its own/);
+  assert.equal(tenantVerdict({ chat: [], admin: [] }, null).ok, true);
+});
+
+test('capture options: the tenant and the pinned account come from demo.json', () => {
+  const o = captureOpts({ capture: { tenant: 'contoso.example', account: 'demo@contoso.example' } });
+  assert.equal(o.tenant, 'contoso.example');
+  assert.deepEqual(o.pin, { loginHint: 'demo@contoso.example', domainHint: 'contoso.example' });
+  assert.equal(captureOpts({ capture: { tenant: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } }).pin, null);
+  assert.equal(captureOpts({}).pin, null);
 });

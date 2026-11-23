@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir, loadavg } from 'node:os';
 import { chromium } from 'playwright-core';
 import { launchCaptureBrowser, probe } from './browser.mjs';
+import { resolveTenant } from '@stuntdouble/capture/browser.mjs';
 import { comparePngs, luminance } from '../../packages/checks/compare.mjs';
 import { core } from '../../packages/capture/build.mjs';
 import { flowScript } from '../../packages/capture/cli.mjs';
@@ -22,6 +23,8 @@ const APPS = arg('--apps') ? arg('--apps').split(',').map(x => { const [id, ...u
 const SIGN_IN = /(^|\.)(login|signin|sign-in|auth|sso|accounts|adfs)[.-]|login\.microsoftonline\.com|login\.live\.com|accounts\.google\.com/i;
 const BLOCKED = /can.t get there from here|you can.t access this|set up your device|device (?:is|isn.t|must be) (?:compliant|managed|registered)|help us keep your device secure|approve sign.in request/i;
 const VP = { width: +arg('--width', 1400), height: +arg('--height', 800) };
+// --only id,id: those apps alone (a redo); parity's shots then go into the parity.json already there.
+if (arg('--only')) { const only = arg('--only').split(','); APPS.splice(0, APPS.length, ...APPS.filter(a => only.includes(a.id))); }
 const log = (...a) => { const s = `${new Date().toISOString().slice(11, 19)} ${a.join(' ')}`; console.log(s); writeFileSync(join(OUT, `${PHASE}.log`), s + '\n', { flag: 'a' }); };
 const save = (name, v) => writeFileSync(join(OUT, name), JSON.stringify(v, null, 1));
 // Where a page is: signed in on the app, on a sign-in page, or blocked by a policy.
@@ -84,6 +87,8 @@ try {
       const t = Date.now(); const p = await cb.newPage({ url: a.url, ...VP }); await settle(p, 5000);
       out.apps[a.id] = { ...(await where(p)), secs: +((Date.now() - t) / 1000).toFixed(1) };
       delete out.apps[a.id].title;
+      // The tenants its sign-in library holds: the demo's (--tenant), another, none.
+      if (cb.tenantsOf) { const want = arg('--tenant') ? await resolveTenant(arg('--tenant')).catch(() => null) : null; out.apps[a.id].tenants = ((await cb.tenantsOf({ x: p })).x || []).map(t => t === want ? 'demo' : want ? 'other' : t.slice(0, 8)); }
     }));
     out.secs = +((Date.now() - t0) / 1000).toFixed(1);
     if (PHASE === 'restart') out.cookies = await cookieReport(cb.ctx);
@@ -98,7 +103,7 @@ try {
     // menus, added to the shots' parity.json.
     const modes = arg('--modes', 'minimized,visible').split(',');
     const PART = arg('--part', 'all');
-    const res = PART === 'audits' ? JSON.parse(readFileSync(join(OUT, 'parity.json'), 'utf8')).res : {};
+    const res = PART === 'audits' || (arg('--only') && existsSync(join(OUT, 'parity.json'))) ? JSON.parse(readFileSync(join(OUT, 'parity.json'), 'utf8')).res : {};
     if (PART !== 'audits') {
     const cmpB = await chromium.launch({ channel: 'chrome', headless: true }); const cp = await cmpB.newPage();
     for (const a of APPS) {

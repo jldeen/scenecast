@@ -128,16 +128,28 @@ stays the extension in her own browser.
 - **The same recorder.** It's the agent's code (`agentCode()` in `build.mjs`), told it's in the capture browser,
   with closed shadow roots handed over through the DevTools protocol as the extension does (`cdp-shadow.js`). On the
   fixture it records the same states, path, beats, streams and side states as the extension, and the same markup.
+- **Only the demo's tenant.** With `capture.tenant` (the demo tenant's domain or id), the capture host reads which
+  tenant each app is signed in to (the tenant ids in its sign-in library's storage keys) before it starts the
+  recorder, and refuses to capture when any app is signed in to another tenant, or to one it can't see; while it
+  runs, a page signed in to another tenant stops it at once. A demo that doesn't name its tenant is refused as soon
+  as an app is signed in to any.
+- **No account picker.** A managed Mac's single sign-on offers its own work accounts to every sign-in page, and
+  Entra then asks which one to use. The capture profile has it off (Chrome's `extensible_enterprise_sso` setting in
+  the profile's Local State; a device policy still wins), and `capture.account` pins the demo's account at Entra's
+  sign-in: `login_hint` and `domain_hint` added, an app's "pick an account" dropped.
 - **A guard for read-only steps** (`guard()` in `browser.mjs`, not on by default): every request that isn't a read
   (GET, HEAD, OPTIONS) to a guarded host is held before it leaves, every page and frame included; `pass()` lets a
   planned write through. WebSocket messages don't go through it.
+
+The tenant and the account live in the demo's own `demo.json`, never in this repository.
 
 `scenecast capture start|stop|status|sign-in|run` (preflight runs `start`). The host's state is `.out/capture.json`
 and its log `.out/capture.log`. `demo.json`:
 
 ```json
 "recorder": "capture",
-"capture": { "profile": "demo-tenant", "channel": "chrome", "window": "auto", "flags": [] }
+"capture": { "profile": "demo-tenant", "tenant": "<the demo tenant's domain>", "account": "<the demo account>",
+             "channel": "chrome", "window": "auto", "flags": [] }
 ```
 
 `packages/capture/browser.mjs` is the launcher (`openCaptureBrowser`, `signInWindow`), and its `launchRealChrome` is

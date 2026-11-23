@@ -6,13 +6,16 @@
 //   stunt capture sign-in [--demo <dir>]             the one window on her screen: sign in to the demo's tenant there
 //   stunt capture run [--demo <dir>]                 in the foreground
 // demo.json "capture" (all optional): { "profile": "default" (a name under ~/.stuntdouble/capture, or a folder),
-//   "channel": "chrome" | "msedge", "window": "auto" | "minimized" | "offscreen", "flags": [] }
+//   "channel": "chrome" | "msedge", "window": "auto" | "minimized" | "offscreen", "flags": [],
+//   "tenant": the demo tenant (its domain or id): nothing is captured signed in to any other,
+//   "account": the demo account (pinned at Entra's sign-in, so no account picker), "domainHint" }
+// These name a tenant: they go in a demo's own demo.json, never in this repository.
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openCaptureBrowser, signInWindow, landedOn, profileDir } from './browser.mjs';
+import { openCaptureBrowser, signInWindow, landedOn, profileDir, resolveTenant, tenantVerdict, isTenantId } from './browser.mjs';
 import { agentCode } from './build.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -23,7 +26,9 @@ export function captureOpts(cfg) {
   const c = cfg.capture || {};
   const p = c.profile || 'default';
   const profile = /^[\w.-]+$/.test(p) ? profileDir(p) : resolve(p.replace(/^~(?=$|[\\/])/, homedir()));
-  return { profile, channel: c.channel || (cfg.chrome && cfg.chrome.browser === 'edge' ? 'msedge' : 'chrome'), window: c.window || 'auto', flags: c.flags || [], ...(c.mockKeychain !== undefined ? { mockKeychain: !!c.mockKeychain } : {}) };
+  const pin = { loginHint: c.account || null, domainHint: c.domainHint || (c.tenant && !isTenantId(c.tenant) ? c.tenant : null) };
+  return { profile, channel: c.channel || (cfg.chrome && cfg.chrome.browser === 'edge' ? 'msedge' : 'chrome'), window: c.window || 'auto', flags: c.flags || [],
+    tenant: c.tenant || null, pin: pin.loginHint || pin.domainHint ? pin : null, ...(c.mockKeychain !== undefined ? { mockKeychain: !!c.mockKeychain } : {}) };
 }
 export const stateFile = demo => join(demo.out, 'capture.json');
 export const logFile = demo => join(demo.out, 'capture.log');
@@ -48,8 +53,11 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   const say = s => { writeFileSync(stateFile(demo), JSON.stringify(s, null, 1)); return s; };
   process.on('exit', () => { const s = hostState(demo); if (s && s.pid === process.pid) rmSync(stateFile(demo), { force: true }); });
   say({ pid: process.pid, phase: 'starting', at: new Date().toISOString(), profile: o.profile });
+  let want = null;
+  try { want = await resolveTenant(o.tenant); } catch (e) { return say({ pid: process.pid, phase: 'failed', error: `the demo's tenant: ${e.message}` }); }
   const cb = await openCaptureBrowser({ ...o, viewport: cfg.viewport, log });
   if (!cb) return say({ pid: process.pid, phase: 'failed', error: `the capture browser didn't start (${o.channel}, profile ${o.profile})` });
+  if (o.pin) await cb.pinAccount(o.pin);
   const apps = (cfg.apps || []).filter(a => a.url);
   // Each app in a window of its own (made one at a time, loaded side by side); then where each one landed.
   const pages = await Promise.all(apps.map(a => cb.open(a)));
@@ -58,10 +66,30 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   const landed = await Promise.all(apps.map(async (a, i) => ({ id: a.id, ...landedOn(pages[i].url(), await pages[i].evaluate(() => document.body ? document.body.innerText.slice(0, 4000) : '').catch(() => ''), a.match) })));
   const signIn = landed.filter(l => l.at !== 'app').map(l => l.id);
   if (signIn.length) log(`capture browser: ${signIn.join(', ')} ${signIn.length > 1 ? 'need' : 'needs'} a sign-in: stunt capture sign-in`);
+  // The tenant, before anything is captured: another tenant (a wrong account picked silently), or one it can't
+  // see where the demo names one, and the browser closes. An app's sign-in library can take a few seconds.
+  const byApp = () => Object.fromEntries(apps.map((a, i) => [a.id, pages[i]]).filter(([id]) => !signIn.includes(id)));
+  let tv = tenantVerdict(await cb.tenantsOf(byApp()), want);
+  for (let i = 0; i < 10 && !tv.ok && !tv.other; i++) { await sleep(2000); tv = tenantVerdict(await cb.tenantsOf(byApp()), want); }
+  if (!tv.ok) {
+    log(`capture browser: refusing to capture: ${tv.why}`);
+    await cb.close();
+    return say({ pid: process.pid, phase: 'refused', at: new Date().toISOString(), profile: o.profile, error: `refusing to capture: ${tv.why}. Sign in again with the demo tenant's account (stunt capture sign-in)` });
+  }
+  // And while it runs: a page signed in to another tenant stops it at once (nothing more is captured).
+  if (want) setInterval(async () => {
+    const now = Object.fromEntries(cb.ctx.pages().filter(p => /^https?:/.test(p.url())).map((p, i) => [`page${i}`, p]));
+    const v = tenantVerdict(await cb.tenantsOf(now).catch(() => ({})), want);
+    if (v.other) {
+      log(`capture browser: stopped: ${v.why}`);
+      say({ pid: process.pid, phase: 'refused', at: new Date().toISOString(), profile: o.profile, error: `stopped capturing: ${v.why}` });
+      await cb.close(); process.exit(3);
+    }
+  }, 20000).unref();
   const started = pages.length ? await startRecorder(pages[0], port).catch(e => String(e.message || e)) : 'no apps';
   const info = await cb.info();
   return say({ pid: process.pid, phase: started === 'agent started' ? 'recording-ready' : 'failed', at: new Date().toISOString(), profile: o.profile,
-    mode: info.mode, fellBack: info.fellBack, startMs: info.startMs, cdp: info.port, browserPid: info.pid, apps: landed.map(l => ({ id: l.id, at: l.at })), ...(signIn.length ? { signIn } : {}),
+    mode: info.mode, fellBack: info.fellBack, startMs: info.startMs, cdp: info.port, browserPid: info.pid, tenant: tv.all.length ? tv.all : null, apps: landed.map(l => ({ id: l.id, at: l.at })), ...(signIn.length ? { signIn } : {}),
     ...(started === 'agent started' ? {} : { error: started }) });
 }
 
@@ -94,7 +122,7 @@ export async function start(demo, { waitS = 120 } = {}) {
   for (let i = 0; i < waitS * 2; i++) {
     await sleep(500);
     const s = hostState(demo);
-    if (s && (s.phase === 'recording-ready' || s.phase === 'failed')) return { ok: s.phase === 'recording-ready', ...s };
+    if (s && (s.phase === 'recording-ready' || s.phase === 'failed' || s.phase === 'refused')) return { ok: s.phase === 'recording-ready', ...s };
     if (i > 10 && !alive(pid)) return { ok: false, error: 'the capture host stopped as it started' };
   }
   return { ok: false, error: `the capture browser wasn't ready in ${waitS} s` };
@@ -117,7 +145,9 @@ export async function signIn(demo, { timeoutS = 600 } = {}) {
   const was = hostState(demo);
   if (was && was.alive) await stop(demo);
   const o = captureOpts(demo.cfg);
-  const r = await signInWindow({ profile: o.profile, channel: o.channel, apps: (demo.cfg.apps || []).filter(a => a.url), timeoutS, flags: o.flags });
+  const r = await signInWindow({ profile: o.profile, channel: o.channel, apps: (demo.cfg.apps || []).filter(a => a.url), timeoutS, flags: o.flags, pin: o.pin });
+  // Signed in to the demo tenant, and no other.
+  if (r.ok) { const v = tenantVerdict(r.tenants || {}, await resolveTenant(o.tenant).catch(() => null)); if (!v.ok) Object.assign(r, { ok: false, error: v.why }); }
   if (was && was.alive) r.restarted = await start(demo);
   return r;
 }
