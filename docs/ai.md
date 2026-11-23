@@ -19,7 +19,9 @@ click in each, and makes the plan:
 - each step says the screen it lands on;
 - the steps that change something (send a prompt, save, add, certify) are marked, and approving the plan approves
   those, and only those;
-- what each line points at becomes a focus point;
+- what each line points at becomes a focus point. Things a line names together share one box, the way you'd frame
+  them: two rows of one list ("Contoso IQ … and my Supply chain disruption plugin"), or a step and the steps it goes on
+  to;
 - where the product isn't what your script says, it says so once (your script says **Approve** on a **Copy file**
   card; the product shows **Save skill**). Steps your script leaves out, it takes from the recording and marks.
 

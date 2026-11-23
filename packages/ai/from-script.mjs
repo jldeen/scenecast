@@ -646,10 +646,74 @@ function focusFor(x, walker, onPath, weight, typed) {
   const apps = [...new Set(x.span.map(k => k.split(':')[0]))];
   const groups = apps.length > 1 ? apps.map(a => x.span.filter(k => k.startsWith(a + ':')).map(k => k.split(':')[1])) : [ids];
   const backed = [];
-  for (const g of groups) for (const f of backing(x.say, g, walker, weight, onPath, typed, groups.length > 1 ? 1 : 3, x.clicked || [])) if (!dupe(f) && out.length + backed.length < 4) backed.push(f);
+  // A point around several items (two rows she names, a step and the steps it goes on to) takes the place of the plain
+  // points it holds: she frames them together.
+  const absorb = f => {
+    if (f.texts.length < 2) return false;
+    const plain = o => !o.mark && !o.around && (!o.on || o.on === f.on) && (!o.via || (f.via && o.via.target === f.via.target)) && o.texts.every(t => f.texts.some(u => norm(u).includes(norm(t))));
+    const k = out.findIndex(plain);
+    if (k < 0) return false;
+    const { pos, ...rest } = f;
+    out[k] = rest;
+    for (let i = out.length - 1; i > k; i--) if (plain(out[i])) out.splice(i, 1);
+    return true;
+  };
+  for (const g of groups) for (const f of backing(x.say, g, walker, weight, onPath, typed, groups.length > 1 ? 1 : 3, x.clicked || [])) if (!absorb(f) && !dupe(f) && out.length + backed.length < 4) backed.push(f);
   // ⌥F goes through a line's points in order: in the order she says them.
   out.push(...backed.map((f, i) => ({ f, i })).sort((a, b) => (a.f.pos ?? Infinity) - (b.f.pos ?? Infinity) || a.i - b.i).map(({ f }) => { const { pos, ...rest } = f; return rest; }));
   for (const h of x.hints.filter(h => h.weak)) { const f = place(h); if (f && !dupe(f) && out.length < 2) out.push(f); }
+  return out;
+}
+// An app's frame: what's on nearly all of its screens (the sidebar, the top bar). Not worth pointing at.
+const frames = new WeakMap();
+function frameTexts(walker, app) {
+  let m = frames.get(walker);
+  if (!m) frames.set(walker, m = {});
+  if (m[app]) return m[app];
+  const ids = walker.states.filter(id => (walker.flow.states[id] || {}).app === app), count = {};
+  for (const id of ids) for (const t of new Set(((walker.shown(id) || {}).items || []).map(i => norm(i.text)))) count[t] = (count[t] || 0) + 1;
+  return (m[app] = new Set(Object.keys(count).filter(t => count[t] > Math.max(1, ids.length * 0.8))));
+}
+// Rows of one list the line names, two or more, the way she frames them together: by their own words ("Under Added:
+// Contoso IQ, … and my Supply chain disruption plugin"), or, for rows that start with the same name, by the words that
+// set them apart ("procurement, inventory, production and sales" for "Fabrikam Procurement", "Fabrikam Sales"…). One
+// list: the same kind of item, with no heading between them.
+const spaced = t => ` ${norm(t).replace(/\.(?!\d)/g, ' ').replace(/[^a-z0-9$%.]+/g, ' ').trim()} `;
+const groupBy = (xs, key) => { const g = new Map(); for (const x of xs) { const k = key(x); if (!g.has(k)) g.set(k, []); g.get(k).push(x); } return [...g.values()]; };
+export function namedRows(say, sc, frame = new Set()) {
+  const ns = spaced(say), lw = new Set(words(say));
+  const count = t => t.trim().split(/\s+/).length;
+  const rows = sc.items.filter(it => it.role !== 'heading' && it.text.length >= 4 && count(it.text) >= 2 && count(it.text) <= 6 && !frame.has(norm(it.text)));
+  const said = rows.filter(it => ns.includes(spaced(it.text)));
+  const lead = it => it.text.trim().split(/\s+/)[0];
+  const apart = it => { const r = words(it.text.trim().split(/\s+/).slice(1).join(' ')); return r.length > 0 && r.every(w => lw.has(w)); };
+  const named = rows.filter(it => !said.includes(it) && !/[.:]$|: /.test(it.text.trim()) && /^[A-Z]/.test(lead(it)) && words(lead(it)).length === 1 && apart(it));
+  const heads = sc.items.filter(it => it.role === 'heading').map(it => it.box[0]);
+  const out = [];
+  for (const set of [said, ...groupBy(named, it => norm(lead(it)))]) for (const g of groupBy(set, it => `${it.tag}|${it.role}|${it.frame || ''}`)) {
+    let run = [];
+    const flush = () => { const u = run.filter((it, i) => run.findIndex(o => norm(o.text) === norm(it.text)) === i); if (u.length >= 2) out.push(u.slice(0, 5)); run = []; };
+    for (const it of g.sort((x, y) => x.box[0] - y.box[0])) { if (run.length && heads.some(h => h > run[run.length - 1].box[0] && h < it.box[0])) flush(); run.push(it); }
+    flush();
+  }
+  return out;
+}
+// A step the line names, with the steps it goes on to: up to two more, to the next step of its kind ("Reviewed custom
+// skill Contoso IQ", then "Retrieve memories"). What's inside a step, one-word labels and lines every step has ("Thought
+// process") aren't steps.
+export function stepsFrom(steps, head, others = []) {
+  const lead = spaced(head.text).trim().split(' ').slice(0, 2).join(' ');
+  const seen = {};
+  for (const i of steps) seen[norm(i.text)] = (seen[norm(i.text)] || 0) + 1;
+  const out = [head];
+  for (const i of steps.filter(i => i.box[0] > head.box[0]).sort((a, b) => a.box[0] - b.box[0])) {
+    if (out.length >= 3) break;
+    if (i.box[0] <= out[out.length - 1].box[2]) continue;
+    const n = norm(i.text);
+    if (spaced(i.text).trim().startsWith(lead + ' ') || others.some(f => n.includes(f))) break;
+    if (i.tag !== head.tag || seen[n] >= 3 || n.split(/\s+/).length < 2) continue;
+    out.push(i);
+  }
   return out;
 }
 // What on the line's screens backs its words (the script matcher's picks, packages/script/match.mjs): two words or a
@@ -673,13 +737,41 @@ function backing(say, ids, walker, w, onPath, typed = new Set(), limit = 3, clic
       break numbers;
     }
   }
+  // Two or more rows of one list that the line names: one point around them, on the line's latest screen that has them
+  // (after the steps the line names, below: those say more).
+  const listed = [];
+  for (const id of [...ids].reverse()) {
+    const sc = walker.shown(id);
+    const rows = sc ? namedRows(say, sc, frameTexts(walker, (walker.flow.states[id] || {}).app)) : [];
+    for (const g of rows) listed.push({ texts: g.map(it => clip(it.text)), on: id, pos: at(words(g[0].text)) });
+    if (rows.length) break;
+  }
+  const holds = (pts, t) => pts.some(o => o.texts.some(u => norm(u).includes(norm(t)) || norm(t).includes(norm(u))));
+  // A name the line says ("from Fabric IQ"), by the row it heads ("Fabric IQ · Semantic model"): the one that shares
+  // more of the line's words, else the first.
+  const names = facts(say).map(f => clean(f.text)).filter(f => f.split(/\s+/).length >= 2);
+  for (const id of [...ids].reverse()) {
+    const sc = walker.shown(id);
+    if (!sc) continue;
+    let found = false;
+    for (const name of names) {
+      const n = spaced(name), own = new Set(words(name));
+      const rows = sc.items.filter(it => it.role !== 'heading' && spaced(it.text).startsWith(n) && spaced(it.text).length > n.length && it.text.split(/\s+/).length <= 8);
+      if (!rows.length) continue;
+      const share = it => words(it.text).filter(w => !own.has(w) && lw.includes(w)).length;
+      const row = rows.slice().sort((a, b) => share(b) - share(a) || a.box[0] - b.box[0])[0];
+      if (!holds(out, row.text) && !holds(listed, row.text)) out.push({ texts: [clip(row.text)], on: id, pos: at(words(name)) });
+      found = true;
+    }
+    if (found) break;
+  }
   // The line's later screens weigh more: it's said once its clicks are done. Her own prompt, shown back in the chat,
   // isn't something to point at.
   let best = null;
   const consider = (id, via, k = 0) => considerShown(walker.shown(id), id, via, k);
   const considerShown = (sc, id, via, k = 0, own = false) => {
     if (!sc) return;
-    const items = sc.items.filter(it => ![...typed].some(t => t.includes(norm(it.text))));
+    const items = sc.items.filter(it => !(norm(it.text).length >= 30 && [...typed].some(t => t.includes(norm(it.text)))));
     const picks = pickItems(lw, { items }, w).map(p => ({ ...p, score: p.score + (named.some(f => norm(items.find(x => x.i === p.item).text).includes(f)) ? 3 : 0) }))
       .filter((p, i) => (p.words.length >= 2 || p.words.some(x => /\d/.test(x))) && (i > 0 || p.score >= 4));
     const score = picks.reduce((n, p) => n + p.score, 0) * (via && !own ? 0.8 : 1) * (1 + 0.3 * k);
@@ -699,11 +791,14 @@ function backing(say, ids, walker, w, onPath, typed = new Set(), limit = 3, clic
     const steps = o.screen.items.filter(i => !closed.has(norm(i.text)));
     if (own) for (const f of named.filter(f => f.includes(' '))) {
       const it = steps.filter(i => norm(i.text).includes(f) && i.text.split(' ').length >= 3).sort((a, b) => a.text.length - b.text.length)[0];
-      if (it && !out.some(o2 => o2.texts[0] === it.text)) out.push({ texts: [clip(it.text)], on: id, ...(via ? { via } : {}), pos: at(words(f)) });
+      if (it && !out.some(o2 => o2.texts[0] === it.text)) out.push({ texts: stepsFrom(steps, it, named.filter(g => g !== f)).map(x => clip(x.text)), on: id, ...(via ? { via } : {}), pos: at(words(f)) });
     }
     considerShown({ items: steps }, id, via, own ? ids.length + 1 : k, own);
   });
-  if (best) for (const p of best.picks.slice(0, Math.max(0, limit - out.length))) {
+  // Rows the line's steps already name go with the steps.
+  for (const p of listed) if (!p.texts.every(t => out.some(o => o.texts.some(u => norm(u).includes(norm(t)))))) out.push(p);
+  const inside = t => holds(out, t);
+  if (best) for (const p of best.picks.filter(p => !inside(p.phrase || best.items.find(x => x.i === p.item).text)).slice(0, Math.max(0, limit - out.length))) {
     const it = best.items.find(x => x.i === p.item);
     out.push({ texts: [clip(p.phrase || it.text)], on: best.id, ...(best.via ? { via: best.via } : {}), pos: at(p.words) });
   }
