@@ -226,12 +226,14 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     return out.filter(m => m.to && m.to !== id);
   }
   // The recording's way from a screen to one where goal(screen) holds: its steps, shortest first (up to `max`).
-  function bridge(from, goal, max = 10) {
+  // avoid(move): a move the way mustn't take (a step that would write, when the plan didn't ask for one).
+  function bridge(from, goal, max = 10, avoid = null) {
     const seen = new Set([from]), queue = [{ id: from, steps: [], path: [] }];
     while (queue.length) {
       const n = queue.shift();
       if (n.path.length >= max) continue;
       for (const m of moves(n.id)) {
+        if (avoid && avoid(m)) continue;
         if (seen.has(m.to)) continue;
         seen.add(m.to);
         const next = { id: m.to, steps: [...n.steps, ...m.steps.map((s, i) => ({ ...s, lands: i === m.steps.length - 1 ? m.to : null, recorded: m.recorded, control: m.control }))], path: [...n.path, m.to] };
