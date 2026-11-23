@@ -16,6 +16,15 @@ b=src-tauri/target/debug/bundle
 take() { if [ "$RUNNER_OS" = macOS ]; then cp $b/macos/*.app.tar.gz $b/macos/*.app.tar.gz.sig "$TMP/new/"; else cp $b/nsis/*"$1"*-setup.exe $b/nsis/*"$1"*-setup.exe.sig "$TMP/new/"; fi; }
 cleanup() { [ -n "${S_KEY:-}" ] && gh release delete "$FEED_RELEASE" -R "$REPO" --yes --cleanup-tag >/dev/null 2>&1 || true; }
 trap cleanup EXIT
+# Feeds left by runs that were cancelled (their exit trap never ran), more than two hours old.
+if [ -n "${S_KEY:-}" ]; then
+  cutoff=$(( $(date +%s) - 7200 ))
+  gh release list -R "$REPO" -L 100 --json tagName,createdAt -q '.[] | select(.tagName | startswith("ci-update-")) | "\(.tagName) \(.createdAt)"' |
+    while read -r tag at; do
+      t=$(node -e 'console.log(Math.floor(Date.parse(process.argv[1]) / 1000))' "$at")
+      [ "$t" -lt "$cutoff" ] && { echo "deleting leftover feed $tag ($at)"; gh release delete "$tag" -R "$REPO" --yes --cleanup-tag || true; }
+    done
+fi
 pushd apps/desktop >/dev/null
 if [ -n "${S_KEY:-}" ]; then
   version=$(node -p "require('./src-tauri/tauri.conf.json').version")
