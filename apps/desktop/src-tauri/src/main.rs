@@ -1989,8 +1989,14 @@ fn test_webkit_gpu_pids(window: tauri::WebviewWindow) -> Vec<i32> {
 /// hours, the page itself fine. A fresh GPU process alone left it blank; a fresh web process (Tauri reloads the page
 /// when it ends) drew again. So: end the GPU process WebKit has for the window (it can be stopped, not just slow), then
 /// the web process: only when macOS says the window is on screen.
+/// `test_no_gpu` (UI test builds only): on a Mac with no WebKit GPU process at all (CI's virtual Macs draw in the web
+/// process), start the page again anyway, so the restart itself is tested there.
 #[tauri::command]
-async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, String> {
+async fn window_not_drawing(
+    webview: tauri::Webview,
+    ms: u64,
+    test_no_gpu: Option<bool>,
+) -> Result<Value, String> {
     scenecast_app::ai::app_log(
         "window not drawing",
         &format!("no frame drawn for {ms} ms while the page says it's visible"),
@@ -2044,7 +2050,8 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
         );
         // Frames also pause for a window mostly covered (macOS calls it visible if any of it shows): only a GPU process
         // that's stopped means the window can't draw. A running one is left to WebKit.
-        if seen != 2 || stuck.is_empty() {
+        let forced = cfg!(feature = "webdriver") && test_no_gpu.unwrap_or(false) && gpu.is_empty();
+        if seen != 2 || (stuck.is_empty() && !forced) {
             return Ok(
                 serde_json::json!({ "restarted": null, "why": if seen != 2 { "not on screen" } else { "GPU process running" } }),
             );
@@ -2068,7 +2075,7 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
     // Windows and Linux: logged only (WebView2 has its own GPU process recovery; a covered window stops drawing too).
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = webview;
+        let _ = (webview, test_no_gpu);
         Ok(serde_json::json!({ "restarted": null }))
     }
 }
