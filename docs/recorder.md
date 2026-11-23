@@ -133,10 +133,14 @@ stays the extension in her own browser.
   recorder, and refuses to capture when any app is signed in to another tenant, or to one it can't see; while it
   runs, a page signed in to another tenant stops it at once. A demo that doesn't name its tenant is refused as soon
   as an app is signed in to any.
-- **No account picker.** A managed Mac's single sign-on offers its own work accounts to every sign-in page, and
-  Entra then asks which one to use. The capture profile has it off (Chrome's `extensible_enterprise_sso` setting in
-  the profile's Local State; a device policy still wins), and `capture.account` pins the demo's account at Entra's
-  sign-in: `login_hint` and `domain_hint` added, an app's "pick an account" dropped.
+- **No account picker.** On a managed Mac, Chrome's own single sign-on (the Mac's work accounts, through its
+  sign-on extension) is what signs the apps in, and it offers every account the Mac has, so Entra asks which one to
+  use. With `capture.account`, the demo's account is pinned: `login_hint` and `domain_hint` added at Entra's
+  sign-in, its "pick an account" dropped, and an app whose own landing asks which account (M365 Copilot's "Sign in
+  to start") opened again with the account as its `login_hint`. Measured on a managed Mac: Teams, M365 Copilot, the
+  admin center and Microsoft IQ all signed in to the demo tenant with no picker and no click, and again after a
+  restart. `capture.macSso: false` turns the Mac's sign-on off in the profile alone; then the profile's own sign-in
+  has to carry every app (measured: on a managed Mac it carried only Teams).
 - **A guard for read-only steps** (`guard()` in `browser.mjs`, not on by default): every request that isn't a read
   (GET, HEAD, OPTIONS) to a guarded host is held before it leaves, every page and frame included; `pass()` lets a
   planned write through. WebSocket messages don't go through it.
@@ -149,7 +153,7 @@ and its log `.out/capture.log`. `demo.json`:
 ```json
 "recorder": "capture",
 "capture": { "profile": "demo-tenant", "tenant": "<the demo tenant's domain>", "account": "<the demo account>",
-             "channel": "chrome", "window": "auto", "flags": [] }
+             "channel": "chrome", "window": "auto", "flags": [], "macSso": true }
 ```
 
 `packages/capture/browser.mjs` is the launcher (`openCaptureBrowser`, `signInWindow`), and its `launchRealChrome` is

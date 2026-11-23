@@ -18,7 +18,7 @@
 //           light (true: pages draw light, as captures are), zoom (page zoom, throwaway profiles only),
 //           flags (more Chrome switches, e.g. an app pack's), extension (an unpacked folder), mockKeychain,
 //           launch ('auto' | 'open' | 'direct': on macOS, through open unless on CI),
-//           macSso (false: the Mac's own single sign-on off in this profile), log
+//           macSso (true: the Mac's own single sign-on, as Chrome has it; false: off in this profile), log
 //   cb.open(app | url, { light, viewport, window, width, height }) → Page   a window of its own, loaded
 //   cb.twins(app | url, n, opts) → Page[]          n windows of one app at once, for side sweeps in parallel
 //   cb.probe(page) → { raf, timer250, fonts, dark, hidden, size, screen, dpr }
@@ -138,9 +138,11 @@ export function pinnedAuthorizeUrl(url, { loginHint = null, domainHint = null } 
 }
 
 // The tenants an app's sign-in library holds accounts for, from the names of what it keeps in the page's storage
-// (MSAL: "<object id>.<tenant id>" in its account and token keys), never their values beyond MSAL's own key lists.
+// (MSAL's account and token keys: "<object id>.<tenant id>" then the sign-in host, "-login.windows.net-…" or
+// "|login.windows.net|…"), never their values beyond MSAL's own key lists. Only that shape: Teams also keeps
+// "tmp.<tenant id>.<object id>.…", where the second id is the user (measured: read as a second tenant otherwise).
 const GUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const HOME_ACCOUNT = new RegExp(`(${GUID})\\.(${GUID})`, 'gi');
+const HOME_ACCOUNT = new RegExp(`(${GUID})\\.(${GUID})(?=[-|]login\\.)`, 'gi');
 export const isTenantId = v => new RegExp(`^${GUID}$`, 'i').test(String(v || ''));
 export function tenantsInKeys(keys) {
   const out = new Set();
@@ -158,6 +160,18 @@ export function tenantVerdict(seen, want) {
   if (unseen.length) return { ok: false, why: `couldn't tell which tenant ${unseen.join(', ')} ${unseen.length > 1 ? 'are' : 'is'} signed in to`, all, unseen };
   return { ok: true, all };
 }
+// An app's own address with the demo account as its login_hint: for an app whose own landing asks which account
+// (M365 Copilot's "Sign in to start"), which never reaches Entra's sign-in by itself. Measured: it signs straight in.
+export function hintedUrl(url, loginHint) {
+  if (!loginHint) return null;
+  let u; try { u = new URL(url); } catch (e) { return null; }
+  if (u.searchParams.get('login_hint')) return null;
+  u.searchParams.set('login_hint', loginHint);
+  return u.toString();
+}
+// An app's own signed-out landing (not Entra's sign-in page): where hintedUrl helps.
+export const ownSignInPage = l => l.at === 'signin' && !!l.host && !SIGN_IN_HOST.test(l.host);
+
 // A tenant named by its domain, as its id (Entra's public sign-in metadata says it).
 export async function resolveTenant(nameOrId) {
   if (!nameOrId || isTenantId(nameOrId)) return nameOrId ? nameOrId.toLowerCase() : null;
@@ -210,7 +224,7 @@ const urlOf = t => typeof t === 'string' ? t : t && t.url || 'about:blank';
 const PROBE_URL = 'data:text/html,<title>capture probe</title><body style="margin:0;background:%23fff">';
 
 export async function openCaptureBrowser({ profile = null, channel = 'chrome', window: win = 'auto', viewport = null, light = true, zoom = 1,
-  flags: extraFlags = [], extension = null, mockKeychain, launch = 'auto', macSso = false, width = 1600, height = 1000, log = () => {} } = {}) {
+  flags: extraFlags = [], extension = null, mockKeychain, launch = 'auto', macSso = true, width = 1600, height = 1000, log = () => {} } = {}) {
   const where = browserApp(channel);
   if (!where) { log(`capture browser: no ${channel} installed here`); return null; }
   const throwaway = !profile;
@@ -227,14 +241,24 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       ...(throwaway && zoom !== 1 ? { partition: { default_zoom_level: { x: Math.log(zoom) / Math.log(1.2) } } } : {}),
     }));
   }
-  // macOS single sign-on (Chrome's Extensible Enterprise SSO) off in this profile alone: it would offer the Mac's
-  // own work accounts to every sign-in page, so a capture could pick one silently. Its switch is a Local State pref
-  // (the ExtensibleEnterpriseSSOBlocklist policy sets it, device-wide, where IT does; a policy still wins).
-  if (process.platform === 'darwin' && !macSso) {
+  // macOS single sign-on (Chrome's Extensible Enterprise SSO). It offers the Mac's own work accounts to every sign-in
+  // page (Entra then shows its account picker), and it's also what signs a managed Mac's apps in at all: measured,
+  // with it off the demo profile's own cookies signed in none of Copilot, the admin center and IQ. So it stays on,
+  // and the demo's account is pinned (pinAccount, hintedUrl) and its tenant checked (tenantVerdict). Off (macSso:
+  // false) is a Local State pref, this profile alone (the ExtensibleEnterpriseSSOBlocklist policy sets it
+  // device-wide, where IT does; a policy still wins).
+  // macSso: true puts Chrome's own default back (on), taking out a switch written before.
+  if (process.platform === 'darwin') {
     const f = join(dir, 'Local State');
-    let ls = {}; try { ls = JSON.parse(readFileSync(f, 'utf8')); } catch (e) {}
-    ls.extensible_enterprise_sso = { ...(ls.extensible_enterprise_sso || {}), enabled: 0, enabled_idps: [] };
-    writeFileSync(f, JSON.stringify(ls));
+    let ls = null; try { ls = JSON.parse(readFileSync(f, 'utf8')); } catch (e) {}
+    if (!macSso) {
+      ls = ls || {};
+      ls.extensible_enterprise_sso = { ...(ls.extensible_enterprise_sso || {}), enabled: 0, enabled_idps: [] };
+      writeFileSync(f, JSON.stringify(ls));
+    } else if (ls && ls.extensible_enterprise_sso && ('enabled' in ls.extensible_enterprise_sso || 'enabled_idps' in ls.extensible_enterprise_sso)) {
+      delete ls.extensible_enterprise_sso.enabled; delete ls.extensible_enterprise_sso.enabled_idps;
+      writeFileSync(f, JSON.stringify(ls));
+    }
   }
   // A port the last run wrote must not be taken for this one's (another program could be on it now).
   rmSync(join(dir, 'DevToolsActivePort'), { force: true });
@@ -277,10 +301,11 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   };
   const cleanup = () => { if (throwaway) try { rmSync(dir, { recursive: true, force: true }); } catch (e) {} };
   // Every process of this browser: its profile folder is in each one's command line.
-  const killAll = () => {
-    if (process.platform === 'win32') { try { if (child) child.kill(); } catch (e) {} return; }
+  const killAll = (sig = 'SIGTERM') => {
+    if (process.platform === 'win32') { try { if (child) child.kill(); } catch (e) {} return 0; }
     const pids = (spawnSync('pgrep', ['-f', `user-data-dir=${dir}`], { encoding: 'utf8' }).stdout || '').split(/\s+/).filter(Boolean).map(Number);
-    for (const pid of pids) try { process.kill(pid); } catch (e) {}
+    for (const pid of pids) try { process.kill(pid, sig); } catch (e) {}
+    return pids.length;
   };
   // Up to 90 s: a browser's first start on a machine can take a while. The port it says it opened counts too.
   await answer(viaOpen ? 30000 : 90000);
@@ -544,7 +569,9 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     await browser.close().catch(() => {});
     if (bpid) for (let i = 0; i < 30; i++) { if (!alive(bpid.id)) break; await sleep(150); if (i === 29) try { process.kill(bpid.id, 'SIGKILL'); } catch (e) {} }
     if (child && direct && child.exitCode === null) child.kill();
-    killAll();
+    // Every helper of this browser gone before it returns (one slow to exit under load outlived it).
+    for (let i = 0; i < 20 && killAll(); i++) await sleep(150);
+    killAll('SIGKILL');
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
   return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, pinAccount, tenantsOf, info, cpu, close, dir };
@@ -574,13 +601,15 @@ export async function signInWindow({ profile, apps, channel = 'chrome', timeoutS
     // nothing navigates under her. It counts as signed in once it's been on the app for three looks in a row.
     for (const a of apps) {
       await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-      let onApp = 0, last = null;
+      let onApp = 0, last = null, hinted = false;
       while (Date.now() - t0 < timeoutS * 1000) {
         await p.waitForLoadState('load', { timeout: 30000 }).catch(() => {});
         await sleep(3000);
         const l = await read(a);
         if (!last || l.at !== last.at) { states[a.id] = { ...l, secs: Math.round((Date.now() - t0) / 1000) }; onState(apps.map(x => ({ id: x.id, at: states[x.id] ? states[x.id].at : null }))); }
         last = l;
+        // The app's own "which account" landing: once, its address with the demo account as the hint.
+        if (!hinted && pin && ownSignInPage(l)) { hinted = true; const to = hintedUrl(a.url, pin.loginHint); if (to) { await p.goto(to, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {}); continue; } }
         // Three looks in a row: an app can redirect to its sign-in seconds after it loads.
         if (l.at === 'app') { if (++onApp >= 3) { tenants[a.id] = tenantsInKeys(await storageKeys(p)); break; } } else onApp = 0;
       }

@@ -8,14 +8,15 @@
 // demo.json "capture" (all optional): { "profile": "default" (a name under ~/.stuntdouble/capture, or a folder),
 //   "channel": "chrome" | "msedge", "window": "auto" | "minimized" | "offscreen", "flags": [],
 //   "tenant": the demo tenant (its domain or id): nothing is captured signed in to any other,
-//   "account": the demo account (pinned at Entra's sign-in, so no account picker), "domainHint" }
+//   "account": the demo account (pinned at Entra's sign-in, so no account picker), "domainHint",
+//   "macSso": false to turn the Mac's own single sign-on off in the profile (it's what signs a managed Mac in) }
 // These name a tenant: they go in a demo's own demo.json, never in this repository.
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openCaptureBrowser, signInWindow, landedOn, profileDir, resolveTenant, tenantVerdict, isTenantId } from './browser.mjs';
+import { openCaptureBrowser, signInWindow, landedOn, profileDir, resolveTenant, tenantVerdict, isTenantId, hintedUrl, ownSignInPage } from './browser.mjs';
 import { agentCode } from './build.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +29,8 @@ export function captureOpts(cfg) {
   const profile = /^[\w.-]+$/.test(p) ? profileDir(p) : resolve(p.replace(/^~(?=$|[\\/])/, homedir()));
   const pin = { loginHint: c.account || null, domainHint: c.domainHint || (c.tenant && !isTenantId(c.tenant) ? c.tenant : null) };
   return { profile, channel: c.channel || (cfg.chrome && cfg.chrome.browser === 'edge' ? 'msedge' : 'chrome'), window: c.window || 'auto', flags: c.flags || [],
-    tenant: c.tenant || null, pin: pin.loginHint || pin.domainHint ? pin : null, ...(c.mockKeychain !== undefined ? { mockKeychain: !!c.mockKeychain } : {}) };
+    tenant: c.tenant || null, pin: pin.loginHint || pin.domainHint ? pin : null, ...(c.mockKeychain !== undefined ? { mockKeychain: !!c.mockKeychain } : {}),
+    ...(c.macSso !== undefined ? { macSso: !!c.macSso } : {}) };
 }
 export const stateFile = demo => join(demo.out, 'capture.json');
 export const logFile = demo => join(demo.out, 'capture.log');
@@ -51,7 +53,8 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   const o = captureOpts(cfg);
   mkdirSync(demo.out, { recursive: true });
   const say = s => { writeFileSync(stateFile(demo), JSON.stringify(s, null, 1)); return s; };
-  process.on('exit', () => { const s = hostState(demo); if (s && s.pid === process.pid) rmSync(stateFile(demo), { force: true }); });
+  // Gone with it, unless it says why it didn't start (failed, refused): start and preflight read that.
+  process.on('exit', () => { const s = hostState(demo); if (s && s.pid === process.pid && !['failed', 'refused'].includes(s.phase)) rmSync(stateFile(demo), { force: true }); });
   say({ pid: process.pid, phase: 'starting', at: new Date().toISOString(), profile: o.profile });
   let want = null;
   try { want = await resolveTenant(o.tenant); } catch (e) { return say({ pid: process.pid, phase: 'failed', error: `the demo's tenant: ${e.message}` }); }
@@ -63,7 +66,16 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   const pages = await Promise.all(apps.map(a => cb.open(a)));
   await Promise.all(pages.map(p => p.waitForLoadState('load', { timeout: 60000 }).catch(() => {})));
   await sleep(3000);
-  const landed = await Promise.all(apps.map(async (a, i) => ({ id: a.id, ...landedOn(pages[i].url(), await pages[i].evaluate(() => document.body ? document.body.innerText.slice(0, 4000) : '').catch(() => ''), a.match) })));
+  const look = async i => ({ id: apps[i].id, ...landedOn(pages[i].url(), await pages[i].evaluate(() => document.body ? document.body.innerText.slice(0, 4000) : '').catch(() => ''), apps[i].match) });
+  let landed = await Promise.all(apps.map((a, i) => look(i)));
+  // An app's own "which account" landing (M365 Copilot's): its address again, with the demo account as the hint.
+  const again = o.pin && o.pin.loginHint ? apps.map((a, i) => i).filter(i => ownSignInPage(landed[i]) && hintedUrl(apps[i].url, o.pin.loginHint)) : [];
+  if (again.length) {
+    log(`capture browser: ${again.map(i => apps[i].id).join(', ')}: their own sign-in landing; with the demo account as the hint`);
+    await Promise.all(again.map(i => pages[i].goto(hintedUrl(apps[i].url, o.pin.loginHint), { waitUntil: 'load', timeout: 60000 }).catch(() => {})));
+    await sleep(5000);
+    landed = await Promise.all(apps.map((a, i) => look(i)));
+  }
   const signIn = landed.filter(l => l.at !== 'app').map(l => l.id);
   if (signIn.length) log(`capture browser: ${signIn.join(', ')} ${signIn.length > 1 ? 'need' : 'needs'} a sign-in: stunt capture sign-in`);
   // The tenant, before anything is captured: another tenant (a wrong account picked silently), or one it can't
@@ -114,7 +126,7 @@ function launchDetached(args, log) {
 // In the background, until stop: waits until the recorder runs (or it can't), and says which.
 export async function start(demo, { waitS = 120 } = {}) {
   const s0 = hostState(demo);
-  if (s0 && s0.alive) return { ok: true, already: true, ...s0 };
+  if (s0 && s0.alive && s0.phase === 'recording-ready') return { ok: true, already: true, ...s0 };
   rmSync(stateFile(demo), { force: true });
   mkdirSync(demo.out, { recursive: true });
   const pid = launchDetached([fileURLToPath(import.meta.url), 'run', '--demo', demo.dir], logFile(demo));

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage } from './browser.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
 
@@ -124,6 +124,8 @@ test('tenants from an app\'s storage key names (MSAL: object id.tenant id)', () 
   assert.deepEqual(tenantsInKeys([`${oid}.${t1}-login.windows.net-${t1}`, `msal.token.keys.x`, `${oid}.${t1}-login.windows.net-accesstoken-c-${t1}-scope`, 'theme']), [t1]);
   assert.deepEqual(tenantsInKeys([`["${oid}.${t2}-login.windows.net-${t2}"]`]), [t2.toLowerCase()]);
   assert.deepEqual(tenantsInKeys(['nothing', 'here']), []);
+  // MSAL's newer keys, and Teams' own tenant-first keys (the second id is the user, not a tenant).
+  assert.deepEqual(tenantsInKeys([`msal.2|${oid}.${t1}|login.windows.net|accesstoken|c|${t1}|scope`, `tmp.${t1}.${oid}.react-web-client.x`, `tmp.auth.v1.${oid}.Token.X`]), [t1]);
 });
 
 test('the tenant guard: only the demo tenant, and never a page it can\'t read when a tenant is named', () => {
@@ -143,4 +145,13 @@ test('capture options: the tenant and the pinned account come from demo.json', (
   assert.deepEqual(o.pin, { loginHint: 'demo@contoso.example', domainHint: 'contoso.example' });
   assert.equal(captureOpts({ capture: { tenant: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } }).pin, null);
   assert.equal(captureOpts({}).pin, null);
+});
+
+test('an app\'s own "which account" landing gets the demo account in its address; Entra\'s own page doesn\'t', () => {
+  assert.equal(hintedUrl('https://app.example.com/', 'demo@contoso.example'), 'https://app.example.com/?login_hint=demo%40contoso.example');
+  assert.equal(hintedUrl('https://app.example.com/?login_hint=x', 'demo@contoso.example'), null);
+  assert.equal(hintedUrl('https://app.example.com/', null), null);
+  assert.equal(ownSignInPage(landedOn('https://app.example.com/', 'Welcome. Sign in to start chatting', 'app.example.com')), true);
+  assert.equal(ownSignInPage(landedOn('https://login.microsoftonline.com/x', 'Pick an account')), false);
+  assert.equal(ownSignInPage(landedOn('https://app.example.com/', 'Hello', 'app.example.com')), false);
 });
