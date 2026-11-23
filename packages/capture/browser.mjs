@@ -76,7 +76,10 @@ export function windowTrouble(mode, p, want = null) {
 // Where an app's page landed: on the app, on a sign-in page, or stopped by a sign-in policy (conditional access).
 // The sign-in hosts are flows/preflight.js's SIGN_IN; the policy words, the pages Entra shows for a device it won't let in.
 export const SIGN_IN_HOST = /(^|\.)(login|signin|sign-in|auth|sso|accounts|adfs)[.-]|login\.microsoftonline\.com|login\.live\.com|accounts\.google\.com/i;
-export const BLOCKED_TEXT = /can.t get there from here|you can.t access this|set up your device|device (?:is|isn.t|must be) (?:compliant|managed|registered)|help us keep your device secure|approve sign.in request/i;
+export const BLOCKED_TEXT = /can.t get there from here|you can.t access this|set up your device|device (?:is|isn.t|must be) (?:compliant|managed|registered)|help us keep your device secure/i;
+// Pages on the way that aren't a block: a second factor, and "Stay signed in?" (what keeps the profile signed in).
+export const MFA_TEXT = /approve (?:the )?sign.in request|verify your identity|enter (?:the )?code|authenticator app|number (?:shown|you see)/i;
+export const KMSI_TEXT = /stay signed in\?/i;
 export function landedOn(url, text = '', match = null) {
   let host = ''; try { host = new URL(url).host; } catch (e) {}
   if (BLOCKED_TEXT.test(text)) return { at: 'blocked', host };
@@ -454,21 +457,32 @@ export async function signInWindow({ profile, apps, channel = 'chrome', timeoutS
     const p = await cb.open('about:blank', { window: 'visible', viewport: null, ...viewport, focus: false });
     // This one window comes to the front: it's hers to sign in on.
     await (await cb.ctx.newCDPSession(p)).send('Page.bringToFront').catch(() => {});
-    for (;;) {
-      for (const a of apps) {
-        if (states[a.id] && states[a.id].at === 'app') continue;
-        if (p.url().split('#')[0] !== a.url.split('#')[0]) await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-        await p.waitForLoadState('load', { timeout: 30000 }).catch(() => {}); await sleep(4000);
-        const text = await p.evaluate(() => document.body ? document.body.innerText.slice(0, 4000) : '').catch(() => '');
-        states[a.id] = { ...landedOn(p.url(), text, a.match), secs: Math.round((Date.now() - t0) / 1000) };
-        if (states[a.id].at !== 'app') break;
+    const seen = new Set();
+    const read = async a => {
+      const text = await p.evaluate(() => document.body ? document.body.innerText.slice(0, 4000) : '').catch(() => '');
+      const l = landedOn(p.url(), text, a.match);
+      if (l.at === 'signin' && MFA_TEXT.test(text)) seen.add('mfa');
+      if (l.at === 'signin' && KMSI_TEXT.test(text)) seen.add('stay-signed-in');
+      if (l.at === 'blocked') seen.add('blocked');
+      return l;
+    };
+    // Each app in turn: opened once, then only watched. While it's on a sign-in or policy page the page is hers:
+    // nothing navigates under her. It counts as signed in once it's been on the app for two looks in a row.
+    for (const a of apps) {
+      await p.goto(a.url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+      let onApp = 0, last = null;
+      while (Date.now() - t0 < timeoutS * 1000) {
+        await p.waitForLoadState('load', { timeout: 30000 }).catch(() => {});
+        await sleep(2500);
+        const l = await read(a);
+        if (!last || l.at !== last.at) { states[a.id] = { ...l, secs: Math.round((Date.now() - t0) / 1000) }; onState(apps.map(x => ({ id: x.id, at: states[x.id] ? states[x.id].at : null }))); }
+        last = l;
+        if (l.at === 'app') { if (++onApp >= 2) break; } else onApp = 0;
       }
-      onState(apps.map(a => ({ id: a.id, at: states[a.id] ? states[a.id].at : null })));
-      if (apps.every(a => states[a.id] && states[a.id].at === 'app') || Date.now() - t0 > timeoutS * 1000) break;
-      await sleep(3000);
+      if (!(states[a.id] && states[a.id].at === 'app')) break;
     }
     const ok = apps.every(a => states[a.id] && states[a.id].at === 'app');
-    return { ok, secs: Math.round((Date.now() - t0) / 1000), apps: apps.map(a => ({ id: a.id, ...states[a.id] })), cookies: cookieExpiries(await cb.ctx.cookies()) };
+    return { ok, secs: Math.round((Date.now() - t0) / 1000), seen: [...seen], apps: apps.map(a => ({ id: a.id, ...states[a.id] })), cookies: cookieExpiries(await cb.ctx.cookies()) };
   } finally { await cb.close(); }
 }
 

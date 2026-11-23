@@ -45,8 +45,8 @@ try {
     log(`sign in in the window that opens (${APPS.length} apps)`);
     const r = await signInWindow({ profile: PROFILE, apps: APPS, timeoutS: +arg('--wait-signin', 600), viewport: VP, flags: ['--disable-features=LocalNetworkAccessChecks'],
       onState: st => log('apps: ' + st.map(x => `${x.id} ${x.at === 'app' ? 'in' : x.at === 'blocked' ? 'BLOCKED' : x.at ? 'sign-in' : '-'}`).join(', ')) });
-    save('signin.json', { secs: r.secs, ok: r.ok, states: Object.fromEntries((r.apps || []).map(x => [x.id, { ok: x.at === 'app', blocked: x.at === 'blocked', signIn: x.at === 'signin', at: x.secs }])), cookies: r.cookies, error: r.error });
-    log(`signed in: ${r.ok} in ${r.secs} s`);
+    save('signin.json', { secs: r.secs, ok: r.ok, seen: r.seen, states: Object.fromEntries((r.apps || []).map(x => [x.id, { ok: x.at === 'app', blocked: x.at === 'blocked', signIn: x.at === 'signin', at: x.secs }])), cookies: r.cookies, error: r.error });
+    log(`signed in: ${r.ok} in ${r.secs} s; pages on the way: ${(r.seen || []).join(', ') || 'none'}`);
   }
   if (PHASE === 'signin' && arg('--signin-mode')) {
     // A visible window on the first app: she signs in there (and says Yes to staying signed in). Then each app is
