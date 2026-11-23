@@ -47,6 +47,15 @@ them, so redact them once with `stunt scrub --redact <raw folder>` before the fi
 
 Updating a demo to a newer StuntDouble is the same `stuntdouble-pack.mjs --into` again, then `npm install`.
 
+The pack brings this machine's binary. For the other systems, CI's Binary jobs upload `stuntdouble-<os>-<cpu>`
+(darwin-arm64, darwin-x64, win32-x64, win32-arm64). Pack each one into the demo after the first pack. npm installs
+only the one for the machine it runs on:
+
+```bash
+gh run download <CI run> -n stuntdouble-win32-x64 -D /tmp/sd-win32-x64
+node scripts/stuntdouble-pack.mjs --into ~/git/my-demo --binary /tmp/sd-win32-x64/stuntdouble.exe --platform win32-x64
+```
+
 ## Environment
 
 | Variable | What |

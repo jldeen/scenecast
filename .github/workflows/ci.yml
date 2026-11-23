@@ -42,6 +42,38 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  binaries:
+    # The stuntdouble binary for each OS and CPU, as @stuntdouble/build-<os>-<cpu> ships it: a demo outside this
+    # repository vendors one with scripts/stuntdouble-pack.mjs --binary <file> --platform <os-cpu>.
+    name: Binary (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, platform: darwin-arm64, target: aarch64-apple-darwin, exe: stuntdouble }
+          - { os: macos-latest, platform: darwin-x64, target: x86_64-apple-darwin, exe: stuntdouble }
+          - { os: windows-latest, platform: win32-x64, target: x86_64-pc-windows-msvc, exe: stuntdouble.exe }
+          - { os: windows-latest, platform: win32-arm64, target: aarch64-pc-windows-msvc, exe: stuntdouble.exe }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: binary-${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked -p stuntdouble-cli --target ${{ matrix.target }}
+      - name: Runs (the runner's own CPU)
+        if: matrix.platform == 'darwin-arm64' || matrix.platform == 'win32-x64'
+        run: target/${{ matrix.target }}/release/${{ matrix.exe }} --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stuntdouble-${{ matrix.platform }}
+          path: target/${{ matrix.target }}/release/${{ matrix.exe }}
+          if-no-files-found: error
+
   engine:
     # The JS engine end to end, headless, through the scenecast binary: the fixture app recorded by the extension, built, served,
     # and checked (two runs, three cold starts, focus points, the whole checklist), with only live-page scenes.
