@@ -136,4 +136,12 @@ test('a capture read without a browser: controls as the outline names them, word
   assert.doesNotMatch(sc.text, /Hidden/);
   // The page's own title before the app bar's.
   assert.deepEqual(sc.headings, ['Tools', 'Catalog']);
+  // What switches and radios are set to, and the page's theme.
+  const st = readScreen([{ key: 'main', html: '<html data-color-scheme="dark"><body><input type="checkbox" role="switch" aria-label="Enable Sync" checked><div role="radio" aria-checked="false">Chat</div><button aria-pressed="true">Bold</button></body></html>' }]);
+  assert.deepEqual([st.theme, ...st.controls.map(c => [c.name, c.on ?? c.pressed])], ['dark', ['Enable Sync', true], ['Chat', false], ['Bold', true]]);
+  // The controls the recorder's matchers pick: attributes, ids, descendants, text, scope.
+  const pk = readScreen([{ key: 'main', html: '<html><body><section aria-label="Reviewers"><span class="x effortMenu__a"><button>Balanced</button></span></section><div data-dd-action-name="view_approvals" tabindex="0">Approvals</div><div role="dialog"><button>Commit changes</button></div><button>Commit changes...</button></body></html>' }], { specs: [
+    { key: 'a', sel: '[data-dd-action-name="view_approvals"]' }, { key: 'b', sel: 'section[aria-label="Reviewers"] span[class*="effortMenu__"] button' },
+    { key: 'c', sel: 'button', text: 'Commit changes', in: '[role="dialog"]' }, { key: 'd', sel: '#none' }] });
+  assert.deepEqual(Object.values(pk.picks).map(i => i < 0 ? null : pk.controls[i].name), ['Approvals', 'Balanced', 'Commit changes', null]);
 });

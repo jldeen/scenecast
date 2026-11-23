@@ -13,11 +13,12 @@
 //                                            (goal(screen, sig, lastMove, path so far))
 import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { readScreen } from '../script/html.mjs';
 import { findItem } from './find.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
-const READER = 7;
+const READER = 9;
 
 const norm = s => String(s || '').toLowerCase().replace(/[“”"'’]/g, '').replace(/\s+/g, ' ').trim();
 
@@ -29,7 +30,11 @@ export function specParts(m) {
   return { frame: m.frame, label: label && label[2], labelPrefix: !!(label && label[1]), testid: testid && testid[2], testidPrefix: !!(testid && testid[1]), text: m.text, textStarts: m.textStarts, sel };
 }
 export const specName = m => { const p = specParts(m); return p.text || p.label || (p.textStarts ? p.textStarts + '…' : '') || ''; };
-function specMatches(m, c) {
+// A recorded matcher as a key: what the reader resolved it to on a screen (picks) is kept under it.
+const specKey = m => JSON.stringify([m.frame ?? null, m.sel ?? null, m.in ?? null, m.label ?? null, m.labelStarts ?? null, m.testid ?? null, m.text ?? null, m.textStarts ?? null, m.nth ?? 0]);
+function specMatches(m, c, sc) {
+  // The control the matcher's selector picks on this capture, when the reader found one.
+  if (sc && sc.picks) { const k = sc.picks[specKey(m)]; if (k !== undefined && k >= 0) return c.i === k; }
   const p = specParts(m);
   if ((p.frame || undefined) !== (c.frame || undefined)) return false;
   if (p.testid && c.testid) return p.testidPrefix ? c.testid.startsWith(p.testid) : c.testid === p.testid;
@@ -75,9 +80,14 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     const src = kind === 'shown' ? builtOf(snap) || rawOf(snap) : rawOf(snap) || builtOf(snap);
     let sc = { controls: [], items: [], headings: [], text: '' };
     if (src) {
-      const key = `${READER}:${src.from}:${statSync(src.from).mtimeMs}`;
+      // The recorded matchers on this screen (its clicks, fields and Enter), resolved as the screen is read.
+      const ms = [];
+      for (const t of transitions(id)) for (const kk of ['click', 'type', 'enter', 'hover']) if (t[kk] && typeof t[kk] === 'object') ms.push(t[kk]);
+      for (const f of st.fill || []) ms.push(f);
+      const specs = [...new Map(ms.map(m => [specKey(m), { ...m, key: specKey(m) }])).values()];
+      const key = `${READER}:${src.from}:${statSync(src.from).mtimeMs}:${createHash('sha1').update(specs.map(m => m.key).join('\n')).digest('hex').slice(0, 12)}`;
       if (saved[k] && saved[k].key === key) sc = saved[k].screen;
-      else { sc = readScreen(src.docs()); saved[k] = { key, screen: sc }; dirty = true; }
+      else { sc = readScreen(src.docs(), { specs }); saved[k] = { key, screen: sc }; dirty = true; }
     }
     // The page's own title (a Copilot task's name), from the build's record of the capture.
     let title = st.title || null;
@@ -105,7 +115,23 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
   const b0 = (flow.beats || [])[0];
   const start = app => (b0 && b0.states && b0.states[app]) || Object.keys(S).find(k => S[k].app === app) || null;
   const appOn = (app, id) => ((flow.apps || []).find(a => a.id === app) || {}).on || [];
-  const transitions = id => [...(S[id].on || []), ...appOn(S[id].app).filter(t => !t.when || t.when.includes(id))];
+  // The recording's own path (flow.path, else recording.json's): where each of its steps led within an app, as moves the
+  // screens don't list (a player key that typed the change, → to the next slide, a click the build left out).
+  const recPath = (flow.path || []).some(s => s.checkpoint) ? flow.path : (() => { try { return JSON.parse(readFileSync(join(demo.dir, 'recording.json'), 'utf8')).path || []; } catch (e) { return []; } })();
+  const pathOn = {};
+  let prevCp = null;
+  for (const p of recPath) {
+    const cp = p.checkpoint;
+    if (!cp) continue;
+    if (prevCp && prevCp !== cp && S[prevCp] && S[cp] && S[prevCp].app === S[cp].app) {
+      const t = p.key && !/^(Enter|Escape)$/.test(p.key) ? { key: p.key, to: cp, fromPath: true } : p.click ? { click: p.click, to: cp, fromPath: true } : p.type && p.text != null ? { type: p.type, text: p.text, to: cp, fromPath: true } : null;
+      const own = S[prevCp].on || [];
+      const known = t && (t.key ? false : own.some(o => (o.click || o.type) && JSON.stringify(o.click || o.type) === JSON.stringify(t.click || t.type)));
+      if (t && !known && !(pathOn[prevCp] || []).some(o => o.to === t.to && JSON.stringify(o) === JSON.stringify(t))) (pathOn[prevCp] = pathOn[prevCp] || []).push(t);
+    }
+    prevCp = cp;
+  }
+  const transitions = id => [...(S[id].on || []), ...appOn(S[id].app).filter(t => !t.when || t.when.includes(id)), ...(pathOn[id] || [])];
   const toOf = (t, id, typed) => {
     if (t.query) { const q = norm(typed); const k = Object.keys(t.query).sort((a, b) => b.length - a.length).find(k => k && q.includes(norm(k))) ?? ''; return t.query[k] || id; }
     if (t.stream) return ((flow.streams || {})[t.stream] || {}).to || id;
@@ -134,8 +160,8 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     const score = fit(el.name, name);
     if (id && S[id]) {
       const clicks = transitions(id).filter(t => t.click);
-      if (!clicks.some(t => specMatches(t.click, el))) {
-        const rival = sc.controls.find(c => !c.disabled && c !== el && fit(c.name, name) >= Math.min(score, 50) && clicks.some(t => specMatches(t.click, c)) && findItem([c], name, kind));
+      if (!clicks.some(t => specMatches(t.click, el, sc))) {
+        const rival = sc.controls.find(c => !c.disabled && c !== el && fit(c.name, name) >= Math.min(score, 50) && clicks.some(t => specMatches(t.click, c, sc)) && findItem([c], name, kind));
         if (rival) return { el: rival, score: fit(rival.name, name) };
       }
     }
@@ -148,28 +174,29 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     if (s.kind === 'click' || s.kind === 'hover') {
       const hit = control(sc, s.target, undefined, id);
       let c = hit && hit.score >= (s.strict ? 50 : 30) ? hit.el : null;
-      let t = s.kind !== 'click' ? null : c ? on.find(x => x.click && specMatches(x.click, c)) : on.find(x => x.click && norm(specName(x.click)) === norm(s.target));
+      let t = s.kind !== 'click' ? null : c ? on.find(x => x.click && specMatches(x.click, c, sc)) : on.find(x => x.click && norm(specName(x.click)) === norm(s.target));
       // "Click the plugin row": the row the recording clicked here.
       if (s.kind === 'click' && !t && s.role) {
         const re = s.role === 'button' ? /^button\b/ : new RegExp(`role="?${s.role}\\b`);
         const r = on.filter(x => x.click && re.test(x.click.sel || ''));
-        if (r.length === 1) { t = r[0]; c = sc.controls.find(x => specMatches(t.click, x)) || c; }
+        if (r.length === 1) { t = r[0]; c = sc.controls.find(x => specMatches(t.click, x, sc)) || c; }
       }
-      if (t) return { to: toOf(t, id, typed), control: c || sc.controls.find(x => specMatches(t.click, x)) || null, recorded: specName(t.click), stream: t.stream || null };
+      if (t) return { to: toOf(t, id, typed), control: c || sc.controls.find(x => specMatches(t.click, x, sc)) || null, recorded: specName(t.click), stream: t.stream || null };
       return c ? { to: id, control: c } : { to: id, control: null, why: 'not-here' };
     }
     if (s.kind === 'type') {
       const hit = s.target ? control(sc, s.target, 'field') : null;
       const field = hit ? hit.el : null;
       const ts = on.filter(x => x.type);
-      const t = field ? ts.find(x => specMatches(x.type, field)) || (ts.length === 1 ? ts[0] : null) : ts.length === 1 ? ts[0] : null;
-      const fieldOf = t ? sc.controls.find(c => specMatches(t.type, c)) : null;
+      const t = field ? ts.find(x => specMatches(x.type, field, sc)) || (ts.length === 1 ? ts[0] : null) : ts.length === 1 ? ts[0] : null;
+      const fieldOf = t ? sc.controls.find(c => specMatches(t.type, c, sc)) : null;
       return { to: t ? t.to || id : id, control: field || fieldOf || null, why: field || fieldOf || !s.target ? null : 'not-here' };
     }
     if (s.kind === 'press') {
       if (s.key === 'Enter') { const t = on.find(x => x.enter); return t ? { to: toOf(t, id, typed), stream: t.stream || null } : { to: id }; }
       if (s.key === 'Escape' && st.esc) return { to: st.esc };
-      return { to: id };
+      const k = on.find(x => x.key && x.key === s.key);
+      return k ? { to: k.to } : { to: id };
     }
     return { to: id };
   }
@@ -181,18 +208,19 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     const fills = st.fill || [];
     for (const t of transitions(id)) {
       if (t.click) {
-        const c = sc.controls.find(x => specMatches(t.click, x));
+        const c = sc.controls.find(x => specMatches(t.click, x, sc));
         const name = c ? c.name : specName(t.click);
         if (name && !t.snap) out.push({ steps: [{ kind: 'click', target: name }], to: toOf(t, id, ''), control: c || null, recorded: specName(t.click) });
       } else if (t.type && t.to) {
         const f = fills.find(f => specMatches(t.type, { name: specName(f), testid: (specParts(f).testid || undefined), frame: f.frame, editable: true })) || fills[0];
-        const c = sc.controls.find(x => specMatches(t.type, x));
-        if (f) out.push({ steps: [{ kind: 'type', value: f.value, target: c ? c.name : specName(t.type) || null }], to: t.to });
-      }
+        const c = sc.controls.find(x => specMatches(t.type, x, sc));
+        const value = f ? f.value : t.text;
+        if (value != null) out.push({ steps: [{ kind: 'type', value, target: c ? c.name : specName(t.type) || null }], to: t.to });
+      } else if (t.key && t.to) out.push({ steps: [{ kind: 'press', key: t.key }], to: t.to });
     }
     const enter = transitions(id).find(t => t.enter);
     if (enter && enter.query && fills.length) {
-      const c = sc.controls.find(x => specMatches(enter.enter, x));
+      const c = sc.controls.find(x => specMatches(enter.enter, x, sc));
       out.push({ steps: [{ kind: 'type', value: fills[0].value, target: c ? c.name : null }, { kind: 'press', key: 'Enter' }], to: toOf(enter, id, fills[0].value) });
     } else if (enter && !enter.query) out.push({ steps: [{ kind: 'press', key: 'Enter' }], to: toOf(enter, id, '') });
     return out.filter(m => m.to && m.to !== id);
@@ -224,6 +252,6 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
   }
   const recorded = (at, s, typed = '') => shaped(sigOf(at), follow(sigOf(at), s, typed));
   // The name of the control a recorded matcher picks on a screen (one recorded by its test id has no name of its own).
-  const nameOf = (sig, m) => { for (const sc of [screen(sig), shown(sig)]) { const c = sc && sc.controls.find(x => specMatches(m, x)); if (c && c.name) return c.name; } return null; };
+  const nameOf = (sig, m) => { for (const sc of [screen(sig), shown(sig)]) { const c = sc && sc.controls.find(x => specMatches(m, x, sc)); if (c && c.name) return c.name; } return null; };
   return { flow, apps, start, screen, view, shown, opened, step, recorded, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
 }
