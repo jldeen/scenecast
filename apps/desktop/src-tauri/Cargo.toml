@@ -31,6 +31,11 @@ tauri-plugin-auditaur = { version = "0.4", optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
 
+# macOS: the window's WebKit processes, to start the page again when it stops drawing (window_not_drawing).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+libc = "0.2"
+
 [features]
 webdriver = ["dep:tauri-plugin-wdio-webdriver"]
 auditaur = ["dep:tauri-plugin-auditaur", "dep:tracing", "dep:tracing-subscriber"]

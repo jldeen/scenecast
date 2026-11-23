@@ -1854,6 +1854,107 @@ fn default_check_browser() {
     }
 }
 
+/// WebKit's GPU processes working for this app (they're launchd's children, so found by who they're responsible to):
+/// all of them, the stopped one WebKit couldn't end included.
+#[cfg(target_os = "macos")]
+fn webkit_gpu_pids() -> Vec<i32> {
+    unsafe extern "C" {
+        fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
+    }
+    let me = std::process::id() as i32;
+    let mut pids = vec![0i32; 8192];
+    let n = unsafe {
+        libc::proc_listallpids(
+            pids.as_mut_ptr().cast(),
+            (pids.len() * std::mem::size_of::<i32>()) as i32,
+        )
+    };
+    pids.truncate(n.max(0) as usize);
+    pids.into_iter()
+        .filter(|&pid| pid > 0 && pid != me)
+        .filter(|&pid| {
+            let mut name = [0u8; 64];
+            let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+            len > 0 && &name[..len as usize] == b"com.apple.WebKit.GPU"
+        })
+        .filter(|&pid| unsafe { responsibility_get_pid_responsible_for_pid(pid) } == me)
+        .collect()
+}
+
+/// For the UI test: the GPU processes, to stop them the way they got stuck on Jessica's Mac.
+#[cfg(all(target_os = "macos", feature = "webdriver"))]
+#[tauri::command]
+fn test_webkit_gpu_pids() -> Vec<i32> {
+    webkit_gpu_pids()
+}
+
+/// The page says the window is on screen and nothing has drawn for a while (its animation frames stopped while its
+/// timers run). On macOS that's WebKit's GPU process wedged: Nov 2026, on Jessica's Mac, WebKit killed it as
+/// unresponsive, couldn't kill the third, and the page kept its connection to that half-started one: blank for two
+/// hours, the page itself fine. A fresh GPU process alone left it blank; a fresh web process (Tauri reloads the page
+/// when it ends) drew again. So: end the GPU process WebKit has for the window (it can be stopped, not just slow), then
+/// the web process. Windows: reload.
+#[tauri::command]
+async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, String> {
+    scenecast_app::ai::app_log(
+        "window not drawing",
+        &format!("no frame drawn for {ms} ms while on screen; starting the page again"),
+    );
+    #[cfg(target_os = "macos")]
+    {
+        let pids = std::sync::Arc::new(std::sync::Mutex::new((0i32, 0i32)));
+        // (the window's web process, 1 once asked)
+        let got = pids.clone();
+        webview
+            .with_webview(move |wv| {
+                use objc2::{msg_send, runtime::AnyObject, sel};
+                let wk = wv.inner() as *mut AnyObject;
+                if wk.is_null() {
+                    return;
+                }
+                // WebKit's own (long-standing SPI) names for the window's processes; asked only if it answers.
+                let wk = unsafe { &*wk };
+                let web: i32 = if wk.class().responds_to(sel!(_webProcessIdentifier)) {
+                    unsafe { msg_send![wk, _webProcessIdentifier] }
+                } else {
+                    0
+                };
+                *got.lock().expect("pids") = (web, 1);
+            })
+            .map_err(|e| e.to_string())?;
+        // with_webview runs on the main thread (this command doesn't): wait for its answer.
+        for _ in 0..50 {
+            if *pids.lock().expect("pids") != (0, 0) {
+                break;
+            }
+            tokio_sleep_ms(20).await;
+        }
+        let web = pids.lock().expect("pids").0;
+        let gpu = webkit_gpu_pids();
+        for &pid in &gpu {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        if web > 0 {
+            unsafe { libc::kill(web, libc::SIGKILL) };
+            return Ok(serde_json::json!({ "restarted": "web process", "web": web, "gpu": gpu }));
+        }
+        let _ = webview.reload();
+        Ok(serde_json::json!({ "restarted": "reload", "gpu": gpu }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        webview.reload().map_err(|e| e.to_string())?;
+        Ok(serde_json::json!({ "restarted": "reload" }))
+    }
+}
+
+async fn tokio_sleep_ms(ms: u64) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(ms))
+    })
+    .await;
+}
+
 fn main() {
     use_bundled_engine();
     default_check_browser();
@@ -1919,6 +2020,9 @@ fn main() {
             move |_ctx, request| serve_file(&state, &request)
         })
         .invoke_handler(tauri::generate_handler![
+            window_not_drawing,
+            #[cfg(all(target_os = "macos", feature = "webdriver"))]
+            test_webkit_gpu_pids,
             app_info,
             list_demos,
             get_demo,
