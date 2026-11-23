@@ -1,23 +1,26 @@
-//! A window WebKit can't draw in, found from WebKit's own log and fixed (macOS 12 and later).
+//! A window WebKit can't draw in, found from WebKit's own log and fixed (macOS).
 //!
 //! Nov 22 2026, Jessica's Mac: WebKit found the window's GPU process unresponsive and tried to end it; macOS refused
 //! ("Could not signal service com.apple.WebKit.GPU: 1: Operation not permitted"). The page kept its connection to that
 //! process and the window stayed blank for two hours, the page itself fine. The process wasn't stopped, just asleep, so
-//! nothing about it shows the problem. WebKit's log does, and it's this app's own (OSLogStore, current process): it
-//! says the process exited, yet it's still running. Ending it and then the window's web process fixed it: Tauri loads
+//! nothing about it shows the problem. WebKit's log does, and it's this app's own: it says the process exited, yet it's
+//! still running. Ending it and then the window's web process fixed it: Tauri loads
 //! the page again, drawn by a new GPU process.
 //!
-//! Every few seconds this reads what this app logged since the last look. A GPU process WebKit says exited that's still
-//! running a few seconds later is ended (only if it's this app's: see `mac::ours`), then the web process. Frames, the
-//! window's place on screen and the process's state play no part: a covered window draws again once it's uncovered.
-//! macOS 11 has no OSLogStore for a process's own log: there this does nothing (quit and open Scenecast again).
+//! One `log stream` (macOS's own tool) runs for the app's life, filtered by the log service to this app's process and
+//! WebKit's lines about its GPU process, so it costs nothing until they come. (Reading the log store instead took 3 to
+//! 6 s a read on a loaded Mac.) A GPU process WebKit says exited that's still running 5 s later is ended (only if it's
+//! this app's: see `mac::ours`), then the web process. Frames, the window's place on screen and the process's state
+//! play no part: a covered window draws again once it's uncovered. If the stream can't be read (its marker, written at
+//! the start, doesn't come back), recovery is off and the app's log says so once.
 
 #[cfg(target_os = "macos")]
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// The GPU processes WebKit says have exited, from its log lines ("WebProcessPool::gpuProcessDidExit: PID=<n>", and
 /// "GPUProcess with PID <n> became unresponsive, terminating it"). One still running a few seconds later is one WebKit
 /// couldn't end ("Could not signal service com.apple.WebKit.GPU", which names no process, says so too).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn exited(lines: &[String]) -> Vec<i32> {
     let num = |s: &str| {
         s.split(|c: char| !c.is_ascii_digit())
@@ -45,64 +48,6 @@ pub fn exited(lines: &[String]) -> Vec<i32> {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use objc2::rc::autoreleasepool;
-    use objc2::runtime::{AnyClass, AnyObject};
-    use objc2::{msg_send, sel};
-    use std::ptr::null_mut;
-
-    #[link(name = "OSLog", kind = "framework")]
-    unsafe extern "C" {}
-
-    /// What this process logged since `since` (seconds since 1970): each entry's message.
-    pub fn logged_since(since: f64) -> Vec<String> {
-        autoreleasepool(|_| unsafe {
-            let mut out = Vec::new();
-            let (Some(store_cls), Some(date_cls)) =
-                (AnyClass::get(c"OSLogStore"), AnyClass::get(c"NSDate"))
-            else {
-                return out;
-            };
-            let mut err: *mut AnyObject = null_mut();
-            // OSLogStoreCurrentProcessIdentifier = 1
-            let store: *mut AnyObject =
-                msg_send![store_cls, storeWithScope: 1isize, error: &mut err];
-            if store.is_null() {
-                return out;
-            }
-            let date: *mut AnyObject = msg_send![date_cls, dateWithTimeIntervalSince1970: since];
-            let pos: *mut AnyObject = msg_send![&*store, positionWithDate: date];
-            let en: *mut AnyObject = msg_send![
-                &*store,
-                entriesEnumeratorWithOptions: 0usize,
-                position: pos,
-                predicate: null_mut::<AnyObject>(),
-                error: &mut err
-            ];
-            if en.is_null() {
-                return out;
-            }
-            loop {
-                let e: *mut AnyObject = msg_send![&*en, nextObject];
-                if e.is_null() {
-                    break;
-                }
-                let e = &*e;
-                if !e.class().responds_to(sel!(composedMessage)) {
-                    continue;
-                }
-                let m: *mut AnyObject = msg_send![e, composedMessage];
-                if m.is_null() {
-                    continue;
-                }
-                let s: *const std::os::raw::c_char = msg_send![&*m, UTF8String];
-                if !s.is_null() {
-                    out.push(std::ffi::CStr::from_ptr(s).to_string_lossy().into_owned());
-                }
-            }
-            out
-        })
-    }
-
     fn started(pid: i32) -> Option<u64> {
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
         let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
@@ -145,7 +90,12 @@ mod mac {
             return false;
         }
         let me = std::process::id() as i32;
-        matches!((started(pid), started(me)), (Some(p), Some(a)) if p >= a)
+        if !matches!((started(pid), started(me)), (Some(p), Some(a)) if p >= a) {
+            return false;
+        }
+        // Opened normally (or as its own launchd job), the app's GPU processes are responsible to it: then that's
+        // required too, so a pid since reused by another app's GPU process (started after this app, same name) isn't.
+        responsible(me) != me || responsible(pid) == me
     }
 
     pub fn alive(pid: i32) -> bool {
@@ -182,6 +132,18 @@ fn web_process(window: &tauri::WebviewWindow) -> i32 {
     rx.recv_timeout(Duration::from_secs(5)).unwrap_or(0)
 }
 
+/// Ends the window's web process (Tauri loads the page again), or reloads it if WebKit doesn't say which it is.
+#[cfg(target_os = "macos")]
+pub fn restart_page(window: &tauri::WebviewWindow) -> i32 {
+    let web = web_process(window);
+    if web > 0 {
+        unsafe { libc::kill(web, libc::SIGKILL) };
+    } else {
+        let _ = window.reload();
+    }
+    web
+}
+
 /// Ends the GPU processes WebKit couldn't end (only this app's, still running), then the window's web process: Tauri
 /// loads the page again. Returns what it did, for the log.
 #[cfg(target_os = "macos")]
@@ -200,49 +162,107 @@ pub fn recover(window: &tauri::WebviewWindow, stuck: &[i32]) -> String {
             left_alone.push(w);
         }
     }
-    let web = web_process(window);
-    if web > 0 {
-        unsafe { libc::kill(web, libc::SIGKILL) };
-    } else {
-        let _ = window.reload();
+    // None ended: the app's real GPU process already exited and nothing is wedged; loading the page again would only
+    // lose what's on it.
+    if ended.is_empty() {
+        return format!(
+            "nothing ended (not this app's, left alone: {left_alone:?}); the page is left as it is"
+        );
     }
+    let web = restart_page(window);
     format!(
         "GPU processes ended: {ended:?}; not this app's, left alone: {left_alone:?}; web process {web} ended (the page loads again)"
     )
 }
 
-/// Watches this app's log (every 5 s) for a GPU process WebKit says exited that's still running, and recovers.
+/// The message of one `log stream --style ndjson` line, if it's an entry.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn message(line: &str) -> Option<String> {
+    if !line.starts_with('{') {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()?
+        .get("eventMessage")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+#[cfg(target_os = "macos")]
+const MARKER: &std::ffi::CStr = c"scenecast gpu-watch marker";
+
+/// Watches this app's log for a GPU process WebKit says exited that's still running, and recovers the window.
 #[cfg(target_os = "macos")]
 pub fn start(app: tauri::AppHandle) {
+    use std::io::BufRead;
     use tauri::Manager;
+    let me = std::process::id();
+    let predicate = format!(
+        "processID == {me} AND (eventMessage CONTAINS \"gpuProcessDidExit\" OR eventMessage CONTAINS \"became unresponsive\" \
+         OR eventMessage CONTAINS \"Could not signal service com.apple.WebKit.GPU\" OR eventMessage CONTAINS \"{}\")",
+        MARKER.to_string_lossy()
+    );
+    // The stream ends with the app, even if the app crashes: the shell around it watches the app's pid.
+    let script = format!(
+        "/usr/bin/log stream --style ndjson --predicate \"$1\" & s=$!; while kill -0 {me} 2>/dev/null; do sleep 5; done; kill $s"
+    );
+    let off = |why: &str| {
+        let msg = format!("can't read this app's log ({why}); blank-window recovery is off");
+        eprintln!("gpu-watch: {msg}");
+        scenecast_app::ai::app_log("gpu-watch", &msg);
+    };
+    let child = std::process::Command::new("/bin/sh")
+        .args(["-c", &script, "gpu-watch", &predicate])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => return off(&e.to_string()),
+    };
+    let Some(out) = child.stdout.take() else {
+        return off("no output");
+    };
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let _ = std::thread::Builder::new()
+        .name("gpu-watch-read".into())
+        .spawn(move || {
+            for l in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+                if let Some(m) = message(&l)
+                    && tx.send(m).is_err()
+                {
+                    break;
+                }
+            }
+        });
     let _ = std::thread::Builder::new()
         .name("gpu-watch".into())
         .spawn(move || {
-            let now = || {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_secs_f64())
-                    .unwrap_or(0.0)
-            };
-            let mut since = now();
+            // The stream is live when the marker written to this app's log comes back through it.
+            let mut live = false;
+            for _ in 0..5 {
+                std::thread::sleep(Duration::from_millis(500));
+                unsafe { libc::syslog(libc::LOG_NOTICE, c"%s".as_ptr(), MARKER.as_ptr()) };
+                if let Ok(m) = rx.recv_timeout(Duration::from_secs(2))
+                    && m.contains(MARKER.to_str().unwrap_or("-"))
+                {
+                    live = true;
+                    break;
+                }
+            }
+            if !live {
+                let _ = child.kill();
+                return off("its marker didn't come back");
+            }
+            eprintln!("gpu-watch: reading this app's log");
             let mut seen: Vec<i32> = Vec::new();
-            loop {
-                std::thread::sleep(Duration::from_secs(5));
-                let t = now();
-                // A little overlap, so nothing logged right at the edge is missed.
-                let lines: Vec<String> = mac::logged_since(since - 2.0)
-                    .into_iter()
-                    .filter(|l| {
-                        l.contains("gpuProcessDidExit")
-                            || l.contains("GPUProcess with PID")
-                            || l.contains("com.apple.WebKit.GPU")
-                    })
-                    .collect();
-                since = t;
-                let refused = lines
-                    .iter()
-                    .any(|l| l.contains("Could not signal service com.apple.WebKit.GPU"));
-                let new: Vec<i32> = exited(&lines)
+            let mut refused = false;
+            while let Ok(m) = rx.recv() {
+                if m.contains("Could not signal service com.apple.WebKit.GPU") {
+                    refused = true;
+                }
+                let new: Vec<i32> = exited(&[m])
                     .into_iter()
                     .filter(|p| !seen.contains(p))
                     .collect();
@@ -252,6 +272,9 @@ pub fn start(app: tauri::AppHandle) {
                 seen.extend(&new);
                 // WebKit may still end it: give it a moment, then only what's still running.
                 std::thread::sleep(Duration::from_secs(5));
+                while let Ok(m) = rx.try_recv() {
+                    refused |= m.contains("Could not signal service com.apple.WebKit.GPU");
+                }
                 let left: Vec<i32> = new.into_iter().filter(|&p| mac::alive(p)).collect();
                 if left.is_empty() {
                     continue;
@@ -265,12 +288,14 @@ pub fn start(app: tauri::AppHandle) {
                 } else {
                     ""
                 };
+                refused = false;
                 let msg = format!(
                     "GPU process {left:?} exited per WebKit but still running{why}: {what}"
                 );
                 eprintln!("gpu-watch: {msg}");
                 scenecast_app::ai::app_log("window not drawing", &msg);
             }
+            let _ = child.kill();
         });
 }
 
@@ -297,39 +322,10 @@ mod tests {
         assert!(exited(&lines[2..4]).is_empty());
     }
 
-    // The app's own log, as gpu_watch reads it: libxpc's default-level lines (the level and source of "Could not signal
-    // service com.apple.WebKit.GPU") come back; reading the log makes one ("activating connection … OSLogService").
-    #[cfg(target_os = "macos")]
     #[test]
-    fn reads_this_process_log() {
-        let t0 = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
-        // The app logs from its first moment (WebKit does); this test process logs a line first, as the app has.
-        {
-            use objc2::msg_send;
-            use objc2::runtime::{AnyClass, AnyObject};
-            unsafe extern "C" {
-                fn NSLog(format: *const AnyObject, ...);
-            }
-            unsafe {
-                let s: *mut AnyObject = msg_send![AnyClass::get(c"NSString").unwrap(), stringWithUTF8String: c"gpu-watch test".as_ptr()];
-                NSLog(s);
-            }
-        }
-        let mut got = Vec::new();
-        for _ in 0..20 {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            got = super::mac::logged_since(t0 - 5.0);
-            if got.iter().any(|l| l.contains("OSLogService")) {
-                break;
-            }
-        }
-        assert!(
-            got.iter().any(|l| l.contains("OSLogService")),
-            "libxpc's lines weren't read back from this process's log: {} read",
-            got.len()
-        );
+    fn reads_log_stream_lines() {
+        use super::message;
+        assert_eq!(message(r#"{"eventMessage":"WebProcessPool::gpuProcessDidExit: PID=69440, reason=Unresponsive","processID":1}"#).as_deref(), Some("WebProcessPool::gpuProcessDidExit: PID=69440, reason=Unresponsive"));
+        assert!(message(r#"Filtering the log data using "processIdentifier == 1""#).is_none());
     }
 }
