@@ -1893,14 +1893,15 @@ fn default_check_browser() {
     }
 }
 
-/// WebKit's GPU processes working for this app (they're launchd's children, so found by who they're responsible to):
-/// all of them, the stopped one WebKit couldn't end included.
+/// WebKit's GPU processes working for this app (launchd's children, so found by who they're responsible to: the same
+/// as the app, which is the app itself when opened normally and whatever started it otherwise, a test runner).
 #[cfg(target_os = "macos")]
 fn webkit_gpu_pids() -> Vec<i32> {
     unsafe extern "C" {
         fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
     }
     let me = std::process::id() as i32;
+    let mine = unsafe { responsibility_get_pid_responsible_for_pid(me) };
     let mut pids = vec![0i32; 8192];
     let n = unsafe {
         libc::proc_listallpids(
@@ -1916,7 +1917,7 @@ fn webkit_gpu_pids() -> Vec<i32> {
             let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
             len > 0 && &name[..len as usize] == b"com.apple.WebKit.GPU"
         })
-        .filter(|&pid| unsafe { responsibility_get_pid_responsible_for_pid(pid) } == me)
+        .filter(|&pid| unsafe { responsibility_get_pid_responsible_for_pid(pid) } == mine)
         .collect()
 }
 
@@ -2018,15 +2019,17 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
             "window not drawing",
             &format!("on screen, GPU process {stuck:?} stopped: ending the GPU and web processes"),
         );
-        for &pid in &gpu {
+        // Only the stopped ones: a running GPU process found this way could be another app's (started by the same
+        // terminal or test runner); WebKit starts a new one for the page.
+        for &pid in &stuck {
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
         if web > 0 {
             unsafe { libc::kill(web, libc::SIGKILL) };
-            return Ok(serde_json::json!({ "restarted": "web process", "web": web, "gpu": gpu }));
+            return Ok(serde_json::json!({ "restarted": "web process", "web": web, "gpu": stuck }));
         }
         let _ = webview.reload();
-        Ok(serde_json::json!({ "restarted": "reload", "gpu": gpu }))
+        Ok(serde_json::json!({ "restarted": "reload", "gpu": stuck }))
     }
     // Windows and Linux: logged only (WebView2 has its own GPU process recovery; a covered window stops drawing too).
     #[cfg(not(target_os = "macos"))]
