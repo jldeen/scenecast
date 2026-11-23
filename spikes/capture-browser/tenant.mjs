@@ -39,7 +39,16 @@ let cb = null;
 const stop = async () => { if (cb) await cb.close().catch(() => {}); cb = null; };
 process.on('SIGINT', async () => { await stop(); process.exit(1); });
 try {
-  if (PHASE === 'signin') {
+  if (PHASE === 'signin' && !arg('--signin-mode')) {
+    // The package's sign-in window (@stuntdouble/capture: what stunt capture sign-in runs), on her screen.
+    const { signInWindow } = await import('@stuntdouble/capture/browser.mjs');
+    log(`sign in in the window that opens (${APPS.length} apps)`);
+    const r = await signInWindow({ profile: PROFILE, apps: APPS, timeoutS: +arg('--wait-signin', 600), viewport: VP, flags: ['--disable-features=LocalNetworkAccessChecks'],
+      onState: st => log('apps: ' + st.map(x => `${x.id} ${x.at === 'app' ? 'in' : x.at === 'blocked' ? 'BLOCKED' : x.at ? 'sign-in' : '-'}`).join(', ')) });
+    save('signin.json', { secs: r.secs, ok: r.ok, states: Object.fromEntries((r.apps || []).map(x => [x.id, { ok: x.at === 'app', blocked: x.at === 'blocked', signIn: x.at === 'signin', at: x.secs }])), cookies: r.cookies, error: r.error });
+    log(`signed in: ${r.ok} in ${r.secs} s`);
+  }
+  if (PHASE === 'signin' && arg('--signin-mode')) {
     // A visible window on the first app: she signs in there (and says Yes to staying signed in). Then each app is
     // opened in turn until every one lands on itself, not a sign-in page.
     const t0 = Date.now(), maxS = +arg('--wait-signin', 600);
