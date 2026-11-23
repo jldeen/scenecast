@@ -616,6 +616,40 @@ try {
   await waitFor('the copy gone', async () => !(await exists('row-fixture-demo-copy')), 60000);
   check('deletes a demo', !existsSync(join(LIB, 'fixture-demo-copy')));
   lap('library');
+
+  // ---- The window stops drawing and comes back by itself (macOS) ------------------------------------------------
+  // Nov 2026, Jessica's Mac: WebKit's GPU process stopped answering, WebKit couldn't end the last of its replacements,
+  // and the window stayed blank for two hours with the page itself fine. Here: the app's GPU processes are stopped
+  // (SIGSTOP), and each one WebKit starts instead, until the page is started again. Then it has to draw within
+  // seconds, with no restart and no stopped GPU process left behind.
+  if (process.platform === 'darwin') {
+    const inv = (cmd, args = {}) => b.executeAsync((cmd, args, done) => window.__TAURI__.core.invoke(cmd, args).then(done, e => done({ error: String(e) })), cmd, args);
+    await b.execute(() => { window.__before = 1; });
+    const stopped = new Set();
+    const stopNew = async () => { const pids = await inv('test_webkit_gpu_pids'); for (const pid of Array.isArray(pids) ? pids : []) if (!stopped.has(pid)) { try { process.kill(pid, 'SIGSTOP'); stopped.add(pid); } catch (e) {} } };
+    await stopNew();
+    const tStop = Date.now();
+    let stall = 0, back = false, told = 0;
+    while (Date.now() - tStop < 120000 && !back) {
+      const st = await b.execute(() => ({ before: window.__before === 1, stalled: window.__drawing?.stalledMs || 0, told: window.__drawing?.told || 0 })).catch(() => null);
+      if (st && st.before) { stall = Math.max(stall, st.stalled); told = Math.max(told, st.told); await stopNew().catch(() => {}); }
+      if (st && !st.before) back = true;
+      await sleep(400);
+    }
+    const tBack = Date.now();
+    check('a window that stops drawing is seen (no frame for 6 s, on screen)', stall > 6000, `stalled ${stall} ms, gpu stopped: ${[...stopped].join(' ')}`);
+    check('and the page is started again by itself', back, `after ${((tBack - tStop) / 1000).toFixed(1)} s; told ${told}`);
+    // Any GPU process this test stopped and still there: let it go (so the rest of the run isn't stuck), then judge.
+    await sleep(1500);
+    const left = [...stopped].filter(pid => { try { process.kill(pid, 0); return true; } catch (e) { return false; } });
+    for (const pid of left) try { process.kill(pid, 'SIGCONT'); } catch (e) {}
+    check('no stopped GPU process left behind', left.length === 0, `still there: ${left.join(' ')}`);
+    let drawing = false;
+    for (let i = 0; i < 30 && !drawing; i++) { await sleep(500); drawing = await b.execute(() => document.visibilityState === 'visible' && (window.__drawing?.stalledMs ?? 9999) < 1500).catch(() => false); }
+    check('it draws again within seconds, no restart', drawing, `${((Date.now() - tBack) / 1000).toFixed(1)} s after the page started again`);
+    if (SHOTS) await b.saveScreenshot(join(SHOTS, 'zz-drawing-again.png')).catch(() => {});
+    lap('window recovery');
+  }
 } catch (e) {
   check('the UI test ran to the end', false, e.stack || e);
   if (b && SHOTS) await b.saveScreenshot(join(SHOTS, 'zz-failure.png')).catch(() => {});
