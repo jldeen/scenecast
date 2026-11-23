@@ -200,8 +200,10 @@ try {
       await sleep(1200);
       const t2 = await win.evaluate(() => window.presenter.elapsed);
       if (!(t2 > t[1] + 0.8)) timer.push('doesn\'t run');
-      await win.click('[data-pn="reset-timer"]');
-      if (Math.abs((await win.evaluate(() => window.presenter.elapsed)) - want) > 0.5) timer.push('Reset doesn\'t go back to the beat\'s start');
+      // Reset and read in one step: the timer runs on after Reset, and a slow machine took over 0.5 s between a click
+      // and the next read.
+      const afterReset = await win.evaluate(() => { document.querySelector('[data-pn="reset-timer"]').click(); return window.presenter.elapsed; });
+      if (Math.abs(afterReset - want) > 0.5) timer.push(`Reset doesn't go back to the beat's start (${afterReset.toFixed(1)} s, want ${want})`);
     }
   }
   const tEnd = await win.evaluate(() => [window.presenter.running, window.presenter.elapsed]);
