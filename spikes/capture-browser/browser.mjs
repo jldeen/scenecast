@@ -9,8 +9,8 @@
 //   - the recorder extension loaded unpacked, for comparing the two recorders in the same browser
 //   launchCaptureBrowser(opts) → { browser, ctx, newPage({ url, light, width, height }), info(), close() } or null
 import { chromium } from 'playwright-core';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -38,7 +38,7 @@ const freePort = () => new Promise((res, rej) => { const s = createServer(); s.o
 // Far off every display: macOS and Windows both keep a window there when it's placed by the program.
 const OFF = { left: -32000, top: -32000 };
 
-export async function launchCaptureBrowser({ profile = null, mode = 'minimized', channel = 'chrome', extension = null, width = 1600, height = 1000, log = () => {} } = {}) {
+export async function launchCaptureBrowser({ profile = null, mode = 'minimized', channel = 'chrome', extension = null, width = 1600, height = 1000, extraFlags = [], log = () => {} } = {}) {
   if (mode === 'headless') {
     const browser = await chromium.launch({ channel, headless: true, args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
     const ctx = await browser.newContext({ viewport: null, deviceScaleFactor: undefined });
@@ -63,29 +63,44 @@ export async function launchCaptureBrowser({ profile = null, mode = 'minimized',
     '--disable-sync', '--disable-background-networking', '--disable-component-update',
     '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
     ...(extension ? ['--enable-unsafe-extension-debugging'] : ['--disable-extensions']),
-    `--window-size=${width},${height}`, 'about:blank'];
+    ...extraFlags, `--window-size=${width},${height}`, 'about:blank'];
   let child = null;
   const t0 = Date.now();
-  if (where.app && mode !== 'visible') child = spawn('open', ['-g', '-j', '-n', '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
-  else if (where.app) child = spawn('open', ['-n', '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
+  // Chrome's own output (open hands it to a file): what it said when it doesn't answer.
+  const chromeLog = join(dir, 'chrome.log');
+  if (where.app && mode !== 'visible') child = spawn('open', ['-g', '-j', '-n', '--stdout', chromeLog, '--stderr', chromeLog, '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
+  else if (where.app) child = spawn('open', ['-n', '--stdout', chromeLog, '--stderr', chromeLog, '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
   else child = spawn(where.exe, [...(mode === 'visible' ? [] : ['--start-minimized', `--window-position=${OFF.left},${OFF.top}`]), ...flags], { stdio: 'ignore', detached: false });
   child.on('error', e => log(`capture browser: ${e.message}`));
-  let browser = null;
-  for (let i = 0; i < 150 && !browser; i++) {
+  // Up to 90 s: a browser's first start on a machine (a CI runner checking the app's signature) can take a while.
+  // The port it says it opened (DevToolsActivePort) counts too.
+  let browser = null, at = port;
+  for (let i = 0; i < 450 && !browser; i++) {
     await sleep(200);
-    try { if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`); } catch (e) {}
+    try { const f = readFileSync(join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0]; if (+f) at = +f; } catch (e) {}
+    try { if ((await fetch(`http://127.0.0.1:${at}/json/version`)).ok) browser = await chromium.connectOverCDP(`http://127.0.0.1:${at}`); } catch (e) {}
   }
   const cleanup = () => { if (throwaway) try { rmSync(dir, { recursive: true, force: true }); } catch (e) {} };
-  if (!browser) { log('capture browser: no answer on its port'); if (child && !where.app) child.kill(); cleanup(); return null; }
+  // Every process of this browser (its profile folder is in each one's command line), for a start that went wrong.
+  const killAll = () => {
+    if (process.platform === 'win32') { try { if (child) child.kill(); } catch (e) {} return; }
+    const pids = (spawnSync('pgrep', ['-f', `--user-data-dir=${dir}`], { encoding: 'utf8' }).stdout || '').split(/\s+/).filter(Boolean).map(Number);
+    for (const pid of pids) try { process.kill(pid); } catch (e) {}
+  };
+  if (!browser) {
+    let said = ''; try { said = readFileSync(chromeLog, 'utf8').trim().split('\n').slice(-12).join('\n'); } catch (e) {}
+    log(`capture browser: no answer on port ${at} in 90 s${said ? `; it said:\n${said}` : ''}`);
+    killAll(); if (child && !where.app) child.kill(); cleanup(); return null;
+  }
   const startMs = Date.now() - t0;
   const ctx = browser.contexts()[0];
   const top = await browser.newBrowserCDPSession();
   if (extension) await top.send('Extensions.loadUnpacked', { path: extension });
-  const place = async targetId => {
+  const place = async (targetId, st = mode) => {
     const w = await top.send('Browser.getWindowForTarget', { targetId }).catch(() => null);
     if (!w) return null;
-    if (mode === 'minimized') await top.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'minimized' } }).catch(() => {});
-    if (mode === 'offscreen') await top.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'normal', ...OFF } }).catch(() => {});
+    if (st === 'minimized') await top.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'minimized' } }).catch(() => {});
+    if (st === 'offscreen') await top.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'normal', ...OFF } }).catch(() => {});
     return w.windowId;
   };
   const first = ctx.pages()[0] || null;
@@ -118,15 +133,16 @@ export async function launchCaptureBrowser({ profile = null, mode = 'minimized',
   // The page's viewport is exactly width × height: a window's own bars are measured once and added.
   let bars = null;
   if (first) { const [ow, oh, iw, ih] = await first.evaluate(() => [outerWidth, outerHeight, innerWidth, innerHeight]); bars = { x: ow - iw, y: oh - ih }; }
-  const make = async ({ url = 'about:blank', light = true, focus = true, width: w = width, height: h = height, viewport = 'window', dpr = 0 } = {}) => {
+  // state: this page's window, when it isn't the browser's mode (a visible baseline beside minimized ones).
+  const make = async ({ url = 'about:blank', light = true, focus = true, width: w = width, height: h = height, viewport = 'window', dpr = 0, state = mode } = {}) => {
     let p;
     const emulate = viewport === 'emulated' ? { width: w, height: h, dpr } : null;
     if (firstFree) { p = firstFree; firstFree = null; await prepare(p, { light, focus, emulate }); }
     else {
       const extra = bars || { x: 0, y: 0 };
       const { targetId } = await top.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: true, width: w + extra.x, height: h + extra.y,
-        ...(mode === 'minimized' ? { windowState: 'minimized' } : mode === 'offscreen' ? OFF : {}) });
-      await place(targetId);
+        ...(state === 'minimized' ? { windowState: 'minimized' } : state === 'offscreen' ? OFF : {}) });
+      await place(targetId, state);
       p = await prepare(await pageOf(targetId), { light, focus, emulate });
     }
 
@@ -152,7 +168,7 @@ export async function launchCaptureBrowser({ profile = null, mode = 'minimized',
   ctx.__sdNewPageRaw = ctxNewPage;
   const procs = async () => (await top.send('SystemInfo.getProcessInfo').catch(() => ({ processInfo: [] }))).processInfo;
   const bpid = (await procs()).find(x => x.type === 'browser');
-  const kill = () => { try { if (bpid) process.kill(bpid.id); else if (child && child.pid) child.kill(); } catch (e) {} cleanup(); };
+  const kill = () => { try { if (bpid) process.kill(bpid.id); else if (child && child.pid) child.kill(); } catch (e) {} killAll(); cleanup(); };
   process.once('exit', kill);
   for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { kill(); process.exit(1); });
   const info = async () => {
@@ -171,6 +187,7 @@ export async function launchCaptureBrowser({ profile = null, mode = 'minimized',
     await browser.close().catch(() => {});
     if (bpid) for (let i = 0; i < 30; i++) { try { process.kill(bpid.id, 0); } catch (e) { break; } await sleep(150); if (i === 29) try { process.kill(bpid.id, 'SIGKILL'); } catch (e) {} }
     if (child && !where.app && child.exitCode === null) child.kill();
+    killAll();
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
   return { browser, ctx, top, newPage, info, cpu, close, dir };

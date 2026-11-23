@@ -32,7 +32,7 @@ const rx = spawn(BIN, ['receiver', '--demo', DEMO], { env: { ...process.env, REP
 for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://127.0.0.1:${RX}/ping`)).ok) break; } catch (e) {} await sleep(200); }
 
 const HOVER = resolve('packages/capture/flows/hover-audit.js');
-const cb = await launchCaptureBrowser({ mode: MODE, width: 1280, height: 800 });
+const cb = await launchCaptureBrowser({ mode: MODE, width: 1280, height: 800, log: m => console.log(m) });
 if (!cb) { console.log('no capture browser'); process.exit(1); }
 const results = [];
 try {

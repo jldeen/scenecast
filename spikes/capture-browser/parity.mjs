@@ -36,7 +36,7 @@ const settle = async p => { await p.evaluate(() => document.fonts.ready); await 
 const results = {};
 for (const mode of MODES) {
   const t0 = Date.now();
-  const cb = await launchCaptureBrowser({ mode, width: VP.width, height: VP.height });
+  const cb = await launchCaptureBrowser({ mode, width: VP.width, height: VP.height, log: m => console.log(m) });
   if (!cb) { results[mode] = { error: 'no browser' }; continue; }
   const r = results[mode] = { startMs: Date.now() - t0, scenes: {} };
   try {
@@ -69,7 +69,7 @@ const table = [];
 for (const [name] of SCENES) for (const mode of MODES) for (const key of [name, name + '@emulated']) {
   const ref = MODES.includes('visible') ? `visible-${name}.png` : `${MODES[0]}-${name}.png`;
   const mine = `${mode}-${key}.png`;
-  if (!b64(mine) || mine === ref) continue;
+  if (!b64(mine) || !b64(ref) || mine === ref) continue;
   const [c] = await comparePngs(cp, [[b64(ref), b64(mine)]]);
   table.push({ scene: key, mode, vs: ref.replace('.png', ''), pct: c && c.pct, box: c && c.box });
 }
