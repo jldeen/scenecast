@@ -5,7 +5,7 @@
   "type": "module",
   "description": "The editor inside the replica: focus-point dots, wording and date overrides, beat starts, undo.",
   "dependencies": {
-    "@stuntdouble/core": "0.5.2",
-    "@stuntdouble/player": "0.5.2"
+    "@stuntdouble/core": "0.5.3",
+    "@stuntdouble/player": "0.5.3"
   }
 }

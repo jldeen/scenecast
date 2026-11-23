@@ -9,8 +9,8 @@
 import './reap.mjs';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
-import { launchRealChrome, browserApp } from '../checks/real-chrome.mjs';
-import { diffDetail, verdict, CLUSTER_PX } from '../checks/compare.mjs';
+import { launchRealChrome, browserApp } from '@stuntdouble/checks/real-chrome.mjs';
+import { diffDetail, verdict, CLUSTER_PX } from '@stuntdouble/checks/compare.mjs';
 
 const channel = browserApp('chrome') ? 'chrome' : browserApp('msedge') ? 'msedge' : null;
 if (!channel) { console.log('SKIP real Chrome checker: no Chrome or Edge here'); process.exit(0); }
