@@ -45,7 +45,9 @@ the replica, each difference diagnosed and fixed. A replica-kit demo builds and 
 recorder older than Scenecast 0.4.5 can still hold sign-in tokens in their markup (Power BI's): the build refuses
 them, so redact them once with `stunt scrub --redact <raw folder>` before the first build.
 
-Updating a demo to a newer StuntDouble is the same `stuntdouble-pack.mjs --into` again, then `npm install`.
+Updating a demo to a newer StuntDouble is the same `stuntdouble-pack.mjs --into` again, then `npm install`. A demo without a `.gitattributes`
+(replica-kit's) gets StuntDouble's (`* -text`): without it, a Windows clone converts the captures to CRLF, and their
+hashes no longer match `manifest.json`.
 
 The pack brings this machine's binary. For the other systems, CI's Binary jobs upload `stuntdouble-<os>-<cpu>`
 (darwin-arm64, darwin-x64, win32-x64, win32-arm64). Pack each one into the demo after the first pack. npm installs

@@ -72,5 +72,9 @@ if (INTO) {
     if (lock.packages && lock.packages['']) { lock.packages[''].dependencies = pkg.dependencies; lock.packages[''].optionalDependencies = pkg.optionalDependencies; }
     writeFileSync(lf, JSON.stringify(lock, null, 2) + '\n');
   }
+  // Captures are served byte for byte: a demo without the template's .gitattributes (replica-kit's) gets it, or a
+  // Windows clone converts them to CRLF and their hashes no longer match manifest.json.
+  const ga = join(INTO, '.gitattributes');
+  if (!existsSync(ga)) { copyFileSync(join(ROOT, 'packages', 'core', 'template', 'gitattributes'), ga); console.log(`${ga}: added (no line-ending conversion on any OS)`); }
   console.log(`${f}: depends on StuntDouble ${version} (vendor/stuntdouble). Now: npm install`);
 }
