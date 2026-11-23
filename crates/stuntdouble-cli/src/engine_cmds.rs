@@ -255,7 +255,8 @@ pub fn fidelity(args: &FidelityArgs) -> Result<i32> {
         FidelityProgress::Round(n) if human => println!("round {n}: real vs replica"),
         FidelityProgress::Building(n) if human => println!("  building round {n}'s fixes"),
         FidelityProgress::Event(e) if human => {
-            let d = &e.data;
+            // As a Value: a key an event doesn't have (an error row has no fonts) reads as null, not a panic.
+            let d = &serde_json::Value::Object(e.data.clone());
             match e.event.as_str() {
                 "compared" => println!(
                     "  {} {:<44} {}{}",
