@@ -528,7 +528,7 @@ function renderNew() {
 // New demo from the browser's open tabs (slice 11): the recorder lists them; the product ones are ticked, one per
 // address, in the browser's own order. Read again when the window comes back to the front (a tab opened meanwhile).
 const GENERIC_HOST = new Set(['www', 'app', 'apps', 'portal', 'web', 'my', 'daily', 'go', 'beta', 'preview', 'insiders']);
-// An app's name from its address, as the app names it (library.rs app_id_from_url): daily.iq.microsoft.com is iq.
+// An app's name from its address, as the app names it (library.rs app_id_from_url): preview.iq.example.com is iq.
 const nameFor = url => {
   try {
     const u = new URL(url), h = u.hostname;
