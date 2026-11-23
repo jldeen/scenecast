@@ -45,7 +45,13 @@ export async function recordForMe({ demo, model, settings = {}, emit = () => {},
       if (el) return { el, o };
       if (i < 5) await sleep(800);
     }
-    return { el: null, o: await observe(cmd, demo, app) };
+    const o = await observe(cmd, demo, app);
+    // What was there instead (the control disabled, another of that name), and the recorder's count of input it held
+    // back while capturing: for the log when a step can't find its control.
+    const like = (o.items || []).filter(it => String(it.name || '').toLowerCase().includes(String(name).toLowerCase())).slice(0, 4);
+    const st = await cmd('recordStatus', {}, 30).catch(() => ({}));
+    emit({ event: 'note', text: `couldn't find "${name}" (${kind}): ${JSON.stringify(like)}; held back while capturing: ${st.blocked || 0}` });
+    return { el: null, o };
   };
   // The page holds each click, Enter or keystroke back until the recorder's loop picks it up and does it for real. On
   // a real app (Nov 20, the admin center: 10 frames) a pass of that loop takes over a second, so "not busy" right

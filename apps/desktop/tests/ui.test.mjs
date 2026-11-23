@@ -74,6 +74,11 @@ app.stdout.on('data', d => appLog.push(String(d)));
 app.stderr.on('data', d => appLog.push(String(d)));
 let appExit = null;
 app.on('exit', code => { appExit = code; });
+// Stopped from outside (Ctrl+C, SIGTERM, a job timeout): the app, its receiver and the browsers go too, right away.
+// Nov 2026: a stopped run needed SIGKILL and left its app's Record for me waiting for hours.
+const stopAll = () => { try { app.kill('SIGKILL'); } catch (e) {} try { if (receiverPid) process.kill(receiverPid); } catch (e) {} try { ctx?.close(); } catch (e) {} try { viewer?.close(); } catch (e) {} };
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { stopAll(); process.exit(130); });
+process.on('exit', () => { if (appExit === null) try { app.kill('SIGKILL'); } catch (e) {} });
 
 let b, ctx, viewer, receiverPid;
 async function session() {

@@ -12,6 +12,13 @@ const [cmd, ...rest] = process.argv.slice(2);
 // Children get the signals this process gets, so stopping `scenecast serve` stops the server too.
 const kids = new Set();
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { for (const k of kids) k.kill(sig); process.exit(130); });
+// Started by the app or a test that has gone (quit, crashed, killed): stop too, with what it started. Nov 2026: a
+// Record for me left waiting on a question for hours after the app was gone (its parent became launchd).
+{
+  const parent = process.ppid;
+  const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+  setInterval(() => { if (process.ppid !== parent || !alive(parent)) { for (const k of kids) k.kill('SIGTERM'); process.exit(129); } }, 2000).unref();
+}
 const node = (script, args, opts = {}) => new Promise(res => { const p = spawn(process.execPath, [need(script), ...args], { stdio: 'inherit', ...opts }); kids.add(p); p.on('close', code => { kids.delete(p); res(code); }); });
 // Exit once what was printed is out: to a pipe (the app reads every command this way) Node writes asynchronously, and
 // exiting at once cut a long answer at 64 KB (the browser's profiles, with their pictures: the app never showed them).
