@@ -300,8 +300,11 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
     };
     // One step, on the screen it's on: the product's control, what the recording did around it, where it lands, what
     // it writes, and what differs from the script.
+    const promptOf = value => promptFor(track.prompts, value);
     const push = (s, from, line, opts = {}) => {
-      const step = { ...s };
+      const step = { ...s }, nf = flags.length;
+      // A step left out: what was said about where it is goes with it.
+      const drop = () => { for (let i = flags.length - 1; i >= nf; i--) if (flags[i].kind === 'order') { seen.delete(flags[i].kind + flags[i].text); flags.splice(i, 1); } return null; };
       if (step.kind === 'app') {
         if (step.app === S.app && started) return null;
         S.app = step.app;
@@ -318,7 +321,9 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       let r = go({ ...step, strict: true, role: opts.role });
       if ((step.kind === 'click' || step.kind === 'hover') && !r.control && !r.recorded && !step.title) {
         const strong = (sc2, name, min = 50) => { const h = walker.control(sc2, name); return h && h.score >= min; };
-        const b = !opts.maybe ? walker.bridge(id, s2 => strong(s2, step.target), 10, again) : null;
+        // To a screen with the control by its own name before one with a name like it ("Add to business plugin", once
+        // the form is filled, not "Add business plugin" one screen back).
+        const b = !opts.maybe ? walker.bridge(id, s2 => strong(s2, step.target, 100), 10, again) || walker.bridge(id, s2 => strong(s2, step.target), 10, again) : null;
         const other = !b && !walker.find(S.app, step.target).length ? apps.find(a => a.id !== S.app && strong(scr(S.cur[a.id]), step.target, 60)) : null;
         if (other) { push({ kind: 'app', app: other.id }, from, line); id = at(); sc = scr(id); r = go(step); }
         else if (b) {
@@ -368,8 +373,8 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         if (ms.length === 1) r = { ...r, to: ms[0].to, recorded: ms[0].recorded || ms[0].steps[0].target };
       }
       const prev = beat.steps[beat.steps.length - 1];
-      if (step.kind === 'click' && prev && prev.kind === 'click' && prev.target === step.target && (prev.lands || {}).screen === id && r.to === id) return null;
-      if (step.kind === 'click' && r.control && PICKED.test(r.control.role)) S.picked = cleanTarget(s.target).length > 2 ? cleanTarget(s.target) : r.control.name;
+      if (step.kind === 'click' && prev && prev.kind === 'click' && prev.target === step.target && (prev.lands || {}).screen === id && r.to === id) return drop();
+      if (step.kind === 'click' && r.control && PICKED.test(r.control.role)) S.picked = titleOf(sc, cleanTarget(s.target).length > 2 ? cleanTarget(s.target) : r.control.name);
       const to = r.to || id;
       const field = step.kind === 'press' ? ((S.field[S.app] && walker.control(sc, S.field[S.app], 'field')) || {}).el || composer(sc.controls) : r.control;
       let w = writeOf(step, field, { next: to !== id ? walker.flow.states[to] : null, nextScreen: to !== id ? scr(to) : null, picked: S.picked, prompt: S.prompt, appTitle: appTitle(S.app) });
@@ -386,7 +391,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       // The same write again right after it, going nowhere (a proposal that says it twice): once. "Twice" in her script
       // goes somewhere each time, and stays.
       const last = beat.steps[beat.steps.length - 1];
-      if (step.writes && last && last.writes && formatStep(last) === formatStep(step) && to === id) return null;
+      if (step.writes && last && last.writes && formatStep(last) === formatStep(step) && to === id) return drop();
       S.cur[S.app] = to;
       const done = append(step, from);
       if (step.kind === 'press' && r.stream) append({ kind: 'wait' }, null);
@@ -467,9 +472,10 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           if (value == null && walker) { const ms = walker.moves(at()).filter(m => m.steps[0].kind === 'type'); const m = ms.find(m => box && norm(m.steps[0].target || '') === norm(box.name)) || ms[0]; value = m ? m.steps[0].value : null; }
           if (value == null) { push({ kind: 'manual', what: `type into ${it.into ? `"${it.into}"` : 'the field'}` }, it.from, line); continue; }
           // The words of one of her prompts: that prompt (it's sent, and the plan says which).
-          const nv = norm(value), p = (track.prompts || []).find(p => p.text && (norm(p.text) === nv || (nv.length > 30 && (nv.startsWith(norm(p.text).slice(0, 40)) || norm(p.text).startsWith(nv.slice(0, 40))))));
+          const p = promptOf(value);
           const typed = push({ kind: 'type', value, target: box ? box.name : it.into && it.into !== 'search' ? it.into : null }, it.from, line);
-          if (p && typed) { S.prompt = { n: p.n, label: p.label || '', text: p.text }; S.unsent = typed; }
+          if (typed) S.prompt = p ? { n: p.n, label: p.label || '', text: p.text } : null;
+          if (p && typed) S.unsent = typed;
           mark();
           continue;
         }
@@ -524,6 +530,17 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
     tb.lines.forEach((l, k) => {
       curLine = `${bi + 1}.${k + 1}`;
       const mine = Array.isArray(l.intents);
+      // Her line names the prompt ("New task, prompt 3"): what Copilot types there is that one, not another of hers. With
+      // no words for it in her script (no Prompts list), the one thing typed on the line is that prompt, by its number.
+      if (mine && (l.do.length || l.screen)) {
+        const said = [...intentsOf(l.do.join('. '), ctx), ...(l.screen ? intentsOf(l.screen, ctx, { descriptive: true }) : [])].filter(x => x.prompt).map(x => x.prompt);
+        const named = [...new Map(said.map(p => [p.text ? norm(p.text) : `#${p.n}`, p])).values()];
+        const np = named.length === 1 ? named[0] : null;
+        const asPrompt = (it, prompt) => { const { type, into, ...rest } = it; return { ...rest, prompt }; };
+        const typing = l.intents.filter(it => it.type != null || it.prompt);
+        if (np && np.text) l = { ...l, intents: l.intents.map(it => { const p = it.prompt || (it.type != null && promptOf(it.type)); return p && p.text && norm(p.text) !== norm(np.text) ? asPrompt(it, np) : it; }) };
+        else if (np && (np.n || np.label) && typing.length === 1 && typing[0].type && !/search/i.test(typing[0].into || '')) l = { ...l, intents: l.intents.map(it => it === typing[0] ? asPrompt(it, { ...np, text: it.type }) : it) };
+      }
       const r1 = mine ? run(l.intents, l) : l.do.length ? run(l.do.join('. '), l) : { span: [], hints: [], clicked: [] };
       const r2 = l.screen ? run(l.screen, l, { descriptive: true, ...(mine ? { only: it => it.hint } : {}) }) : { span: [], hints: [], clicked: [] };
       // What Copilot says the line points at: names and headings on its screen, or her own words.
@@ -597,6 +614,13 @@ function assignHints(hints, lines) {
 }
 
 const has = (sc, t) => !!sc && norm(sc.text).includes(norm(t));
+// A card picked by all its words ("Supply chain disruption What a supplier delay puts at risk… Plugin"): its title, the
+// longest text of its own on the screen that it starts with.
+function titleOf(sc, name) {
+  const n = norm(name);
+  const t = (sc && sc.items || []).filter(x => x.kind === 'text' && x.text && x.text.length > 2 && norm(x.text).length < n.length && n.startsWith(norm(x.text)) && /^\s/.test(n.slice(norm(x.text).length))).sort((a, b) => b.text.length - a.text.length)[0];
+  return t ? clean(t.text) : name;
+}
 function focusFor(x, walker, onPath, weight, typed) {
   const ids = [...new Set(x.span.map(k => k.split(':')[1]))];
   const out = [];
@@ -605,7 +629,9 @@ function focusFor(x, walker, onPath, weight, typed) {
     const texts = (h.texts || []).filter(t => t && t.length > 1);
     if (!texts.length) return null;
     if (h.via) return { texts, around: h.around, via: h.via, on: ids[ids.length - 1] };
-    let on = h.on && texts.every(t => has(walker.shown(h.on), t)) ? h.on : [...ids].reverse().find(id => texts.every(t => has(walker.shown(id), t))) || null, via = null;
+    // The card a click is on is where it first shows on the line's way: the click comes after it.
+    const order = h.around === 'card' ? ids : [...ids].reverse();
+    let on = h.on && texts.every(t => has(walker.shown(h.on), t)) ? h.on : order.find(id => texts.every(t => has(walker.shown(id), t))) || null, via = null;
     if (!on) for (const id of ids) {
       const m = walker.moves(id).find(m => m.steps.length === 1 && !onPath.has(m.to) && texts.every(t => has(walker.shown(m.to), t)));
       if (m) { on = m.to; via = { ...m.steps[0], text: formatStep(m.steps[0]) }; break; }
@@ -687,6 +713,16 @@ function backing(say, ids, walker, w, onPath, typed = new Set(), limit = 3, clic
 // Numbers said in words or digits: "about thirty-five thousand dollars" → 35000, "five days" → 5, "350" → 350.
 const UNITS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
 const SCALES = { thousand: 1e3, million: 1e6, billion: 1e9 };
+// Which of her prompts these words are: the same words, else the one that shares the longest start with them (prompt 4
+// is prompt 1 with "and what will it cost us?" added: it's prompt 4).
+export function promptFor(prompts, value) {
+  const nv = norm(value), P = (prompts || []).filter(p => p.text);
+  const same = P.find(p => norm(p.text) === nv);
+  if (same || nv.length <= 30) return same || null;
+  const shared = t => { let i = 0; while (i < t.length && i < nv.length && t[i] === nv[i]) i++; return i; };
+  return P.map(p => ({ p, n: shared(norm(p.text)) })).filter(x => x.n >= 40).sort((a, b) => b.n - a.n)[0]?.p || null;
+}
+
 export function spokenNumbers(text) {
   const out = [];
   let cur = null, total = 0;

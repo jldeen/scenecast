@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
-import { planFromTrack, intentsOf } from './from-script.mjs';
+import { planFromTrack, intentsOf, promptFor } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
@@ -180,6 +180,21 @@ test('Copilot reads a prose talk track: its steps grounded on the recorded scree
   assert.deepEqual([rules.model.fallback, rules.plan.beats.flatMap(b => b.steps).length], [true, planFromTrack(track, { walker }).plan.beats.flatMap(b => b.steps).length]);
   const failing = await planWithModel(track, { walker, model: { kind: 'test', ask: async () => { throw new Error('offline'); } } });
   assert.deepEqual([failing.model.fallback, failing.model.error], [true, 'offline']);
+});
+
+test('Copilot\'s steps keep to her script: the prompt her line names, and a write it proposes twice done once', async () => {
+  const walker = walkerFromDemo(demoDir());
+  const ask = "What's changed on PO-1?", payoff = "What's changed on PO-1? And what will it cost us?";
+  const track = parseTalkTrack(`# D\n\n## 1. Ask\n\n> I ask, and save it.\n\n**Do:** ⌥C, ⌥P (prompt 2), Enter. Click Approve on the Save note card.\n\n## Prompts\n\n1. Ask: “${ask}”\n2. Payoff: “${payoff}”\n`, 'd.md');
+  // Prompt 2 starts with prompt 1's words: it's still prompt 2.
+  assert.deepEqual([promptFor(track.prompts, payoff).n, promptFor(track.prompts, ask).n], [2, 1]);
+  const steps = ['Go to chat', `Type "${ask}" in "Message"`, 'Press Enter', 'Wait for the answer', 'Click "Save: Save note"', 'Click "Save: Save note"'];
+  const model = { kind: 'test', ask: async () => ({ beats: [{ n: 1, lines: [{ id: '1.1', steps, point: [] }] }] }) };
+  const { plan, flags } = await planWithModel(track, { walker, model });
+  const all = plan.beats.flatMap(b => b.steps);
+  assert.equal(all.find(st => st.kind === 'type').value, payoff);
+  assert.deepEqual(all.filter(st => st.writes).map(st => st.writes), ['sends prompt 2 (Payoff) in Chat app', 'saves "Save note" ("Save: Save note")']);
+  assert.ok(!flags.some(f => f.kind === 'order'));
 });
 
 test('Copilot gets a screen\'s words only when page text is allowed, redacted; asking again comes from the cache', async () => {
