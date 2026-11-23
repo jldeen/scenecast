@@ -36,7 +36,9 @@ A fast check, item by item, that fixes only what fails:
 | receiver | Up on the demo's port | Starts it in the background |
 | browser | Edge or Chrome running with the demo's user data folder and profile (`chrome.browser`, `chrome.profile`, `chrome.userDataDir` in `demo.json`); with the agent recorder, the debugging port too | Not running: starts it with that profile. Running without the profile open: opens a window of it. **A running browser is never relaunched.** Running without a needed debugging port: says so and leaves it. |
 | recorder | The extension (or agent) is polling the receiver. If it is, the browser check is skipped. | Rebuilds the extension folder if it's out of date and says how to load it |
-| app *id* | Its tab is open, reads light, and is on its start screen (`start` in the app's settings) | Opens a missing tab; reloads one that's off its start screen; a dark one needs its theme set by hand |
+| app *id* | Its tab is open and on its start screen (`start` in the app's settings). Its theme is said; with `preflight.theme` in `demo.json` (`"light"` or `"dark"`), a tab in the other theme fails | Opens a missing tab; reloads one that's off its start screen, or runs `preflight.prep` (the demo's own script) instead; a tab in the wrong theme needs its app set to that theme by hand (not System) |
+| reset | With `preflight.reset` in `demo.json`: the demo's own check that everything is as the show starts | Runs `preflight.resetFix` (the demo's reset), then the check again |
+| dock | macOS: where the Dock is and whether it hides. Never a failure | An app that bounces for attention peeks out of a hidden Dock into a full-screen recording: bring it to the front once |
 
 When everything is set it takes a few seconds (the selftest: 0.7 s). `--check` only checks; `--json` prints the
 result; `--ndjson` prints each item as it lands (what the desktop app shows). It matches replica-kit's

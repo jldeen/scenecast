@@ -65,6 +65,14 @@ A demo folder holds:
   before the rule-based one (interface in `packages/checks/fixer/index.mjs`).
 - `theme` (optional): `"light"` or `"dark"`, the theme the demo should be recorded in. Only a note when a screen
   isn't (preflight, record stop, `fidelity`); either theme records.
+- `preflight` (optional): `{ theme, reset, resetFix, prep }` for `stunt preflight` (from replica-kit).
+  - `theme`: `"light"` or `"dark"`. An app tab in the other theme fails preflight.
+  - `reset`, `resetFix` and `prep` are capture scripts in the demo folder. They run in the recorder as `stunt run`
+    runs them, with `ARGS.apps`.
+  - `reset` returns `{ ok, detail }`: is everything as the show starts?
+  - When `reset` fails, `resetFix` (the demo's reset) runs, then `reset` again.
+  - `prep` gets the tabs to their start screens when loading the app's address isn't enough (a channel to open). It
+    runs only when a tab is missing or off its start screen.
 - `checks` (optional): `known: ["text a failure starts with", …]` makes those accepted differences warnings.
 
 ## flow.json

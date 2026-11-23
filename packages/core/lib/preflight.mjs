@@ -5,6 +5,9 @@
 //              (and the debugging port, for the agent recorder)    it isn't running at all); never restarts it
 //   recorder   the extension (or agent) polling the receiver    → builds the extension folder and says how to load it
 //   apps       each app's tab open (light or dark), on its start screen    → opens a missing tab, reloads one off its start
+//              screen (or runs demo.json preflight.prep); with preflight.theme, a tab in the other theme fails
+//   reset      demo.json preflight.reset: the demo's own check that all is as the show starts → runs preflight.resetFix
+//   dock       macOS: where the Dock is and whether it hides (said, never a failure)
 // Matches replica-kit's `replica preflight`. Under a minute when everything is set (each probe is bounded).
 // preflight(demo, { fix, onItem }) is the library call (the desktop app shows each item as it lands).
 import { at as __at } from './at.mjs';
@@ -40,6 +43,35 @@ function listening(port) {
 async function op(port, cmd, tmoS) {
   const { send } = await import('@stuntdouble/capture/cli.mjs');
   return send(cmd, tmoS, port);
+}
+// A capture script of the demo's, run in the recorder as `stunt run` runs it (ARGS.apps): its value, or { error }.
+async function runScript(port, file, extra, tmoS) {
+  const { send, flowScript } = await import('@stuntdouble/capture/cli.mjs');
+  const r = await send(flowScript(file, extra), tmoS, port);
+  return r.ok ? r.value : { error: r.error };
+}
+
+// demo.json preflight.reset: the demo's check that everything is as the show starts ({ ok, detail }). When it isn't,
+// preflight.resetFix (the demo's reset) runs, then the check again. run(file, seconds) runs one of the demo's scripts.
+export async function checkReset(P, run, fix) {
+  const said = v => String((v && (v.detail || v.error)) || '').slice(0, 300);
+  let v = await run(P.reset, 120);
+  if (v && v.ok) return { status: 'ok', detail: said(v) || 'as the show starts' };
+  if (!fix || !P.resetFix) return { status: 'fail', detail: `${said(v) || 'not as the show starts'}: ${P.resetFix ? 'Fix runs ' + P.resetFix : "run the demo's reset"}` };
+  const f = await run(P.resetFix, 900);
+  v = await run(P.reset, 120);
+  if (v && v.ok) return { status: 'fixed', detail: `ran ${P.resetFix}: ${said(v) || 'as the show starts'}` };
+  return { status: 'fail', detail: `${P.resetFix} ran${f && f.error ? ` (${said(f)})` : ''}, and it still isn't as the show starts (${said(v) || 'no detail'}): run the demo's reset by hand` };
+}
+// The Dock (macOS): an app bouncing for attention peeks out of a hidden one, into a full-screen recording.
+function dockNote() {
+  const read = k => new Promise(res => execFile('defaults', ['read', 'com.apple.dock', k], { timeout: 5000 }, (e, out) => res(e ? '' : String(out).trim())));
+  return Promise.all([read('autohide'), read('orientation')]).then(([hide, side]) => {
+    side = side || 'bottom';
+    return hide === '1'
+      ? `auto-hidden on the ${side}: an app that bounces for attention peeks out of a full-screen recording, and macOS doesn't say which will. If one bounces, bring it to the front once`
+      : `always shown on the ${side}: a full-screen browser hides it`;
+  });
 }
 
 // An app now found at another host (its address redirects there): kept as its match in demo.json, so Record and the
@@ -83,6 +115,7 @@ export async function recorderReady(demo, { waitS = 6 } = {}) {
 
 export async function preflight(demo, { fix = true, onItem = () => {}, waitAgentS = fix ? 20 : 6 } = {}) {
   const t0 = Date.now(), cfg = demo.cfg, port = +(process.env.REPLICA_RX_PORT || cfg.receiverPort);
+  const P = cfg.preflight || {};
   const recorder = cfg.recorder === 'agent' ? 'agent' : 'extension';
   const items = [];
   const item = async (id, fn) => {
@@ -188,7 +221,15 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   if (rec.status === 'ok') {
     // Each app it opens can take up to a minute (load, its start screen, marking the tab): the wait grows with them.
     // Apps load side by side now: the wait is the slowest one's, not their sum.
-    const r = await op(port, { op: 'preflight', apps: cfg.apps, fix, waitS: 20, light: cfg.theme !== 'dark' }, fix ? Math.max(120, 110 + 10 * cfg.apps.length) : 120);
+    // A demo whose start screens need more than loading the app's address (a channel to open) has its own prep script
+    // (demo.json preflight.prep): it runs instead of the reload, when a tab is missing or off its start screen.
+    const look = f => op(port, { op: 'preflight', apps: cfg.apps, fix: f, waitS: 20, light: cfg.theme !== 'dark' }, f ? Math.max(120, 110 + 10 * cfg.apps.length) : 120);
+    let r = await look(fix && !P.prep);
+    const prepped = new Set(fix && P.prep && r.ok ? cfg.apps.filter(a => { const o = r.value[a.id] || {}; return o.missing || o.onStart === false; }).map(a => a.id) : []);
+    if (prepped.size) {
+      await runScript(port, join(demo.dir, P.prep), { apps: cfg.apps }, 300);
+      r = await look(false);
+    }
     const tabs = r.ok ? r.value._tabs : undefined;
     for (const a of cfg.apps) {
       const o = r.ok ? r.value[a.id] || {} : {};
@@ -202,14 +243,22 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
           o.fixed.push(`it lives at ${o.moved.host} now${kept ? ', kept in demo.json' : ''}`);
         }
         if (o.r && o.r.error) return { status: 'fail', detail: o.r.error };
-        if (o.onStart === false) return { status: 'fail', detail: `${a.id} isn't on its start screen (${o.r.url})` };
-        // Light or dark both record; demo.json "theme" only adds a word when a tab doesn't match it.
+        if (o.onStart === false) return { status: 'fail', detail: `${a.id} isn't on its start screen (${o.r.url})${prepped.has(a.id) ? `: ${P.prep} didn't get it there` : ''}` };
+        // Light or dark both record; demo.json "theme" only adds a word when a tab doesn't match it. preflight.theme
+        // (replica-kit's light check) makes it a must: a tab in the other theme fails until its app is set to it.
         const theme = o.light === false ? 'dark' : o.light === true ? 'light' : null;
+        if (P.theme && theme && theme !== P.theme) return { status: 'fail', detail: `${a.id} reads ${theme}: set ${a.title || a.id}'s theme to ${P.theme === 'dark' ? 'Dark' : 'Light'} (not System) in its settings, then check again`, theme };
+        if (prepped.has(a.id)) o.fixed.push(`ran ${P.prep}`);
         const off = cfg.theme && theme && theme !== cfg.theme ? `; reads ${theme}, the demo's theme is ${cfg.theme}` : '';
         return { status: o.fixed.length ? 'fixed' : 'ok', detail: `${o.r.url}${o.fixed.length ? ` (${o.fixed.join(', ')})` : ''}${theme ? ` · ${theme}` : ''}${off}` };
       });
     }
   } else for (const a of cfg.apps) await item(`app ${a.id}`, async () => ({ status: 'skip', detail: 'needs the recorder connected' }));
+
+  if (P.reset) await item('reset', async () => rec.status === 'ok'
+    ? checkReset(P, (file, tmoS) => runScript(port, join(demo.dir, file), { apps: cfg.apps }, tmoS), fix)
+    : { status: 'skip', detail: 'needs the recorder connected' });
+  if (process.platform === 'darwin' && !process.env.STUNTDOUBLE_NO_DOCK) await item('dock', async () => ({ status: 'ok', detail: await dockNote() }));
 
   const secs = (Date.now() - t0) / 1000;
   return { ready: items.every(i => i.status === 'ok' || i.status === 'fixed'), secs: +secs.toFixed(1), items };

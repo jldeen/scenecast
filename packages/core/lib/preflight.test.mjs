@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { at } from './at.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { parseProcs, judgeBrowser, preflight } from './preflight.mjs';
+import { parseProcs, judgeBrowser, preflight, checkReset } from './preflight.mjs';
 
 test('main browser processes on the Mac, with their flags; helpers left out', () => {
   const ps = [
@@ -101,4 +101,23 @@ test('check and fix: a tab elsewhere in its app goes back to the app\'s address 
   assert.equal(atUrl('https://admin.cloud.microsoft/#/agents/all', 'https://admin.cloud.microsoft/?#/agents/tools/all/plugins'), false);
   assert.equal(atUrl('https://admin.cloud.microsoft/#/agents/tools/all/plugins', 'https://admin.cloud.microsoft/?#/agents/tools/all/plugins'), true);
   assert.equal(atUrl('https://teams.cloud.microsoft/v2/?a=1', 'https://teams.cloud.microsoft/'), true);
+});
+
+test('reset: the demo\'s check; when it fails, its reset runs and the check again; never without fix', async () => {
+  const P = { reset: 'capture/reset-check.js', resetFix: 'capture/reset.js' };
+  const runs = [];
+  const fake = answers => async (file, s) => { runs.push(file); return answers.shift(); };
+  assert.deepEqual(await checkReset(P, fake([{ ok: true, detail: 'switches off' }]), true), { status: 'ok', detail: 'switches off' });
+  runs.length = 0;
+  const fixed = await checkReset(P, fake([{ ok: false, detail: 'Autopilot is on' }, { done: 1 }, { ok: true }]), true);
+  assert.equal(fixed.status, 'fixed');
+  assert.deepEqual(runs, [P.reset, P.resetFix, P.reset]);
+  runs.length = 0;
+  const asked = await checkReset(P, fake([{ ok: false, detail: 'Autopilot is on' }]), false);
+  assert.equal(asked.status, 'fail'); assert.match(asked.detail, /Autopilot is on: Fix runs capture\/reset\.js/);
+  assert.deepEqual(runs, [P.reset]);
+  const still = await checkReset(P, fake([{ ok: false }, { error: 'timeout' }, { ok: false, detail: 'pane open' }]), true);
+  assert.equal(still.status, 'fail'); assert.match(still.detail, /capture\/reset\.js ran \(timeout\).*pane open.*by hand/);
+  const none = await checkReset({ reset: 'r.js' }, fake([{ ok: false }]), true);
+  assert.match(none.detail, /run the demo's reset/);
 });
