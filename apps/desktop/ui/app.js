@@ -836,8 +836,26 @@ function renderRegions() {
     if (html === undefined || el.innerHTML === html) continue;
     const next = document.createElement(el.tagName);
     next.innerHTML = html;
+    const typed = keepTyped(el);
     morph(el, next);
+    typed();
   }
+}
+// What's been typed into a field in a region (by id), put back after it's drawn again: a row appearing beside it
+// (the recorder connecting) redraws the whole list, and the field came back with its old value. Nov 2026, the UI
+// test: a changed start page saved as the old one.
+function keepTyped(root) {
+  const active = document.activeElement;
+  const kept = [...root.querySelectorAll('input[id],textarea[id]')].filter(f => f.value !== f.defaultValue || f === active)
+    .map(f => ({ id: f.id, value: f.value, focused: f === active, start: f.selectionStart, end: f.selectionEnd }));
+  return () => {
+    for (const k of kept) {
+      const f = document.getElementById(k.id);
+      if (!f || !root.contains(f)) continue;
+      if (f.value !== k.value) f.value = k.value;
+      if (k.focused && document.activeElement !== f) { f.focus(); try { f.setSelectionRange(k.start, k.end); } catch (e) {} }
+    }
+  };
 }
 // Only what changed is changed: a status line ticking over doesn't replace the buttons beside it (a click on a button
 // that was just replaced is lost), and pictures already shown aren't loaded again.
