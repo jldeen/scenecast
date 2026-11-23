@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir, loadavg } from 'node:os';
 import { chromium } from 'playwright-core';
 import { launchCaptureBrowser, probe } from './browser.mjs';
-import { resolveTenant } from '@stuntdouble/capture/browser.mjs';
+import { resolveTenant, hintedUrl } from '@stuntdouble/capture/browser.mjs';
 import { comparePngs, luminance } from '../../packages/checks/compare.mjs';
 import { core } from '../../packages/capture/build.mjs';
 import { flowScript } from '../../packages/capture/cli.mjs';
@@ -23,6 +23,11 @@ const APPS = arg('--apps') ? arg('--apps').split(',').map(x => { const [id, ...u
 const SIGN_IN = /(^|\.)(login|signin|sign-in|auth|sso|accounts|adfs)[.-]|login\.microsoftonline\.com|login\.live\.com|accounts\.google\.com/i;
 const BLOCKED = /can.t get there from here|you can.t access this|set up your device|device (?:is|isn.t|must be) (?:compliant|managed|registered)|help us keep your device secure|approve sign.in request/i;
 const VP = { width: +arg('--width', 1400), height: +arg('--height', 800) };
+// --login-hint <account> [--domain-hint d] [--hint-apps a,b]: the demo account pinned at Entra's sign-in in every
+// browser here, and in the start address of the apps named (an app whose own landing asks which account).
+const PIN = arg('--login-hint') ? { loginHint: arg('--login-hint'), domainHint: arg('--domain-hint') || null } : null;
+if (PIN && arg('--hint-apps')) for (const a of APPS) if (arg('--hint-apps').split(',').includes(a.id)) a.url = hintedUrl(a.url, PIN.loginHint) || a.url;
+const launch = async o => { const b = await launchCaptureBrowser(o); if (b && PIN) await b.pinAccount(PIN); return b; };
 // --only id,id: those apps alone (a redo); parity's shots then go into the parity.json already there.
 if (arg('--only')) { const only = arg('--only').split(','); APPS.splice(0, APPS.length, ...APPS.filter(a => only.includes(a.id))); }
 const log = (...a) => { const s = `${new Date().toISOString().slice(11, 19)} ${a.join(' ')}`; console.log(s); writeFileSync(join(OUT, `${PHASE}.log`), s + '\n', { flag: 'a' }); };
@@ -46,7 +51,7 @@ try {
     // The package's sign-in window (@stuntdouble/capture: what stunt capture sign-in runs), on her screen.
     const { signInWindow } = await import('@stuntdouble/capture/browser.mjs');
     log(`sign in in the window that opens (${APPS.length} apps)`);
-    const r = await signInWindow({ profile: PROFILE, apps: APPS, timeoutS: +arg('--wait-signin', 600), viewport: VP, flags: ['--disable-features=LocalNetworkAccessChecks'],
+    const r = await signInWindow({ profile: PROFILE, apps: APPS, timeoutS: +arg('--wait-signin', 600), viewport: VP, flags: ['--disable-features=LocalNetworkAccessChecks'], pin: PIN,
       onState: st => log('apps: ' + st.map(x => `${x.id} ${x.at === 'app' ? 'in' : x.at === 'blocked' ? 'BLOCKED' : x.at ? 'sign-in' : '-'}`).join(', ')) });
     save('signin.json', { secs: r.secs, ok: r.ok, seen: r.seen, states: Object.fromEntries((r.apps || []).map(x => [x.id, { ok: x.at === 'app', blocked: x.at === 'blocked', signIn: x.at === 'signin', at: x.secs }])), cookies: r.cookies, error: r.error });
     log(`signed in: ${r.ok} in ${r.secs} s; pages on the way: ${(r.seen || []).join(', ') || 'none'}`);
@@ -55,7 +60,7 @@ try {
     // A visible window on the first app: she signs in there (and says Yes to staying signed in). Then each app is
     // opened in turn until every one lands on itself, not a sign-in page.
     const t0 = Date.now(), maxS = +arg('--wait-signin', 600);
-    cb = await launchCaptureBrowser({ profile: PROFILE, mode: arg('--signin-mode', 'visible'), width: VP.width, height: VP.height, extraFlags: ['--disable-features=LocalNetworkAccessChecks'] });
+    cb = await launch({ profile: PROFILE, mode: arg('--signin-mode', 'visible'), width: VP.width, height: VP.height, extraFlags: ['--disable-features=LocalNetworkAccessChecks'] });
     const p = await cb.newPage({ url: APPS[0].url, ...VP });
     log(`capture browser up in ${cb && (await cb.info()).startMs} ms; sign in in its window (${APPS.length} apps)`);
     const states = {};
@@ -80,7 +85,7 @@ try {
     let profile = PROFILE;
     if (PHASE === 'expiry') { profile = mkdtempSync(join(tmpdir(), 'sd-expired-')); cpSync(PROFILE, profile, { recursive: true }); for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) rmSync(join(profile, f), { force: true }); }
     const t0 = Date.now();
-    cb = await launchCaptureBrowser({ profile, mode: 'minimized', width: VP.width, height: VP.height });
+    cb = await launch({ profile, mode: 'minimized', width: VP.width, height: VP.height });
     if (PHASE === 'expiry') await cb.ctx.clearCookies();
     const out = { startMs: (await cb.info()).startMs, apps: {} };
     await Promise.all(APPS.map(async a => {
@@ -112,7 +117,7 @@ try {
       const shots = {};
       // One browser: two minimized windows and (when asked) one visible, loaded and shot at the same moment.
       const visible = modes.includes('visible');
-      cb = await launchCaptureBrowser({ profile: PROFILE, mode: visible ? 'visible' : 'minimized', width: VP.width, height: VP.height });
+      cb = await launch({ profile: PROFILE, mode: visible ? 'visible' : 'minimized', width: VP.width, height: VP.height });
       // offscreen: a normal window placed off every display (the fallback; on a Mac, does it stay there?).
       const want = [['minimized', 1], ['minimized', 2], ...(visible ? [['visible', 0]] : []), ...(modes.includes('offscreen') ? [['offscreen', 0]] : [])];
       const pages = [];
@@ -140,7 +145,7 @@ try {
     }
     if (PART !== 'shots') {
     // Hovers and menus through CDP input, in minimized windows: the recorder's own audits, a few controls each.
-    cb = await launchCaptureBrowser({ profile: PROFILE, mode: 'minimized', width: VP.width, height: VP.height });
+    cb = await launch({ profile: PROFILE, mode: 'minimized', width: VP.width, height: VP.height });
     const make = new Function('return async (page0) => { const RX = "http://127.0.0.1:9"; const AGENT_ID = "spike"; const AGENT_QS = async () => ""; ' + core() + '\nreturn { OPS, H }; }')();
     const { OPS } = await make(cb.ctx.pages()[0]);
     // What the apps send while they're only looked at (for a network guard on read-only steps): methods and hosts,
@@ -172,7 +177,7 @@ try {
   if (PHASE === 'twins') {
     // The first app, 1 then 2 then 4 windows at once, each hovering up to 10 controls.
     const a = APPS.find(x => x.id === arg('--app', APPS[0].id));
-    cb = await launchCaptureBrowser({ profile: PROFILE, mode: 'minimized', width: VP.width, height: VP.height });
+    cb = await launch({ profile: PROFILE, mode: 'minimized', width: VP.width, height: VP.height });
     const make = new Function('return async (page0) => { const RX = "http://127.0.0.1:9"; const AGENT_ID = "spike"; const AGENT_QS = async () => ""; ' + core() + '\nreturn { OPS, H }; }')();
     const { OPS } = await make(cb.ctx.pages()[0]);
     const out = [];
