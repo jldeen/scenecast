@@ -29,8 +29,10 @@ const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) :
 if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build -p stuntdouble-cli first (or set SCENECAST_BIN)`); process.exit(1); }
 // SCENECAST_SELFTEST_KEEP=<file>: keep the demo folder too, and write where it is to that file (selftest/hover-repeat.mjs).
 const keep = process.argv.includes('--keep') || !!process.env.SCENECAST_SELFTEST_KEEP;
-// The recorder: the extension (MV3, chrome.debugger) by default; --agent for the Playwright-driven agent.
-const MODE = process.argv.includes('--agent') || process.env.SCENECAST_RECORDER === 'agent' ? 'agent' : 'extension';
+// The recorder: the extension (MV3, chrome.debugger) by default; --agent for the Playwright-driven agent; --capture for
+// the capture browser (the installed Chrome, its own profile, off the screen, the recorder over CDP).
+const MODE = process.argv.includes('--agent') || process.env.SCENECAST_RECORDER === 'agent' ? 'agent'
+  : process.argv.includes('--capture') || process.env.SCENECAST_RECORDER === 'capture' ? 'capture' : 'extension';
 const RX_PORT = 47691, REPLICA_PORT = 4699;
 const tmp = mkdtempSync(join(tmpdir(), 'replica-selftest-'));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -108,6 +110,8 @@ try {
   Object.assign(cfg, { raw: join(tmp, 'raw'), receiverPort: RX_PORT, viewport: { width: 1600, height: 900, dpr: 1 }, zooms: [67, 150, 200] });
   // The agent recorder runs this very build (no version to check), in a browser preflight doesn't look for.
   if (MODE === 'agent') cfg.recorder = 'agent';
+  // The capture browser's profile: a folder of its own in this run's temp (a real one lives in ~/.stuntdouble/capture).
+  if (MODE === 'capture') Object.assign(cfg, { recorder: 'capture', capture: { profile: join(tmp, 'capture-profile'), window: process.env.SCENECAST_CAPTURE_WINDOW || 'auto', ...(process.env.CI ? { mockKeychain: true } : {}) } });
   Object.assign(cfg.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200 });
   writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(cfg, null, 2));
   const at = { cwd: DEMO };
@@ -158,26 +162,34 @@ export default flow => {
     check('preflight: all set, nothing done, under a minute', pf.ready && pf.items.every(i => i.status === 'ok') && times.preflight < 60, JSON.stringify(pf));
     const vp = await chat.evaluate(() => [innerWidth, innerHeight, devicePixelRatio]);
     check('window is 1600×900 at 1×', vp.join() === '1600,900,1', vp.join());
+  } else if (MODE === 'capture') {
+    // The capture browser: Fix starts it (each app in a window of its own, off the screen) and its recorder connects
+    // to the receiver. The presenter's part is played through the same browser's debugging port, never raising a
+    // window (in real Chrome bringToFront brings it onto the screen).
+    let t1 = Date.now();
+    const pf = await cmd('preflight', '--json');
+    times.preflightFix = +((Date.now() - t1) / 1000).toFixed(1);
+    const st = id => ((pf.items || []).find(i => i.id === id) || {}).status;
+    check('preflight: starts the capture browser, its recorder connects, both apps open', pf.ready && st('browser') === 'fixed' && st('recorder') === 'ok' && st('app chat') === 'ok' && st('app admin') === 'ok', JSON.stringify(pf));
+    const hs = JSON.parse(readFileSync(join(DEMO, '.out', 'capture.json'), 'utf8'));
+    console.log('capture browser: ' + JSON.stringify({ mode: hs.mode, fellBack: hs.fellBack, startMs: hs.startMs, preflightS: times.preflightFix }));
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${hs.cdp}`); ctx = browser.contexts()[0];
+    chat = ctx.pages().find(p => p.url().startsWith(fx.chat)); admin = ctx.pages().find(p => p.url().startsWith(fx.admin));
+    check('capture browser: both apps in it', !!chat && !!admin, ctx.pages().map(p => p.url()).join(' '));
+    for (const p of [chat, admin]) p.bringToFront = async () => {};
+    const vp = await chat.evaluate(() => [innerWidth, innerHeight, devicePixelRatio, matchMedia('(prefers-color-scheme: dark)').matches]);
+    check('capture browser: the demo\'s viewport, light', vp.join() === '1600,900,1,false', vp.join());
+    t1 = Date.now();
+    const pf2 = await cmd('preflight', '--json');
+    check('preflight: all set the second time, nothing done', pf2.ready && pf2.items.every(i => i.status === 'ok'), JSON.stringify(pf2));
+    times.preflight = +((Date.now() - t1) / 1000).toFixed(1);
   } else {
     r = await run(['agent', join(tmp, 'agent')], at);
     check('agent builds', r.code === 0, r.out);
-    if (process.env.SCENECAST_CAPTURE_BROWSER) {
-      // Spike (stage C): the recorder over CDP in the capture browser (real Chrome, its own profile, every page a
-      // window of its own, off the screen), at the same viewport the other runs use.
-      const { launchCaptureBrowser } = await import('../../spikes/capture-browser/browser.mjs');
-      const cb = await launchCaptureBrowser({ mode: process.env.SCENECAST_CAPTURE_BROWSER, width: 1600, height: 900 });
-      if (!cb) throw new Error('no capture browser');
-      browser = { close: () => cb.close() }; ctx = cb.ctx;
-      const at = { width: 1600, height: 900, viewport: 'emulated', dpr: 1 };
-      chat = await cb.newPage({ url: fx.chat, ...at });
-      admin = await cb.newPage({ url: fx.admin, ...at });
-      console.log('capture browser: ' + JSON.stringify(await cb.info()));
-    } else {
     browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
     ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light' });
     chat = await ctx.newPage(); await chat.goto(fx.chat);
     admin = await ctx.newPage(); await admin.goto(fx.admin);
-    }
     await chat.bringToFront(); await sleep(500);
     const agent = eval(readFileSync(join(tmp, 'agent', 'agent.js'), 'utf8'));
     check('agent starts', (await agent(chat)) === 'agent started');
@@ -257,6 +269,7 @@ export default flow => {
     check(`the fixture take stays within its time budget (${budget} s)`, T.wallSecs <= budget, `${T.wallSecs} s`);
   }
   if (MODE === 'extension') { await ctx.close(); ctx = null; } else { await browser.close(); browser = null; }
+  if (MODE === 'capture') { const r = await cmd('capture', 'stop'); check('the capture browser stops', r.ok === true, JSON.stringify(r)); }
   // --record-only: stop here (for timing the recorder while working on it).
   if (process.argv.includes('--record-only')) throw RECORD_ONLY;
 
@@ -573,6 +586,7 @@ export default flow => {
 } finally {
   if (browser) await browser.close().catch(() => {});
   if (ctx && MODE === 'extension') await ctx.close().catch(() => {});
+  if (MODE === 'capture') spawnSync(BIN, ['capture', 'stop', '--demo', join(tmp, 'fixture-demo')], { stdio: 'ignore', timeout: 30000 });
   // On Windows the scenecast binary waits on Node rather than becoming it: stop the whole tree.
   for (const p of procs) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' }); else p.kill(); }
   fx.close();

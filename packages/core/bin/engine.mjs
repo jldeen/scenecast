@@ -78,6 +78,7 @@ async function main() {
     case 'open-extensions': { const r = await (await import('../lib/profiles.mjs')).openExtensionsPage(loadDemo(rest)); console.log(JSON.stringify(r)); return r.ok ? 0 : 1; }
     case 'profiles': return (await import('../lib/profiles.mjs')).main(rest, loadDemo);
     case 'receiver': return node('capture/receiver.mjs', ['--demo', loadDemo(rest).dir]);
+    case 'capture': return node('capture/host.mjs', rest.includes('--demo') ? rest : [...rest, '--demo', loadDemo(rest).dir]);
     case 'cmd': { const [op, j] = rest; return send(op, j && j.startsWith('{') ? JSON.parse(j) : {}); }
     case 'run': {
       const { send: s, flowScript } = await import('@stuntdouble/capture/cli.mjs');

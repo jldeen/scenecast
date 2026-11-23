@@ -15,7 +15,7 @@ repository gets the packages as tarballs (below).
 | `@stuntdouble/cli` | The `stunt` command (also `stuntdouble`). It runs the binary for this OS, or the JavaScript engine straight when there isn't one (serve, check, record, notes and the rest still work). |
 | `@stuntdouble/build` | `binaryPath()`: the Rust binary (format, build, CLI) for this OS, from `@stuntdouble/build-<os>-<cpu>`, `STUNTDOUBLE_BINARY`, or this checkout's `target/`. |
 | `@stuntdouble/core` | The engine entry (`bin/engine.mjs`), demo settings, the flow compiler, text rules and edits, presenter notes, the workflow (`text`, `status`, `save`, `release`), the project template, and `at()`. |
-| `@stuntdouble/capture` | The recorder (the MV3 extension, or `agent.js` in a Playwright browser), the serializer, side-state sweeps, the receiver, raw captures → `data/`. |
+| `@stuntdouble/capture` | The recorder (the MV3 extension, `agent.js` in a Playwright browser, or the capture browser: the installed Chrome, its own profile, off the screen), the serializer, side-state sweeps, the receiver, raw captures → `data/`. |
 | `@stuntdouble/player` | The replica: server, morph engine, streams, presenter keys, focus points, the presenter guide (⌥G), the launcher (Chrome on the Mac, Edge on Windows). |
 | `@stuntdouble/checks` | The fidelity checklist, real vs replica, and the fixer. |
 | `@stuntdouble/format` | The manifest's JSON Schema, generated from the Rust types. |

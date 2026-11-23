@@ -54,6 +54,8 @@ enum Command {
     Agent(Passthrough),
     /// The local receiver the capture agent posts captures to (keep it running while recording).
     Receiver(Passthrough),
+    /// The capture browser (opt-in, demo.json recorder "capture"): start, stop, status, sign-in.
+    Capture(Passthrough),
     /// One command to the capture agent (snap, tabs, eval, click, …).
     Cmd(Passthrough),
     /// A capture script on the agent (the recorder's helpers in scope).
@@ -368,6 +370,7 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Profiles(a) => return engine_cmds::handover("profiles", &a, false),
         Command::Agent(a) => return engine_cmds::handover("agent", &a, false),
         Command::Receiver(a) => return engine_cmds::handover("receiver", &a, true),
+        Command::Capture(a) => return engine_cmds::handover("capture", &a, true),
         Command::Cmd(a) => return engine_cmds::handover("cmd", &a, false),
         Command::Run(a) => return engine_cmds::handover("run", &a, false),
         Command::Flow(a) => return engine_cmds::handover("flow", &a, true),

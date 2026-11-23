@@ -36,6 +36,10 @@ A fast check, item by item, that fixes only what fails:
 | receiver | Up on the demo's port | Starts it in the background |
 | browser | Edge or Chrome running with the demo's user data folder and profile (`chrome.browser`, `chrome.profile`, `chrome.userDataDir` in `demo.json`); with the agent recorder, the debugging port too | Not running: starts it with that profile. Running without the profile open: opens a window of it. **A running browser is never relaunched.** Running without a needed debugging port: says so and leaves it. |
 | recorder | The extension (or agent) is polling the receiver. If it is, the browser check is skipped. | Rebuilds the extension folder if it's out of date and says how to load it |
+
+With `"recorder": "capture"` (the capture browser, below), the **browser** item is the capture browser instead: not
+running, Fix starts it; an app on a sign-in page fails with **Sign in again** (`scenecast capture sign-in`), the one
+fix that needs the presenter.
 | app *id* | Its tab is open and on its start screen (`start` in the app's settings). Its theme is said; with `preflight.theme` in `demo.json` (`"light"` or `"dark"`), a tab in the other theme fails | Opens a missing tab; reloads one that's off its start screen, or runs `preflight.prep` (the demo's own script) instead; a tab in the wrong theme needs its app set to that theme by hand (not System) |
 | reset | With `preflight.reset` in `demo.json`: the demo's own check that everything is as the show starts | Runs `preflight.resetFix` (the demo's reset), then the check again |
 | dock | macOS: where the Dock is and whether it hides. Never a failure | An app that bounces for attention peeks out of a hidden Dock into a full-screen recording: bring it to the front once |
@@ -104,6 +108,41 @@ Record for me (docs/ai.md) runs the demo through the same command loop: `observe
 `press` do the step, so the recorder captures it exactly as it captures a person's clicks. `record status` lists the
 last few steps (`recent`), which the coach follows. The receiver also serves the coach window (`/coach`).
 
+## The capture browser (opt-in)
+
+`"recorder": "capture"` in `demo.json` records in **the capture browser** instead of the presenter's own: the
+installed Chrome (or Edge) with a profile of its own, every window off her screen, and the recorder running in it
+over the DevTools protocol. No extension, no debugging bar, and her browser and tabs are never touched. The default
+stays the extension in her own browser.
+
+- **One sign-in, kept.** The profile is a folder of its own, `~/.stuntdouble/capture/<name>` (`capture.profile`,
+  default `default`), outside every repository. `scenecast capture sign-in` opens its one window on her screen: she
+  signs in to the demo's tenant (and says Yes to staying signed in); it closes once every app lands on itself.
+  Preflight says when a sign-in has run out.
+- **Off the screen, drawn as on it.** Each page is a window of its own (a background tab doesn't draw), with
+  backgrounding off. macOS: minimized windows. Windows: a normal window placed off every display (a minimized one
+  there shrinks to a title bar and slows to a few frames a second). `capture.window: "auto"` (the default) picks by
+  OS, probes a window, and switches when it doesn't draw. Measured: 0.000% apart from the same page on screen.
+- **At the demo's viewport, light.** A window can't be bigger than the display, so each page's viewport is emulated
+  at `viewport` (size and pixel ratio), and pages draw light.
+- **The same recorder.** It's the agent's code (`agentCode()` in `build.mjs`), told it's in the capture browser,
+  with closed shadow roots handed over through the DevTools protocol as the extension does (`cdp-shadow.js`). On the
+  fixture it records the same states, path, beats, streams and side states as the extension, and the same markup.
+- **A guard for read-only steps** (`guard()` in `browser.mjs`, not on by default): every request that isn't a read
+  (GET, HEAD, OPTIONS) to a guarded host is held before it leaves, every page and frame included; `pass()` lets a
+  planned write through. WebSocket messages don't go through it.
+
+`scenecast capture start|stop|status|sign-in|run` (preflight runs `start`). The host's state is `.out/capture.json`
+and its log `.out/capture.log`. `demo.json`:
+
+```json
+"recorder": "capture",
+"capture": { "profile": "demo-tenant", "channel": "chrome", "window": "auto", "flags": [] }
+```
+
+`packages/capture/browser.mjs` is the launcher (`openCaptureBrowser`, `signInWindow`), and its `launchRealChrome` is
+the checker's real Chrome in the same shape. `packages/capture/host.mjs` keeps it up for a demo.
+
 ## How it's built
 
 `packages/capture/build.mjs` builds one body of code two ways:
@@ -112,7 +151,8 @@ last few steps (`recent`), which the coach follows. The receiver also serves the
   shim over `chrome.debugger` (pages, frames, `evaluate`, `frameElement`, mouse, keyboard, `screenshot`, CDP
   sessions), so the driver, recorder and side-state audits run unchanged. `extension/shadow.js` hands closed shadow
   roots to the serializer. `extension/main.js` holds the receiver port, the command loop and the resume.
-- **`agent.js`** (`scenecast agent`): the same, for a browser driven by Playwright (`browser_run_code_unsafe`).
+- **`agent.js`** (`scenecast agent`): the same, for a browser driven by Playwright (`browser_run_code_unsafe`), and
+  in the capture browser (`host.mjs`), where it runs in the host's own process.
 
 The extension needs Chrome or Edge 125 or later (flattened sessions for cross-site frames). It can't run scripts it's
 sent (`scenecast run`); every built-in command and side path works.
@@ -121,7 +161,10 @@ sent (`scenecast run`); every built-in command and side path works.
 
 - `packages/selftest/selftest.mjs`: the fixture recorded **through the extension**, end to end (preflight, record
   with every side state, a service-worker stop and resume, build, the full checklist twice). `--agent` runs it on
-  the Playwright agent instead; `--record-only` stops after recording (for timing).
+  the Playwright agent instead, `--capture` in the capture browser (preflight starts it); `--record-only` stops
+  after recording (for timing).
+- `packages/selftest/capture-browser.mjs`: the capture browser on the fixture apps: off the screen on this OS,
+  drawing, at the demo's viewport, twins, sign-in landing, the guard, closed shadow roots, nothing left running.
 - `packages/selftest/hover-repeat.mjs`: the hover check and the checklist over and over on a kept selftest demo
   (`.github/workflows/repeat.yml`). A missed hover prints the player's hover trace (`d1.hoverTrace()`); the hover
   check reads the player once it has settled, never at a fixed time, and the selftest proves it with every page timer

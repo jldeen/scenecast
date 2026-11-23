@@ -41,16 +41,23 @@ ${read('recorder.js')}
 `;
 }
 
-export function buildAgent(outDir, port) {
-  const code = `async (page0) => {
+// The agent: the recorder for a Playwright page, as one function (page0) => 'agent started'. browser: what it tells
+// the receiver it runs in ('agent', or 'capture' in the capture browser); shadow: the code that hands closed shadow
+// roots to the serializer (the capture browser has the DevTools protocol for it, as the extension does).
+export function agentCode(port, { browser = 'agent', shadow = '' } = {}) {
+  return `async (page0) => {
 const RX = ${JSON.stringify('http://127.0.0.1:' + port)};
-const AGENT_ID = 'agent-' + Math.random().toString(36).slice(2, 10);
-const AGENT_QS = async () => '?agent=' + AGENT_ID + '&browser=agent&tabs=' + page0.context().pages().length;
-${core()}
+const AGENT_ID = '${browser}-' + Math.random().toString(36).slice(2, 10);
+const AGENT_QS = async () => '?agent=' + AGENT_ID + '&browser=${browser}&tabs=' + page0.context().pages().length;
+${shadow}${core()}
 startLoop();
 return 'agent started';
 }
 `;
+}
+
+export function buildAgent(outDir, port) {
+  const code = agentCode(port);
   new Function('return ' + code);
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, 'agent.js'), code);

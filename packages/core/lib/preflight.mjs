@@ -74,6 +74,22 @@ function dockNote() {
   });
 }
 
+// The capture browser: running (or started by Fix), and signed in to every app; when a sign-in ran out, the fix is
+// hers: Sign in again opens its one window on her screen.
+async function captureBrowserItem(demo, fix) {
+  const host = await import('@stuntdouble/capture/host.mjs');
+  let s = host.hostState(demo);
+  const was = s && s.alive;
+  if (!was) {
+    if (!fix) return { status: 'fail', detail: "the capture browser isn't running: Fix starts it (stunt capture start)" };
+    s = await host.start(demo);
+    if (!s.ok) return { status: 'fail', detail: `couldn't start the capture browser: ${s.error}` };
+  }
+  if (s.signIn && s.signIn.length) return { status: 'fail', detail: `the capture browser isn't signed in to ${s.signIn.join(', ')}: Sign in again (stunt capture sign-in) opens its window on your screen`, signIn: s.signIn };
+  const how = `${s.mode} windows${s.fellBack && s.fellBack.to ? ` (${s.fellBack.from} ones didn't draw here: ${s.fellBack.why})` : ''}`;
+  return { status: was ? 'ok' : 'fixed', detail: `${was ? 'capture browser running' : 'started the capture browser'}: ${how}, profile ${s.profile}` };
+}
+
 // An app now found at another host (its address redirects there): kept as its match in demo.json, so Record and the
 // next check find the tab by it.
 // An app that moved (its address redirects to another host): its new host is how its tab is found, and its new
@@ -94,7 +110,8 @@ export function keepMatch(demo, id, host, url) {
 // update is reloaded (it can do that itself); when it can't, the answer says to. { ok, version } or { error }.
 export async function recorderReady(demo, { waitS = 6 } = {}) {
   const cfg = demo.cfg, port = +(process.env.REPLICA_RX_PORT || cfg.receiverPort);
-  if (cfg.recorder === 'agent') return { ok: true };
+  // The agent, and the capture browser's recorder, are built from this engine as they start: always this version.
+  if (cfg.recorder === 'agent' || cfg.recorder === 'capture') return { ok: true };
   const browser = (cfg.chrome && cfg.chrome.browser) || defaultBrowser(), bname = NAME[browser] || browser, page = PAGE[browser];
   const ver = JSON.parse(readFileSync(__at('capture', 'package.json'), 'utf8')).version;
   // Polling, or working on a command (another check's): either way it's there.
@@ -116,7 +133,7 @@ export async function recorderReady(demo, { waitS = 6 } = {}) {
 export async function preflight(demo, { fix = true, onItem = () => {}, waitAgentS = fix ? 20 : 6 } = {}) {
   const t0 = Date.now(), cfg = demo.cfg, port = +(process.env.REPLICA_RX_PORT || cfg.receiverPort);
   const P = cfg.preflight || {};
-  const recorder = cfg.recorder === 'agent' ? 'agent' : 'extension';
+  const recorder = cfg.recorder === 'agent' || cfg.recorder === 'capture' ? cfg.recorder : 'extension';
   const items = [];
   const item = async (id, fn) => {
     const t = Date.now(); let r;
@@ -157,6 +174,8 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
   };
   const label = dir => { const p = info && info.profiles.find(x => x.dir === dir); return p && p.name !== dir ? `"${p.name}" (${dir})` : `"${dir}"`; };
   await item('browser', async () => {
+    // The capture browser (opt-in): the engine's own Chrome, its own profile, off the screen. Nothing of hers.
+    if (recorder === 'capture') return captureBrowserItem(demo, fix);
     // A receiver just started: a recorder already running in the browser connects on its next try (every 2 s). Give
     // it that, so a browser that's open isn't taken for one that isn't.
     // Not connected right now: it may be reconnecting (the browser restarted its worker, the receiver just changed
@@ -210,6 +229,7 @@ export async function preflight(demo, { fix = true, onItem = () => {}, waitAgent
       return { status: 'ok', detail: `extension ${have || ''} connected`.replace('  ', ' '), version: have };
     }
     if (recorder === 'agent') return { status: 'fail', detail: 'no agent polling: run scenecast agent, then start it in the browser' };
+    if (recorder === 'capture') return { status: 'fail', detail: "the capture browser's recorder isn't polling: stunt capture status says why" };
     const m = existsSync(join(extDir, 'manifest.json')) && JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
     const have = m && (m.version_name || m.version);
     if (fix && have !== ver) await new Promise(r => execFile(process.execPath, [__at('capture', 'build.mjs'), '--extension', extDir, '--port', String(port)], () => r()));
