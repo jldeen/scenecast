@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
-import { planFromTrack, intentsOf, promptFor } from './from-script.mjs';
+import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
@@ -212,6 +212,21 @@ test('Copilot gets a screen\'s words only when page text is allowed, redacted; a
   await m.ask('script-plan', { a: 1 });
   await m.ask('script-plan', { a: 2 });
   assert.deepEqual([(await import(pathToFileURL(file).href)).n, m.stats.cached], [2, 1]);
+});
+
+test('one box for what a line names together: rows of one list, a step and the steps it goes on to', () => {
+  const item = (i, text, more = {}) => ({ i, kind: 'text', role: 'generic', tag: 'span', text, box: [i * 10, 0, i * 10 + 1, 1], ...more });
+  const rows = (say, items) => namedRows(say, { items }).map(g => g.map(it => it.text));
+  const added = [item(1, 'Added (3)', { role: 'heading', tag: 'h1' }), item(2, 'Supply chain disruption'), item(3, 'Contoso IQ'), item(4, 'Fabric IQ'), item(5, 'Catalog', { role: 'heading', tag: 'h2' }), item(6, 'Work IQ Mail')];
+  assert.deepEqual(rows('Under Added: my Supply chain disruption plugin, and Contoso IQ.', added), [['Supply chain disruption', 'Contoso IQ']]);
+  // A heading between them: two lists, so no box around both.
+  assert.deepEqual(rows('Contoso IQ, and Work IQ Mail in the catalog.', added), []);
+  // Rows that start with the same name, told apart by the words she says. A description isn't one of them.
+  const conn = [item(1, 'Fabrikam Procurement'), item(2, 'Fabrikam procurement: suppliers and orders.'), item(3, 'Fabrikam Inventory'), item(4, 'Fabrikam Sales'), item(5, 'What changed'), item(6, 'What it does')];
+  assert.deepEqual(rows('It connects to procurement, inventory and sales, and you can see what changed.', conn), [['Fabrikam Procurement', 'Fabrikam Inventory', 'Fabrikam Sales']]);
+  // A step and the ones it goes on to, to the next step of its kind; what every step has isn't one.
+  const steps = [item(1, 'Reviewed custom skill Contoso IQ'), item(2, 'Thought process'), item(3, 'Retrieve memories'), item(4, 'Thought process'), item(5, 'Thought process'), item(6, 'Reviewed custom skill Supply chain disruption'), item(7, 'Get purchase order')];
+  assert.deepEqual(stepsFrom(steps, steps[0]).map(x => x.text), ['Reviewed custom skill Contoso IQ', 'Retrieve memories']);
 });
 
 test('a walker never writes; offline, the recording says where a write went', () => {
