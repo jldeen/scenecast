@@ -38,7 +38,7 @@ const freePort = () => new Promise((res, rej) => { const s = createServer(); s.o
 // Far off every display: macOS and Windows both keep a window there when it's placed by the program.
 const OFF = { left: -32000, top: -32000 };
 
-export async function launchCaptureBrowser({ profile = null, mode = 'minimized', channel = 'chrome', extension = null, width = 1600, height = 1000, extraFlags = [], log = () => {} } = {}) {
+export async function launchCaptureBrowser({ profile = null, mode = 'minimized', channel = 'chrome', extension = null, width = 1600, height = 1000, extraFlags = [], mockKeychain, log = () => {} } = {}) {
   if (mode === 'headless') {
     const browser = await chromium.launch({ channel, headless: true, args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
     const ctx = await browser.newContext({ viewport: null, deviceScaleFactor: undefined });
@@ -63,6 +63,9 @@ export async function launchCaptureBrowser({ profile = null, mode = 'minimized',
     '--disable-sync', '--disable-background-networking', '--disable-component-update',
     '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
     ...(extension ? ['--enable-unsafe-extension-debugging'] : ['--disable-extensions']),
+    // A CI Mac's login keychain is locked: a new profile waits on it for its cookie key and never opens its port.
+    // Only for a throwaway profile; a signed-in capture profile keeps the real keychain.
+    ...(process.platform === 'darwin' && (mockKeychain ?? (throwaway && !!process.env.CI)) ? ['--use-mock-keychain'] : []),
     ...extraFlags, `--window-size=${width},${height}`, 'about:blank'];
   let child = null;
   const t0 = Date.now();
@@ -84,7 +87,7 @@ export async function launchCaptureBrowser({ profile = null, mode = 'minimized',
   // Every process of this browser (its profile folder is in each one's command line), for a start that went wrong.
   const killAll = () => {
     if (process.platform === 'win32') { try { if (child) child.kill(); } catch (e) {} return; }
-    const pids = (spawnSync('pgrep', ['-f', `--user-data-dir=${dir}`], { encoding: 'utf8' }).stdout || '').split(/\s+/).filter(Boolean).map(Number);
+    const pids = (spawnSync('pgrep', ['-f', `user-data-dir=${dir}`], { encoding: 'utf8' }).stdout || '').split(/\s+/).filter(Boolean).map(Number);
     for (const pid of pids) try { process.kill(pid); } catch (e) {}
   };
   if (!browser) {
