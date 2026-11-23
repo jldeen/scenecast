@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/capture",
-  "version": "0.5.4-rc.1",
+  "version": "0.5.4",
   "description": "StuntDouble capture: DOM/CSSOM/fonts/shadow DOM/iframes serializer, driver, recorder, side-state audits, receiver, build of raw captures into data/.",
   "type": "module",
   "license": "MIT",
@@ -12,7 +12,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@stuntdouble/core": "0.5.4-rc.1",
-    "@stuntdouble/apps": "0.5.4-rc.1"
+    "@stuntdouble/core": "0.5.4",
+    "@stuntdouble/apps": "0.5.4"
   }
 }

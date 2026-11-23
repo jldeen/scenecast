@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/cli",
-  "version": "0.5.4-rc.1",
+  "version": "0.5.4",
   "description": "StuntDouble: record a live web demo once, replay it offline the same way every time. The stunt command.",
   "type": "module",
   "license": "MIT",
@@ -16,12 +16,12 @@
     "stuntdouble": "bin/stunt.mjs"
   },
   "dependencies": {
-    "@stuntdouble/build": "0.5.4-rc.1",
-    "@stuntdouble/core": "0.5.4-rc.1",
-    "@stuntdouble/capture": "0.5.4-rc.1",
-    "@stuntdouble/player": "0.5.4-rc.1",
-    "@stuntdouble/checks": "0.5.4-rc.1",
-    "@stuntdouble/format": "0.5.4-rc.1",
-    "@stuntdouble/apps": "0.5.4-rc.1"
+    "@stuntdouble/build": "0.5.4",
+    "@stuntdouble/core": "0.5.4",
+    "@stuntdouble/capture": "0.5.4",
+    "@stuntdouble/player": "0.5.4",
+    "@stuntdouble/checks": "0.5.4",
+    "@stuntdouble/format": "0.5.4",
+    "@stuntdouble/apps": "0.5.4"
   }
 }
