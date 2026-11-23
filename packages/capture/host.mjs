@@ -7,8 +7,8 @@
 //   stunt capture run [--demo <dir>]                 in the foreground
 // demo.json "capture" (all optional): { "profile": "default" (a name under ~/.stuntdouble/capture, or a folder),
 //   "channel": "chrome" | "msedge", "window": "auto" | "minimized" | "offscreen", "flags": [] }
-import { spawn } from 'node:child_process';
-import { mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,20 +65,37 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
     ...(started === 'agent started' ? {} : { error: started }) });
 }
 
+// The host on its own, outliving whoever started it. Windows: through Start-Process (ShellExecute), because a child
+// made the usual way inherits every inheritable handle, the caller's output pipe included, and keeps it open for
+// as long as it runs (measured: the selftest, which reads preflight's output to the end, waited for ever). It
+// writes its own log there (--log).
+function launchDetached(args, log) {
+  if (process.platform === 'win32') {
+    const argList = [...args, '--log'].map(a => /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a).join(' ');
+    const q = v => `'${String(v).replace(/'/g, "''")}'`;
+    const ps = `$p = Start-Process -FilePath ${q(process.execPath)} -ArgumentList ${q(argList)} -WindowStyle Hidden -PassThru; $p.Id`;
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, timeout: 60000 });
+    return +String(r.stdout || '').trim() || null;
+  }
+  const out = openSync(log, 'a');
+  const k = spawn(process.execPath, args, { detached: true, stdio: ['ignore', out, out], env: process.env });
+  k.unref();
+  return k.pid;
+}
+
 // In the background, until stop: waits until the recorder runs (or it can't), and says which.
 export async function start(demo, { waitS = 120 } = {}) {
   const s0 = hostState(demo);
   if (s0 && s0.alive) return { ok: true, already: true, ...s0 };
   rmSync(stateFile(demo), { force: true });
   mkdirSync(demo.out, { recursive: true });
-  const out = openSync(logFile(demo), 'a');
-  const k = spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--demo', demo.dir], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env: process.env });
-  k.unref();
+  const pid = launchDetached([fileURLToPath(import.meta.url), 'run', '--demo', demo.dir], logFile(demo));
+  if (!pid) return { ok: false, error: "the capture host didn't start" };
   for (let i = 0; i < waitS * 2; i++) {
     await sleep(500);
     const s = hostState(demo);
     if (s && (s.phase === 'recording-ready' || s.phase === 'failed')) return { ok: s.phase === 'recording-ready', ...s };
-    if (i > 10 && !alive(k.pid)) return { ok: false, error: 'the capture host stopped as it started' };
+    if (i > 10 && !alive(pid)) return { ok: false, error: 'the capture host stopped as it started' };
   }
   return { ok: false, error: `the capture browser wasn't ready in ${waitS} s` };
 }
@@ -109,7 +126,15 @@ export async function main(args, loadDemo) {
   const sub = args[0] && !args[0].startsWith('--') ? args[0] : 'status';
   const demo = loadDemo(args.filter((a, i) => i > 0 || a.startsWith('--')));
   const print = r => { console.log(JSON.stringify(r, null, 1)); return r.ok === false || r.error ? 1 : 0; };
-  if (sub === 'run') { const r = await run(demo); if (r.phase !== 'recording-ready') { console.error(r.error || 'not ready'); process.exit(1); } return new Promise(() => {}); }
+  if (sub === 'run') {
+    // --log: no output of its own (started through Start-Process on Windows), so it writes the demo's capture.log.
+    const toFile = args.includes('--log');
+    const log = toFile ? m => { try { appendFileSync(logFile(demo), `${new Date().toISOString()} ${m}\n`); } catch (e) {} } : undefined;
+    if (toFile) for (const ev of ['uncaughtException', 'unhandledRejection']) process.on(ev, e => { log(String(e && e.stack || e)); process.exit(1); });
+    const r = await run(demo, log ? { log } : {});
+    if (r.phase !== 'recording-ready') { (log || console.error)(r.error || 'not ready'); process.exit(1); }
+    return new Promise(() => {});
+  }
   if (sub === 'start') return print(await start(demo));
   if (sub === 'stop') return print(await stop(demo));
   if (sub === 'sign-in') return print(await signIn(demo));
