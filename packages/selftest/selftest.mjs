@@ -6,6 +6,7 @@
 // runs on it, including two identical runs of the recorded path; then script to focus points and the editor
 // (script-focus.mjs), and the presenter guide (presenter-walk.mjs).
 //   node test/selftest.mjs [--keep]        (--keep leaves the temp demo folder and prints where it is)
+import './reap.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, unlinkSync, utimesSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';

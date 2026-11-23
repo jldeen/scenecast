@@ -9,6 +9,7 @@
 //   node packages/selftest/ai-modes.mjs [--keep] [--only 1,2,3]
 // --real: Record for me on GitHub Copilot instead (SCENECAST_COPILOT_TOKEN, or the stored sign-in), goal only, every
 // send answered "Do it": a local check that a real model makes a sensible demo (not run in CI).
+import './reap.mjs';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';

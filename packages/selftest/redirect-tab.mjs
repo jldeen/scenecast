@@ -5,6 +5,7 @@
 //   2. An app that lands on a sign-in page: not ready, and it says to sign in (never a recording of the sign-in page).
 //   3. An app that isn't open, with nothing to open: not ready, with the open tabs, so the app can ask which one it is.
 //   node packages/selftest/redirect-tab.mjs
+import './reap.mjs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';

@@ -2,6 +2,7 @@
 // it's loaded through the DevTools protocol, as "Load unpacked" would). For each one installed: the extension
 // loads, connects to a receiver, and captures a page (DOM and a real screenshot). Headless, temporary profiles.
 //   node packages/selftest/extension-browsers.mjs [chrome] [msedge]
+import './reap.mjs';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, existsSync, readFileSync } from 'node:fs';

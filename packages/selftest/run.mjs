@@ -1,6 +1,7 @@
 // npm test: the unit tests, the extension in branded Chrome and Edge, the capture test, the end-to-end selftest and the
 // three AI modes (ai-modes.mjs, on the stand-in model), on macOS, Windows and Linux. Builds the
 // scenecast binary first unless SCENECAST_BIN points at one.
+import './reap.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';

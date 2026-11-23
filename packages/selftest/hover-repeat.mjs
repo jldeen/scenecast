@@ -1,6 +1,7 @@
 // The hover check, and then the whole checklist, over and over on the selftest's kept demo: a hover that shows one
 // run and not the next is a bug. Used by .github/workflows/repeat.yml after npm test (SCENECAST_SELFTEST_KEEP).
 //   LOOPS=10 node packages/selftest/hover-repeat.mjs [demo folder]
+import './reap.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';

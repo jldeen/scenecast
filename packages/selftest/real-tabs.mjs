@@ -6,6 +6,7 @@
 //   3. Two tabs for one app, the second marked (a tab opened for the recording next to the presenter's own): the marked
 //      one is recorded even when the recorder hasn't attached to it yet (as after the recorder reloads).
 //   node packages/selftest/real-tabs.mjs
+import './reap.mjs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';

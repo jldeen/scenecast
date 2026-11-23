@@ -6,6 +6,7 @@
 // moves it, → steps over the beat with no screen, the timer runs and resets; a script change shows as out of date;
 // the text and RunLines formats; the checklist's notes item, and quick only when the guide's inputs changed.
 //   node packages/selftest/presenter-walk.mjs <demo dir>      (SCENECAST_BIN, else target/debug/scenecast)
+import './reap.mjs';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join, dirname, resolve as resolvePath } from 'node:path';

@@ -4,6 +4,7 @@
 //   2. Pause: what's done in the browser isn't recorded; Go on with the tab moved says which; Go on from here goes on.
 //   3. The debugging bar closed: paused by itself; Go on attaches again, every screen kept, and the next click records.
 //   node packages/selftest/pause-go-on.mjs
+import './reap.mjs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';

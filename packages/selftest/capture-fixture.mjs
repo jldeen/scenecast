@@ -2,6 +2,7 @@
 // adopted sheets, shadow DOM, a cross-origin iframe, a blob image, a canvas, form state, scroll), captured with the
 // same agent code that runs in playwright-chrome, through a real receiver. Headless system Chrome, temp profile.
 //   node test/capture-fixture.mjs
+import './reap.mjs';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, existsSync } from 'node:fs';
