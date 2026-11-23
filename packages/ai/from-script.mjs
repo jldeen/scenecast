@@ -648,19 +648,22 @@ function focusFor(x, walker, onPath, weight, typed) {
   const backed = [];
   // A point around several items (two rows she names, a step and the steps it goes on to) takes the place of the plain
   // points it holds: she frames them together.
+  // The same for the row a name heads ("Fabric IQ · Semantic model"), over a point at the bare name ("Fabric IQ").
   const absorb = f => {
-    if (f.texts.length < 2) return false;
-    const plain = o => !o.mark && !o.around && (!o.on || o.on === f.on) && (!o.via || (f.via && o.via.target === f.via.target)) && o.texts.every(t => f.texts.some(u => norm(u).includes(norm(t))));
+    const bare = o => !o.mark && !o.around && (!o.on || o.on === f.on) && (!o.via || (f.via && o.via.target === f.via.target));
+    const plain = f.heads ? o => bare(o) && o.texts.length === 1 && norm(o.texts[0]) === norm(f.heads)
+      : o => bare(o) && o.texts.every(t => f.texts.some(u => norm(u).includes(norm(t))));
+    if (!f.heads && f.texts.length < 2) return false;
     const k = out.findIndex(plain);
     if (k < 0) return false;
-    const { pos, ...rest } = f;
+    const { pos, heads, ...rest } = f;
     out[k] = rest;
     for (let i = out.length - 1; i > k; i--) if (plain(out[i])) out.splice(i, 1);
     return true;
   };
   for (const g of groups) for (const f of backing(x.say, g, walker, weight, onPath, typed, groups.length > 1 ? 1 : 3, x.clicked || [])) if (!absorb(f) && !dupe(f) && out.length + backed.length < 4) backed.push(f);
   // ⌥F goes through a line's points in order: in the order she says them.
-  out.push(...backed.map((f, i) => ({ f, i })).sort((a, b) => (a.f.pos ?? Infinity) - (b.f.pos ?? Infinity) || a.i - b.i).map(({ f }) => { const { pos, ...rest } = f; return rest; }));
+  out.push(...backed.map((f, i) => ({ f, i })).sort((a, b) => (a.f.pos ?? Infinity) - (b.f.pos ?? Infinity) || a.i - b.i).map(({ f }) => { const { pos, heads, ...rest } = f; return rest; }));
   for (const h of x.hints.filter(h => h.weak)) { const f = place(h); if (f && !dupe(f) && out.length < 2) out.push(f); }
   return out;
 }
@@ -760,7 +763,7 @@ function backing(say, ids, walker, w, onPath, typed = new Set(), limit = 3, clic
       if (!rows.length) continue;
       const share = it => words(it.text).filter(w => !own.has(w) && lw.includes(w)).length;
       const row = rows.slice().sort((a, b) => share(b) - share(a) || a.box[0] - b.box[0])[0];
-      if (!holds(out, row.text) && !holds(listed, row.text)) out.push({ texts: [clip(row.text)], on: id, pos: at(words(name)) });
+      if (!holds(out, row.text) && !holds(listed, row.text)) out.push({ texts: [clip(row.text)], on: id, pos: at(words(name)), heads: name });
       found = true;
     }
     if (found) break;
