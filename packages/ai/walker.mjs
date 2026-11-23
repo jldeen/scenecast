@@ -13,7 +13,7 @@
 //                                            (goal(screen, sig, lastMove, path so far))
 import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readScreen } from '../script/html.mjs';
+import { readScreen } from '@scenecast/script/html.mjs';
 import { findItem } from './find.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.

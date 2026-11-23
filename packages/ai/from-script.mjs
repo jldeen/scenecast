@@ -4,7 +4,7 @@
 // every time, and what the tests run); Copilot works out what the rules can't, on screen, when the plan runs.
 import { formatStep, risk } from './plan.mjs';
 import { findItem, composer, searchBox } from './find.mjs';
-import { words, facts, pickItems, sentences } from '../script/match.mjs';
+import { words, facts, pickItems, sentences } from '@scenecast/script/match.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');

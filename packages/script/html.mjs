@@ -1,5 +1,5 @@
 // A captured page read without a browser: its controls (named the way the recorder's outline names them,
-// packages/recorder/outline-page.js), its text items (the way the script matcher indexes a screen,
+// packages/capture/outline-page.js), its text items (the way the script matcher indexes a screen,
 // packages/player/app/focus-target.js, with a box that's its place in the page's order) and its words. Captures are
 // serialized DOM, so a small stack parser is enough. Used to map a talk track's Do lines to real controls, and its
 // lines to what's on screen, before there's a replica to look at.
@@ -55,7 +55,7 @@ export function textOf(el, out = []) {
 }
 export const wordsOf = el => textOf(el).join('').split('\n').map(clean).filter(Boolean).join('\n');
 
-// Roles and names as packages/recorder/outline-page.js gives them.
+// Roles and names as packages/capture/outline-page.js gives them.
 const ROLE_SEL = /^(button|link|tab|menuitem|menuitemcheckbox|menuitemradio|option|treeitem|switch|checkbox|radio|textbox|searchbox|combobox|gridcell)$/;
 function roleOf(el) {
   const r = el.attrs.role;

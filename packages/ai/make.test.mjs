@@ -13,9 +13,9 @@ import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings } from './finish.mjs';
-import { parseTalkTrack } from '../script/talk.mjs';
-import { parseScript as guideParse } from '../kit/lib/notes.mjs';
-import { checkFocusJson } from '../kit/lib/overrides.mjs';
+import { parseTalkTrack } from '@scenecast/script/talk.mjs';
+import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
+import { checkFocusJson } from '@stuntdouble/core/lib/overrides.mjs';
 
 const BOX = { sel: 'div[role=textbox][contenteditable=true]' };
 function demoDir() {

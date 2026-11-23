@@ -136,6 +136,7 @@ test('a capture read without a browser: controls as the outline names them, word
   assert.doesNotMatch(sc.text, /Hidden/);
   // The page's own title before the app bar's.
   assert.deepEqual(sc.headings, ['Tools', 'Catalog']);
+});
 
 test('focus.mjs points keep their order within a beat; focus.json points go in by beat and screen', () => {
   const flow = { states: { a: { app: 'x' }, b: { app: 'x' }, c: { app: 'y' } }, beats: [{ active: 'x', states: { x: 'a' } }, { active: 'x', states: { x: 'b' } }], path: [{ checkpoint: 'a' }, { checkpoint: 'b' }, { checkpoint: 'c' }] };

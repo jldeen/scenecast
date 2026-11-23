@@ -13,7 +13,7 @@ import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset } from './reset.mjs';
-import { readTalkTrack, talkTrackText } from '../script/talk.mjs';
+import { readTalkTrack, talkTrackText } from '@scenecast/script/talk.mjs';
 import { aiDir } from './run.mjs';
 
 export const PLAN = 'plan.md', RESET = 'reset.md';
@@ -22,7 +22,7 @@ const sha = t => createHash('sha256').update(String(t)).digest('hex');
 // The app packs (packages/apps): each app's names, writes and their undos. Optional: without them, plain rules.
 export async function loadPacks(demo) {
   try {
-    const m = await import('../apps/index.mjs');
+    const m = await import('@stuntdouble/apps/index.mjs');
     return { forApp: m.packsForDemo(demo.cfg), writeFor: m.writeFor };
   } catch (e) { return null; }
 }

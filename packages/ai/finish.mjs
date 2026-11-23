@@ -10,9 +10,9 @@ import { join } from 'node:path';
 import { parsePlan, formatStep } from './plan.mjs';
 import { aiDir } from './run.mjs';
 import { walkerFromDemo, specName } from './walker.mjs';
-import { parseTalkTrack } from '../script/talk.mjs';
+import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { cleanTarget } from './from-script.mjs';
-import { readFocusJson, readEditorOverrides, writeJsonAtomic, checkFocusJson, FOCUS_JSON, EDITOR_JSON } from '../kit/lib/overrides.mjs';
+import { readFocusJson, readEditorOverrides, writeJsonAtomic, checkFocusJson, FOCUS_JSON, EDITOR_JSON } from '@stuntdouble/core/lib/overrides.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');
