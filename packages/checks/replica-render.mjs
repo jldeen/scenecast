@@ -102,8 +102,12 @@ export async function openReplica(demo, url) {
     return { page };
   }
   // The screen as the recorder took it (in a real browser, the tab's own capture at its pixel ratio).
-  const shoot = async page => real ? Buffer.from((await page.__cdp.send('Page.captureScreenshot', { format: 'png' })).data, 'base64')
-    : page.screenshot({ animations: 'disabled', caret: 'hide' });
+  // No caret in either (the recorder hides it in the real page's pictures too).
+  const shoot = async page => {
+    if (!real) return page.screenshot({ animations: 'disabled', caret: 'hide' });
+    for (const f of page.frames()) await f.evaluate(() => { if (!document.querySelector('style[data-sc-clean]')) { const s = document.createElement('style'); s.setAttribute('data-sc-clean', ''); s.textContent = '*{caret-color:transparent!important}'; document.documentElement.appendChild(s); } }).catch(() => {});
+    return Buffer.from((await page.__cdp.send('Page.captureScreenshot', { format: 'png' })).data, 'base64');
+  };
   async function close() { if (real) { await real.close(); await cmpBrowser.close(); } else await browser.close(); if (server) server.kill(); }
   return { flow, browser, cmpBrowser, real: !!real, zoom, pageAt, show, shoot, close };
 }

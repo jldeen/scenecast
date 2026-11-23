@@ -2,13 +2,14 @@
 // still sees a difference that's really there.
 //   1. One real Chrome plays the presenter's: the fixture chat at 110% page zoom, captured as the recorder does.
 //   2. A second one, the checker's (its own profile, hidden), draws the same page: the same to within anti-aliasing.
-//   3. Five differences planted in the checker's page, one at a time: each found, where it was planted.
+//   3. Differences planted in the checker's page, one at a time: each one makes the screen differ (verdict, real mode),
+//      at the 0.5% bar, and the spot or area it's found in is where it was planted.
 // Needs Google Chrome (or Edge) installed: on a machine without either it says so and stops (CI's Linux runner).
 //   node packages/selftest/real-chrome-checker.mjs
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
 import { launchRealChrome, browserApp } from '../checks/real-chrome.mjs';
-import { diffDetail } from '../checks/compare.mjs';
+import { diffDetail, verdict, CLUSTER_PX } from '../checks/compare.mjs';
 
 const channel = browserApp('chrome') ? 'chrome' : browserApp('msedge') ? 'msedge' : null;
 if (!channel) { console.log('SKIP real Chrome checker: no Chrome or Edge here'); process.exit(0); }
@@ -44,18 +45,22 @@ try {
   const plants = [
     ['a changed word', () => { const h = document.querySelector('h1'); h.textContent = h.textContent.replace('working on', 'working at'); }, 'h1'],
     ['a 1-px border', () => { document.querySelector('[aria-label="Workspace"]').style.outline = '1px solid #c8c8c8'; }, '[aria-label="Workspace"]'],
-    ['a wrong colour', () => { document.querySelector('[aria-label="Sidebar"]').style.background = '#eef3fb'; }, '[aria-label="Sidebar"]'],
+    ['a clearly wrong colour', () => { document.querySelector('[aria-label="Send"]').style.background = '#d13438'; }, '[aria-label="Send"]'],
+    // A panel's background lost (its CSS variable falling back to white): #f6f7f9 → #fff, under the per-pixel tolerance.
+    ['a panel\'s background lost', () => { document.querySelector('[aria-label="Sidebar"]').style.background = '#ffffff'; }, '[aria-label="Sidebar"]'],
     ['a missing icon', () => { document.querySelector('[aria-label="Send"]').style.visibility = 'hidden'; }, '[aria-label="Send"]'],
     ['a 2-px shift', () => { document.querySelector('h1').style.transform = 'translateX(2px)'; }, 'h1'],
   ];
+  check('the same page passes (no spot, no area)', verdict(base, { real: true }).pass, JSON.stringify({ spot: base.regions[0], area: base.areas[0] }));
   const results = [];
   for (const [name, prep, sel] of plants) {
     const shot = await shotOf(checker, prep);
-    const d = await diff(real.png, shot.png);
-    results.push(`${name} ${d.pct}%`);
-    // Found: the difference is many times the noise, and its regions fall on the planted element.
-    check(`planted ${name}: found (${d.pct}% of pixels, noise ${base.pct}%)`, d.pct > Math.max(0.01, base.pct * 10) && d.regions.length > 0, `${d.pct}%`);
-    check(`planted ${name}: ${d.pct > 0.5 ? 'over' : 'under'} the 0.5% bar`, true);
+    const d = await diff(real.png, shot.png), v = verdict(d, { real: true });
+    // Where it was planted, in device pixels (2.2 a CSS px).
+    const box = await (async () => { const p = await checker.newPage(); const s = await p.context().newCDPSession(p); await s.send('Emulation.setDeviceMetricsOverride', METRICS); await p.goto(fx.chat); await p.waitForTimeout(500); const r = await p.evaluate(q => { const b = document.querySelector(q).getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; }, sel); await p.close(); return r.map(v => v * 2.2); })();
+    const at = v.spot || v.area, near = at && at.x <= box[0] + box[2] + 40 && at.x + at.w >= box[0] - 40 && at.y <= box[1] + box[3] + 40 && at.y + at.h >= box[1] - 40;
+    results.push(`${name}: ${d.pct}%, largest spot ${(d.regions[0] || {}).px || 0} px, area ${(d.areas[0] || {}).pct || 0}% → ${v.why}`);
+    check(`planted ${name}: caught (${v.why || 'missed'}), where it was planted`, !v.pass && (v.why === 'share' || near), JSON.stringify({ v, box }));
   }
   console.log('PLANTS ' + results.join(' · '));
   await checker.close();

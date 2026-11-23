@@ -1,8 +1,9 @@
 // A real Chrome (or Edge) for the checker: the installed browser, the same one a screen was recorded in, so the
 // replica's text is drawn the way the real page's was (headless Chrome draws it differently: a screen of text read
 // about 1% off, a zoomed one up to 5%, Nov 2026). Its own throwaway profile, at the page zoom the tab was recorded at
-// (Chrome's ⌘+ / Ctrl+), and never on the presenter's screen: macOS starts it hidden in the background (open -g -j),
-// Windows minimized and off-screen. Each page is its own window, so none is a background tab (those don't draw).
+// (Chrome's ⌘+ / Ctrl+), and never on the presenter's screen: every window minimized the moment it exists (a window
+// made from here came up full size on her Mac even with the app started hidden), which still draws exactly as on
+// screen with backgrounding off (measured: 0.000% apart). Each page is its own window: a background tab doesn't draw.
 //   launchRealChrome({ zoom, channel }) → { browser, newPage(), close() } or null (no such browser here, or it didn't start)
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
@@ -63,9 +64,15 @@ export async function launchRealChrome({ zoom = 1, channel = 'chrome', log = () 
   let first = ctx.pages()[0] || null, queue = Promise.resolve();
   // A window of its own for each page (the first is the one it started with), one at a time: two made at once could
   // both be handed the same page.
+  const minimize = async targetId => {
+    const w = await top.send('Browser.getWindowForTarget', { targetId }).catch(() => null);
+    if (w) await top.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { windowState: 'minimized' } }).catch(() => {});
+  };
+  for (const t of (await top.send('Target.getTargets')).targetInfos.filter(t => t.type === 'page')) await minimize(t.targetId);
   const make = async () => {
     if (first) { const p = first; first = null; return p; }
-    const { targetId } = await top.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: true });
+    const { targetId } = await top.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: true, windowState: 'minimized' });
+    await minimize(targetId);
     for (let i = 0; i < 100; i++) {
       for (const p of ctx.pages()) { const s = await ctx.newCDPSession(p); const { targetInfo } = await s.send('Target.getTargetInfo').catch(() => ({})); await s.detach().catch(() => {}); if (targetInfo && targetInfo.targetId === targetId) return p; }
       await sleep(50);
@@ -73,7 +80,13 @@ export async function launchRealChrome({ zoom = 1, channel = 'chrome', log = () 
     throw new Error('the checker browser didn\'t open a window');
   };
   const newPage = () => (queue = queue.then(make, make));
+  // Whatever happens to this process, the browser it started goes with it (Nov 2026: a test that crashed left one up).
+  const pid = (await top.send('SystemInfo.getProcessInfo').catch(() => ({ processInfo: [] }))).processInfo.find(x => x.type === 'browser');
+  const kill = () => { try { if (pid) process.kill(pid.id); else if (child && child.pid) child.kill(); } catch (e) {} cleanup(); };
+  process.once('exit', kill);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { kill(); process.exit(1); });
   async function close() {
+    process.removeListener('exit', kill);
     await top.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
     if (where.exe && child && child.exitCode === null) child.kill();

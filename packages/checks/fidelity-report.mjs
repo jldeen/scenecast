@@ -29,7 +29,7 @@ const items = last.items.map(it => {
   const was = first.items.find(x => x.id === it.id);
   return {
     id: it.id, kind: it.kind, state: it.state, z: it.z, click: it.click, pass: it.pass, pct: it.pct, firstPct: was ? was.pct : null,
-    regions: (it.regions || []).slice(0, 8), size: it.size, error: it.error, note: it.note,
+    regions: (it.regions || []).slice(0, 8), size: it.size, error: it.error, note: it.note, differs: it.differs, checker: it.checker,
     sideBySide: rel(it.sideBySide), diff: rel(it.diff), replica: rel(it.replica),
     causes: Object.values(causes[it.id] || {}).flat().map(d => ({ cause: d.cause, summary: d.summary, patch: d.patch ? d.patch.kind : null, patchStatus: d.patchStatus || null })),
   };
