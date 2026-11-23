@@ -224,7 +224,7 @@ const urlOf = t => typeof t === 'string' ? t : t && t.url || 'about:blank';
 const PROBE_URL = 'data:text/html,<title>capture probe</title><body style="margin:0;background:%23fff">';
 
 export async function openCaptureBrowser({ profile = null, channel = 'chrome', window: win = 'auto', viewport = null, light = true, zoom = 1,
-  flags: extraFlags = [], extension = null, mockKeychain, launch = 'auto', macSso = true, width = 1600, height = 1000, log = () => {} } = {}) {
+  flags: extraFlags = [], extension = null, mockKeychain, launch = 'auto', macSso = true, activate = false, width = 1600, height = 1000, log = () => {} } = {}) {
   const where = browserApp(channel);
   if (!where) { log(`capture browser: no ${channel} installed here`); return null; }
   const throwaway = !profile;
@@ -288,7 +288,8 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     child.on('error', e => log(`capture browser: ${e.message}`));
   };
   if (viaOpen) {
-    child = spawn('open', [...(mode === 'visible' ? [] : ['-g', '-j']), '-n', '--stdout', chromeLog, '--stderr', chromeLog, '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
+    // Visible windows never take focus either (-g), unless asked (the sign-in window: hers to type in).
+    child = spawn('open', [...(mode === 'visible' ? (activate ? [] : ['-g']) : ['-g', '-j']), '-n', '--stdout', chromeLog, '--stderr', chromeLog, '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
     child.on('error', e => log(`capture browser: ${e.message}`));
   } else startDirect();
   let browser = null, at = port;
@@ -580,7 +581,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
 // The one window that shows on her screen: the capture profile, visible, on the first app that needs a sign-in. She
 // signs in there (and says Yes to staying signed in); it closes itself once every app lands on its own host.
 export async function signInWindow({ profile, apps, channel = 'chrome', timeoutS = 600, viewport = { width: 1280, height: 800 }, flags = [], pin = null, onState = () => {}, log = () => {} } = {}) {
-  const cb = await openCaptureBrowser({ profile, channel, window: 'visible', light: false, flags, width: viewport.width, height: viewport.height, log });
+  const cb = await openCaptureBrowser({ profile, channel, window: 'visible', activate: true, light: false, flags, width: viewport.width, height: viewport.height, log });
   if (!cb) return { ok: false, error: 'the capture browser did not start' };
   if (pin) await cb.pinAccount(pin);
   const t0 = Date.now(), states = {}, tenants = {};
