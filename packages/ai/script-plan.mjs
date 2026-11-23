@@ -9,7 +9,7 @@
 // is allowed (Settings → Copilot: "Send page text"); everything is redacted as every request is (model.mjs).
 import { redact } from './model.mjs';
 import { parseStep, formatStep } from './plan.mjs';
-import { planFromTrack } from './from-script.mjs';
+import { planFromTrack, promptFor } from './from-script.mjs';
 
 const clean = s => String(s ?? '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');
@@ -82,7 +82,7 @@ function intentOf(text, line, prompts) {
     case 'click': return { click: s.target, from };
     case 'hover': return { hover: s.target, card: true, from };
     case 'type': {
-      const p = prompts.find(p => p.text && (norm(p.text) === norm(s.value) || (norm(s.value).length > 30 && norm(p.text).startsWith(norm(s.value).slice(0, 60)))));
+      const p = promptFor(prompts, s.value);
       return p ? { prompt: { n: p.n, label: p.label || '', text: p.text }, from } : { type: s.value, into: s.target || null, from };
     }
     case 'press': return { key: s.key, from };
