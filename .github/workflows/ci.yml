@@ -318,62 +318,11 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm ci --prefix apps/desktop
-      - name: Build the update (and, without the updater key, the version before it)
-        working-directory: apps/desktop
+      - name: Update (apps/desktop/scripts/update-ci.sh)
         shell: bash
-        run: |
-          set -e
-          b=src-tauri/target/debug/bundle
-          mkdir -p "$RUNNER_TEMP/new" "$RUNNER_TEMP/old"
-          take() { if [ "$RUNNER_OS" = macOS ]; then cp $b/macos/*.app.tar.gz $b/macos/*.app.tar.gz.sig "$RUNNER_TEMP/new/"; else cp $b/nsis/*"$1"*-setup.exe $b/nsis/*"$1"*-setup.exe.sig "$RUNNER_TEMP/new/"; fi; }
-          if [ -n "$S_KEY" ]; then
-            version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-            echo '{"bundle":{"createUpdaterArtifacts":true}}' > src-tauri/tauri.update-test.json
-            TAURI_SIGNING_PRIVATE_KEY="$S_KEY" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$S_KEY_PASSWORD" npx tauri build --debug --bundles ${{ matrix.bundles }} --config src-tauri/tauri.update-test.json
-            take "$version"
-            if [ "$RUNNER_OS" = macOS ]; then
-              gh release download "$FROM" -R "$GITHUB_REPOSITORY" -p "Scenecast_${FROM#v}_universal.app.tar.gz" -D "$RUNNER_TEMP"
-              tar -xzf "$RUNNER_TEMP/Scenecast_${FROM#v}_universal.app.tar.gz" -C "$RUNNER_TEMP/old"
-            else
-              gh release download "$FROM" -R "$GITHUB_REPOSITORY" -p "Scenecast_${FROM#v}_x64-setup.exe" -D "$RUNNER_TEMP/old"
-            fi
-          else
-            echo "::warning::no updater key: the update is tested between two builds of this code, not from $FROM"
-            version=0.3.99
-            npx tauri signer generate --ci -p test -w "$RUNNER_TEMP/update-test.key" -f
-            export TAURI_SIGNING_PRIVATE_KEY="$(cat "$RUNNER_TEMP/update-test.key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=test
-            conf() {
-              node -e "const fs=require('fs');fs.writeFileSync('src-tauri/tauri.update-test.json',JSON.stringify({version:process.argv[1],bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey:fs.readFileSync(process.argv[2],'utf8').trim(),endpoints:['http://127.0.0.1:47811/latest.json'],dangerousInsecureTransportProtocol:true,windows:{installMode:'passive'}}}}))" "$1" "$RUNNER_TEMP/update-test.key.pub"
-            }
-            conf 0.3.99
-            npx tauri build --debug --bundles ${{ matrix.bundles }} --config src-tauri/tauri.update-test.json
-            take 0.3.99
-            conf 0.3.98
-            npx tauri build --debug --bundles ${{ matrix.bundles }} --config src-tauri/tauri.update-test.json
-            if [ "$RUNNER_OS" = macOS ]; then cp -R $b/macos/Scenecast.app "$RUNNER_TEMP/old/"; else cp $b/nsis/*0.3.98*-setup.exe "$RUNNER_TEMP/old/"; fi
-          fi
-          echo "NEW_VERSION=$version" >> "$GITHUB_ENV"
-          ls -la "$RUNNER_TEMP/new" "$RUNNER_TEMP/old"
-      - name: The feed, as a throwaway pre-release (https, as the release's updater needs)
-        if: env.S_KEY != ''
-        shell: bash
-        run: |
-          set -e
-          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$FEED_RELEASE/"
-          node apps/desktop/scripts/latest-json.mjs "$RUNNER_TEMP/new" "$NEW_VERSION" "$base"
-          gh release create "$FEED_RELEASE" -R "$GITHUB_REPOSITORY" --prerelease --latest=false --target "$GITHUB_SHA" \
-            --title "CI update test (deleted after the run)" --notes "The in-app update test's feed. Deleted when the run ends." \
-            "$RUNNER_TEMP"/new/*
-          echo "UPDATE_FEED=${base}latest.json" >> "$GITHUB_ENV"
-      - name: Update
-        shell: bash
-        run: |
-          old="$(ls -d "$RUNNER_TEMP"/old/* | head -1)"
-          node apps/desktop/tests/update.test.mjs "$old" "$RUNNER_TEMP/new" "$NEW_VERSION"
-      - name: Delete the throwaway feed
-        if: always() && env.S_KEY != ''
-        shell: bash
-        run: gh release delete "$FEED_RELEASE" -R "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+        run: apps/desktop/scripts/update-ci.sh
 
   release:
     # On a version tag, once every job is green: a GitHub Release with the macOS and Windows installers and the printable

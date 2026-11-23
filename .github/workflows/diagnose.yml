@@ -15,12 +15,22 @@ on:
       env:
         description: Extra environment, NAME=value pairs separated by spaces
         default: SCENECAST_AI_TRACE=1
+      updater:
+        description: Give the command the updater key and release access (apps/desktop/scripts/update-ci.sh)
+        type: boolean
+        default: false
 
 jobs:
   diagnose:
     name: Diagnose (${{ inputs.os }})
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 45
+    timeout-minutes: 75
+    permissions:
+      contents: write
+    env:
+      S_KEY: ${{ inputs.updater && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      S_KEY_PASSWORD: ${{ inputs.updater && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
