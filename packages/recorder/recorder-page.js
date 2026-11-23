@@ -167,6 +167,8 @@
     const o = ownerOf(e.target);
     down = { x: e.clientX, y: e.clientY, spec: o ? specOf(o) : null, field: isField(o), moved: 0 };
   }, true);
+  // Where the pointer is (the capture parks it in a corner, and puts it back if that changed the screen).
+  on('pointermove', e => { R.pointer = [e.clientX, e.clientY]; }, true);
   on('pointermove', e => { if (down && e.buttons) down.moved = Math.max(down.moved, Math.hypot(e.clientX - down.x, e.clientY - down.y)); }, true);
   on('pointerup', e => {
     if (down && down.moved > 8) { push({ kind: 'drag', spec: down.spec, x0: down.x, y0: down.y, x1: e.clientX, y1: e.clientY }); down.dragged = true; }

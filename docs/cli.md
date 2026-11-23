@@ -135,7 +135,26 @@ the replica from the same file (SHA-256), else it's reported as substituted or a
 Several screens are compared at once (a third of the cores, at most 4; `SCENECAST_COMPARE_LANES` sets it), and
 `compare.json` lists what's done so far while it runs. A screen whose replica looks exactly as it did last time, next
 to the same real screenshot, keeps its last comparison (`.out/fidelity/cache`).
-What's over the threshold (0.5% of pixels by default), or has a font that isn't the real file, goes to the fixer.
+**Which browser draws the replica.** A demo recorded in the presenter's Chrome or Edge (the recorder saves the
+browser, the tab's page zoom and size) is drawn in that installed browser: its own throwaway profile, every window
+minimized, at the recorded page zoom, size and pixel ratio, closed (with its profile) when the compare ends. Text then
+comes out as it did in the real page (headless Chrome drew it about 1% different on every screen of text, up to 5%
+zoomed). Without that browser, or recorded by the tests' Chromium, it's headless. `SCENECAST_CHECKER=real|headless`
+forces either.
+
+**What counts as different** (`packages/checks/compare.mjs` `verdict`). Headless: more than the threshold, 0.5% of
+pixels by default. Drawn in the real browser, also:
+- **a spot:** 400 or more differing pixels together. Calibrated on a real take (fixture, Chrome at 110%, 2.2 px a
+  CSS px, 35 views): text drawn by the same Chrome differs in at most 88 px in one spot; the smallest planted
+  difference (a 1-px border) is 3,224.
+- **an area:** a panel-sized area all shifted a little, under the per-pixel tolerance (a background falling back to
+  white): 2% of the picture or more, at least 12% of its height and 8% of its width. A hovered row's shade is a
+  strip (9.9% of the height at 200% zoom) and doesn't count.
+
+`packages/selftest/real-chrome-checker.mjs` plants a changed word, a 2-px shift, a missing icon, a 1-px border, a
+wrong colour and a panel's lost background, and checks each is caught where it was planted. Review shows a spot or an
+area outlined on both pictures ("This spot differs").
+What's different, or has a font that isn't the real file, goes to the fixer.
 Its diagnosers say why, from evidence in the raw captures and the rendered replica, and write a patch for this demo
 in `flow.fixes.json` (never a capture edited by hand, never a product-wide rule). Then the loop builds and compares
 again, up to `--rounds` fix rounds (3). The rule-based diagnoser knows:

@@ -19,7 +19,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { availableParallelism } from 'node:os';
-import { diffDetail } from './compare.mjs';
+import { diffDetail, verdict } from './compare.mjs';
 import { loadDemo, arg } from '../kit/lib/demo.mjs';
 import { openReplica } from './replica-render.mjs';
 
@@ -204,7 +204,11 @@ async function compareOne(it, lane) {
   Object.assign(row, { pct: d.pct, box: d.box, regions: d.regions, size: d.size, replica: join(OUT, file(it.id, 'replica')), sideBySide: join(OUT, file(it.id, 'side-by-side')), diff: join(OUT, file(it.id, 'diff')) });
   if (!sizeOk) row.sizeMismatch = true;
   if (r.fonts) row.fonts = fontVerdicts(realFonts(it.snap), r.fonts);
-  row.pass = d.pct <= THRESHOLD && sizeOk;
+  // Drawn in the browser it was recorded in: a spot or an area that differs counts too (compare.mjs verdict).
+  const v = verdict(d, { threshold: THRESHOLD, real: R.real });
+  row.pass = v.pass && sizeOk;
+  if (v.why) row.differs = v.why === 'share' ? { why: 'share' } : { why: v.why, at: v.spot || v.area };
+  if (R.real) row.checker = 'real';
   return row;
 }
 let next = 0;

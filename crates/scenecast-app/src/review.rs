@@ -33,6 +33,13 @@ pub struct Screen {
     /// What the fixer found, in its own words (for Details).
     #[serde(default)]
     pub detail: Vec<String>,
+    /// Where it differs, when the checker drew it in the browser it was recorded in: a spot or an area, in the
+    /// picture's pixels: [x, y, w, h, picture width, picture height], to highlight.
+    #[serde(default)]
+    pub spot: Option<[i64; 6]>,
+    /// Compared in the browser it was recorded in (only a real difference counts), not a headless one.
+    #[serde(default)]
+    pub real_checker: bool,
 }
 
 /// What a fixer cause means, in a sentence for anyone. Its own summary (selectors, file names) goes under Details.
@@ -169,6 +176,19 @@ pub fn read(dir: &Path, os: &str) -> Review {
         // is listed under it, not folded in (Nov 2026: a screen read "17.4% different", its 110% zoom's score).
         let pass = base.map(|i| i["pass"] == true);
         let pct = base.and_then(|i| i["pct"].as_f64());
+        let spot = base.and_then(|i| {
+            let a = &i["differs"]["at"];
+            let size = &i["size"]["real"];
+            Some([
+                a["x"].as_i64()?,
+                a["y"].as_i64()?,
+                a["w"].as_i64()?,
+                a["h"].as_i64()?,
+                size[0].as_i64()?,
+                size[1].as_i64()?,
+            ])
+        });
+        let real_checker = base.is_some_and(|i| i["checker"] == "real");
         let views: Vec<View> = mine
             .iter()
             .filter(|i| base.is_none_or(|b| !std::ptr::eq(*i, b)) && i["pass"] != true)
@@ -220,6 +240,8 @@ pub fn read(dir: &Path, os: &str) -> Review {
             views,
             why,
             detail,
+            spot,
+            real_checker,
         }
     };
 
@@ -476,7 +498,9 @@ mod tests {
                     { "id": "admin-01-menu", "state": "admin-01-menu", "kind": "state", "z": 100, "pass": false, "pct": 1.2 },
                     { "id": "admin-01-menu@150", "state": "admin-01-menu", "kind": "zoom", "z": 150, "pass": false, "pct": 1.4,
                       "causes": [{ "cause": "virtualized", "summary": "div.list is virtualized: only the rows in view at 100% were captured" }] },
-                    { "id": "iq-start", "state": "iq-start", "kind": "state", "z": 100, "pass": true, "pct": 0.0 }
+                    { "id": "iq-start", "state": "iq-start", "kind": "state", "z": 100, "pass": true, "pct": 0.0 },
+                    { "id": "chat-02", "state": "chat-02", "kind": "state", "z": 100, "pass": false, "pct": 0.09, "checker": "real",
+                      "size": { "real": [3024, 1612] }, "differs": { "why": "spot", "at": { "x": 100, "y": 200, "w": 64, "h": 32, "px": 900 } } }
                 ],
                 "residual": [{ "id": "admin-01-menu", "why": ["not diagnosed (compare only, or the round limit)"] }]
             }),
@@ -517,23 +541,30 @@ mod tests {
                 .is_some_and(|p| p.ends_with("sbs/chat-start.png"))
         );
         // A menu off the path that differs is kept apart, so it isn't missed.
-        assert_eq!(r.others.len(), 1);
+        assert_eq!(r.others.len(), 2);
         // A cause the fixer named reads plainly, with its own words under Details.
+        let menu = r.others.iter().find(|s| s.id == "admin-01-menu").unwrap();
         assert_eq!(
-            r.others[0].why,
+            menu.why,
             [
                 "not diagnosed (compare only, or the round limit)",
                 "A long list ends early: only the rows on screen were recorded."
             ]
         );
         assert_eq!(
-            r.others[0].detail,
+            menu.detail,
             ["div.list is virtualized: only the rows in view at 100% were captured"]
+        );
+        // Compared in the browser it was recorded in: under the 0.5% share, still differs, and where.
+        let spot = r.others.iter().find(|s| s.id == "chat-02").unwrap();
+        assert_eq!(
+            (spot.pass, spot.spot, spot.real_checker),
+            (Some(false), Some([100, 200, 64, 32, 3024, 1612]), true)
         );
         // The counts agree with the report: 5 of 5 on the path match, the menu off it differs, two zooms apart.
         assert_eq!(
             (r.screens, r.matching, r.differ, r.views_differ),
-            (5, 5, 1, 2)
+            (5, 5, 2, 2)
         );
         assert!(r.compared && r.fonts_ok);
     }

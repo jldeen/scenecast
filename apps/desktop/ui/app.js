@@ -1407,6 +1407,8 @@ function pickPanel(d, r) {
   if (!sc) return '<section class="card pick"><p class="muted">Pick a screen to see it next to the real product.</p></section>';
   const [st] = screenState(sc);
   const where = beat ? (beat.n === 0 ? `${appLabel({ id: sc.app })}\u2019s start screen` : `Beat ${beat.n}, screen ${i + 1}`) : `Menus and hovers, ${i + 1}`;
+  // Compared in the browser it was recorded in: only a real difference fails, and it's shown where it is.
+  if (sc.pass === false && sc.spot) return pickPanelSpot(d, sc, where, st);
   const said = sc.pass === true ? `<p><b>Matches.</b> Same as the real product${sc.pct ? ` (${pctWords(sc.pct)}: anti-aliasing, a caret)` : ', to the pixel'}.</p>`
     : sc.pass === false ? `<p><b>${esc(plainWhy(sc.why[0] || 'It differs from the real product.'))}</b> <span class="muted">${pctWords(sc.pct)}.</span></p>${sc.why.length > 1 ? `<ul class="also">${sc.why.slice(1).map(w => `<li>${esc(plainWhy(w))}</li>`).join('')}</ul>` : ''}${(sc.detail || []).length ? `<details class="err-detail"><summary>Details</summary><div class="log">${sc.detail.map(esc).join('\n')}</div></details>` : ''}`
     : '<p class="muted">Not compared yet.</p>';
@@ -1414,9 +1416,23 @@ function pickPanel(d, r) {
   const views = (sc.views || []).length ? `<ul class="also" data-test="review-views">${sc.views.map(v => `<li>${esc(v.label[0].toUpperCase() + v.label.slice(1))}: ${pctWords(v.pct)}</li>`).join('')}</ul>${sc.pass === true && sc.why.length ? `<p class="small muted">${esc(plainWhy(sc.why[0]))}</p>` : ''}` : '';
   return `<section class="card pick" aria-live="polite" data-test="review-pick" data-screen="${esc(sc.id)}" data-state="${st}">
     <h2>${where}</h2><p class="sub">${esc(appLabel({ id: sc.app }))}</p>
-    ${sc.sideBySide ? `<figure class="compare"><div class="labels"><span>Real product</span><span>Your replica</span></div><img src="${esc(sc.sideBySide)}" alt="The real product and your replica, side by side"></figure>`
+    ${sc.sideBySide ? `<figure class="compare"><div class="labels"><span>Real product</span><span>Your replica</span></div><div class="shotwrap"><img src="${esc(sc.sideBySide)}" alt="The real product and your replica, side by side">${spotBoxes(sc)}</div></figure>`
       : sc.shot ? `<figure class="compare one"><div class="labels"><span>What you recorded</span></div><img src="${esc(sc.shot)}" alt="What you recorded"></figure>` : ''}
     ${said}${views}
+    <div class="others"><button class="alink" data-goto="edit" data-test="review-wording">Change wording or a date</button><button class="alink" data-goto="script" data-test="review-say">Edit what you say here</button></div></section>`;
+}
+// The spot that differs, outlined on both pictures of the side by side (real | 12 px | replica, a 34 px caption on top).
+function spotBoxes(sc) {
+  if (!sc.spot) return '';
+  const [x, y, w, h, W, H] = sc.spot, TW = 2 * W + 12, TH = H + 34, pad = 6;
+  const box = left => `<span class="spot" style="left:${(100 * (left - pad) / TW).toFixed(2)}%;top:${(100 * (y + 34 - pad) / TH).toFixed(2)}%;width:${(100 * (w + 2 * pad) / TW).toFixed(2)}%;height:${(100 * (h + 2 * pad) / TH).toFixed(2)}%"></span>`;
+  return box(x) + box(x + W + 12);
+}
+function pickPanelSpot(d, sc, where, st) {
+  return `<section class="card pick" aria-live="polite" data-test="review-pick" data-screen="${esc(sc.id)}" data-state="${st}" data-spot="1">
+    <h2>${where}</h2><p class="sub">${esc(appLabel({ id: sc.app }))}</p>
+    <figure class="compare"><div class="labels"><span>Real product</span><span>Your replica</span></div><div class="shotwrap"><img src="${esc(sc.sideBySide)}" alt="The real product and your replica, side by side">${spotBoxes(sc)}</div></figure>
+    <p><b>This spot differs.</b> <span class="muted">It’s outlined on both. Fix it for me finds out why.</span></p>
     <div class="others"><button class="alink" data-goto="edit" data-test="review-wording">Change wording or a date</button><button class="alink" data-goto="script" data-test="review-say">Edit what you say here</button></div></section>`;
 }
 PANELS.review = async (panel, d) => {
