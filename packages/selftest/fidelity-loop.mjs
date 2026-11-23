@@ -3,6 +3,7 @@
 // `scenecast fidelity` compares every captured state with the real page, diagnoses each difference, writes the demo's
 // own patches (flow.fixes.json) and checks again, until every state is within 0.5% of pixels. Nothing is fixed by hand.
 //   node packages/selftest/fidelity-loop.mjs [--keep] [--record-only]
+import './reap.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
