@@ -112,7 +112,7 @@ const readJson = f => { try { return JSON.parse(readFileSync(f, 'utf8')); } catc
 export function needsYou({ planReview, reset, plan, fidelity, points }) {
   const out = [];
   for (const f of (planReview && planReview.flags) || []) out.push({ kind: f.kind === 'added' ? 'Added from the recording' : f.kind === 'order' ? 'Not where your script says' : 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
-  for (const n of (reset && reset.needs) || []) out.push({ kind: 'Reset', where: `beat ${n.beat}`, text: n.text });
+  for (const n of (reset && reset.needs) || []) out.push({ kind: n.kind === 'start' ? 'A step is missing' : 'Reset', where: `beat ${n.beat}`, text: n.text });
   plan.beats.forEach((b, bi) => (b.lines || []).forEach((l, li) => { if (!(l.focus || []).some(f => f.on)) out.push({ kind: 'No focus point', where: `line ${bi + 1}.${li + 1}`, text: `Nothing on its screens backs “${l.text.slice(0, 80)}${l.text.length > 80 ? '…' : ''}”. Add one in the editor if it needs one.` }); }));
   for (const i of ((fidelity && fidelity.items) || []).filter(i => i.status === 'fail' || i.status === 'manual')) out.push({ kind: i.status === 'fail' ? 'Check failed' : 'Look yourself', where: '', text: `${i.title}: ${(i.detail || '').split('\n')[0]}` });
   if (points && !points.length) out.push({ kind: 'No focus point', where: '', text: 'The plan has no focus points yet: build the demo, then finish again.' });
@@ -170,6 +170,9 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], o
   const rec = readJson(join(demo.dir, 'recording.json')) || readJson(join(demo.raw || '', 'recording.json'));
   const timings = [];
   if (planReview) timings.push(['Plan', `${planReview.steps} steps from ${planReview.from}, checked against ${planReview.checked} captured screens`]);
+  const cm = planReview && planReview.model;
+  if (cm && !cm.fallback) timings.push(['Copilot', cm.calls ? `${cm.calls} question${cm.calls === 1 ? '' : 's'}, ${cm.secs} s` : 'the answer from last time (nothing asked)']);
+  else if (cm && cm.fallback) timings.push(['Copilot', `not used (${cm.error ? 'it couldn\u2019t answer' : 'its answer didn\u2019t fit'}): the plan is from your Do lines`]);
   if (rec && rec.timing) timings.push(['Recording', `${Math.round(rec.timing.totalSecs || rec.timing.secs || 0)} s (the product ${Math.round(rec.timing.productSecs || 0)} s, the recorder ${Math.round(rec.timing.recorderSecs || 0)} s)`]);
   if (bench) for (const p of bench.phases || []) timings.push([`Unattended: ${p.name}`, `${p.secs} s${p.ok ? '' : ' (failed)'}`]);
   if (fidelity) timings.push(['Checks', `${fidelity.secs} s · ${fidelity.items.filter(i => i.status === 'pass').length} of ${fidelity.items.length} pass`]);

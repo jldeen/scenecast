@@ -16,6 +16,7 @@
 // is the plain opposite, in words. Writes that can't be undone (a deletion, a sent message to someone else) are listed
 // under "Needs you".
 import { formatStep, parsePlan } from './plan.mjs';
+import { startState, setterOf } from './start.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');
@@ -109,6 +110,42 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
       for (const t of [...new Set(gone)].slice(0, 3)) out.checks.push({ app: a, text: `shows "${t}"`, from: 'its start screen' });
     }
   }
+  // The state the demo starts in (start.mjs), as its first screens show it: set first, then checked. What the
+  // demo points at on an app's first screen is checked to be there too. A state no step of the plan changes, but a
+  // later screen shows changed, is something a run can't show: it needs a step.
+  out.set = [];
+  if (walker) {
+    const st = startState(plan, { walker, packs });
+    const packOf = app => ((packs || {}).forApp || {})[app] || null;
+    for (const f of st.facts) {
+      const how = setterOf(f, packOf(f.app), packs && packs.writeFor);
+      const text = startText(f);
+      if (how) out.set.push({ app: f.app, text, how, seen: `beat ${f.seen.beat}, ${f.seen.screen}` });
+      out.checks.push({ app: f.app, text, from: `start: beat ${f.seen.beat}, ${f.seen.screen}` });
+    }
+    const first = {};
+    plan.beats.forEach(b => b.steps.forEach(s => { if (s.kind === 'app' && s.lands && s.lands.screen && !first[s.app]) first[s.app] = s.lands.screen; }));
+    for (const [app, sig] of Object.entries(first)) {
+      const sc = walker.screen(sig);
+      if (!sc) continue;
+      const said = plan.beats.flatMap(b => (b.lines || []).flatMap(l => (l.focus || []).filter(f => f.on === sig && f.texts.length === 1).map(f => f.texts[0])));
+      const appTitle = norm(((walker.apps || []).find(a => a.id === app) || {}).title || app);
+      const shown = [...new Set(said)].filter(t => t.split(' ').length <= 6 && t.length <= 48 && !/^(show|see|view|open|add|go|back|more)\b/i.test(t) && !norm(t).includes(appTitle))
+        .filter(t => { const it = sc.items.find(i => norm(i.text) === norm(t)); return it && !/^(heading|tab|menuitem|switch|checkbox|radio|textbox|searchbox|combobox)$/.test(it.role); });
+      for (const t of shown.slice(0, 3)) out.checks.push({ app, text: `shows "${t}"`, from: 'what the demo points at on its first screen' });
+    }
+    const groups = new Map();
+    for (const c of st.changes) { const k = `${c.app}|${c.before.screen}|${c.after.screen}|${c.from}|${c.to}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
+    const allSteps = plan.beats.flatMap(b => b.steps);
+    for (const g of groups.values()) {
+      const c = g[0], step = allSteps[c.after.step - 1];
+      const names = list(g.map(x => `"${x.subject}"`)), many = g.length > 1;
+      const fix = g.map(x => x.kind === 'toggle' && x.control ? `Click "${x.control}"` : x.kind === 'choice' ? `Click "${x.to}"` : null).filter(Boolean);
+      // Where the fix goes: after the step, when its controls are on the screen the step lands on.
+      const there = (walker.screen(c.after.screen) || { controls: [] }).controls.some(x => g.some(y => y.control && x.name === y.control));
+      out.needs.push({ beat: c.after.beat, kind: 'start', text: `${names} ${many ? 'are' : 'is'} ${c.from} before ${step ? formatStep(step) : 'this step'} and ${c.to} after it, and no step turns ${many ? 'them' : 'it'} ${c.to}: a run of your script won't show that${fix.length ? `. Add ${list(fix)} ${there ? 'after' : 'before'} it` : ''}` });
+    }
+  }
   // One of each: the same check twice (two prompts in one task), a pack's check over the plain one for the same thing,
   // and a pack's count check with the number the start screen shows.
   const seen = new Set();
@@ -158,6 +195,17 @@ function fromPack(w, ctx, packs) {
   return out;
 }
 
+const list = xs => xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+// A start-state fact in words: "Sync" is off; "Cowork" is picked (Chat | Cowork); renders light.
+function startText(f) {
+  if (f.kind === 'toggle') return `"${f.subject}" is ${f.value}`;
+  if (f.kind === 'choice') return `"${f.value}" is picked (${f.subject})`;
+  if (f.kind === 'version') return `${f.subject} is version ${f.value}`;
+  if (f.kind === 'list') return `"${f.subject}" lists ${list(f.value.split(', '))}`;
+  if (f.kind === 'theme') return `renders ${f.value}`;
+  return `${f.subject}: ${f.value}`;
+}
+
 // "17 curated here" on the start screen, "18 curated here" after: the same words with another number.
 function numberSwap(t, text) {
   if (!/\d/.test(t)) return false;
@@ -180,6 +228,15 @@ export function formatReset(r) {
     });
     out.push('');
   }
+  if ((r.set || []).length) {
+    out.push('## Set first', '', '<!-- The state the demo starts in, as its first screens show it. The capture pass sets each one that isn\'t already, then checks them all. -->', '');
+    for (const s of r.set) {
+      out.push(`- ${s.app}: ${s.text}`, `  Set: "${s.how.control}"${s.how.path ? ` (${s.how.path})` : ''} · ${s.how.pack}:${s.how.write}`);
+      if (s.how.open) out.push(`  Opens: ${s.how.open}`);
+      out.push(`  Seen: ${s.seen}`);
+    }
+    out.push('');
+  }
   if (r.checks.length) {
     out.push('## Check', '', '<!-- Read-only: each line is something the screen shows. -->', '');
     for (const c of r.checks) out.push(`- ${c.app}: ${c.text}`, `  From: ${c.from}`);
@@ -193,9 +250,18 @@ export function formatReset(r) {
   return out.join('\n');
 }
 
-// reset.md read back: its Undo steps as a plan the capture pass runs, and its checks.
+// reset.md read back: its Undo steps as a plan the capture pass runs, what to set first, its checks, what needs her.
 export function parseReset(text) {
-  const undo = parsePlan(String(text).split(/^## Check\b/m)[0].replace(/^## Undo · /gm, '## '));
-  const checks = [...String(text).split(/^## Check\b/m)[1] || ''].length ? (String(text).split(/^## Check\b/m)[1].split(/^## /m)[0].match(/^- .+$/gm) || []).map(l => l.slice(2)) : [];
-  return { undo, checks };
+  const parts = String(text).split(/^(?=## )/m);
+  const undo = parsePlan(parts.filter(p => /^## Undo · /.test(p)).map(p => p.replace(/^## Undo · /, '## ')).join('\n'));
+  const lines = name => { const p = parts.find(x => new RegExp(`^## ${name}\\b`).test(x)); return p ? (p.match(/^- .+$/gm) || []).map(l => l.slice(2)) : []; };
+  const set = [];
+  const sp = parts.find(x => /^## Set first\b/.test(x));
+  if (sp) for (const block of sp.split(/^(?=- )/m).slice(1)) {
+    const [head, ...rest] = block.split('\n');
+    const d = { what: head.slice(2).trim() };
+    for (const l of rest) { const m = /^\s+(Set|Opens|Seen):\s*(.*)$/.exec(l); if (m) d[m[1].toLowerCase()] = m[2].trim(); }
+    set.push(d);
+  }
+  return { undo, set, checks: lines('Check'), needs: lines('Needs you') };
 }

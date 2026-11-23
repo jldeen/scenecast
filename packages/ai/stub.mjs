@@ -145,6 +145,8 @@ export async function ask(task, input) {
     case 'adapt': return adapt(input);
     case 'next': return next(input);
     case 'script': return script(input);
+    // No stand-in for reading a talk track: the rules alone make that plan (from-script.mjs).
+    case 'script-plan': return { beats: null };
     default: throw new Error('unknown task ' + task);
   }
 }

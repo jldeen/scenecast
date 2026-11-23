@@ -206,13 +206,13 @@ export async function signOut() {
 }
 
 // One question to Copilot, no tools: just the answer's text.
-export async function ask({ system, prompt, model }) {
+export async function ask({ system, prompt, model, timeoutMs = 180000 }) {
   const c = await client();
   try {
     const a = await c.getAuthStatus();
     if (!a.isAuthenticated) throw new Error('sign in to GitHub first (Settings → Copilot)');
     const s = await c.createSession({ model: model || readSettings().model || 'auto', ...NO_TOOLS, systemMessage: { mode: 'replace', content: system } });
-    const r = await s.sendAndWait({ prompt }, 180000);
+    const r = await s.sendAndWait({ prompt }, timeoutMs);
     return (r && r.data && r.data.content) || '';
   } finally { await c.stop().catch(() => {}); }
 }

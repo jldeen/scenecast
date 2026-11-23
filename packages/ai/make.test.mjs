@@ -6,12 +6,15 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack, intentsOf } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
-import { resetFor, formatReset } from './reset.mjs';
+import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
+import { scriptPlanInput, planWithModel } from './script-plan.mjs';
+import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings } from './finish.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
@@ -36,16 +39,16 @@ function demoDir() {
     beats: [{ active: 'chat', states: { chat: 'chat-home', admin: 'admin-home' } }, { active: 'admin', states: { chat: 'chat-home', admin: 'admin-home' } }],
     path: [],
   };
-  const page = body => `<!doctype html><html><head><title>t</title><style>p{color:red}</style></head><body>${body}</body></html>`;
+  const page = body => `<!doctype html><html data-color-scheme="light"><head><title>t</title><style>p{color:red}</style></head><body>${body}</body></html>`;
   const box = '<div role="textbox" contenteditable="true" aria-label="Message"></div>';
   const snaps = {
-    'chat-home': `<h1>New chat</h1>${box}`,
+    'chat-home': `<h1>New chat</h1>${box}<div role="radiogroup"><div role="radio" aria-checked="false">Chat</div><div role="radio" aria-checked="true">Notes</div></div>`,
     'chat-typed': `<h1>New chat</h1>${box}`,
     'chat-answer': `<h2>Kestrel delay answer</h2><p>Kestrel moved the ship date by six days.</p><p>That puts about $35,073 in penalties at risk with Brightline.</p><section><h3>Save note</h3><button aria-label="Save: Save note">Save</button><button aria-label="Cancel: Save note">Cancel</button></section><div role="tab">Sources</div>${box}`,
     'chat-saved': '<p>Your note is saved as kestrel-note in your notes.</p>',
     'chat-sources': "<p>Sources: the supplier's notice in Teams and two emails.</p>",
-    'admin-home': '<h1>Plugin admin</h1><p>17 curated here</p><button aria-label="Certified" data-testid="cert-badge">Certified</button><span aria-hidden="true">Uncertified</span><button aria-label="Add one seat">+</button>',
-    'admin-certified': '<h1>Plugin admin</h1><p>18 curated here</p><span>Certified by you</span>',
+    'admin-home': '<h1>Plugin admin</h1><p>17 curated here</p><button aria-label="Certified" data-testid="cert-badge">Certified</button><span aria-hidden="true">Uncertified</span><button aria-label="Add one seat">+</button><div role="switch" aria-checked="false" aria-label="Enable Sync"></div><p>Version 2.1.0</p>',
+    'admin-certified': '<h1>Plugin admin</h1><p>18 curated here</p><span>Certified by you</span><div role="switch" aria-checked="true" aria-label="Enable Sync"></div>',
     'admin-seat': '<h1>Plugin admin</h1><p>2 seats</p>',
   };
   mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
@@ -135,6 +138,67 @@ test('"Add X" takes the recording\'s way only when that way names X', () => {
   assert.deepEqual(keyed.beats[0].steps.map(s => s.text), ['Go to admin', 'Scroll down']);
 });
 
+// A talk track that only tells the story (no Do lines): Copilot proposes the steps, the rules ground them.
+const PROSE = `# Delay demo
+
+## 1. The question
+
+> I ask what changed on the order.
+
+> Kestrel moved the ship date by six days.
+
+## 2. Certify it
+
+> I certify it, so everyone knows it's ours.
+
+## Prompts
+
+1. Ask: “What's changed on PO-1?”
+`;
+
+test('Copilot reads a prose talk track: its steps grounded on the recorded screens, its points framed, the rest the rules', async () => {
+  const walker = walkerFromDemo(demoDir());
+  const track = parseTalkTrack(PROSE, 'p.md');
+  const answer = { beats: [
+    { n: 1, lines: [{ id: '1.1', steps: ['Go to chat', `Type "What's changed on PO-1?" in "Message"`, 'Press Enter', 'Wait for the answer'], point: [] },
+      { id: '1.2', steps: [], point: [{ text: 'Kestrel moved the ship date by six days.', screen: 'chat-answer' }] }] },
+    { n: 2, lines: [{ id: '2.1', steps: ['Beat 1', 'Click "Certified"'], point: [{ texts: ['Certified by you', '18 curated here'], screen: 'admin-certified' }] }] },
+  ] };
+  let asked = null;
+  const model = { kind: 'test', ask: async (task, input) => { asked = { task, input }; return answer; } };
+  const r = await planWithModel(track, { walker, model });
+  assert.equal(asked.task, 'script-plan');
+  // What was asked: her lines, the screens with their moves, the beats; no screen words unless allowed.
+  assert.ok(asked.input.screens.find(x => x.id === 'chat-answer').moves.some(m => /Save: Save note.*→ chat-saved/.test(m)));
+  assert.ok(asked.input.screens.every(x => !x.words));
+  assert.deepEqual(r.plan.beats.flatMap(b => b.steps).map(st => st.text), ['Go to chat', `Type "What's changed on PO-1?" in "Message"`, 'Press Enter', 'Wait for the answer', 'Go to admin', 'Click "Certified"']);
+  assert.deepEqual(r.plan.beats.flatMap(b => b.steps).filter(st => st.writes).map(st => st.writes), ['sends prompt 1 (Ask) in Chat app', 'endorses it: "Certified"']);
+  assert.deepEqual(r.plan.beats[0].lines[1].focus[0].texts, ['Kestrel moved the ship date by six days.']);
+  assert.deepEqual(r.plan.beats[1].lines[0].focus[0], { texts: ['Certified by you', '18 curated here'], on: 'admin-certified' });
+  // No answer that fits (the stand-in model, or an error): the rules' plan, as without Copilot.
+  const rules = await planWithModel(track, { walker, model: await makeModel({ kind: 'stub' }) });
+  assert.deepEqual([rules.model.fallback, rules.plan.beats.flatMap(b => b.steps).length], [true, planFromTrack(track, { walker }).plan.beats.flatMap(b => b.steps).length]);
+  const failing = await planWithModel(track, { walker, model: { kind: 'test', ask: async () => { throw new Error('offline'); } } });
+  assert.deepEqual([failing.model.fallback, failing.model.error], [true, 'offline']);
+});
+
+test('Copilot gets a screen\'s words only when page text is allowed, redacted; asking again comes from the cache', async () => {
+  const demo = demoDir();
+  writeFileSync(join(demo.dir, 'data', 'snaps', 'chat-saved.html'), '<!doctype html><html><body><p>Your note is saved as kestrel-note. Mail seth@example.com about it.</p></body></html>');
+  const walker = walkerFromDemo(demo);
+  const track = parseTalkTrack(PROSE, 'p.md');
+  const words = scriptPlanInput(track, walker, { pageText: true }).screens.find(x => x.id === 'chat-saved').words;
+  assert.match(words, /saved as kestrel-note\. Mail \[email\] about it/);
+  assert.equal(scriptPlanInput(track, walker, { pageText: false }).screens.find(x => x.id === 'chat-saved').words, undefined);
+  const file = join(demo.dir, 'model.mjs');
+  writeFileSync(file, 'export let n = 0; export async function ask() { n++; return { beats: [] }; }');
+  const m = await makeModel({ kind: file, cacheDir: join(demo.dir, 'cache') });
+  await m.ask('script-plan', { a: 1 });
+  await m.ask('script-plan', { a: 1 });
+  await m.ask('script-plan', { a: 2 });
+  assert.deepEqual([(await import(pathToFileURL(file).href)).n, m.stats.cached], [2, 1]);
+});
+
 test('a walker never writes; offline, the recording says where a write went', () => {
   const walker = walkerFromDemo(demoDir());
   assert.throws(() => walker.step('chat-answer', { kind: 'click', target: 'Save: Save note', writes: 'saves it' }), e => e.code === 'WRITE');
@@ -157,7 +221,7 @@ test('the reset: each write undone in reverse, a pack\'s undo with what the run 
   assert.match(formatPlan(quiet), /- Click "Certified"\n  Safe: Only shows/);
   const r = resetFor(plan, { walker, packs });
   assert.deepEqual(r.undo.map(u => u.steps.join(' / ')), ['Remove the endorsement ("Certified")', 'Click "Delete kestrel-note"', 'Delete the task it made ("Kestrel delay answer")']);
-  assert.deepEqual(r.checks.map(c => `${c.app}: ${c.text}`), ['admin: no endorsement', 'chat: no "kestrel-note"', 'chat: no task "Kestrel delay answer" from this run in Recent', 'admin: shows "17 curated here"']);
+  assert.deepEqual(r.checks.filter(c => !/^start/.test(c.from)).map(c => `${c.app}: ${c.text}`), ['admin: no endorsement', 'chat: no "kestrel-note"', 'chat: no task "Kestrel delay answer" from this run in Recent', 'admin: shows "17 curated here"']);
   assert.match(formatReset(r), /## Undo · Admin center\n\n- Go to admin\n- Remove the endorsement/);
   // A private pack's API undo: named, not written out; the steps by hand are what's left if it can't.
   const api = { forApp: { chat: { ...pack, writes: [{ ...pack.writes[0], undo: { ...pack.writes[0].undo, api: { use: 'notes', method: 'DELETE', path: '/notes/{skill}' } } }] } }, writeFor };
@@ -168,6 +232,19 @@ test('the reset: each write undone in reverse, a pack\'s undo with what the run 
   const twice = resetFor(parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n${send}\n## Beat 2 · B\n\n- Click "New chat"\n${send}`), { walker });
   assert.deepEqual(twice.undo.map(u => [u.undoes, u.times]), [['beat 2, Press Enter; beat 1, Press Enter', 2]]);
   assert.match(formatReset(twice), /Note: do these steps 2 times, once for each/);
+});
+
+test('the start state: what the first screens show is set first and checked; a change no step makes needs one', () => {
+  const walker = walkerFromDemo(demoDir());
+  const pack = { id: 'admin', writes: [{ id: 'sync', on: { kind: 'click', target: 'Enable Sync' }, undo: { open: 'https://admin.test/sync', steps: ['Click "Enable Sync"'] } }] };
+  const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && w.on.target.toLowerCase() === String(step.target).toLowerCase()) || null;
+  const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker });
+  const r = resetFor(plan, { walker, packs: { forApp: { admin: pack }, writeFor } });
+  assert.deepEqual(r.set.map(s => [s.app, s.text, s.how.control, s.how.open]), [['admin', '"Sync" is off', 'Enable Sync', 'https://admin.test/sync']]);
+  assert.deepEqual(r.checks.filter(c => /^start/.test(c.from)).map(c => `${c.app}: ${c.text}`), ['chat: "Notes" is picked (Chat | Notes)', 'chat: renders light', 'admin: "Sync" is off', 'admin: Plugin admin is version 2.1.0', 'admin: renders light']);
+  // On before the certify and on after it, with no step between that switches it: the plan needs that step.
+  assert.match(r.needs.find(n => n.kind === 'start').text, /^"Sync" is off before Click "Certified" and on after it.*Add Click "Enable Sync" after it$/);
+  assert.deepEqual(parseReset(formatReset(r)).set, [{ what: 'admin: "Sync" is off', set: '"Enable Sync" · admin:sync', opens: 'https://admin.test/sync', seen: 'beat 2, admin-home' }]);
 });
 
 test('the approval is the plan\'s exact text: an edit needs approving again', () => {

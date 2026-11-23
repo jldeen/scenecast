@@ -3,7 +3,7 @@
 // With the presenter's script, its lines go on the beats (beat by beat when the counts match).
 import { formatStep } from './plan.mjs';
 import { specName } from './walker.mjs';
-import { writeOf, packWrite } from './from-script.mjs';
+import { writeOf, packWrite, packSafe } from './from-script.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
@@ -40,7 +40,7 @@ export function planFromRecording(rec, { walker = null, title = '', track = null
     let w = writeOf(step, el, { next: to && to !== before ? S[to] : null, nextScreen: walker && to && to !== before ? walker.screen(to) : null, prompt: step.kind === 'press' && typed ? { n: prompts, label: '', text: typed } : null, appTitle: appTitle(app) });
     const pack = ((packs || {}).forApp || {})[app];
     const pw = pack && packs.writeFor ? packWrite(packs.writeFor, pack, step, el, el) : null;
-    const safe = !pw && pack && packs.writeFor && (pack.safe || []).length ? packWrite(packs.writeFor, { ...pack, writes: pack.safe }, step, el, el) : null;
+    const safe = !pw ? packSafe(packs, pack, step, el, el) : null;
     if (safe) { step.safe = `${safe.what.replace(/\.$/, '')} · ${pack.id}:${safe.id}`; w = null; }
     if (w || pw) step.writes = `${w ? w.what : pw.what.split(/[;:(]/)[0].trim()}${pw ? ` · ${pack.id}:${pw.id}` : ''}`;
     if (to && to !== before && step.kind !== 'app') step.lands = { screen: to, text: walker ? landWords(walker, before, to) : null };

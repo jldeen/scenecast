@@ -53,7 +53,14 @@ async function main() {
       const d = demo();
       const script = arg(args, '--script', null), walk = arg(args, '--walkthrough', null);
       if (walk) { const { planFromWalkthrough } = await import('./make.mjs'); const r = await planFromWalkthrough({ demo: d, file: walk, script, emit }); return { beats: r.review.beats, steps: r.review.steps, writes: r.review.writes.length, flags: [] }; }
-      if (script) { const { planFromScript } = await import('./make.mjs'); const r = await planFromScript({ demo: d, file: script, emit }); return { beats: r.review.beats, steps: r.review.steps, writes: r.review.writes.length, flags: r.review.flags, checked: r.review.checked }; }
+      if (script) {
+        // Copilot reads it with the screens when it's ready here (no download for this), else the rules alone.
+        const { planFromScript } = await import('./make.mjs');
+        const { runtimeState } = await import('./copilot.mjs');
+        const m = kind === 'stub' || (kind === 'copilot' && !runtimeState().ready) ? null : await makeModel({ kind, sentDir: join(aiDir(d), 'sent'), settings, on: emit, cacheDir: join(aiDir(d), 'cache'), timeoutMs: 600000 });
+        const r = await planFromScript({ demo: d, file: script, model: m, settings, emit });
+        return { beats: r.review.beats, steps: r.review.steps, writes: r.review.writes.length, flags: r.review.flags, checked: r.review.checked, ...(r.review.model ? { copilot: r.review.model } : {}) };
+      }
       const { draftPlan } = await import('./draft.mjs');
       return draftPlan({ demo: d, model: await model(d), settings, emit });
     }

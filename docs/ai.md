@@ -25,9 +25,23 @@ click in each, and makes the plan:
 
 When the demo has been recorded before, the plan is checked against every recorded screen, so a new version of your
 script takes minutes. A script written for presenting the replica works too: its ⌥ keys say where each beat starts.
+
+When you're signed in, Copilot reads your script with the recorded screens and proposes each line's steps and what it
+points at, so a script that only tells the story (no Do lines) gets steps too. Every step it proposes is put on the
+real controls the same way as yours, and anything that doesn't fit is flagged. What it gets:
+
+- your script;
+- each screen's title, headings and control names;
+- where each recorded step leads;
+- the screens' words, only when **Send page text** is on (Settings → Copilot).
+
+It takes one question to Copilot, about a minute, and the answer is kept: making the same plan again asks nothing.
+Without Copilot, the plan comes from your Do lines alone.
 **Approve and start** approves the plan exactly as it is: change it after that and it asks again.
 
-Afterwards Scenecast writes `reset.md` (each change undone, and a checklist that only looks), and once the demo is
+Afterwards Scenecast writes `reset.md`: each change undone, the state your demo starts in (what's switched on or off,
+the mode picked, the theme, as your first screens show it) set first, and a checklist that only looks. If a later
+screen shows something switched that no step of your plan switches, it says which step to add. Once the demo is
 built, the finish: your script for the presenter guide with its Do lines in presenter keys, ⌥1–⌥9 on your beats, the
 focus points, and one page to look at (`.out/review/index.html`): every screen, the timings (how long each beat takes
 to say against the time your script gives it), and anything that needs you. One walkthrough works the same way
