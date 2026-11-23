@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage } from './browser.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
@@ -92,7 +92,7 @@ test('a profile another browser has open is in use; a stale lock is not', { skip
 test('capture options: a profile by name lives under ~/.stuntdouble/capture; the channel follows the demo\'s browser', () => {
   assert.equal(captureOpts({}).profile, profileDir('default'));
   assert.equal(captureOpts({ capture: { profile: 'demo-tenant' } }).profile, profileDir('demo-tenant'));
-  assert.equal(captureOpts({ capture: { profile: '/tmp/x' } }).profile, '/tmp/x');
+  assert.equal(captureOpts({ capture: { profile: '/tmp/x' } }).profile, resolve('/tmp/x'));
   assert.equal(captureOpts({ chrome: { browser: 'edge' } }).channel, 'msedge');
   assert.equal(captureOpts({}).window, 'auto');
 });
