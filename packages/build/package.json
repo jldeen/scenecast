@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/build",
-  "version": "0.5.3",
+  "version": "0.5.4-rc.1",
   "description": "StuntDouble's Rust binary (the format, the build, the CLI), prebuilt for each OS and CPU as an optional dependency: binaryPath() finds it. The platform packages are listed as optional dependencies only in a published build (scripts/stuntdouble-pack.mjs --for-npm), never while @stuntdouble is unclaimed on npm.",
   "type": "module",
   "license": "MIT",
