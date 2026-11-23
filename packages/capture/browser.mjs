@@ -57,7 +57,9 @@ export function browserApp(channel = 'chrome') {
 
 // The window mode that draws off the screen on this OS.
 export const platformWindow = (platform = process.platform) => platform === 'win32' ? 'offscreen' : 'minimized';
-export const otherWindow = mode => mode === 'minimized' ? 'offscreen' : mode === 'offscreen' ? 'minimized' : null;
+// The mode to try when this one doesn't draw here. Windows has none: a minimized window there passes a short probe
+// and then barely draws under work (measured: 3 fps, screenshots timing out).
+export const otherWindow = (mode, platform = process.platform) => mode === 'minimized' ? 'offscreen' : mode === 'offscreen' && platform !== 'win32' ? 'minimized' : null;
 // Far off every display: macOS and Windows both keep a window there when the program places it.
 const OFF = { left: -32000, top: -32000 };
 
@@ -292,7 +294,17 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     const { targetId } = await top.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: true, width: size.width + bars.x, height: size.height + bars.y,
       ...(st === 'minimized' ? { windowState: 'minimized' } : st === 'offscreen' ? OFF : {}) });
     await place(targetId, st);
-    return prepare(await pageOf(targetId), { light: lt, focus, emulate: vp });
+    const p = await prepare(await pageOf(targetId), { light: lt, focus, emulate: vp });
+    // A page at its window's size: the window fitted from its own bars (the anchor's are wrong where it starts
+    // minimized, as on Windows). A minimized window can't be sized; it keeps the size it was made at.
+    if (!vp && st !== 'minimized') {
+      const [ow, oh, iw, ih] = await p.evaluate(() => [outerWidth, outerHeight, innerWidth, innerHeight]).catch(() => [0, 0, 0, 0]);
+      if (iw && (Math.abs(iw - size.width) > 1 || Math.abs(ih - size.height) > 1)) {
+        const w = await top.send('Browser.getWindowForTarget', { targetId }).catch(() => null);
+        if (w) await top.send('Browser.setWindowBounds', { windowId: w.windowId, bounds: { width: size.width + ow - iw, height: size.height + oh - ih } }).catch(() => {});
+      }
+    }
+    return p;
   };
   // One window made at a time (two made at once could both be handed the same page); they load side by side.
   const open = async (target, opts) => {
@@ -307,10 +319,17 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   let fellBack = null;
   if (win === 'auto') {
     const want = { width: 800, height: 600 };
-    const trial = async m => { const p = await open(PROBE_URL, { window: m, viewport: null, ...want }); const r = await probe(p).catch(() => null); await p.close().catch(() => {}); return windowTrouble(m, r, want); };
+    // Up to three probes: a browser still starting draws slowly at first (measured: 11 fps on a busy CI runner).
+    const trial = async m => {
+      const p = await open(PROBE_URL, { window: m, viewport: null, ...want });
+      let why = null;
+      for (let i = 0; i < 3; i++) { why = windowTrouble(m, await probe(p).catch(() => null), want); if (!why) break; await sleep(700); }
+      await p.close().catch(() => {});
+      return why;
+    };
     const why = await trial(mode);
     if (why) {
-      const alt = otherWindow(mode), why2 = alt ? await trial(alt) : 'no other mode';
+      const alt = otherWindow(mode), why2 = alt ? await trial(alt) : 'no other mode here';
       fellBack = { from: mode, to: why2 ? null : alt, why, ...(why2 ? { altWhy: why2 } : {}) };
       log(`capture browser: ${mode} windows won't do here (${why})${why2 ? `; ${alt} won't either (${why2})` : `: using ${alt} windows`}`);
       if (!why2) mode = alt;

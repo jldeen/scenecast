@@ -25,8 +25,10 @@ test("an off-screen window the system moved onto a display won't do", () => {
 test('each OS starts with the mode that draws off the screen there, and falls back to the other', () => {
   assert.equal(platformWindow('darwin'), 'minimized');
   assert.equal(platformWindow('win32'), 'offscreen');
-  assert.equal(otherWindow('minimized'), 'offscreen');
-  assert.equal(otherWindow('offscreen'), 'minimized');
+  assert.equal(otherWindow('minimized', 'darwin'), 'offscreen');
+  assert.equal(otherWindow('offscreen', 'darwin'), 'minimized');
+  // Windows: a minimized window passes a short probe and then barely draws; never the fallback there.
+  assert.equal(otherWindow('offscreen', 'win32'), null);
   assert.equal(otherWindow('visible'), null);
 });
 
