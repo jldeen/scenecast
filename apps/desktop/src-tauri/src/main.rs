@@ -1917,8 +1917,8 @@ fn use_bundled_engine() {
 /// with none to end (CI's virtual Macs have no GPU process): the web process ends and the page loads again.
 #[cfg(all(target_os = "macos", feature = "webdriver"))]
 #[tauri::command]
-fn test_recover_window(window: tauri::WebviewWindow) -> String {
-    gpu_watch::recover(&window, &[])
+fn test_recover_window(window: tauri::WebviewWindow) -> i32 {
+    gpu_watch::restart_page(&window)
 }
 
 fn main() {
