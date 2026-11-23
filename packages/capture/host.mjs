@@ -61,7 +61,7 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   const started = pages.length ? await startRecorder(pages[0], port).catch(e => String(e.message || e)) : 'no apps';
   const info = await cb.info();
   return say({ pid: process.pid, phase: started === 'agent started' ? 'recording-ready' : 'failed', at: new Date().toISOString(), profile: o.profile,
-    mode: info.mode, fellBack: info.fellBack, startMs: info.startMs, cdp: info.port, apps: landed.map(l => ({ id: l.id, at: l.at })), ...(signIn.length ? { signIn } : {}),
+    mode: info.mode, fellBack: info.fellBack, startMs: info.startMs, cdp: info.port, browserPid: info.pid, apps: landed.map(l => ({ id: l.id, at: l.at })), ...(signIn.length ? { signIn } : {}),
     ...(started === 'agent started' ? {} : { error: started }) });
 }
 
@@ -72,7 +72,7 @@ export async function start(demo, { waitS = 120 } = {}) {
   rmSync(stateFile(demo), { force: true });
   mkdirSync(demo.out, { recursive: true });
   const out = openSync(logFile(demo), 'a');
-  const k = spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--demo', demo.dir], { detached: true, stdio: ['ignore', out, out], env: process.env });
+  const k = spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--demo', demo.dir], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env: process.env });
   k.unref();
   for (let i = 0; i < waitS * 2; i++) {
     await sleep(500);
@@ -89,6 +89,8 @@ export async function stop(demo) {
   try { process.kill(s.pid, 'SIGTERM'); } catch (e) {}
   for (let i = 0; i < 40 && alive(s.pid); i++) await sleep(250);
   if (alive(s.pid)) try { process.kill(s.pid, 'SIGKILL'); } catch (e) {}
+  // On Windows a stopped process runs none of its exit handlers: the browser it started goes too.
+  if (s.browserPid && alive(s.browserPid)) { try { process.kill(s.browserPid); } catch (e) {} for (let i = 0; i < 20 && alive(s.browserPid); i++) await sleep(250); }
   rmSync(stateFile(demo), { force: true });
   return { ok: true, stopped: s.pid };
 }

@@ -16,7 +16,8 @@
 //     opts: profile (folder; null = throwaway), channel ('chrome' | 'msedge'),
 //           window ('auto' | 'minimized' | 'offscreen' | 'visible'), viewport ({ width, height, dpr }: emulated),
 //           light (true: pages draw light, as captures are), zoom (page zoom, throwaway profiles only),
-//           flags (more Chrome switches, e.g. an app pack's), extension (an unpacked folder), mockKeychain, log
+//           flags (more Chrome switches, e.g. an app pack's), extension (an unpacked folder), mockKeychain,
+//           launch ('auto' | 'open' | 'direct': on macOS, through open unless on CI), log
 //   cb.open(app | url, { light, viewport, window, width, height }) → Page   a window of its own, loaded
 //   cb.twins(app | url, n, opts) → Page[]          n windows of one app at once, for side sweeps in parallel
 //   cb.probe(page) → { raf, timer250, fonts, dark, hidden, size, screen, dpr }
@@ -27,7 +28,7 @@
 //   launchRealChrome({ zoom, channel, log }) → { browser, ctx, newPage(), close() }   the checker's shape (Phase 6)
 import { chromium } from 'playwright-core';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -138,7 +139,7 @@ const urlOf = t => typeof t === 'string' ? t : t && t.url || 'about:blank';
 const PROBE_URL = 'data:text/html,<title>capture probe</title><body style="margin:0;background:%23fff">';
 
 export async function openCaptureBrowser({ profile = null, channel = 'chrome', window: win = 'auto', viewport = null, light = true, zoom = 1,
-  flags: extraFlags = [], extension = null, mockKeychain, width = 1600, height = 1000, log = () => {} } = {}) {
+  flags: extraFlags = [], extension = null, mockKeychain, launch = 'auto', width = 1600, height = 1000, log = () => {} } = {}) {
   const where = browserApp(channel);
   if (!where) { log(`capture browser: no ${channel} installed here`); return null; }
   const throwaway = !profile;
@@ -171,18 +172,29 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     ...extraFlags, '--window-size=800,600', 'about:blank'];
   const t0 = Date.now();
   const chromeLog = join(dir, 'chrome.log');
-  let child;
-  // macOS: through open, hidden (-g: not brought forward, -j: launched hidden), so it never takes her screen.
-  if (where.app) child = spawn('open', [...(mode === 'visible' ? [] : ['-g', '-j']), '-n', '--stdout', chromeLog, '--stderr', chromeLog, '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
-  else child = spawn(where.exe, [...(mode === 'visible' ? [] : ['--start-minimized', `--window-position=${OFF.left},${OFF.top}`]), ...flags], { stdio: 'ignore', detached: false });
-  child.on('error', e => log(`capture browser: ${e.message}`));
-  // Up to 90 s: a browser's first start on a machine can take a while. The port it says it opened counts too.
+  let child = null, direct = false;
+  // macOS: through open, hidden (-g: not brought forward, -j: launched hidden), so it never takes her screen. On CI
+  // (and when open gets no answer) the browser's own binary instead: a CI Mac's first start through open waits on a
+  // dialog no one can answer (measured: open never answered; the binary answered in 1 to 3 s).
+  const viaOpen = !!where.app && (launch === 'open' || (launch === 'auto' && !process.env.CI));
+  const startDirect = () => {
+    direct = true;
+    const out = openSync(chromeLog, 'a');
+    child = spawn(where.exe, [...(mode === 'visible' || where.app ? [] : ['--start-minimized', `--window-position=${OFF.left},${OFF.top}`]), ...flags], { stdio: ['ignore', out, out], detached: false });
+    child.on('error', e => log(`capture browser: ${e.message}`));
+  };
+  if (viaOpen) {
+    child = spawn('open', [...(mode === 'visible' ? [] : ['-g', '-j']), '-n', '--stdout', chromeLog, '--stderr', chromeLog, '-a', where.app, '--args', ...flags], { stdio: 'ignore' });
+    child.on('error', e => log(`capture browser: ${e.message}`));
+  } else startDirect();
   let browser = null, at = port;
-  for (let i = 0; i < 450 && !browser; i++) {
-    await sleep(200);
-    try { const f = readFileSync(join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0]; if (+f) at = +f; } catch (e) {}
-    try { if ((await fetch(`http://127.0.0.1:${at}/json/version`)).ok) browser = await chromium.connectOverCDP(`http://127.0.0.1:${at}`); } catch (e) {}
-  }
+  const answer = async ms => {
+    for (const end = Date.now() + ms; !browser && Date.now() < end;) {
+      await sleep(200);
+      try { const f = readFileSync(join(dir, 'DevToolsActivePort'), 'utf8').split('\n')[0]; if (+f) at = +f; } catch (e) {}
+      try { if ((await fetch(`http://127.0.0.1:${at}/json/version`)).ok) browser = await chromium.connectOverCDP(`http://127.0.0.1:${at}`); } catch (e) {}
+    }
+  };
   const cleanup = () => { if (throwaway) try { rmSync(dir, { recursive: true, force: true }); } catch (e) {} };
   // Every process of this browser: its profile folder is in each one's command line.
   const killAll = () => {
@@ -190,10 +202,17 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     const pids = (spawnSync('pgrep', ['-f', `user-data-dir=${dir}`], { encoding: 'utf8' }).stdout || '').split(/\s+/).filter(Boolean).map(Number);
     for (const pid of pids) try { process.kill(pid); } catch (e) {}
   };
+  // Up to 90 s: a browser's first start on a machine can take a while. The port it says it opened counts too.
+  await answer(viaOpen ? 30000 : 90000);
+  if (!browser && viaOpen) {
+    log('capture browser: no answer through open in 30 s; starting its binary instead');
+    killAll(); await sleep(500); rmSync(join(dir, 'DevToolsActivePort'), { force: true }); at = port;
+    startDirect(); await answer(60000);
+  }
   if (!browser) {
     let said = ''; try { said = readFileSync(chromeLog, 'utf8').trim().split('\n').slice(-12).join('\n'); } catch (e) {}
     log(`capture browser: no answer on port ${at} in 90 s${said ? `; it said:\n${said}` : ''}`);
-    killAll(); if (child && !where.app) child.kill(); cleanup(); return null;
+    killAll(); if (child && direct) child.kill(); cleanup(); return null;
   }
   const startMs = Date.now() - t0;
   const ctx = browser.contexts()[0];
@@ -399,7 +418,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     await top.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
     if (bpid) for (let i = 0; i < 30; i++) { if (!alive(bpid.id)) break; await sleep(150); if (i === 29) try { process.kill(bpid.id, 'SIGKILL'); } catch (e) {} }
-    if (child && !where.app && child.exitCode === null) child.kill();
+    if (child && direct && child.exitCode === null) child.kill();
     killAll();
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
