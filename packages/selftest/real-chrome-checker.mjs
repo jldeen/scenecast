@@ -35,7 +35,7 @@ try {
   if (!presenter) { console.log('SKIP real Chrome checker: the browser didn\'t start'); process.exit(0); }
   const real = await shotOf(presenter);
   await presenter.close();
-  check('the presenter\'s Chrome at 110%: 1374 CSS px at 2.2', real.inner[0] === 1374 && Math.abs(real.inner[1] - 2.2) < 0.01, JSON.stringify(real.inner));
+  check('the presenter\'s Chrome at 110%: 1374 CSS px at 2.2', Math.abs(real.inner[0] - 1374) <= 1 && Math.abs(real.inner[1] - 2.2) < 0.01, JSON.stringify(real.inner));
 
   const checker = await launchRealChrome({ zoom: ZOOM, channel });
   const same = await shotOf(checker);

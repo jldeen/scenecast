@@ -1887,10 +1887,14 @@ fn webkit_gpu_pids() -> Vec<i32> {
         .collect()
 }
 
-/// For the UI test: the GPU processes, to stop them the way they got stuck on Jessica's Mac.
+/// For the UI test: the GPU processes, to stop them the way they got stuck on Jessica's Mac (the window in front first:
+/// only a window on screen is started again).
 #[cfg(all(target_os = "macos", feature = "webdriver"))]
 #[tauri::command]
-fn test_webkit_gpu_pids() -> Vec<i32> {
+fn test_webkit_gpu_pids(window: tauri::WebviewWindow) -> Vec<i32> {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
     webkit_gpu_pids()
 }
 
@@ -1899,17 +1903,17 @@ fn test_webkit_gpu_pids() -> Vec<i32> {
 /// unresponsive, couldn't kill the third, and the page kept its connection to that half-started one: blank for two
 /// hours, the page itself fine. A fresh GPU process alone left it blank; a fresh web process (Tauri reloads the page
 /// when it ends) drew again. So: end the GPU process WebKit has for the window (it can be stopped, not just slow), then
-/// the web process. Windows: reload.
+/// the web process: only when macOS says the window is on screen.
 #[tauri::command]
 async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, String> {
     scenecast_app::ai::app_log(
         "window not drawing",
-        &format!("no frame drawn for {ms} ms while on screen; starting the page again"),
+        &format!("no frame drawn for {ms} ms while the page says it's visible"),
     );
     #[cfg(target_os = "macos")]
     {
+        // (the window's web process; 1 once asked, 2 when the window really is on screen)
         let pids = std::sync::Arc::new(std::sync::Mutex::new((0i32, 0i32)));
-        // (the window's web process, 1 once asked)
         let got = pids.clone();
         webview
             .with_webview(move |wv| {
@@ -1925,7 +1929,17 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
                 } else {
                     0
                 };
-                *got.lock().expect("pids") = (web, 1);
+                // Frames stop too when the window is covered (Chrome over it while recording): WebKit pauses
+                // drawing there and still calls the page visible. Only a window macOS says is on screen counts.
+                let win = wv.ns_window() as *mut AnyObject;
+                let on_screen = !win.is_null() && {
+                    let win = unsafe { &*win };
+                    let visible: bool = unsafe { msg_send![win, isVisible] };
+                    let mini: bool = unsafe { msg_send![win, isMiniaturized] };
+                    let occlusion: usize = unsafe { msg_send![win, occlusionState] };
+                    visible && !mini && occlusion & 2 != 0
+                };
+                *got.lock().expect("pids") = (web, if on_screen { 2 } else { 1 });
             })
             .map_err(|e| e.to_string())?;
         // with_webview runs on the main thread (this command doesn't): wait for its answer.
@@ -1935,7 +1949,14 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
             }
             tokio_sleep_ms(20).await;
         }
-        let web = pids.lock().expect("pids").0;
+        let (web, seen) = *pids.lock().expect("pids");
+        if seen != 2 {
+            return Ok(serde_json::json!({ "restarted": null, "why": "not on screen" }));
+        }
+        scenecast_app::ai::app_log(
+            "window not drawing",
+            "on screen: ending the GPU and web processes",
+        );
         let gpu = webkit_gpu_pids();
         for &pid in &gpu {
             unsafe { libc::kill(pid, libc::SIGKILL) };
@@ -1947,10 +1968,11 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
         let _ = webview.reload();
         Ok(serde_json::json!({ "restarted": "reload", "gpu": gpu }))
     }
+    // Windows and Linux: logged only (WebView2 has its own GPU process recovery; a covered window stops drawing too).
     #[cfg(not(target_os = "macos"))]
     {
-        webview.reload().map_err(|e| e.to_string())?;
-        Ok(serde_json::json!({ "restarted": "reload" }))
+        let _ = webview;
+        Ok(serde_json::json!({ "restarted": null }))
     }
 }
 
