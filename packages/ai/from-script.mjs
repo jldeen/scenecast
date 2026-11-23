@@ -246,6 +246,14 @@ export function packWrite(writeFor, pack, step, field, el) {
   return null;
 }
 
+// A recorded move that would change something (send, save, approve, add).
+const writes = m => m.steps.some((s, i) => {
+  if (s.kind !== 'press') return !!writeOf(s, m.control || null, {});
+  // Enter sends what was typed, except in a search box (it only filters).
+  const typed = m.steps.slice(0, i).reverse().find(x => x.kind === 'type'), field = (typed && typed.target) || (m.control && m.control.name) || '';
+  return s.key === 'Enter' && !/search|filter|find/i.test(field);
+});
+
 // ---- the walk: intents to grounded steps, then each line's focus -------------------------------------------------
 const APPROVE = /^(approve|save|confirm|allow|ok|yes|continue|submit|done|create)\b/i;
 // The button that does what an approval verb says, when the screen words it differently: on the card the script names
@@ -273,6 +281,9 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
   const plan = { title: title || track.title || 'Demo', beats: [] };
   const lines = [];
   let started = false, curLine = null;
+  // The screens a write of the plan landed on: a way the rules add never does that write again.
+  const wrote = new Set();
+  const again = m => wrote.has(m.to) && writes(m);
 
   for (const [bi, tb] of track.beats.entries()) {
     const beat = { title: tb.title, steps: [], say: [], lines: [] };
@@ -307,7 +318,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       let r = go({ ...step, strict: true, role: opts.role });
       if ((step.kind === 'click' || step.kind === 'hover') && !r.control && !r.recorded && !step.title) {
         const strong = (sc2, name, min = 50) => { const h = walker.control(sc2, name); return h && h.score >= min; };
-        const b = !opts.maybe ? walker.bridge(id, s2 => strong(s2, step.target), 10) : null;
+        const b = !opts.maybe ? walker.bridge(id, s2 => strong(s2, step.target), 10, again) : null;
         const other = !b && !walker.find(S.app, step.target).length ? apps.find(a => a.id !== S.app && strong(scr(S.cur[a.id]), step.target, 60)) : null;
         if (other) { push({ kind: 'app', app: other.id }, from, line); id = at(); sc = scr(id); r = go(step); }
         else if (b) {
@@ -350,6 +361,12 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         if (alt) { step.target = alt.name; r = { ...r, control: alt }; }
       } else if (r.control && r.control.name && norm(r.control.name) !== norm(step.target) && step.kind !== 'type') step.target = r.control.name;
       if (step.kind === 'type') { S.typed[S.app] = step.value; if (r.control) step.target = S.field[S.app] = r.control.name; }
+      // The product's own approve button ("Save: Save skill") where the recording clicked the replica's ("Approve"):
+      // it goes where that went.
+      if (step.kind === 'click' && r.control && (!r.to || r.to === id) && APPROVE.test(step.target)) {
+        const ms = walker.moves(id).filter(m => m.steps.length === 1 && m.steps[0].kind === 'click' && APPROVE.test(m.steps[0].target));
+        if (ms.length === 1) r = { ...r, to: ms[0].to, recorded: ms[0].recorded || ms[0].steps[0].target };
+      }
       const prev = beat.steps[beat.steps.length - 1];
       if (step.kind === 'click' && prev && prev.kind === 'click' && prev.target === step.target && (prev.lands || {}).screen === id && r.to === id) return null;
       if (step.kind === 'click' && r.control && PICKED.test(r.control.role)) S.picked = cleanTarget(s.target).length > 2 ? cleanTarget(s.target) : r.control.name;
@@ -364,8 +381,12 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       if (safe) { step.safe = `${safe.what.replace(/\.$/, '')} · ${pack.id}:${safe.id}`; w = null; }
       if (pw && !w) step.writes = `${pw.what.split(/[;:(]/)[0].trim()} · ${pack.id}:${pw.id}`;
       else if (w) step.writes = pw ? `${w.what} · ${pack.id}:${pw.id}` : w.what;
-      if (w || pw) S.wrote = { kind: w ? w.kind : 'change', picked: S.picked, target: step.target };
+      if (w || pw) { S.wrote = { kind: w ? w.kind : 'change', picked: S.picked, target: step.target }; if (r.to) wrote.add(r.to); }
       if (to !== id) step.lands = { screen: to, text: landText(sc, scr(to)) || landText(null, scr(to)) };
+      // The same write again right after it, going nowhere (a proposal that says it twice): once. "Twice" in her script
+      // goes somewhere each time, and stays.
+      const last = beat.steps[beat.steps.length - 1];
+      if (step.writes && last && last.writes && formatStep(last) === formatStep(step) && to === id) return null;
       S.cur[S.app] = to;
       const done = append(step, from);
       if (step.kind === 'press' && r.stream) append({ kind: 'wait' }, null);
@@ -391,7 +412,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           if (!to) continue;
           if (app2 !== S.app || !started) { push({ kind: 'app', app: app2 }, it.from, line); mark(); }
           if (S.cur[app2] !== to) {
-            const b = walker.bridge(S.cur[app2], (s2, id2) => id2 === to, 8);
+            const b = walker.bridge(S.cur[app2], (s2, id2) => id2 === to, 8, again);
             if (b && b.steps.length) {
               flag('added', `Beat key ⌥${it.beat} starts on "${to}": ${b.steps.length === 1 ? 'a step' : `${b.steps.length} steps`} your script leaves out, as recorded: ${b.steps.map(formatStep).join(' → ')}`, where(line));
               for (const bs of b.steps) { push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, '(not in your script: as recorded)', line); mark(); }
@@ -446,7 +467,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           if (value == null && walker) { const ms = walker.moves(at()).filter(m => m.steps[0].kind === 'type'); const m = ms.find(m => box && norm(m.steps[0].target || '') === norm(box.name)) || ms[0]; value = m ? m.steps[0].value : null; }
           if (value == null) { push({ kind: 'manual', what: `type into ${it.into ? `"${it.into}"` : 'the field'}` }, it.from, line); continue; }
           // The words of one of her prompts: that prompt (it's sent, and the plan says which).
-          const p = (track.prompts || []).find(p => p.text && norm(p.text) === norm(value));
+          const nv = norm(value), p = (track.prompts || []).find(p => p.text && (norm(p.text) === nv || (nv.length > 30 && (nv.startsWith(norm(p.text).slice(0, 40)) || norm(p.text).startsWith(nv.slice(0, 40))))));
           const typed = push({ kind: 'type', value, target: box ? box.name : it.into && it.into !== 'search' ? it.into : null }, it.from, line);
           if (p && typed) { S.prompt = { n: p.n, label: p.label || '', text: p.text }; S.unsent = typed; }
           mark();

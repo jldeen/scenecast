@@ -76,7 +76,8 @@ function parseJson(text) {
 // cacheDir: answers kept by what was asked (the task, its instructions, the input and the model), so asking the same
 // thing again sends nothing. stats: how many questions went to the model, how many came from the cache, and how long
 // the model took.
-export async function makeModel({ kind, sentDir, settings = {}, on = () => {}, cacheDir = null, timeoutMs } = {}) {
+// cacheOnly: answer from the cache or not at all (evaluations that mustn't ask again).
+export async function makeModel({ kind, sentDir, settings = {}, on = () => {}, cacheDir = null, timeoutMs, cacheOnly = false } = {}) {
   kind = kind || process.env.SCENECAST_AI_MODEL || 'copilot';
   let custom = null;
   if (kind !== 'copilot' && kind !== 'stub') custom = await import(pathToFileURL(resolve(kind)).href);
@@ -92,6 +93,7 @@ export async function makeModel({ kind, sentDir, settings = {}, on = () => {}, c
       const key = cacheDir ? createHash('sha256').update(JSON.stringify([task, SYSTEM[task] || '', sent, kind, settings.model || 'auto'])).digest('hex').slice(0, 32) : null;
       const cached = key && join(cacheDir, `${task}-${key}.json`);
       if (cached && existsSync(cached)) { stats.cached++; on({ event: 'cached', task, file: cached }); return JSON.parse(readFileSync(cached, 'utf8')).answer; }
+      if (cacheOnly) throw new Error('not in the cache');
       const keep = answer => { if (cached && answer != null) { mkdirSync(cacheDir, { recursive: true }); writeFileSync(cached, JSON.stringify({ task, at: new Date().toISOString(), answer }, null, 1)); } return answer; };
       const record = { task, model: kind === 'copilot' ? `copilot (${settings.model || 'auto'})` : kind, at: new Date().toISOString(), pageText: prompts.pageText, system: SYSTEM[task], prompt: sent };
       let file = null;
