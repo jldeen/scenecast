@@ -230,6 +230,14 @@ export function writeOf(step, el, at = {}) {
 }
 
 // A pack's write for a step: by the control's name, its visible words (before a ":"), or its test id.
+// A step the app's pack says only looks like a change (its safe list: an opener for a picker or a menu): the packs'
+// own safeFor() when they have it, by the step's name and the part of it before ":".
+export function packSafe(packs, pack, step, field, el) {
+  if (!packs || !pack || !(pack.safe || []).length) return null;
+  const name = String(step.target || '');
+  if (packs.safeFor) { for (const t of [step, { ...step, target: name.split(':')[0].trim() }]) { const s = packs.safeFor(pack, t, field); if (s) return s; } return null; }
+  return packs.writeFor ? packWrite(packs.writeFor, { ...pack, writes: pack.safe }, step, field, el) : null;
+}
 export function packWrite(writeFor, pack, step, field, el) {
   const name = String(step.target || '');
   const tries = [step, { ...step, target: name.split(':')[0].trim() }, { ...step, kind: step.kind === 'click' && el && /^(switch|checkbox)$/.test(el.role) ? 'click' : step.kind }];
@@ -250,7 +258,8 @@ function approvalAlt(sc, target, card) {
 }
 const PICKED = /^(option|listitem|row|gridcell|treeitem|menuitem)$/;
 
-export function planFromTrack(track, { walker = null, apps = [], title, trace = null, packs = null } = {}) {
+// open: the plan opens where the demo starts (off for the draft Copilot gets: what her words alone give).
+export function planFromTrack(track, { walker = null, apps = [], title, trace = null, packs = null, open = true } = {}) {
   apps = (walker ? walker.apps : apps).map(a => ({ ...a, names: [...(a.names || []), ...(((packs || {}).forApp || {})[a.id] || {}).names || []] }));
   const ctx = { apps, prompts: track.prompts || [] };
   const flags = [], seen = new Set();
@@ -263,15 +272,17 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
   const appTitle = id => (apps.find(a => a.id === id) || {}).title || id;
   const plan = { title: title || track.title || 'Demo', beats: [] };
   const lines = [];
-  let started = false;
+  let started = false, curLine = null;
 
-  for (const tb of track.beats) {
+  for (const [bi, tb] of track.beats.entries()) {
     const beat = { title: tb.title, steps: [], say: [], lines: [] };
     plan.beats.push(beat);
-    const where = l => ({ beat: tb.n, line: l ? l.id : null });
+    curLine = `${bi + 1}.1`;
+    const where = l => ({ beat: tb.n, line: l ? l.id : null, at: curLine });
     const append = (step, from) => {
       if (from && !step.script && norm(from) !== norm(formatStep(step))) step.script = clean(from).slice(0, 160);
       step.text = formatStep(step);
+      step.line = curLine;
       beat.steps.push(step);
       started = true;
       return step;
@@ -349,7 +360,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       const pack = ((packs || {}).forApp || {})[S.app];
       const pw = pack && packs.writeFor ? packWrite(packs.writeFor, pack, step, field, r.control) : null;
       // What the pack knows only looks like a change ("Add content to…" opens a picker): no write, no asking.
-      const safe = !pw && pack && packs.writeFor && (pack.safe || []).length ? packWrite(packs.writeFor, { ...pack, writes: pack.safe }, step, field, r.control) : null;
+      const safe = !pw ? packSafe(packs, pack, step, field, r.control) : null;
       if (safe) { step.safe = `${safe.what.replace(/\.$/, '')} · ${pack.id}:${safe.id}`; w = null; }
       if (pw && !w) step.writes = `${pw.what.split(/[;:(]/)[0].trim()} · ${pack.id}:${pw.id}`;
       else if (w) step.writes = pw ? `${w.what} · ${pack.id}:${pw.id}` : w.what;
@@ -365,8 +376,10 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       const span = [], hints = [], clicked = [];
       const mark = () => { const k = `${S.app}:${at()}`; if (span[span.length - 1] !== k) span.push(k); };
       mark();
-      for (const it of intentsOf(text, ctx, opts)) {
+      // A line's steps as Copilot proposed them (script-plan.mjs) come already read; her own words are read here.
+      for (const it of Array.isArray(text) ? text : intentsOf(text, ctx, opts)) {
         if (opts.only && !opts.only(it)) continue;
+        if (it.manual) { push({ kind: 'manual', what: it.manual }, it.from, line); continue; }
         if (it.note) continue;
         if (it.unclear) { flag('unclear', `"${it.unclear}": which control? Name it in your script and the plan follows it`, where(line)); continue; }
         if (it.hint) { hints.push(it.hint.around === 'card' && walker ? { ...it.hint, on: at() } : it.hint); continue; }
@@ -376,7 +389,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           const fb = walker && (walker.flow.beats || [])[it.beat];
           const app2 = fb && fb.active, to = app2 && (fb.states || {})[app2];
           if (!to) continue;
-          if (app2 !== S.app) { push({ kind: 'app', app: app2 }, it.from, line); mark(); }
+          if (app2 !== S.app || !started) { push({ kind: 'app', app: app2 }, it.from, line); mark(); }
           if (S.cur[app2] !== to) {
             const b = walker.bridge(S.cur[app2], (s2, id2) => id2 === to, 8);
             if (b && b.steps.length) {
@@ -422,9 +435,20 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           continue;
         }
         if (it.type !== undefined) {
+          if (it.into && it.into !== 'search' && walker && !walker.control(scr(at()), it.into, 'field')) {
+            const other = apps.find(a => a.id !== S.app && walker.control(scr(S.cur[a.id]), it.into, 'field') && walker.control(scr(S.cur[a.id]), it.into, 'field').score >= 60);
+            if (other) { push({ kind: 'app', app: other.id }, it.from, line); mark(); }
+          }
           const sc = scr(at());
           const box = sc && it.into ? (walker.control(sc, it.into === 'search' ? 'search' : it.into, 'field') || {}).el || (it.into === 'search' ? searchBox(sc.controls) : null) : null;
-          push({ kind: 'type', value: it.type, target: box ? box.name : it.into && it.into !== 'search' ? it.into : null }, it.from, line);
+          // "Type in the field" with no words: what was recorded in it.
+          let value = it.type;
+          if (value == null && walker) { const ms = walker.moves(at()).filter(m => m.steps[0].kind === 'type'); const m = ms.find(m => box && norm(m.steps[0].target || '') === norm(box.name)) || ms[0]; value = m ? m.steps[0].value : null; }
+          if (value == null) { push({ kind: 'manual', what: `type into ${it.into ? `"${it.into}"` : 'the field'}` }, it.from, line); continue; }
+          // The words of one of her prompts: that prompt (it's sent, and the plan says which).
+          const p = (track.prompts || []).find(p => p.text && norm(p.text) === norm(value));
+          const typed = push({ kind: 'type', value, target: box ? box.name : it.into && it.into !== 'search' ? it.into : null }, it.from, line);
+          if (p && typed) { S.prompt = { n: p.n, label: p.label || '', text: p.text }; S.unsent = typed; }
           mark();
           continue;
         }
@@ -468,20 +492,29 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
     };
 
     const beatRun = { span: [], hints: [], clicked: [] };
+    // Copilot read this beat (its lines carry the steps it proposed): its words are already in those steps.
+    const byModel = tb.lines.some(l => Array.isArray(l.intents));
     // Where the beat starts comes first: its Screen line's app or beat key ("pull request #4 (⌥7)"), then its Do.
     const nav = it => it.app || it.beat != null;
-    if (tb.screen) beatRun.span.push(...run(tb.screen, null, { descriptive: true, only: nav }).span);
-    if (tb.do.length) { const r = run(tb.do.filter(d => !d.level).map(d => d.text).join('. '), null); beatRun.span.push(...r.span); beatRun.hints.push(...r.hints); beatRun.clicked = r.clicked; }
-    if (tb.screen && !tb.lines.some(l => l.do.length || l.screen)) { const r = run(tb.screen, null, { descriptive: true, only: it => !nav(it) }); beatRun.span.push(...r.span); beatRun.hints.push(...r.hints); }
+    if (tb.screen && !byModel) beatRun.span.push(...run(tb.screen, null, { descriptive: true, only: nav }).span);
+    if (tb.do.length && !byModel) { const r = run(tb.do.filter(d => !d.level).map(d => d.text).join('. '), null); beatRun.span.push(...r.span); beatRun.hints.push(...r.hints); beatRun.clicked = r.clicked; }
+    if (tb.screen && !tb.lines.some(l => l.do.length || l.screen)) { const r = run(tb.screen, null, { descriptive: true, only: it => !nav(it) && (!byModel || it.hint) }); beatRun.span.push(...r.span); beatRun.hints.push(...r.hints); }
     const given = assignHints(beatRun.hints, tb.lines);
     tb.lines.forEach((l, k) => {
-      const r1 = l.do.length ? run(l.do.join('. '), l) : { span: [], hints: [], clicked: [] };
-      const r2 = l.screen ? run(l.screen, l, { descriptive: true }) : { span: [], hints: [], clicked: [] };
-      const own = l.do.length || l.screen;
+      curLine = `${bi + 1}.${k + 1}`;
+      const mine = Array.isArray(l.intents);
+      const r1 = mine ? run(l.intents, l) : l.do.length ? run(l.do.join('. '), l) : { span: [], hints: [], clicked: [] };
+      const r2 = l.screen ? run(l.screen, l, { descriptive: true, ...(mine ? { only: it => it.hint } : {}) }) : { span: [], hints: [], clicked: [] };
+      // What Copilot says the line points at: names and headings on its screen, or her own words.
+      const pts = (l.points || []).map(p => ({ texts: (Array.isArray(p.texts) ? p.texts : [p.text]).map(clean).filter(Boolean), loose: true, ...(p.screen ? { on: p.screen } : {}) })).filter(h => h.texts.length);
+      // What her own Do words point at ("Approve on the Copy file card", "Point at Share") stays, with Copilot's steps.
+      const said = mine && l.do.length ? intentsOf(l.do.join('. '), ctx).filter(x => x.hint).map(x => x.hint) : [];
+      r1.hints.unshift(...pts, ...said);
+      const own = (mine && l.intents.length) || l.do.length || l.screen;
       // A line whose Do starts with switching apps is said on the new app; one that starts on screen ("Seth's post
       // is on screen. Then ⌥C") starts where it is.
       const firstClause = clausesOf([...l.do, l.screen].filter(Boolean).join('. '))[0] || '';
-      const switches = /^(?:⌥|ctrl\s*\+\s*alt\s*\+\s*)[a-z0-9]\b/i.test(firstClause) && intentsOf(firstClause, ctx).some(x => x.app);
+      const switches = mine ? !!(l.intents[0] && l.intents[0].app) : /^(?:⌥|ctrl\s*\+\s*alt\s*\+\s*)[a-z0-9]\b/i.test(firstClause) && intentsOf(firstClause, ctx).some(x => x.app);
       const r1s = switches ? r1.span.slice(1) : r1.span;
       // In order, each screen where the line last is (after "close it", back on the page).
       const all = [...(own ? [] : beatRun.span), ...r1s, ...r2.span, `${S.app}:${at()}`];
@@ -490,6 +523,14 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       beat.lines.push({ text: l.say, focus: [] });
       beat.say.push(l.say);
     });
+  }
+  // The plan opens where the demo starts (the app its first beat shows) unless its first beat opens on an app of its
+  // own: the first beat's lines are said there.
+  const b0 = walker && (walker.flow.beats || [])[0];
+  const opens = plan.beats[0] && plan.beats[0].steps[0];
+  if (open && b0 && b0.active && plan.beats[0] && !(opens && opens.kind === 'app')) {
+    const start = walker.start(b0.active);
+    plan.beats[0].steps.unshift({ kind: 'app', app: b0.active, text: formatStep({ kind: 'app', app: b0.active }), line: '1.1', ...(start ? { lands: { screen: start, text: landText(null, scr(start)) } } : {}) });
   }
 
   // Focus: the script's own targets first ("lit", "Point at", a hover card), then what on the line's screens backs its
@@ -547,6 +588,8 @@ function focusFor(x, walker, onPath, weight, typed) {
     if (!on) for (const id of ids) {
       const m = walker.moves(id).find(m => m.steps.length === 1 && !onPath.has(m.to) && texts.every(t => has(walker.shown(m.to), t)));
       if (m) { on = m.to; via = { ...m.steps[0], text: formatStep(m.steps[0]) }; break; }
+      const o = walker.opened(id);
+      if (o && o.label && texts.every(t => has(o.screen, t))) { on = id; via = { kind: 'click', target: o.label, text: `Click "${o.label}"` }; break; }
     }
     if (!on && h.loose) return null;
     return { texts, ...(h.around ? { around: h.around } : {}), ...(h.mark ? { mark: h.mark, dir: h.dir || 'sw' } : {}), ...(via ? { via } : {}), ...(on ? { on } : {}) };

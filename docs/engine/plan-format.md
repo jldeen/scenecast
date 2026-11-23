@@ -86,7 +86,8 @@ keeps to these rules:
 
 ## The reset (`reset.md`)
 
-Made from the plan's writes, in reverse (`scenecast ai reset`). The capture pass runs it before and after a run.
+Made from the plan's writes, in reverse, and from the state the demo's first screens show (`scenecast ai reset`). The
+capture pass runs it before and after a run: Undo, then Set first, then Check.
 
 ```markdown
 # Reset: Supplier delay
@@ -101,14 +102,25 @@ Made from the plan's writes, in reverse (`scenecast ai reset`). The capture pass
   Undoes: beat 3, Press Enter; beat 1, Press Enter
   Note: do these steps 2 times, once for each
 
+## Set first
+
+- chat: "Notes" is picked (Chat | Notes)
+  Set: "Notes" · chat-app:composer-mode
+  Opens: https://chat.example.com/
+  Seen: beat 1, chat-home
+
 ## Check
 
 - chat: Added doesn't list the skill
   From: beat 2
+- chat: "Notes" is picked (Chat | Notes)
+  From: start: beat 1, chat-home
 
 ## Needs you
 
 - Beat 1: Press Enter: part of its undo is by hand (delete the task "Supplier delay" from Recent)
+- Beat 3: "Sync" is off before Click "Manage all" and on after it, and no step turns it on: a run of your script won't
+  show that. Add Click "Enable Sync" after it
 ```
 
 - **Undo**, per app: plan steps, run the same way as the plan's. `You:` is a step for a person. `Undoes:` says which
@@ -116,14 +128,21 @@ Made from the plan's writes, in reverse (`scenecast ai reset`). The capture pass
   private pack's API undo, named and not written out (its host and IDs stay in the pack): the capture pass calls it in
   its own signed-in session with what its run made (`{taskId}`, `{skill}`), and the `Note:` has the steps by hand for
   when it can't. What a run leaves besides its writes (saved memories) is undone only when its check finds something.
-- **Check**: read-only. Each line is something the screen shows, and none of them clicks anything that changes.
-- **Needs you**: what the reset can't do on its own (an undo by hand, or one nobody has tried yet).
+- **Set first**: the state the demo starts in, as the first screen that shows each thing has it, in the plan's order:
+  what's switched on or off, the option picked (Chat | Cowork), and the theme. `Set:` is the control that changes it
+  and the app pack's write for it (only when the pack knows one), `Opens:` where, `Seen:` the screen it's read from.
+  The capture pass sets each one that isn't already, then checks it.
+- **Check**: read-only. Each line is something the screen shows, and none of them clicks anything that changes. With
+  the writes' checks come the start state's (`From: start: …`): the settings above, versions ("is version 1.4.9"),
+  what a list of switches holds, the theme each app renders in, and what the demo points at on an app's first screen.
+- **Needs you**: what the reset can't do on its own (an undo by hand, or one nobody has tried yet), and a state that a
+  later screen shows changed with no step of the plan between: a run can't show it until the plan has that step.
 
 Names come from the captures (the task's title, the skill's name). Copilot can name things differently on each run,
 so the capture pass fills in what its own run made.
 
-`packages/ai/reset.mjs`: `resetFor(plan, { walker, packs })`, `formatReset(r)`, `parseReset(text)` (its Undo as a plan,
-and its checks).
+`packages/ai/reset.mjs`: `resetFor(plan, { walker, packs })`, `formatReset(r)`, `parseReset(text)` (`{ undo, set, checks,
+needs }`: its Undo as a plan). `packages/ai/start.mjs`: `startState(plan, { walker, packs })` (`{ facts, changes }`).
 
 ## In code
 

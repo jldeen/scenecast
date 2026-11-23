@@ -23,7 +23,7 @@ const sha = t => createHash('sha256').update(String(t)).digest('hex');
 export async function loadPacks(demo) {
   try {
     const m = await import('../apps/index.mjs');
-    return { forApp: m.packsForDemo(demo.cfg), writeFor: m.writeFor };
+    return { forApp: m.packsForDemo(demo.cfg), writeFor: m.writeFor, safeFor: m.safeFor || null };
   } catch (e) { return null; }
 }
 
@@ -35,7 +35,8 @@ function save(demo, plan, review) {
   return text;
 }
 
-export async function planFromScript({ demo, file, packs, emit = () => {} }) {
+// model: makeModel()'s, to have Copilot read the script with the screens (script-plan.mjs); without one, the rules alone.
+export async function planFromScript({ demo, file, packs, model = null, settings = {}, emit = () => {} }) {
   if (!existsSync(file)) throw new Error(`${file}: there\u2019s no such file`);
   const track = readTalkTrack(file);
   const lines = track.beats.reduce((n, b) => n + b.lines.length, 0);
@@ -44,8 +45,9 @@ export async function planFromScript({ demo, file, packs, emit = () => {} }) {
   packs = packs === undefined ? await loadPacks(demo) : packs;
   const walker = walkerFromDemo(demo);
   emit({ event: 'screens', recorded: !!walker, screens: walker ? walker.states.length : 0 });
-  const { plan, flags } = planFromTrack(track, { walker, apps: demo.cfg.apps || [], packs });
-  const review = { at: new Date().toISOString(), from: basename(file), checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags, prompts: track.prompts };
+  const { planWithModel } = await import('./script-plan.mjs');
+  const { plan, flags, model: asked } = model && walker ? await planWithModel(track, { walker, model, packs, apps: demo.cfg.apps || [], settings, emit }) : planFromTrack(track, { walker, apps: demo.cfg.apps || [], packs });
+  const review = { at: new Date().toISOString(), from: basename(file), checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags, prompts: track.prompts, ...(asked ? { model: asked } : {}) };
   const text = save(demo, plan, review);
   // Her words stay with the demo: the source the plan came from (the app shows it as the material). Material she wrote
   // herself isn't replaced.

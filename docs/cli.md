@@ -205,6 +205,7 @@ scenecast ai status                   # signed in? the model, the settings, Copi
 scenecast ai settings --set pageText=false --set model=auto
 scenecast ai plan   --demo <dir>      # plan.md from ai.json's goal and/or source.md, and each app's start screen
 scenecast ai plan   --demo <dir> --script <file>        # Make it from my script: Word, Markdown, RunLines or text
+                                                        # (Copilot proposes the steps when signed in; --model stub: rules only)
 scenecast ai plan   --demo <dir> --walkthrough <recording.json> [--script <file>]   # the same from one walkthrough
 scenecast ai approve --demo <dir>     # approve plan.md as it is (its writes); any edit needs approving again
 scenecast ai reset  --demo <dir>      # reset.md: each write undone, and a read-only checklist
