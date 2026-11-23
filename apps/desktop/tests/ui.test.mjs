@@ -130,7 +130,7 @@ async function shot(name) {
   await b.saveScreenshot(join(SHOTS, `${name}.png`));
 }
 // The app's own state: whether a demo's job (the quick checks it starts after a build, a script or an edit) runs.
-const checksAfter = (since, id = 'fixture-demo') => b.execute((since, id) => { const j = window.__scenecast?.jobs?.[id]?.checks; return j && j.startedAt > since && !window.__scenecast.jobs[id].running.checks ? (j.outcome || { error: j.error, lines: (j.lines || []).slice(-30) }) : null; }, since, id);
+const checksAfter = (since, id = 'fixture-demo') => b.execute((since, id) => { const j = window.__scenecast?.jobs?.[id]?.checks; return j && j.startedAt > since && !window.__scenecast.jobs[id].running.checks && (j.outcome || j.error) ? (j.outcome || { error: j.error, lines: (j.lines || []).slice(-30) }) : null; }, since, id);
 // Why a checks run didn't pass: its failing items, or its error with the end of its output and the app's log.
 const checksWhy = o => o?.items ? JSON.stringify(o.items.filter(i => i.status === 'fail')) : `error: ${o?.error}\n${(o?.lines || []).map(l => typeof l === 'string' ? l : JSON.stringify(l)).join('\n')}\n--- app output ---\n${appLog.join('').slice(-3000)}`;
 // The checks the app starts on its own after a step that began at `since`: wait for them to start and end.
@@ -343,6 +343,24 @@ try {
   const failing = await b.execute(() => [...document.querySelectorAll('[aria-label=Checks] [data-status=fail]')].map(li => li.innerText.replace(/\s+/g, ' ')).join('; '));
   check('the build runs the quick checks on its own, and they pass', (await attr('checks-done', 'data-pass')) === 'true' && (await attr('checks-done', 'data-quick')) === 'true', `${await text('checks-done')} ${failing}`);
   check('no "run every check" outside Export', !(await exists('checks-full')));
+  // The app says a job is done a moment before the page has its answer (Nov 23: "the script runs the quick checks on
+  // its own: error: null", though they passed). That word coming first while the page waits: the job reads running
+  // until its answer is in place, never finished with no result.
+  {
+    const t0 = await b.execute(() => Date.now());
+    await click('checks-quick');
+    await waitFor('the checks to start', () => b.execute(t0 => (window.__scenecast.jobs['fixture-demo']?.checks?.startedAt || 0) > t0, t0), 20000, 50);
+    await b.execute(() => window.__TAURI__.event.emit('job-state', { demo: 'fixture-demo', job: 'checks', running: false }));
+    await sleep(200);
+    const seen = [];
+    for (let i = 0; i < 600; i++) {
+      const st = await b.execute(() => { const J = window.__scenecast.jobs['fixture-demo']; return { running: !!J.running.checks, result: !!(J.checks.outcome || J.checks.error) }; });
+      seen.push(st);
+      if (!st.running) break;
+      await sleep(100);
+    }
+    check('a job the app says is done reads running until its answer is in place', seen.length > 1 && seen[0].running && seen.every(x => x.running || x.result), JSON.stringify(seen.slice(0, 3).concat(seen.slice(-2))));
+  }
   await shot('07-build');
   lap('build');
 

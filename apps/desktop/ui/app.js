@@ -213,6 +213,7 @@ async function step(job, cmd, args, after) {
   const id = args?.id || S.id;
   const token = {};
   J(id).running[job] = true;
+  (J(id).owned ??= {})[job] = token;
   J(id)[job] = { ...(J(id)[job] || {}), stages: [], lines: [], items: [], events: [], error: null, outcome: null, startedAt: Date.now(), token };
   const mine = () => J(id)[job]?.token === token;
   rerender();
@@ -230,7 +231,7 @@ async function step(job, cmd, args, after) {
     if (x && !(S.view === 'demo' && S.id === id && tabJobs(S.tab).includes(job))) toast(`${x.title}. ${x.body}`, true);
     J(id)[job].error = msg;
   } finally {
-    if (mine()) delete J(id).running[job];
+    if (mine()) { delete J(id).running[job]; delete J(id).owned[job]; }
     await refreshDemo(id);
     rerender();
   }
@@ -310,8 +311,12 @@ listen('capture', async ({ payload: { demo: id, action } }) => {
   if (S.view !== 'demo' || S.id !== id) await openDemo(id, 'record');
   await ACTIONS['record-stop']();
 });
+// A job's busy mark. The app says it's done when its command ends, a moment before the page has the command's answer:
+// for a job this page started (step), the mark stays until step has the answer (or error) in place, so nothing reads
+// "finished, no result" (Nov 23: the quick checks after a script read that, though they passed). Jobs the app runs on
+// its own (the background compare) follow the app.
 listen('job-state', ({ payload: { demo: id, job, running: on } }) => {
-  if (on) J(id).running[job] = true; else delete J(id).running[job];
+  if (on) J(id).running[job] = true; else if (!J(id).owned?.[job]) delete J(id).running[job];
   if (id === S.id) renderTabsBar();
 });
 
