@@ -1,6 +1,12 @@
 // The engine side of `scenecast ai` (the desktop app runs the same): GitHub Copilot sign-in, and the three AI modes.
 //   ai status | sign-in | sign-out | models | runtime | settings [--set key=value]…
 //   ai plan    --demo <dir>     draft plan.md from the goal (ai.json) or source material (source.md)
+//   ai plan    --demo <dir> --script <file>             Make it from my script: plan.md from her talk track (Word,
+//                               Markdown, RunLines or Do/Say lines), mapped to the recorded screens when there are any
+//   ai plan    --demo <dir> --walkthrough <recording.json> [--script <file>]   the same from one walkthrough
+//   ai approve --demo <dir>     approve plan.md as it is now (its writes included; any edit needs approving again)
+//   ai reset   --demo <dir>     reset.md: the plan's writes undone, and a read-only checklist
+//   ai finish  --demo <dir>     after the build: her script for the guide, the beat keys, focus points, the review
 //   ai record  --demo <dir>     Record for me: run the approved plan in the browser while recording; then the script
 //   ai script  --demo <dir>     the talk track (script.md) from what was recorded
 //   ai coach   --demo <dir>     Coach me: the next step and line, live, until the recording stops
@@ -21,7 +27,7 @@ const exitWhenOut = code => process.stdout.write('', () => process.exit(code));
 const args = process.argv.slice(2);
 const sub = args[0];
 const emit = e => console.log('@ai ' + JSON.stringify(e));
-const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model', '--plan', '--yes'].includes(args[i - 1]));
+const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model', '--plan', '--yes', '--script', '--walkthrough'].includes(args[i - 1]));
 
 async function main() {
   const settings = readSettings();
@@ -43,7 +49,17 @@ async function main() {
       args.forEach((a, i) => { if (args[i - 1] === '--set') { const [k, ...v] = a.split('='); const val = v.join('='); patch[k] = val === 'true' ? true : val === 'false' ? false : val; } });
       return Object.keys(patch).length ? writeSettings(patch) : settings;
     }
-    case 'plan': { const d = demo(); const { draftPlan } = await import('./draft.mjs'); return draftPlan({ demo: d, model: await model(d), settings, emit }); }
+    case 'plan': {
+      const d = demo();
+      const script = arg(args, '--script', null), walk = arg(args, '--walkthrough', null);
+      if (walk) { const { planFromWalkthrough } = await import('./make.mjs'); const r = await planFromWalkthrough({ demo: d, file: walk, script, emit }); return { beats: r.review.beats, steps: r.review.steps, writes: r.review.writes.length, flags: [] }; }
+      if (script) { const { planFromScript } = await import('./make.mjs'); const r = await planFromScript({ demo: d, file: script, emit }); return { beats: r.review.beats, steps: r.review.steps, writes: r.review.writes.length, flags: r.review.flags, checked: r.review.checked }; }
+      const { draftPlan } = await import('./draft.mjs');
+      return draftPlan({ demo: d, model: await model(d), settings, emit });
+    }
+    case 'approve': { const { approve } = await import('./make.mjs'); return approve(demo()); }
+    case 'reset': { const { writeReset } = await import('./make.mjs'); const r = await writeReset(demo()); return { undo: r.reset.undo.length, checks: r.reset.checks.length, needs: r.reset.needs, file: 'reset.md' }; }
+    case 'finish': { const { finish } = await import('./finish.mjs'); return finish({ demo: demo(), emit }); }
     case 'record': {
       const d = demo();
       // The same readiness check as Record's (--checked: the app ran it just now).
@@ -82,7 +98,7 @@ async function main() {
       return { sent: readdirSync(dir).sort().map(f => { const r = JSON.parse(readFileSync(join(dir, f), 'utf8')); return { file: join(dir, f), task: r.task, model: r.model, at: r.at, chars: r.prompt.length, pageText: r.pageText }; }) };
     }
     default:
-      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|record|bench|script|coach|answer|stop|sent');
+      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|approve|reset|finish|record|bench|script|coach|answer|stop|sent');
       return null;
   }
 }

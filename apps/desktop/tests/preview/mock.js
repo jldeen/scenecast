@@ -21,7 +21,13 @@
 - Go to copilot
 - Type "What does the delay on PO-450101 hold up?" in "Message"
 - Press Enter — ask first
+  Writes: sends the question (a new task in Recent)
+  Lands on: copilot-answer · "Kestrel moved the ship date"
 - Wait for the answer
+- Click "Save: Save skill" — ask first
+  Script: Click Approve on the Copy file card
+  Differs: the product shows "Save: Save skill" here, not "Approve"
+  Writes: saves the skill
 > Copilot pulls it together from Teams, email and the ERP.
 ## Beat 3 · Who can approve the expedite
 - Go to iq
@@ -122,7 +128,10 @@
     browser_profiles: ({ browser }) => ({ browser: browser || demo.browser, picked: 'Profile 10', running: true, profiles: [
       { dir: 'Profile 10', name: 'Jessica', email: 'jessica@contoso.com', open: true, color: '#6b4fbb', ...(SC === 'empty' ? {} : { extension: { id: 'kfmgcj', enabled: true, devMode: true } }) },
       { dir: 'Default', name: 'Personal', color: '#0f6cbd' } ] }),
-    ai_get: () => ({ plan: SC === 'copilot-plan' ? PLAN : '', goal: 'A buyer finds out PO-450101 is late, asks Copilot what it holds up, finds who can approve the expedite in Microsoft IQ, and IT rolls the agent out.', source: '', sent: [], run: null }),
+    ai_get: () => ({ plan: SC === 'copilot-plan' ? PLAN : '', goal: 'A buyer finds out PO-450101 is late, asks Copilot what it holds up, finds who can approve the expedite in Microsoft IQ, and IT rolls the agent out.', source: '', sent: [], run: null,
+      review: SC === 'copilot-plan' ? { from: 'Act 1 talk track.docx', beats: 4, steps: 14, checked: 22, writes: [], flags: [{ kind: 'differs', beat: 2, line: '2.1', text: 'The product shows "Save: Save skill" here, not "Approve"' }] } : null }),
+    pick_script_file: () => ({ name: 'Act 1 talk track.docx', path: '/x/Act 1 talk track.docx' }),
+    ai_approve: () => ({ approved: true }),
     ai_save: a => a, ai_settings: ({ set }) => ({ model: 'auto', pageText: true, ...set }),
     key_reference: () => {
       const m = OS === 'macos' ? '⌥' : 'Ctrl+Alt+';

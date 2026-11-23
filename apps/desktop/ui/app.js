@@ -1087,6 +1087,8 @@ function planBeats(text) {
     if (!b) continue;
     if ((m = /^[-*]\s+(.*)$/.exec(l))) { const ask = /\s[—–-]\s*ask (me )?first\.?$/i.test(m[1]); b.steps.push({ text: m[1].replace(/\s*[—–-]\s*ask (me )?first\.?$/i, ''), ask }); }
     else if ((m = /^>\s?(.*)$/.exec(l))) b.say.push(m[1]);
+    // Details under a step (docs/engine/plan-format.md): what it changes, and where the product differs from her script.
+    else if ((m = /^(Writes|Differs):\s*(.+)$/i.exec(l)) && b.steps.length) b.steps[b.steps.length - 1][m[1].toLowerCase()] = m[2].replace(/ · [\w-]+:[\w-]+$/, '');
   }
   return beats;
 }
@@ -1099,9 +1101,12 @@ function recShowRows(d) {
     const plan = planBeats(planText(d));
     if (!plan.length) return `<div class="sec">Show <span>Copilot\u2019s plan shows here.</span></div>
       <div class="rd-row" data-test="show-empty">${mk('todo')}<div class="t"><b>No plan yet</b><small>Say what the demo should show, then draft the plan.</small></div><span></span><span></span><span></span></div>`;
-    return `<div class="sec">Show <span>Copilot\u2019s plan. Read it, change anything, then approve.</span></div>
+    const rev = AIS[d.id]?.review, differs = plan.flatMap(b => b.steps).filter(s => s.differs);
+    const from = rev?.from ? `Made from ${esc(rev.from)}, each step on the screens your demo shows.` : 'Copilot\u2019s plan.';
+    return `<div class="sec">Show <span>${from} Read it, change anything, then approve.</span></div>
+      ${differs.length ? `<div class="rd-row" data-test="plan-differs" data-count="${differs.length}">${mk('hold')}<div class="t"><b>${plural(differs.length, 'step')} ${differs.length === 1 ? 'isn\u2019t' : 'aren\u2019t'} quite what your script says</b><small>Copilot uses what the product shows. They\u2019re marked below.</small></div><span></span><span></span><span></span></div>` : ''}
       ${plan.map((b, k) => `<div class="rd-row" data-test="plan-beat-${k + 1}">${mk('todo')}<div class="t"><b>Beat ${k + 1} \u00b7 ${esc(b.title)}</b>${b.say[0] ? `<small><em>\u201c${esc(b.say[0])}\u201d</em></small>` : ''}
-        <ul class="steps">${b.steps.map(s => `<li>${esc(s.text)}${s.ask ? ' <span class="tag">asks you first</span>' : ''}</li>`).join('')}</ul></div>
+        <ul class="steps">${b.steps.map(s => `<li${s.differs ? ' data-test="plan-step-differs"' : ''}>${esc(s.text)}${s.writes ? ` <span class="tag" data-test="plan-step-writes" title="${esc(s.writes)}">changes something</span>` : s.ask ? ' <span class="tag">asks you first</span>' : ''}${s.writes ? `<small>${esc(s.writes[0].toUpperCase() + s.writes.slice(1))}</small>` : ''}${s.differs ? `<small class="differs">Not as your script says: ${esc(s.differs)}</small>` : ''}</li>`).join('')}</ul></div>
         <span></span><span class="time">${timed(k + 1)}</span>${stateOf()}</div>`).join('')}`;
   }
   const beats = rd?.beats || [];
@@ -1123,6 +1128,8 @@ PANELS.record = (panel, d) => {
       <div class="goal-row"><div class="grow"><label for="ai-goal">What should the demo show? <span class="hint">One line is enough. Your talk track helps.</span></label>
         <textarea id="ai-goal" rows="2" data-test="ai-goal" data-save="goal" placeholder="A buyer finds out PO-450101 is late, asks Copilot what it holds up, and IT rolls the agent out."></textarea></div>
         ${planBeats(AIS[d.id]?.plan).length ? `<button class="btn" data-action="ai-plan" data-test="ai-plan-again" ${running('ai-plan', d.id) ? 'disabled' : ''}>${I.spark} Draft it again</button>` : ''}</div>
+      <div class="row" style="margin-top:8px"><button class="btn" data-action="ai-plan-script" data-test="ai-plan-script" ${running('ai-plan', d.id) ? 'disabled' : ''}>Make it from my script\u2026</button>
+        <span class="hint small">Your talk track, in Word, Markdown, RunLines or text. Copilot puts each Do line on the real screens.</span></div>
       <details style="margin-top:6px"><summary>Add notes, a doc or an email to work from</summary>
         <label for="ai-source" class="visually-hidden">Material to work from</label><textarea id="ai-source" rows="3" data-test="ai-source" data-save="source" style="margin-top:8px"></textarea>
         <div class="row" style="margin-top:6px"><button class="btn small" data-action="pick-source-demo">Open a file…</button></div></details>
@@ -1178,7 +1185,7 @@ function pendingQuestion(events) {
 Object.assign(REGIONS, {
   'ai-plan-progress'(d) {
     const j = J(d.id)['ai-plan'] || {};
-    if (running('ai-plan', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-planning">Copilot is reading your words and the start screens, and drafting the plan…</p>`;
+    if (running('ai-plan', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-planning">${J(d.id).planFrom ? `Copilot is reading ${esc(J(d.id).planFrom)} and putting each step on the screens your demo shows\u2026` : 'Copilot is reading your words and the start screens, and drafting the plan\u2026'}</p>`;
     const plan = (j.events || []).find(e => e.event === 'plan');
     // As the plan is now: the presenter may have edited it since Copilot drafted it.
     const now = planBeats(planText(d)), counts = now.length ? { beats: now.length, steps: now.reduce((n, b) => n + b.steps.length, 0) } : plan?.data;
@@ -1865,8 +1872,20 @@ const ACTIONS = {
   'ai-sign-out': async () => { await call('ai_sign_out'); await refreshAi(); },
   'ai-models': async () => { AI.models = (await call('ai_models')).models; renderCopilot(); },
   'pick-source-demo': async () => { const f = await call('pick_text_file'); if (f) { $('#ai-source').value = f.text; await saveAiField('source', f.text); toast(`Using ${f.name}`); } },
+  // Make it from my script: her talk track, mapped onto the demo's screens; the plan shows here to approve once.
+  'ai-plan-script': async () => {
+    const id = S.id;
+    const f = await call('pick_script_file');
+    if (!f) return;
+    await saveAiFields(id);
+    J(id).planFrom = f.name;
+    const o = await step('ai-plan', 'ai_plan', { script: f.path });
+    J(id).planFrom = null;
+    if (o) { const p = $('#ai-plan'); if (p) delete p.dataset.dirty; await loadAi(id); }
+  },
   'ai-plan': async () => {
     const id = S.id;
+    J(id).planFrom = null;
     await saveAiFields(id);
     const o = await step('ai-plan', 'ai_plan', {});
     if (o) { const p = $('#ai-plan'); if (p) delete p.dataset.dirty; await loadAi(id); }
@@ -1875,7 +1894,8 @@ const ACTIONS = {
     const id = S.id;
     const plan = $('#ai-plan')?.value || '';
     if (!plan.trim()) return toast('Draft the plan first', true);
-    try { await saveAiFields(id); await call('ai_save', { id, plan }); } catch { return; }
+    // Approving is the plan as it is now: its writes included. Any edit after this needs approving again.
+    try { await saveAiFields(id); await call('ai_save', { id, plan }); await call('ai_approve', { id }); } catch { return; }
     J(id).aiChain = null;
     const o = await step('ai-record', 'ai_record', {});
     loadAi(id);

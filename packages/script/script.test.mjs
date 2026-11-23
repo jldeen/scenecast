@@ -78,3 +78,62 @@ test('focus order: by beat, then where the screen comes in the run-through, keep
   const pts = [{ id: 'c1', beat: 1, states: ['c'] }, { id: 'b1', beat: 1, states: ['b'] }, { id: 'a0', beat: 0, states: ['a'] }, { id: 'b2', beat: 1, states: ['b'] }];
   assert.deepEqual(orderFocus(pts, flow).map(p => p.id), ['a0', 'b1', 'b2', 'c1']);
 });
+
+// ---- Make it from my script: reading talk tracks and captures ----------------------------------------------------
+import { deflateRawSync } from 'node:zlib';
+import { docxToMarkdown } from './docx.mjs';
+import { parseTalkTrack } from './talk.mjs';
+import { readScreen } from './html.mjs';
+
+// A .docx as Word writes one: a zip of XML parts (document.xml deflated, styles.xml stored).
+function docx(body, styles) {
+  const files = [['word/document.xml', `<?xml version="1.0"?><w:document xmlns:w="w"><w:body>${body}</w:body></w:document>`, true], ['word/styles.xml', `<w:styles xmlns:w="w">${styles}</w:styles>`, false]];
+  const parts = [], central = [];
+  let off = 0;
+  for (const [name, text, deflate] of files) {
+    const raw = Buffer.from(text), data = deflate ? deflateRawSync(raw) : raw, nm = Buffer.from(name);
+    const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(deflate ? 8 : 0, 8); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22); lh.writeUInt16LE(nm.length, 26);
+    const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(deflate ? 8 : 0, 10); ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(nm.length, 28); ch.writeUInt32LE(off, 42);
+    parts.push(lh, nm, data); central.push(ch, nm); off += 30 + nm.length + data.length;
+  }
+  const cd = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
+  return Buffer.concat([...parts, cd, end]);
+}
+const p = (text, style, extra = '') => `<w:p><w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ''}${extra}</w:pPr>${text}</w:p>`;
+const r = (t, bold) => `<w:r>${bold ? '<w:rPr><w:b/></w:rPr>' : ''}<w:t xml:space="preserve">${t}</w:t></w:r>`;
+const cell = t => `<w:tc>${p(r(t))}</w:tc>`;
+
+test('Word: headings by style name (any language), tables, lists, bold; deleted text and pictures left out', () => {
+  const styles = '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/></w:style><w:style w:type="paragraph" w:styleId="berschrift2"><w:name w:val="heading 2"/></w:style>';
+  const body = p(r('Delay demo'), 'Title') + p(r('1. One question'), 'berschrift2')
+    + `<w:tbl><w:tr>${cell('#')}${cell('Say')}${cell('Screen')}</w:tr><w:tr>${cell('1')}<w:tc>${p(r('So I ask Copilot ') + '<w:del><w:r><w:delText>OLD </w:delText></w:r></w:del>' + r('what this puts at risk.'))}</w:tc>${cell('Teams › Supply alerts. Then ⌥C, type prompt 1 and send.')}</w:tr></w:tbl>`
+    + p(r('Prompts'), 'berschrift2') + p(r('1. Ask: ', true) + r('“What does this put at risk?”') + '<w:r><w:drawing><w:t>picture text</w:t></w:drawing></w:r>', null, '<w:numPr><w:ilvl w:val="0"/></w:numPr>');
+  const md = docxToMarkdown(docx(body, styles));
+  assert.match(md, /^# Delay demo\n\n### 1\. One question\n\n\| # \| Say \| Screen \|/m);
+  assert.match(md, /^- \*\*1\. Ask:\*\* “What does this put at risk\?”$/m);
+  assert.doesNotMatch(md, /OLD|picture text/);
+  const t = parseTalkTrack(md, 'x.docx');
+  assert.deepEqual(t.beats.map(b => [b.title, b.lines.map(l => [l.id, l.say, l.screen])]), [['One question', [['1.1', 'So I ask Copilot what this puts at risk.', 'Teams › Supply alerts. Then ⌥C, type prompt 1 and send.']]]]);
+  assert.deepEqual(t.prompts, [{ n: 1, label: 'Ask', text: 'What does this put at risk?' }]);
+});
+
+test('talk tracks: quotes with Do and Screen under them, Do and Say sections, RunLines stage cues, plain Say/Do', () => {
+  const md = parseTalkTrack('# T\n\n## Beat 1 · OPEN (~10s)\n\n*Stage:* CUE — Arun speaks\n\n> Hello there.\n\n**Do:** Start on Teams (⌥0).\n*Screen:* No facts here.\n\n## 2. Merge it? · 0:45–1:30\n\n**Do**\n\n- Press **⌥B**.\n- **⌥F**: the merge box\n\n**Say**\n\n> One.\n>\n> Two.\n', 'x.md');
+  assert.deepEqual(md.beats.map(b => [b.title, b.time, b.stage.length, b.do.map(d => d.text), b.lines.map(l => [l.say, l.do, l.notes])]),
+    [['OPEN', '~10s', 1, [], [['Hello there.', ['Start on Teams (⌥0).'], ['No facts here.']]]], ['Merge it?', '0:45–1:30', 0, ['Press ⌥B.', '⌥F: the merge box'], [['One.', [], []], ['Two.', [], []]]]]);
+  const sk = parseTalkTrack(JSON.stringify({ title: 'S', rows: [{ narrative: 'Hi.\nThen this.', demo_actions: 'ARUN: over to you <Jessica enters> DO NOT CLICK', time: '~10s' }, { narrative: 'Next.', demo_actions: '[OPEN] Click Plugins' }] }), 'x.sk');
+  assert.deepEqual(sk.beats.map(b => [b.title, b.stage.length, b.do.map(d => d.text), b.lines.length]), [['Hi.', 3, [], 2], ['OPEN', 0, ['Click Plugins'], 1]]);
+  const plain = parseTalkTrack('Beat 1: Start\nSay: Hello.\nDo: Click Plugins.\nSay: Bye.\n', 'x.txt');
+  assert.deepEqual(plain.beats[0].lines.map(l => [l.say, l.do]), [['Hello.', ['Click Plugins.']], ['Bye.', []]]);
+});
+
+test('a capture read without a browser: controls as the outline names them, words as the screen shows them', () => {
+  const sc = readScreen([{ key: 'main', html: '<html><head><style>b{}</style></head><body><header><h1>Catalog</h1></header><h1>Tools</h1><div role="tab">Users<span>Users</span></div><button aria-label="Save: Save skill"><span>Save</span></button><span aria-hidden="true">Certified</span><button style="display:none">Hidden</button><a href="/x">Agents&#x200e;</a><div role="textbox" contenteditable="true" aria-label="Message"></div></body></html>' }, { key: 'f4', html: '<button data-testid="badge">Add endorsement</button>' }]);
+  assert.deepEqual(sc.controls.map(c => [c.role, c.name, c.frame || null]), [['tab', 'Users', null], ['button', 'Save: Save skill', null], ['link', 'Agents', null], ['textbox', 'Message', null], ['button', 'Add endorsement', 'f4']]);
+  assert.equal(sc.controls[3].multiline, true);
+  assert.match(sc.text, /Certified/);
+  assert.doesNotMatch(sc.text, /Hidden/);
+  // The page's own title before the app bar's.
+  assert.deepEqual(sc.headings, ['Tools', 'Catalog']);
+});

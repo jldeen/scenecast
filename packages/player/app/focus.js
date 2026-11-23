@@ -19,7 +19,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const frame = () => new Promise(r => requestAnimationFrame(r));
 const N = s => s.replace(/[\u2019\u2018]/g, "'").replace(/[\u2011\u2010]/g, '-').replace(/\u00a0/g, ' ');
 
-export function createFocus({ stage, points, current, docsOf, openGroup, groupButton, options = {}, speed = 1 }) {
+export function createFocus({ stage, points, current, docsOf, openGroup, groupButton, go = null, options = {}, speed = 1 }) {
   const ZOOM = options.zoom || 2, PEN = options.pen || 5, RED = options.color || 'rgb(255, 56, 60)';
   // The replica's clock (?speed=, for the checks): every animation is that much shorter and ends the same.
   const T = ms => ms / Math.max(1, speed);
@@ -188,6 +188,10 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
   }
   const here = (p, cur = current()) => cur && p.app === cur.id && p.states.includes(cur.state);
   const ready = (p, cur = current()) => here(p, cur) && (p.open ? p.open.every(l => groupButton(cur.app, l)) || !!locate(p, cur) : !!locate(p, cur));
+  // A point one step on from this screen (`via: { from: [states], to: state }`: a tab, a panel, a hover card): ⌥F takes
+  // that step itself (the shell's own move, as the click would), then frames it.
+  const reachable = (p, cur = current()) => !!(go && p.via && cur && p.app === cur.id && (p.via.from || []).includes(cur.state));
+  const can = (p, cur) => ready(p, cur) || reachable(p, cur);
 
   // The mark around a box at zoom Z, in page coordinates, and everything it covers (box, mark and pen). Pads and the
   // arrow's length are in screen points, as she'd drag them; the pen is PEN × Z points on screen.
@@ -251,7 +255,12 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
   const r2 = a => a.map(v => Math.round(v * 100) / 100);
 
   async function show(i, my) {
-    const p = points[i], cur = current();
+    const p = points[i];
+    if (!ready(p) && reachable(p)) {
+      await go(p.app, p.via.to); if (!live(my)) return;
+      for (let n = 0; n < 100 && !ready(p); n++) { await sleep(50); if (!live(my)) return; }
+    }
+    const cur = current();
     if (p.open) { let opened = false; for (const l of p.open) opened = openGroup(cur.app, l) || opened; if (opened) { await sleep(T(420)); if (!live(my)) return; } }
     let t = locate(p); if (!t) return;
     const before = r2(t.box);
@@ -318,7 +327,7 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
   async function step(dir) {
     const my = ++st.gen, cur = current();
     let i = st.cursor + dir;
-    while (i >= 0 && i < points.length && !ready(points[i], cur)) i += dir;
+    while (i >= 0 && i < points.length && !can(points[i], cur)) i += dir;
     if (i < 0 || i >= points.length) return;
     st.cursor = i; st.run++;
     try {

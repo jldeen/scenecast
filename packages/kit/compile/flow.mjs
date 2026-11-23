@@ -170,7 +170,7 @@ export async function finishFlow(demo, flow, rec) {
   // Points from an earlier script (focus.json) can name beats or screens a new take doesn't have: they're left out until
   // Script makes new ones, instead of stopping the build (Nov 20: Record for me again, then Build, failed on one).
   const nBeats = (flow.beats || []).length, S = flow.states || {};
-  const fits = p => !Number.isInteger(p.beat) || p.beat < nBeats && (p.states || []).every(id => S[id]);
+  const fits = p => (!Number.isInteger(p.beat) || p.beat < nBeats) && (p.states || []).every(id => S[id]) && (!p.via || [...(p.via.from || []), p.via.to].every(id => S[id]));
   const all = readFocusJson(demo.dir).points, generated = all.filter(fits);
   if (generated.length < all.length) (flow.notes = flow.notes || []).push(`${all.length - generated.length} focus point(s) from an earlier script left out (${all.filter(p => !fits(p)).map(p => p.id).join(', ')}): this recording has no such beat or screen; Script makes new ones`);
   if (existsSync(fp) || generated.length) flow.focus = mergeFocus(generated, hand, flow);
@@ -224,6 +224,7 @@ export function validate(flow) {
     if (!apps.has(p.app)) out.push(`${w}: no app ${p.app}`);
     if (!(p.states || []).length) out.push(`${w}: no states`); for (const st of p.states || []) has(st, w);
     if (!p.find && !(p.union || []).length) out.push(`${w}: needs find (text) or union (texts or { sel } / { text, up })`);
+    if (p.via) { if (!(p.via.from || []).length) out.push(`${w}: via needs from: [states]`); for (const st of p.via.from || []) has(st, `${w}.via`); has(p.via.to, `${w}.via`); }
     if (!Number.isInteger(p.beat) || p.beat < 0 || p.beat > 9) out.push(`${w}: beat must be 0–9 (the ⌥ key that lands just before it)`);
   }
   for (const st of flow.apps || []) if (flow.beats && flow.beats[0] && !flow.beats[0].states[st.id]) out.push(`beat 0: no state for ${st.id}`);

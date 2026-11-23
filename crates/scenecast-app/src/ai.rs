@@ -126,12 +126,17 @@ pub fn get(dir: &Path) -> Value {
     let run: Option<Value> = std::fs::read(dir.join(".out/ai/run.json"))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok());
+    // A plan made from her script: where it came from, its writes, and what differs from the script.
+    let review: Option<Value> = std::fs::read(dir.join(".out/ai/plan-review.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
     json!({
         "mode": ai.mode,
         "goal": ai.goal,
         "source": read_text("source.md"),
         "plan": read_text("plan.md"),
         "run": run,
+        "review": review,
         "sent": sent(dir),
     })
 }

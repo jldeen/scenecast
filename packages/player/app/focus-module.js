@@ -8,6 +8,8 @@ export default function focusModule(api) {
   const focus = createFocus({
     stage: api.stage, points: api.flow.focus || [], options: api.flow.focusOptions || {}, speed: api.speed, docsOf: api.docsOf,
     current: api.current, groupButton: api.groupButton, openGroup: api.openGroup,
+    // A point's `via`: the shell's own move to the screen one step on (as the click there would).
+    go: api.morph ? (app, state) => api.morph(app, state) : null,
   });
   // While zoomed: Esc and ↑/↓ are ZoomIt's, before anything else. ⌥F and ⌥⇧F step through the points; Ctrl+Alt+F
   // and Ctrl+Alt+Shift+F too, on any OS (Edge on Windows keeps Alt+F for its menu).
