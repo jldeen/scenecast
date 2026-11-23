@@ -1917,8 +1917,42 @@ fn webkit_gpu_pids() -> Vec<i32> {
             let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
             len > 0 && &name[..len as usize] == b"com.apple.WebKit.GPU"
         })
-        .filter(|&pid| unsafe { responsibility_get_pid_responsible_for_pid(pid) } == mine)
+        .filter(|&pid| {
+            let r = unsafe { responsibility_get_pid_responsible_for_pid(pid) };
+            r == me || r == mine
+        })
         .collect()
+}
+
+/// Every WebKit GPU process on the Mac with the process it's responsible to, and this app's own (for the test's
+/// output when none is found).
+#[cfg(all(target_os = "macos", feature = "webdriver"))]
+#[tauri::command]
+fn test_webkit_gpu_all() -> Value {
+    unsafe extern "C" {
+        fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
+    }
+    let me = std::process::id() as i32;
+    let mut pids = vec![0i32; 8192];
+    let n = unsafe {
+        libc::proc_listallpids(
+            pids.as_mut_ptr().cast(),
+            (pids.len() * std::mem::size_of::<i32>()) as i32,
+        )
+    };
+    pids.truncate(n.max(0) as usize);
+    let all: Vec<Value> = pids
+        .into_iter()
+        .filter_map(|pid| {
+            let mut name = [0u8; 64];
+            let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+            let name = String::from_utf8_lossy(&name[..len.max(0) as usize]).into_owned();
+            name.contains("WebKit").then(|| {
+                json!({ "pid": pid, "name": name, "responsible": unsafe { responsibility_get_pid_responsible_for_pid(pid) } })
+            })
+        })
+        .collect();
+    json!({ "me": me, "mine": unsafe { responsibility_get_pid_responsible_for_pid(me) }, "webkit": all })
 }
 
 /// A process macOS has stopped or suspended (SSTOP): the state Jessica's GPU process was left in.
@@ -2116,6 +2150,8 @@ fn main() {
             window_not_drawing,
             #[cfg(all(target_os = "macos", feature = "webdriver"))]
             test_webkit_gpu_pids,
+            #[cfg(all(target_os = "macos", feature = "webdriver"))]
+            test_webkit_gpu_all,
             app_info,
             list_demos,
             get_demo,
