@@ -94,8 +94,12 @@ try {
   if (PHASE === 'parity') {
     // Per app, three windows at the same moment: two minimized (live content's own noise between them) and one
     // visible (the screen's drawing). Then, in a minimized window: hovers and menus through CDP input.
+    // --part shots: only the windows on the screen (the sitting pauses after it); --part audits: only the hovers and
+    // menus, added to the shots' parity.json.
     const modes = arg('--modes', 'minimized,visible').split(',');
-    const res = {};
+    const PART = arg('--part', 'all');
+    const res = PART === 'audits' ? JSON.parse(readFileSync(join(OUT, 'parity.json'), 'utf8')).res : {};
+    if (PART !== 'audits') {
     const cmpB = await chromium.launch({ channel: 'chrome', headless: true }); const cp = await cmpB.newPage();
     for (const a of APPS) {
       const r = res[a.id] = {};
@@ -127,6 +131,9 @@ try {
     }
     await cmpB.close();
     log('screen free: nothing more shows on the screen');
+    save('parity.json', { viewport: VP, load: loadavg(), res });
+    }
+    if (PART !== 'shots') {
     // Hovers and menus through CDP input, in minimized windows: the recorder's own audits, a few controls each.
     cb = await launchCaptureBrowser({ profile: PROFILE, mode: 'minimized', width: VP.width, height: VP.height });
     const make = new Function('return async (page0) => { const RX = "http://127.0.0.1:9"; const AGENT_ID = "spike"; const AGENT_QS = async () => ""; ' + core() + '\nreturn { OPS, H }; }')();
@@ -155,6 +162,7 @@ try {
     }
     await stop();
     save('parity.json', { viewport: VP, load: loadavg(), res });
+    }
   }
   if (PHASE === 'twins') {
     // The first app, 1 then 2 then 4 windows at once, each hovering up to 10 controls.
