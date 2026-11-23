@@ -1,0 +1,51 @@
+name: Diagnose
+# Manual only: one OS, one command, to find a failure's cause without a full run. Never fails (no failure email); its
+# output and the files under diag/ are uploaded. Never a gate: an RC needs CI green on every OS.
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: Runner
+        type: choice
+        options: [windows-latest, macos-latest, ubuntu-latest]
+        default: windows-latest
+      command:
+        description: Command to run from the repository root (bash)
+        default: node packages/selftest/ai-modes.mjs
+      env:
+        description: Extra environment, NAME=value pairs separated by spaces
+        default: SCENECAST_AI_TRACE=1
+
+jobs:
+  diagnose:
+    name: Diagnose (${{ inputs.os }})
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright-core install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+      - run: cargo build -p stuntdouble-cli
+      - name: Run it (never fails the job)
+        shell: bash
+        run: |
+          git config --global user.name "scenecast ci"; git config --global user.email "ci@localhost"
+          mkdir -p diag
+          export SCENECAST_BIN=$([ "$RUNNER_OS" = Windows ] && echo target/debug/scenecast.exe || echo target/debug/scenecast)
+          export DIAG_DIR="$PWD/diag"
+          for kv in ${{ inputs.env }}; do export "$kv"; done
+          set +e
+          ${{ inputs.command }} 2>&1 | tee diag/output.log
+          echo "exit $?" >> diag/output.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnose-${{ runner.os }}
+          path: diag/

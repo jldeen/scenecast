@@ -1887,6 +1887,23 @@ fn webkit_gpu_pids() -> Vec<i32> {
         .collect()
 }
 
+/// A process macOS has stopped or suspended (SSTOP): the state Jessica's GPU process was left in.
+#[cfg(target_os = "macos")]
+fn stopped(pid: i32) -> bool {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size,
+        )
+    };
+    n == size && info.pbi_status == libc::SSTOP
+}
+
 /// For the UI test: the GPU processes, to stop them the way they got stuck on Jessica's Mac (the window in front first:
 /// only a window on screen is started again).
 #[cfg(all(target_os = "macos", feature = "webdriver"))]
@@ -1951,15 +1968,23 @@ async fn window_not_drawing(webview: tauri::Webview, ms: u64) -> Result<Value, S
             tokio_sleep_ms(20).await;
         }
         let (web, seen) = *pids.lock().expect("pids");
-        eprintln!("window_not_drawing: {ms} ms, on screen {}", seen == 2);
-        if seen != 2 {
-            return Ok(serde_json::json!({ "restarted": null, "why": "not on screen" }));
+        let gpu = webkit_gpu_pids();
+        let stuck: Vec<i32> = gpu.iter().copied().filter(|&p| stopped(p)).collect();
+        eprintln!(
+            "window_not_drawing: {ms} ms, on screen {}, gpu {gpu:?}, stopped {stuck:?}",
+            seen == 2
+        );
+        // Frames also pause for a window mostly covered (macOS calls it visible if any of it shows): only a GPU process
+        // that's stopped means the window can't draw. A running one is left to WebKit.
+        if seen != 2 || stuck.is_empty() {
+            return Ok(
+                serde_json::json!({ "restarted": null, "why": if seen != 2 { "not on screen" } else { "GPU process running" } }),
+            );
         }
         scenecast_app::ai::app_log(
             "window not drawing",
-            "on screen: ending the GPU and web processes",
+            &format!("on screen, GPU process {stuck:?} stopped: ending the GPU and web processes"),
         );
-        let gpu = webkit_gpu_pids();
         for &pid in &gpu {
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
