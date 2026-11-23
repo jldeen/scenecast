@@ -95,24 +95,29 @@ try {
       // One browser: two minimized windows and (when asked) one visible, loaded and shot at the same moment.
       const visible = modes.includes('visible');
       cb = await launchCaptureBrowser({ profile: PROFILE, mode: visible ? 'visible' : 'minimized', width: VP.width, height: VP.height });
-      const want = [['minimized', 1], ['minimized', 2], ...(visible ? [['visible', 0]] : [])];
+      // offscreen: a normal window placed off every display (the fallback; on a Mac, does it stay there?).
+      const want = [['minimized', 1], ['minimized', 2], ...(visible ? [['visible', 0]] : []), ...(modes.includes('offscreen') ? [['offscreen', 0]] : [])];
       const pages = [];
-      for (const [m] of want) pages.push(await cb.newPage({ url: a.url, ...VP, state: m === 'visible' ? 'visible' : 'minimized' }));
+      for (const [m] of want) pages.push(await cb.newPage({ url: a.url, ...VP, state: m }));
       await Promise.all(pages.map(p => settle(p)));
       for (const p of pages) await p.mouse.move(VP.width - 3, VP.height - 3);
       await sleep(400);
       const pngs = await Promise.all(pages.map(p => p.screenshot()));
       pngs.forEach((b, i) => { const [m, k] = want[i]; const nm = `${a.id}-${m}${m === 'minimized' ? '-' + k : ''}.png`; writeFileSync(join(OUT, nm), b); shots[nm] = b.toString('base64'); });
       for (const [i, [m, k]] of want.entries()) if (k !== 2) { r[m] = { probe: await probe(pages[i]), where: await where(pages[i]) }; delete r[m].where.title; }
+      // Where the OS put each window (bounds and state only).
+      r.windows = ((await cb.info()).wins || []).map(w => ({ state: w.state, left: w.left, top: w.top, width: w.width, height: w.height }));
       await stop();
       const n = (m, i) => `${a.id}-${m}${m === 'minimized' ? '-' + i : ''}.png`;
       if (shots[n('minimized', 2)]) r.noise = (await comparePngs(cp, [[shots[n('minimized', 1)], shots[n('minimized', 2)]]]))[0];
       if (shots[n('visible')]) r.visibleVsMinimized = (await comparePngs(cp, [[shots[n('visible')], shots[n('minimized', 1)]]]))[0];
+      if (shots[n('offscreen')]) r.offscreenVsMinimized = (await comparePngs(cp, [[shots[n('offscreen')], shots[n('minimized', 1)]]]))[0];
       r.light = (await luminance(cp, [shots[n('minimized', 1)]]))[0];
       r.secs = Math.round((Date.now() - t0) / 1000);
-      log(`${a.id}: noise ${r.noise && r.noise.pct}% · visible vs minimized ${r.visibleVsMinimized && r.visibleVsMinimized.pct}% · luminance ${r.light} · raf ${r.minimized.probe.raf} · t250 ${r.minimized.probe.timer250} · fonts ${r.minimized.probe.fonts} (${r.minimized.probe.faces} faces, ${r.minimized.probe.facesFailed} failed)`);
+      log(`${a.id}: noise ${r.noise && r.noise.pct}% · visible vs minimized ${r.visibleVsMinimized && r.visibleVsMinimized.pct}% · offscreen vs minimized ${r.offscreenVsMinimized && r.offscreenVsMinimized.pct}% · luminance ${r.light} · raf ${r.minimized.probe.raf} · t250 ${r.minimized.probe.timer250} · fonts ${r.minimized.probe.fonts} (${r.minimized.probe.faces} faces, ${r.minimized.probe.facesFailed} failed)`);
     }
     await cmpB.close();
+    log('screen free: nothing more shows on the screen');
     // Hovers and menus through CDP input, in minimized windows: the recorder's own audits, a few controls each.
     cb = await launchCaptureBrowser({ profile: PROFILE, mode: 'minimized', width: VP.width, height: VP.height });
     const make = new Function('return async (page0) => { const RX = "http://127.0.0.1:9"; const AGENT_ID = "spike"; const AGENT_QS = async () => ""; ' + core() + '\nreturn { OPS, H }; }')();
