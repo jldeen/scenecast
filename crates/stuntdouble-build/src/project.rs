@@ -49,10 +49,6 @@ const TEMPLATE: &[(&str, &str)] = &[
         "capture/vendor/README.md",
         include_str!("../../../packages/core/template/capture/vendor/README.md"),
     ),
-    (
-        "presenter/script.md",
-        include_str!("../../../packages/core/template/presenter/script.md"),
-    ),
 ];
 
 /// One app (browser tab) of the demo: `id=url` on the command line.

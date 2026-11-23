@@ -301,6 +301,10 @@ pub fn export_live(
             include_bytes!("../../../packages/player/app/morph.js").as_slice(),
         ),
         (
+            "app/variants.js",
+            include_bytes!("../../../packages/player/app/variants.js").as_slice(),
+        ),
+        (
             "app/presenter-key.js",
             include_bytes!("../../../packages/player/app/presenter-key.js").as_slice(),
         ),

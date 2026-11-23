@@ -48,12 +48,12 @@
   }
   function module(path) {
     if (modules.has(path)) return modules.get(path);
-    const allowed = ['/app/morph.js', '/app/presenter-key.js', '/app/bundle-flow.js', '/app/focus.js', '/app/focus-module.js', '/app/shell.js'];
+    const allowed = ['/app/morph.js', '/app/presenter-key.js', '/app/bundle-flow.js', '/app/variants.js', '/app/focus.js', '/app/focus-module.js', '/app/shell.js'];
     if (!allowed.includes(path)) throw new Error(`Offline playback does not support custom module ${path}`);
     let source = text(new URL(path.slice(1), root));
     const deps = {
       '/app/focus-module.js': ['./focus.js', './presenter-key.js'],
-      '/app/shell.js': ['./morph.js', './presenter-key.js', './bundle-flow.js'],
+      '/app/shell.js': ['./morph.js', './presenter-key.js', './bundle-flow.js', './variants.js'],
     }[path] || [];
     for (const dep of deps) source = source.replaceAll(`'${dep}'`, JSON.stringify(module('/app/' + dep.slice(2))));
     const value = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(source);
