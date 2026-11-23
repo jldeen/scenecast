@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/format",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "StuntDouble's replica format: manifest.json's JSON Schema, generated from the Rust types.",
   "type": "module",
   "main": "index.mjs",

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Script to focus points: the presenter's lines matched to the replica's screens (pluggable matcher, deterministic by default), the line-to-screen sheet and the cue sheet.",
   "dependencies": {
-    "@stuntdouble/core": "0.5.2",
-    "@stuntdouble/player": "0.5.2"
+    "@stuntdouble/core": "0.5.3",
+    "@stuntdouble/player": "0.5.3"
   }
 }
