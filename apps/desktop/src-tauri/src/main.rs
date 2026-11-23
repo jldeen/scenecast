@@ -2065,6 +2065,9 @@ async fn window_not_drawing(
         for &pid in &stuck {
             unsafe { libc::kill(pid, libc::SIGKILL) };
         }
+        eprintln!(
+            "window_not_drawing: restarting: web process {web}, stopped GPU processes ended {stuck:?}"
+        );
         if web > 0 {
             unsafe { libc::kill(web, libc::SIGKILL) };
             return Ok(serde_json::json!({ "restarted": "web process", "web": web, "gpu": stuck }));
