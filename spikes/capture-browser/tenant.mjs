@@ -117,17 +117,26 @@ try {
     cb = await launchCaptureBrowser({ profile: PROFILE, mode: 'minimized', width: VP.width, height: VP.height });
     const make = new Function('return async (page0) => { const RX = "http://127.0.0.1:9"; const AGENT_ID = "spike"; const AGENT_QS = async () => ""; ' + core() + '\nreturn { OPS, H }; }')();
     const { OPS } = await make(cb.ctx.pages()[0]);
+    // What the apps send while they're only looked at (for a network guard on read-only steps): methods and hosts,
+    // counted, never bodies or paths. Watched only; nothing is blocked.
+    let stage = 'load', net = null;
+    cb.ctx.on('request', q => { if (!net) return; let h = ''; try { h = new URL(q.url()).host; } catch (e) {} if (!/^https?:/.test(q.url())) return; const k = `${stage} ${q.method()} ${h}`; net[k] = (net[k] || 0) + 1; });
     for (const a of APPS) {
+      net = {}; stage = 'load';
       const p = await cb.newPage({ url: a.url + (a.url.includes('#') ? '' : ''), ...VP }); await settle(p);
+      stage = 'hover';
       await p.evaluate(id => sessionStorage.setItem('d1tab', id), 'spike-' + a.id);
       const t = Date.now();
       const hv = await OPS.js({ code: flowScript(resolve('packages/capture/flows/hover-audit.js'), { tab: 'spike-' + a.id, page: a.id, max: 10 }).code }).catch(e => ({ error: String(e.message || e).slice(0, 200) }));
-      const tc = Date.now();
+      const tc = Date.now(); stage = 'menu';
       const ck = await OPS.js({ code: flowScript(resolve('packages/capture/flows/click-audit.js'), { tab: 'spike-' + a.id, page: a.id, pick: { max: 4 } }).code }).catch(e => ({ error: String(e.message || e).slice(0, 200) }));
       res[a.id].hovers = { shown: hv.n, tried: hv.tried, secs: (tc - t) / 1000, error: hv.error };
       res[a.id].menus = { opened: ck && ck.n, tried: ck && (ck.results || []).length, restores: ck && (ck.results || []).map(x => x.restore || x.effect || x.skip || x.error).filter(Boolean), secs: (Date.now() - tc) / 1000, error: ck && ck.error };
+      res[a.id].net = net; net = null;
+      const nonGet = Object.entries(res[a.id].net).filter(([k]) => !/ (GET|OPTIONS|HEAD) /.test(k)).reduce((n, [k, v]) => (n[k.split(' ')[0]] = (n[k.split(' ')[0]] || 0) + v, n), {});
+      res[a.id].nonGet = nonGet;
       writeFileSync(join(OUT, `${a.id}-after-audits.png`), await p.screenshot());
-      log(`${a.id}: hovers ${JSON.stringify(res[a.id].hovers)} menus ${JSON.stringify(res[a.id].menus)}`);
+      log(`${a.id}: hovers ${JSON.stringify(res[a.id].hovers)} menus ${JSON.stringify(res[a.id].menus)} non-GET by stage ${JSON.stringify(res[a.id].nonGet)}`);
       await p.close();
     }
     await stop();
