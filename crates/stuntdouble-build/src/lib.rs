@@ -31,7 +31,7 @@ pub mod sync;
 
 use std::path::{Path, PathBuf};
 
-pub use engine::{Engine, EngineError, Progress};
+pub use engine::{Bundled, Engine, EngineError, Progress, use_bundled};
 pub use project::{AppSpec, NewProject, ProjectCreated, ProjectError, create_project};
 pub use sync::{SyncError, SyncReport, fallback_scenes, sync_manifest};
 

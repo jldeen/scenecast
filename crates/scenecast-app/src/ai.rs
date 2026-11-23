@@ -281,6 +281,7 @@ pub fn open_coach(dir: &Path) -> Result<String, AppError> {
     }
     let engine = crate::engine()?;
     let out = std::process::Command::new(&engine.node)
+        .envs(engine.env.iter().map(|(k, v)| (k, v)))
         .arg(engine.packages.join("player").join("open.mjs"))
         .arg("--demo")
         .arg(dir)

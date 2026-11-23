@@ -167,18 +167,22 @@ async function frameKeys(p) {
 }
 
 // One full snapshot of a tab: screenshot first (the exact state), then every frame's DOM, then the resources.
-// A clean picture of a screen (opts.clean, the screens themselves and their zoom levels): no text caret, no overlay
-// scrollbar (one shows for a second after a scroll; hidden only where scrollbars take no room, so nothing moves), and
-// the pointer parked in the top right corner, where the checker parks it (so a row it was resting on isn't shaded).
+// A clean picture of a screen (opts.clean, the screens themselves and their zoom levels): no text caret, no scrollbar
+// the replica doesn't draw (overlay ones, which show for a second after a scroll, and every one on a Mac), no focus
+// ring a click left, and the pointer parked in the top right corner, where the checker parks it (so a row it was
+// resting on isn't shaded).
 // Nov 2026, on real Chrome: the checks found a scrollbar, a caret and a hovered row in the pictures, not the pages.
 const CLEAN_CSS = '*{caret-color:transparent!important}';
-const CLEAN_BARS = '*::-webkit-scrollbar{display:none!important}';
+// Scrollbars the replica doesn't draw: overlay ones (they show only while scrolling), and on a Mac every one, as the
+// replica's macOS look has none (player/app/variants.js); with a mouse connected macOS shows classic bars (Nov 23,
+// Jessica's Mac: a scrollbar in the admin capture). Windows' are drawn by the replica, so they stay in the picture.
+const CLEAN_BARS = '*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important}';
 async function cleanFor(p) {
   const done = [];
   for (const f of p.frames()) {
     const ok = await frameEval(p, f, ([css, bars]) => {
       const d = document.createElement('div'); d.style.cssText = 'position:absolute;top:-999px;width:100px;height:100px;overflow:scroll';
-      (document.body || document.documentElement).appendChild(d); const overlay = d.offsetWidth - d.clientWidth === 0; d.remove();
+      (document.body || document.documentElement).appendChild(d); const overlay = d.offsetWidth - d.clientWidth === 0 || /Mac/.test(navigator.platform); d.remove();
       const st = document.createElement('style'); st.setAttribute('data-sc-clean', ''); st.textContent = css + (overlay ? bars : '');
       document.documentElement.appendChild(st); return true;
     }, [CLEAN_CSS, CLEAN_BARS], 3000, { noContext: 'skip' }).catch(() => false);
@@ -196,7 +200,18 @@ async function cleanFor(p) {
     parked = true;
     if ((await look()) !== before) { await p.mouse.move(was.x, was.y).catch(() => {}); await poll(250); parked = false; }
   }
-  return async () => { if (parked) await p.mouse.move(was.x, was.y).catch(() => {}); for (const f of done) await frameEval(p, f, () => { for (const s of document.querySelectorAll('style[data-sc-clean]')) s.remove(); }, undefined, 3000, { noContext: 'skip' }).catch(() => {}); };
+  // A control left focused by a click (a menu's button after Escape) shows its focus ring: not in the picture, unless
+  // letting go of it changes the screen. Text boxes keep theirs (what's typed and the caret are the screen).
+  const unfocus = () => p.evaluate(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement || a.matches('input,textarea,select,[contenteditable]:not([contenteditable=false])')) return false;
+    window.__scFocus = a; a.blur(); return true;
+  }).catch(() => false);
+  const refocus = () => p.evaluate(() => { const a = window.__scFocus; delete window.__scFocus; if (a && a.isConnected) a.focus({ preventScroll: true }); }).catch(() => {});
+  const seen = await look();
+  let blurred = await unfocus();
+  if (blurred) { await poll(100); if ((await look()) !== seen) { await refocus(); await poll(150); blurred = false; } }
+  return async () => { if (blurred) await refocus(); if (parked) await p.mouse.move(was.x, was.y).catch(() => {}); for (const f of done) await frameEval(p, f, () => { for (const s of document.querySelectorAll('style[data-sc-clean]')) s.remove(); }, undefined, 3000, { noContext: 'skip' }).catch(() => {}); };
 }
 async function snap(p, id, opts = {}) {
   const t0 = Date.now();

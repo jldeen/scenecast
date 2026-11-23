@@ -562,7 +562,14 @@ fn selftest_hook(state: Shared, app: AppHandle) {
                             "version": app.package_info().version.to_string(),
                             "pid": std::process::id(),
                             "testFeed": test_feed(),
+                            "engine": scenecast_app::engine().map(|e| e.packages.display().to_string()).map_err(|e| e.to_string()),
+                            "env": std::env::vars_os()
+                                .filter_map(|(k, _)| k.into_string().ok())
+                                .filter(|k| ["SCENECAST_", "REPLICA_", "STUNTDOUBLE_"].iter().any(|p| k.starts_with(p)))
+                                .collect::<Vec<_>>(),
                         })),
+                        // Copilot's state, as the window reads it (through the engine).
+                        "ai-status" => scenecast_app::ai::run(None, &["status"], |_| {}),
                         "create" => {
                             serde_json::from_value::<scenecast_app::NewDemo>(req["spec"].clone())
                                 .map_err(AppError::from)
@@ -1842,55 +1849,66 @@ async fn install_update(app: AppHandle) -> Res<()> {
 }
 
 /// In an installed app, the engine (`node_modules/@stuntdouble/*`, Scenecast's `node_modules/@scenecast/*`, their
-/// dependencies) and Node come with it, as resources: point the engine at them unless the environment already does.
-/// Runs before any thread starts.
+/// dependencies) and Node come with it, as resources. They're given to the engine's processes, never set in the app's
+/// own environment: the updater restarts the app with that environment, so whatever it holds reaches the next version
+/// (0.5.2's `SCENECAST_JS=…/Resources/packages` reached 0.5.3, whose engine is elsewhere: it had none).
+/// The checks' browser is the one presenters have (Edge on Windows, Chrome on the Mac) unless set.
+/// Runs first thing in main, before any thread starts.
 fn use_bundled_engine() {
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
-    let Some(exe_dir) = exe.parent() else { return };
-    let candidates = [
-        exe_dir.join("../Resources"),
-        exe_dir.to_path_buf(),
-        exe_dir.join("../lib/scenecast"),
-        exe_dir.join("../lib/Scenecast"),
-    ];
-    let Some(res) = candidates.iter().find(|d| {
-        d.join("node_modules/@stuntdouble/core/bin/engine.mjs")
-            .is_file()
-    }) else {
-        return;
-    };
-    let node = res
-        .join("node")
-        .join(if cfg!(windows) { "node.exe" } else { "node" });
-    // SAFETY: called first thing in main, before the runtime or any other thread exists.
-    unsafe {
-        if std::env::var_os("STUNTDOUBLE_JS").is_none()
-            && std::env::var_os("SCENECAST_JS").is_none()
-        {
-            std::env::set_var("SCENECAST_JS", res.join("node_modules/@stuntdouble"));
-        }
-        if std::env::var_os("STUNTDOUBLE_NODE").is_none()
-            && std::env::var_os("SCENECAST_NODE").is_none()
-            && node.is_file()
-        {
-            std::env::set_var("SCENECAST_NODE", &node);
-        }
-    }
-}
-
-/// The checks' headless browser: the one presenters have (Edge on Windows, Chrome on the Mac) unless set.
-fn default_check_browser() {
-    if std::env::var_os("REPLICA_CHROME_CHANNEL").is_none() {
-        // SAFETY: as above.
+    let check_browser = if cfg!(windows) { "msedge" } else { "chrome" };
+    let exe = std::env::current_exe().ok();
+    let exe_dir = exe.as_deref().and_then(Path::parent);
+    let res = exe_dir.and_then(|exe_dir| {
+        [
+            exe_dir.join("../Resources"),
+            exe_dir.to_path_buf(),
+            exe_dir.join("../lib/scenecast"),
+            exe_dir.join("../lib/Scenecast"),
+        ]
+        .into_iter()
+        .find(|d| {
+            d.join("node_modules/@stuntdouble/core/bin/engine.mjs")
+                .is_file()
+        })
+    });
+    // What an earlier version set in its own environment and its updater passed on (0.5.2 can't change): a path inside
+    // this app's bundle, or one with no engine, and its default check browser. A developer's own path elsewhere stays.
+    if let Some(res) = &res {
+        let res_real = res.canonicalize().unwrap_or_else(|_| res.clone());
+        let own = |v: &std::ffi::OsStr| {
+            let p = Path::new(v);
+            p.starts_with(res) || p.canonicalize().is_ok_and(|c| c.starts_with(&res_real))
+        };
+        let engine_in = |v: &std::ffi::OsStr| Path::new(v).join("core/bin/engine.mjs").is_file();
+        // SAFETY: called first thing in main, before the runtime or any other thread exists.
         unsafe {
-            std::env::set_var(
-                "REPLICA_CHROME_CHANNEL",
-                if cfg!(windows) { "msedge" } else { "chrome" },
-            );
+            for var in ["STUNTDOUBLE_JS", "SCENECAST_JS"] {
+                if std::env::var_os(var).is_some_and(|v| own(&v) || !engine_in(&v)) {
+                    std::env::remove_var(var);
+                }
+            }
+            for var in ["STUNTDOUBLE_NODE", "SCENECAST_NODE"] {
+                if std::env::var_os(var).is_some_and(|v| own(&v) || !Path::new(&v).is_file()) {
+                    std::env::remove_var(var);
+                }
+            }
+            if std::env::var_os("REPLICA_CHROME_CHANNEL").is_some_and(|v| v == check_browser) {
+                std::env::remove_var("REPLICA_CHROME_CHANNEL");
+            }
         }
     }
+    let node = res
+        .as_ref()
+        .map(|r| {
+            r.join("node")
+                .join(if cfg!(windows) { "node.exe" } else { "node" })
+        })
+        .filter(|n| n.is_file());
+    scenecast_app::use_bundled(scenecast_app::Bundled {
+        packages: res.map(|r| r.join("node_modules/@stuntdouble")),
+        node,
+        env: vec![("REPLICA_CHROME_CHANNEL".into(), check_browser.into())],
+    });
 }
 
 /// WebKit's GPU processes working for this app (launchd's children, so found by who they're responsible to: the same
@@ -2094,7 +2112,6 @@ async fn tokio_sleep_ms(ms: u64) {
 fn main() {
     take_test_feed();
     use_bundled_engine();
-    default_check_browser();
     let library = Library::new(Library::default_root());
     let _ = std::fs::create_dir_all(&library.root);
     let files = FileScope::default();

@@ -87,6 +87,7 @@ impl PresentSession {
     ) -> Result<Self, AppError> {
         let engine = engine()?;
         let mut cmd = Command::new(&engine.node);
+        cmd.envs(engine.env.iter().map(|(k, v)| (k, v)));
         cmd.arg(engine.packages.join("player").join("serve.mjs"))
             .arg("--demo")
             .arg(dir)

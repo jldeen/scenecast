@@ -29,6 +29,7 @@ const ping = () => fetch(`http://127.0.0.1:${RX}/ping`).then(r => r.json()).catc
 // The app on 127.0.0.1; its frame on localhost (another site, so its own process) loads, then never answers again.
 const web = createServer((q, s) => {
   s.setHeader('content-type', 'text/html');
+  if (q.url.startsWith('/focusapp')) return s.end('<title>focus</title><style>body{background:#fff;margin:40px}button{font-size:30px;width:300px;height:120px;border:0;background:#eee}button:focus-visible{outline:12px solid #f00}</style><h1>focus</h1><button onclick="document.querySelector(\'h1\').textContent=\'focus opened \'+Date.now()">Open</button>');
   if (q.url.startsWith('/darkapp')) return s.end('<title>dark</title><style>body{background:#fff}@media (prefers-color-scheme: dark){body{background:#111}}</style><h1>dark</h1><button onclick="document.querySelector(\'h1\').textContent=\'dark opened\'">Open</button>');
   if (q.url.startsWith('/boxes')) return s.end('<title>boxes</title><input id="i" value="left over"><div id="ce" contenteditable="true"><p>an unsent prompt\u200b</p></div>');
   if (q.url.startsWith('/slowframe')) return s.end('<p>slow</p><script>setInterval(() => { const t = Date.now(); while (Date.now() - t < 1500) {} }, 1600)</script>');
@@ -138,6 +139,29 @@ try {
   const lum = await luminance(dp, shots.map(f => readFileSync(join(raw, 'shots', f)).toString('base64')));
   const newShots = shots.filter(f => !shotsBefore.has(f));
   check('the worker restarts mid-take: the take resumes and the tab stays light', !!swT && !!st?.value?.resumed && afterRestart === 'rgb(255, 255, 255)', JSON.stringify({ worker: !!swT, resumed: st?.value?.resumed, afterRestart }));
+  // A control left focused (keyboard, as after a menu's Escape) shows its focus ring: not in the screen's picture
+  // (Nov 23: a ring on "More options" in three zoom pictures on Jessica's Mac).
+  const focusM = `127.0.0.1:${WEB}/focusapp`;
+  const fp = await ctx.newPage(); await fp.goto(`http://${focusM}`);
+  const preFocus = new Set(readdirSync(join(raw, 'shots')));
+  const rf = await send({ op: 'recordStart', apps: [{ id: 'focus', match: focusM }], record: { auto: false } }, 120, RX);
+  await fp.bringToFront(); await fp.keyboard.press('Tab'); await fp.keyboard.press('Enter');
+  for (let i = 0; i < 40 && readdirSync(join(raw, 'shots')).filter(f => !preFocus.has(f) && !/start/.test(f)).length < 1; i++) await sleep(500);
+  const ringNow = await fp.evaluate(() => document.activeElement?.tagName + ':' + document.activeElement?.matches(':focus-visible'));
+  await send({ op: 'recordAbort' }, 60, RX);
+  const fshots = readdirSync(join(raw, 'shots')).filter(f => f.endsWith('.png') && !preFocus.has(f));
+  const red = await fp.evaluate(async pngs => {
+    const out = [];
+    for (const b64 of pngs) {
+      const i = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = 'data:image/png;base64,' + b64; });
+      const c = new OffscreenCanvas(i.width, i.height), g = c.getContext('2d'); g.drawImage(i, 0, 0);
+      const d = g.getImageData(0, 0, i.width, i.height).data; let n = 0;
+      for (let k = 0; k < d.length; k += 4) if (d[k] > 200 && d[k + 1] < 60 && d[k + 2] < 60) n++;
+      out.push(n);
+    }
+    return out;
+  }, fshots.map(f => readFileSync(join(raw, 'shots', f)).toString('base64')));
+  check('a focused control\'s ring isn\'t in the screen\'s picture, and it keeps its focus', rf.ok && fshots.some(f => !/start/.test(f)) && red.every(n => n === 0) && ringNow === 'BUTTON:true', JSON.stringify({ ringNow, shots: Object.fromEntries(fshots.map((f, i) => [f, red[i]])) }));
   check('every shot of the dark tab is light, after the restart too', newShots.length >= 1 && shots.length >= 2 && lum.every(l => l > 0.6), JSON.stringify(Object.fromEntries(shots.map((f, i) => [f, lum[i]]))));
   // Typing replaces what's already in a box: Copilot puts back the last unsent prompt (Nov 20: typed on top, doubled).
   const boxes = `127.0.0.1:${WEB}/boxes`;

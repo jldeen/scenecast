@@ -135,6 +135,8 @@ impl Update {
     }
 }
 
+pub use scenecast_build::{Bundled, use_bundled};
+
 /// The engine (`packages/` under Node), checked once so a missing Node reads as one clear message.
 pub fn engine() -> Result<scenecast_build::Engine, AppError> {
     let engine = scenecast_build::Engine::locate()?;

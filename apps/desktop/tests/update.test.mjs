@@ -4,6 +4,8 @@
 //   node apps/desktop/tests/update.test.mjs <old: Scenecast.app (macOS) | *-setup.exe (Windows)> <new update dir> <new version>
 // The new update dir holds the N+1 update file and its .sig (macOS *.app.tar.gz, Windows *-setup.exe), signed with
 // the key whose public half both builds have; the app reads latest.json from SCENECAST_UPDATE_URL.
+// UPDATE_FEED=<https URL of latest.json>: the feed is there instead (a release's updater reads only https; CI puts it in
+// a throwaway pre-release), and the old app is a published release, as presenters update from.
 import { execFileSync, spawn } from 'node:child_process';
 import { realpathSync, cpSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -65,8 +67,14 @@ try {
   install();
   const before = installedVersion();
   check(`version N installed (${before})`, before && before !== newVersion, before);
-  execFileSync(process.execPath, [join(HERE, '..', 'scripts', 'latest-json.mjs'), newDir, newVersion, `http://127.0.0.1:${PORT}/`], { stdio: 'inherit' });
-  const env = { ...process.env, SCENECAST_LIBRARY: LIB, SCENECAST_SELFTEST: HOOK, SCENECAST_UPDATE_URL: `http://127.0.0.1:${PORT}/latest.json` };
+  const FEED = process.env.UPDATE_FEED;
+  if (!FEED) execFileSync(process.execPath, [join(HERE, '..', 'scripts', 'latest-json.mjs'), newDir, newVersion, `http://127.0.0.1:${PORT}/`], { stdio: 'inherit' });
+  // Copilot's state through the engine, with the stand-in model (signed in, no account): what the window shows.
+  const env = { ...process.env, SCENECAST_LIBRARY: LIB, SCENECAST_SELFTEST: HOOK, SCENECAST_AI_MODEL: 'stub', SCENECAST_UPDATE_URL: FEED || `http://127.0.0.1:${PORT}/latest.json` };
+  // Two builds of this code: the old one's variables as 0.5.2 left them for 0.5.3 (Nov 23, on Jessica's Mac): the
+  // engine's place inside the old bundle, gone from the new one, passed on by the updater's restart. (A published
+  // release sets its own.)
+  if (MAC && !FEED) { env.SCENECAST_JS = join(appDir, 'Contents', 'MacOS', '..', 'Resources', 'packages'); env.SCENECAST_NODE = join(appDir, 'Contents', 'MacOS', '..', 'Resources', 'node', 'node'); }
   app = spawn(exe, [], { env, stdio: 'ignore', detached: !WIN });
   const v0 = await hook('version', {}, 90000);
   check('the installed app runs version N', v0.ok && v0.value.version === before, JSON.stringify(v0));
@@ -93,11 +101,29 @@ try {
     return r && r.ok && r.value.version === newVersion && r;
   }, 240000, 1000).catch(e => ({ error: e.message }));
   check(`relaunched on ${newVersion}`, v1.ok && v1.value.pid !== v0.value.pid, JSON.stringify(v1));
-  // The test feed doesn't outlive this run: the app the update relaunched checks the release feed (tauri.conf.json).
-  if (!WIN) check('after the update, the release feed (the test feed isn\'t passed on)', v1.ok && v1.value.testFeed == null, JSON.stringify(v1.value || v1));
+  // The test feed doesn't outlive this run: an app of this code passes it to none (a published one passes it on, so
+  // there it's the normal reopen below that matters).
+  if (!WIN && !FEED) check('after the update, the release feed (the test feed isn\'t passed on)', v1.ok && v1.value.testFeed == null, JSON.stringify(v1.value || v1));
+  check('after the update, the engine is found (an old version\'s engine path isn\'t used)', v1.ok && v1.value.engine?.Ok && !/[\\/]packages$/.test(v1.value.engine.Ok), JSON.stringify(v1.value?.engine || v1));
+  // None of the variables an old version set in its own environment (the engine's place, Node, the checks' browser)
+  // or the test feed: this version gives its engine's processes their own and keeps them out of its environment.
+  const LEAKS = ['SCENECAST_JS', 'SCENECAST_NODE', 'STUNTDOUBLE_JS', 'STUNTDOUBLE_NODE', 'REPLICA_CHROME_CHANNEL', 'SCENECAST_UPDATE_URL'];
+  check('after the update, no variable an old version set (or the test feed) in the app', v1.ok && Array.isArray(v1.value.env) && !v1.value.env.some(k => LEAKS.includes(k)), JSON.stringify(v1.value?.env));
+  const ai = await hook('ai-status', {}, 120000);
+  check('after the update, Copilot reads as signed in (through the engine)', ai.ok && ai.value?.signedIn === true, JSON.stringify(ai));
   check(`the installed app is ${newVersion}`, installedVersion() === newVersion, installedVersion());
   check('the demo is still there', existsSync(join(LIB, made.value.id, 'demo.json')));
+  // Quit, and open it normally (no test feed): the release feed, nothing to say it's on test updates.
   if (v1.value?.pid) try { process.kill(v1.value.pid); } catch { /* gone */ }
+  await waitFor('the app to quit', () => { try { process.kill(v1.value.pid, 0); return false; } catch { return true; } }, 30000).catch(() => {});
+  const { SCENECAST_UPDATE_URL: _feed, ...normal } = env;
+  app = spawn(exe, [], { env: normal, stdio: 'ignore', detached: !WIN });
+  const v2 = await waitFor('Scenecast opened normally', async () => {
+    const r = await hook('version', {}, 15000).catch(() => null);
+    return r && r.ok && r.value.pid !== v1.value?.pid && r;
+  }, 120000, 1000).catch(e => ({ error: e.message }));
+  check('opened normally after the update: the release feed, no "test updates", no old variables', v2.ok && v2.value.testFeed == null && !v2.value.env.some(k => LEAKS.includes(k)) && v2.value.engine?.Ok, JSON.stringify(v2.value || v2));
+  if (v2.value?.pid) try { process.kill(v2.value.pid); } catch { /* gone */ }
 } catch (e) {
   check('ran', false, e.stack || e);
 } finally {

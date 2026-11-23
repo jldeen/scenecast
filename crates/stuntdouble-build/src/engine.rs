@@ -4,15 +4,15 @@
 //! in an npm install or the desktop app. It's found from `STUNTDOUBLE_JS` (or `SCENECAST_JS`), else by walking up from
 //! the running binary to a `packages/` or `node_modules/@stuntdouble` holding it, else the checkout this binary was
 //! built from. Node is `STUNTDOUBLE_NODE` (or `SCENECAST_NODE`), else `node` on PATH. Both work the same on macOS and
-//! Windows.
+//! Windows. An app that ships the engine gives its own with [`use_bundled`] instead of setting those in its environment.
 
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -62,12 +62,36 @@ pub struct Engine {
     pub cancel: Option<Arc<AtomicBool>>,
 }
 
+/// The engine an app ships with it: its packages, its Node, and variables for the engine's processes. Kept here, not in
+/// the app's own environment: an updater restarts the app with that environment, and the next version's bundle may be
+/// laid out differently (0.5.2's `Resources/packages` reached 0.5.3 that way, and it had no engine).
+#[derive(Debug, Clone, Default)]
+pub struct Bundled {
+    pub packages: Option<PathBuf>,
+    pub node: Option<PathBuf>,
+    /// Set on the engine's processes unless the environment already has them.
+    pub env: Vec<(OsString, OsString)>,
+}
+
+static BUNDLED: OnceLock<Bundled> = OnceLock::new();
+
+/// Uses the app's own engine (once, at start). `STUNTDOUBLE_JS`/`STUNTDOUBLE_NODE` still win, for a developer.
+pub fn use_bundled(bundled: Bundled) {
+    let _ = BUNDLED.set(bundled);
+}
+
 impl Engine {
     pub fn locate() -> Result<Self, EngineError> {
+        let bundled = BUNDLED.get();
         let packages = std::env::var_os("STUNTDOUBLE_JS")
             .or_else(|| std::env::var_os("SCENECAST_JS"))
             .map(PathBuf::from)
             .filter(|p| p.join(ENTRY).is_file())
+            .or_else(|| {
+                bundled
+                    .and_then(|b| b.packages.clone())
+                    .filter(|p| p.join(ENTRY).is_file())
+            })
             .or_else(|| {
                 std::env::current_exe().ok().and_then(|exe| {
                     exe.ancestors()
@@ -85,11 +109,21 @@ impl Engine {
         let node = std::env::var_os("STUNTDOUBLE_NODE")
             .or_else(|| std::env::var_os("SCENECAST_NODE"))
             .map(PathBuf::from)
+            .or_else(|| bundled.and_then(|b| b.node.clone()))
             .unwrap_or_else(|| PathBuf::from("node"));
+        let env = bundled
+            .map(|b| {
+                b.env
+                    .iter()
+                    .filter(|(k, _)| std::env::var_os(k).is_none())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(Self {
             packages: dunce(packages),
             node,
-            env: Vec::new(),
+            env,
             cancel: None,
         })
     }

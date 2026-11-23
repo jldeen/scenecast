@@ -370,6 +370,7 @@ pub fn open(dir: &Path, stage: &str, place: Option<Place>) -> Result<String, App
     }
     let engine = engine()?;
     let mut cmd = Command::new(&engine.node);
+    cmd.envs(engine.env.iter().map(|(k, v)| (k, v)));
     cmd.arg(engine.packages.join("player").join("open.mjs"))
         .arg("--demo")
         .arg(dir)
