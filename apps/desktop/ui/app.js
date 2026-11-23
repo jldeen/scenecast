@@ -2273,21 +2273,3 @@ setInterval(() => { if (U.available && !U.busy) { const b = $('#update-now'); if
 window.__scenecast = S;
 // The UI test opens a shared file the way a double-click does.
 S.openFile = openShared;
-// The window drawing: animation frames come while it's on screen. The page's 1 s timer still ticking with no frame
-// between six ticks means the page is fine but nothing reaches the screen (WebKit's GPU process wedged: a blank window
-// for two hours, Nov 2026). Ticks, not time: a long task holds timers and frames alike, and once it ends the timer can
-// run before the next frame (6.5 s measured mid Record for me, the page fine). The app starts the page again if macOS
-// says the window is on screen (window_not_drawing); at most once a minute.
-(() => {
-  let last = performance.now(), ticks = 0, told = 0;
-  const frame = () => { last = performance.now(); ticks = 0; requestAnimationFrame(frame); };
-  requestAnimationFrame(frame);
-  const W = window.__drawing = { stalledMs: 0, ticks: 0, told: 0 };
-  setInterval(() => {
-    const now = performance.now();
-    if (document.visibilityState !== 'visible') { last = now; ticks = 0; W.stalledMs = 0; W.ticks = 0; return; }
-    ticks++;
-    W.stalledMs = Math.round(now - last); W.ticks = ticks;
-    if (ticks >= 6 && W.stalledMs > 6000 && now - told > 60000) { told = now; W.told++; call('window_not_drawing', { ms: W.stalledMs }).catch(() => {}); }
-  }, 1000);
-})();

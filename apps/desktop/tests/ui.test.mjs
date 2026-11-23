@@ -624,38 +624,22 @@ try {
   check('deletes a demo', !existsSync(join(LIB, 'fixture-demo-copy')));
   lap('library');
 
-  // ---- A window that can't draw starts its page again (macOS) ----------------------------------------------------
-  // Nov 2026, Jessica's Mac: WebKit's GPU process stopped answering, WebKit couldn't end the last of its replacements,
-  // and the window stayed blank for two hours with the page itself fine. Here the app's GPU processes are stopped
-  // (SIGSTOP), as hers was. The page's watchdog (frames stop while its timers run) can't be tested on CI's display
-  // (frames don't run there at all), so the app is told directly, as the watchdog tells it; it must start the page
-  // again, leave no stopped GPU process, and draw: a real screenshot of the window that isn't blank.
+  // ---- A window WebKit can't draw in comes back (macOS) ---------------------------------------------------------
+  // Nov 2026, Jessica's Mac: WebKit couldn't end its unresponsive GPU process and the window stayed blank. The app reads
+  // that from its own log (gpu_watch.rs; the reading is unit-tested, the real case is checked on a real Mac: CI's
+  // virtual Macs have no GPU process). Here, what it then does: the window's web process ends, the page loads again on
+  // its own and draws, with no restart.
   if (process.platform === 'darwin') {
-    const inv = (cmd, args = {}) => b.executeAsync((cmd, args, done) => window.__TAURI__.core.invoke(cmd, args).then(done, e => done({ error: String(e) })), cmd, args);
     await b.execute(() => { window.__before = 1; });
-    const gpu = await inv('test_webkit_gpu_pids');
-    // CI's virtual Macs have no WebKit GPU process (the web process draws): there, only the restart can be tested.
-    const noGpu = Array.isArray(gpu) && !gpu.length;
-    if (noGpu) console.log('window recovery: no WebKit GPU process on this Mac (a virtual one draws in the web process), so stopping it is tested on a real Mac only: ' + JSON.stringify(await inv('test_webkit_gpu_all')));
-    else check('the app finds its GPU process', Array.isArray(gpu), JSON.stringify(gpu));
-    for (const pid of noGpu ? [] : gpu) try { process.kill(pid, 'SIGSTOP'); } catch (e) {}
-    // Not awaited in the page: the answer never comes back to it, as its web process is the one ended.
-    await b.execute((noGpu) => { window.__TAURI__.core.invoke('window_not_drawing', { ms: 10000, testNoGpu: noGpu }).catch(() => {}); }, noGpu);
+    await b.execute(() => { window.__TAURI__.core.invoke('test_recover_window').catch(() => {}); });
     let back = false;
-    for (let i = 0; i < 40 && !back; i++) { await sleep(500); back = await b.execute(() => window.__before !== 1).catch(() => false); }
-    const said = appLog.join('').split('\n').filter(l => /window_not_drawing/.test(l)).slice(-4).join('\n');
-    console.log('window recovery, the app says:\n' + said);
-    check(noGpu ? 'the app starts its page again (a fresh web process)' : 'a window whose GPU process is stopped starts its page again', /restarting: web process [1-9]/.test(said) && back, said);
-    await sleep(1000);
-    const left = (noGpu ? [] : gpu).filter(pid => { try { process.kill(pid, 0); return true; } catch (e) { return false; } });
-    for (const pid of left) try { process.kill(pid, 'SIGCONT'); } catch (e) {}
-    if (!noGpu) check('no stopped GPU process left behind', left.length === 0, `still there: ${left.join(' ')}`);
-    // Drawing: the window's own picture, not one colour.
+    for (let i = 0; i < 40 && !back; i++) { await sleep(500); back = await b.execute(() => window.__before !== 1 && !!document.querySelector('[data-test]')).catch(() => false); }
+    check('the window\'s page loads again on its own after its web process ends', back);
     let drawn = false, shot = null;
     for (let i = 0; i < 20 && !drawn; i++) {
       await sleep(500);
       shot = await b.takeScreenshot().catch(() => null);
-      if (shot) { const png = Buffer.from(shot, 'base64'); drawn = png.length > 20000; }
+      if (shot) drawn = Buffer.from(shot, 'base64').length > 20000;
     }
     if (SHOTS && shot) writeFileSync(join(SHOTS, 'zz-drawing-again.png'), Buffer.from(shot, 'base64'));
     check('it draws again within seconds, no restart', drawn && appExit === null, `picture ${shot ? Buffer.from(shot, 'base64').length : 0} bytes`);
