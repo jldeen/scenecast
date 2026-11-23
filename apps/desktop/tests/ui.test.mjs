@@ -639,11 +639,13 @@ try {
     if (noGpu) console.log('window recovery: no WebKit GPU process on this Mac (a virtual one draws in the web process), so stopping it is tested on a real Mac only: ' + JSON.stringify(await inv('test_webkit_gpu_all')));
     else check('the app finds its GPU process', Array.isArray(gpu), JSON.stringify(gpu));
     for (const pid of noGpu ? [] : gpu) try { process.kill(pid, 'SIGSTOP'); } catch (e) {}
-    const said = await inv('window_not_drawing', { ms: 10000, testNoGpu: noGpu });
+    // Not awaited in the page: the answer never comes back to it, as its web process is the one ended.
+    await b.execute((noGpu) => { window.__TAURI__.core.invoke('window_not_drawing', { ms: 10000, testNoGpu: noGpu }).catch(() => {}); }, noGpu);
     let back = false;
     for (let i = 0; i < 40 && !back; i++) { await sleep(500); back = await b.execute(() => window.__before !== 1).catch(() => false); }
-    console.log('window recovery, the app says:\n' + JSON.stringify(said) + '\n' + appLog.join('').split('\n').filter(l => /window_not_drawing/.test(l)).slice(-4).join('\n'));
-    check(noGpu ? 'the app starts its page again (a fresh web process)' : 'a window whose GPU process is stopped starts its page again', said && said.restarted === 'web process' && back, JSON.stringify(said));
+    const said = appLog.join('').split('\n').filter(l => /window_not_drawing/.test(l)).slice(-4).join('\n');
+    console.log('window recovery, the app says:\n' + said);
+    check(noGpu ? 'the app starts its page again (a fresh web process)' : 'a window whose GPU process is stopped starts its page again', /restarting: web process [1-9]/.test(said) && back, said);
     await sleep(1000);
     const left = (noGpu ? [] : gpu).filter(pid => { try { process.kill(pid, 0); return true; } catch (e) { return false; } });
     for (const pid of left) try { process.kill(pid, 'SIGCONT'); } catch (e) {}
