@@ -153,7 +153,9 @@ pixels by default. Drawn in the real browser, also:
   strip (9.9% of the height at 200% zoom) and doesn't count.
 
 `packages/selftest/real-chrome-checker.mjs` plants a changed word, a 2-px shift, a missing icon, a 1-px border, a
-wrong colour and a panel's lost background, and checks each is caught where it was planted. Review shows a spot or an
+wrong colour and a panel's lost background, and checks each is caught where it was planted. The real browser is the
+capture browser's launcher (`packages/checks/real-chrome.mjs` re-exports it): minimized windows on macOS, off every
+display on Windows, Chrome's own binary on a CI Mac; macOS and Windows only, so Linux stays headless. Review shows a spot or an
 area outlined on both pictures ("This spot differs").
 What's different, or has a font that isn't the real file, goes to the fixer.
 Its diagnosers say why, from evidence in the raw captures and the rendered replica, and write a patch for this demo

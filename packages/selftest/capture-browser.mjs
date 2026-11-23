@@ -2,6 +2,7 @@
 // profile, every window off the screen, on the fixture apps. Nothing shows on the screen and nothing of the
 // presenter's is touched. Needs Chrome (or Edge: CAPTURE_CHANNEL=msedge) installed.
 //   node packages/selftest/capture-browser.mjs
+import './reap.mjs';
 import { createServer } from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -12,6 +13,8 @@ import { startFixture } from '../../examples/fixture-app/server.mjs';
 const channel = process.env.CAPTURE_CHANNEL || 'chrome';
 let failed = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${!ok && detail ? ': ' + String(detail).slice(0, 400) : ''}`); if (!ok) failed++; };
+// macOS and Windows: what the capture browser is for (a Linux runner has no display for a real Chrome's windows).
+if (!['darwin', 'win32'].includes(process.platform)) { console.log('SKIP capture browser: macOS and Windows only'); process.exit(0); }
 if (!browserApp(channel)) { console.log(`SKIP no ${channel} installed`); process.exit(0); }
 
 const fx = startFixture({ chatPort: 47811, adminPort: 47812 });
