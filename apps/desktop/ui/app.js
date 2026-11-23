@@ -1347,7 +1347,7 @@ function screenState(sc) {
 const thumbBtn = (d, sc, label) => {
   const [st, says] = screenState(sc);
   return `<button class="thumb ${st === 'hold' ? 'differs' : ''}" data-pick="${esc(sc.id)}" aria-pressed="${J(d.id).pick === sc.id}" aria-label="${esc(label)}: ${says.toLowerCase()}" data-test="screen">
-    ${sc.shot ? `<img src="${esc(sc.shot)}" alt="" loading="lazy">` : '<span class="noshot"></span>'}${st === 'hold' ? `<span class="badge">${svg('<path d="M12 6.5v7M12 17v.5"/>', '')}</span>` : ''}</button>`;
+    ${sc.shot ? `<img src="${esc(sc.thumb || sc.shot)}" alt="" loading="lazy" decoding="async">` : '<span class="noshot"></span>'}${st === 'hold' ? `<span class="badge">${svg('<path d="M12 6.5v7M12 17v.5"/>', '')}</span>` : ''}</button>`;
 };
 Object.assign(REGIONS, {
   review(d) {
