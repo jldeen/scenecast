@@ -104,7 +104,7 @@ async function recSettle(p, ms, maxMs) {
 function recUniq(id) { let k = id, n = 1; while (REC.states[k]) k = `${id}-${++n}`; return k; }
 async function recAddState(A, id, sig) {
   const tSnap = Date.now();
-  await H.snap(A.page, id);
+  await H.snap(A.page, id, { clean: true });
   REC.time.capture += Date.now() - tSnap;
   const meta = await A.page.mainFrame().evaluate(() => ({ title: document.title, cs: window.__rkrec ? window.__rkrec.colorScheme() : null })).catch(() => ({}));
   const st = { app: A.id, snap: id, sig: sig || await recSig(A.page), title: meta.title, on: [] };
@@ -778,7 +778,7 @@ async function recSide(A, c) {
           // markup), and its CSS lays it out.
           if (dom !== null && dom === lastDom) { out.push(`${z}% as the level below`); prevVw = vw; continue; }
           lastDom = dom;
-          await H.snap(p, id);
+          await H.snap(p, id, { clean: true });
           const lm = await p.evaluate(sel => { const o = {}; for (const q of sel) o[q] = [...document.querySelectorAll(q)].map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }).filter(b => b[2] > 0 && b[3] > 0).slice(0, 3); return o; }, c.landmarks || ['nav', 'main', 'aside', 'header', '[role=navigation]', '[role=main]', '[role=dialog]', '[role=grid]', '[contenteditable=true]', 'textarea', 'input[type=search]']);
           // bw: the window's width at 100% (the bands are placed from it); pw: the width of the last level checked, whose
           // markup was still the one below (this level's band starts halfway between).

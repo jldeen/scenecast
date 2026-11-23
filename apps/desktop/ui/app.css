@@ -372,3 +372,8 @@ dialog .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px
 .card.making { display: grid; gap: 10px; max-width: 720px; }
 .card.making .sub { color: var(--muted); margin-bottom: 4px; }
 .card.making .line { display: flex; align-items: center; gap: 12px; }
+
+/* Review: the spot that differs, outlined on the side by side. */
+.compare .shotwrap{position:relative;line-height:0}
+.compare .shotwrap img{width:100%;height:auto}
+.compare .spot{position:absolute;border:2px solid var(--bad);border-radius:4px;pointer-events:none}

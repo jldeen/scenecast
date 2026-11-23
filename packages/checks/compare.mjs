@@ -54,12 +54,13 @@ export async function diffDetail(page, pairs, { label = [] } = {}) {
       const c = new OffscreenCanvas(w, h), g = c.getContext('2d', { willReadFrequently: true });
       g.drawImage(A, 0, 0); const da = g.getImageData(0, 0, w, h).data;
       g.clearRect(0, 0, w, h); g.drawImage(B, 0, 0); const db = g.getImageData(0, 0, w, h).data;
-      const C = 16, cw = Math.ceil(w / C), ch = Math.ceil(h / C), cells = new Uint32Array(cw * ch);
+      const C = 16, cw = Math.ceil(w / C), ch = Math.ceil(h / C), cells = new Uint32Array(cw * ch), soft = new Uint32Array(cw * ch);
       const dd = new ImageData(w, h); const dp = dd.data;
       let bad = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
       for (let i = 0, p = 0; i < da.length; i += 4, p++) {
         const x = p % w, y = (p / w) | 0;
-        const off = Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]) > 60;
+        const dsum = Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]), off = dsum > 60;
+        if (!off && dsum >= 18) soft[((y / C) | 0) * cw + ((x / C) | 0)]++;
         if (off) {
           bad++; cells[((y / C) | 0) * cw + ((x / C) | 0)]++;
           if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
@@ -82,6 +83,24 @@ export async function diffDetail(page, pairs, { label = [] } = {}) {
         regions.push({ x: rx0 * C, y: ry0 * C, w: Math.min(w, (rx1 + 1) * C) - rx0 * C, h: Math.min(h, (ry1 + 1) * C) - ry0 * C, px });
       }
       regions.sort((a, b) => b.px - a.px);
+      // Areas shifted a little (Δ 6 or more a channel, under the per-pixel tolerance) all over: cells nearly all of
+      // whose pixels moved, joined when they share a side. A panel's background lost (a CSS variable falling back to
+      // white) is one large area; text drawn differently isn't (its cells are mostly unchanged background).
+      const full = Math.floor(C * C * 0.8), aseen = new Uint8Array(cw * ch), areas = [];
+      for (let s = 0; s < soft.length; s++) {
+        if (soft[s] < full || aseen[s]) continue;
+        const stack = [s]; aseen[s] = 1; let n = 0, rx0 = cw, ry0 = ch, rx1 = 0, ry1 = 0;
+        while (stack.length) {
+          const q = stack.pop(), qx = q % cw, qy = (q / cw) | 0; n++;
+          if (qx < rx0) rx0 = qx; if (qy < ry0) ry0 = qy; if (qx > rx1) rx1 = qx; if (qy > ry1) ry1 = qy;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = qx + dx, ny = qy + dy, m = ny * cw + nx;
+            if (nx >= 0 && ny >= 0 && nx < cw && ny < ch && soft[m] >= full && !aseen[m]) { aseen[m] = 1; stack.push(m); }
+          }
+        }
+        areas.push({ x: rx0 * C, y: ry0 * C, w: Math.min(w, (rx1 + 1) * C) - rx0 * C, h: Math.min(h, (ry1 + 1) * C) - ry0 * C, pct: +(100 * n * C * C / (w * h)).toFixed(2) });
+      }
+      areas.sort((a, b) => b.pct - a.pct);
       // Side by side: real | replica, regions outlined on both, with a caption.
       const gap = 12, top = 34, sbs = new OffscreenCanvas(w * 2 + gap, h + top), sg = sbs.getContext('2d');
       sg.fillStyle = '#fff'; sg.fillRect(0, 0, sbs.width, sbs.height);
@@ -94,9 +113,30 @@ export async function diffDetail(page, pairs, { label = [] } = {}) {
       out.push({
         pct: +(100 * bad / (w * h)).toFixed(3), box: bad ? [x0, y0, x1, y1] : null,
         size: { real: [A.width, A.height], replica: [B.width, B.height] },
-        regions: regions.slice(0, 40), sideBySide: await b64Of(sbs), diff: await b64Of(dc),
+        regions: regions.slice(0, 40), areas: areas.slice(0, 10), sideBySide: await b64Of(sbs), diff: await b64Of(dc),
       });
     }
     return out;
   }, { pairs, label });
+}
+
+// Whether a screen differs. The share of pixels (0.5%) alone, where the replica is drawn by another engine than the
+// real page (headless: text drawn a little differently all over). Drawn in the same browser as it was recorded (real),
+// anything really there is also caught by where it is:
+//   a spot     differing pixels together, CLUSTER_PX or more (her real take: text drawn by the same Chrome differs in
+//              at most 88 px in one spot; a changed word, a missing icon, a 1-px border are thousands)
+//   an area    a panel-sized area all shifted a little (under the per-pixel tolerance): 2% of the screen or more, at
+//              least 12% of its height and 8% of its width (a background lost; a hovered row's shade is a strip: on
+//              her take 9.9% of the height at 200% zoom)
+// → { pass, why: 'share' | 'spot' | 'area' | null, spot?, area? }
+export const CLUSTER_PX = 400, AREA_PCT = 2, AREA_H = 0.12, AREA_W = 0.08;
+export function verdict(d, { threshold = 0.5, real = false } = {}) {
+  if (d.pct > threshold) return { pass: false, why: 'share' };
+  if (!real) return { pass: true, why: null };
+  const spot = (d.regions || []).find(r => r.px >= CLUSTER_PX);
+  if (spot) return { pass: false, why: 'spot', spot };
+  const [W, H] = (d.size && d.size.real) || [0, 0];
+  const area = (d.areas || []).find(a => a.pct >= AREA_PCT && a.h >= AREA_H * H && a.w >= AREA_W * W);
+  if (area) return { pass: false, why: 'area', area };
+  return { pass: true, why: null };
 }

@@ -167,9 +167,40 @@ async function frameKeys(p) {
 }
 
 // One full snapshot of a tab: screenshot first (the exact state), then every frame's DOM, then the resources.
+// A clean picture of a screen (opts.clean, the screens themselves and their zoom levels): no text caret, no overlay
+// scrollbar (one shows for a second after a scroll; hidden only where scrollbars take no room, so nothing moves), and
+// the pointer parked in the top right corner, where the checker parks it (so a row it was resting on isn't shaded).
+// Nov 2026, on real Chrome: the checks found a scrollbar, a caret and a hovered row in the pictures, not the pages.
+const CLEAN_CSS = '*{caret-color:transparent!important}';
+const CLEAN_BARS = '*::-webkit-scrollbar{display:none!important}';
+async function cleanFor(p) {
+  const done = [];
+  for (const f of p.frames()) {
+    const ok = await frameEval(p, f, ([css, bars]) => {
+      const d = document.createElement('div'); d.style.cssText = 'position:absolute;top:-999px;width:100px;height:100px;overflow:scroll';
+      (document.body || document.documentElement).appendChild(d); const overlay = d.offsetWidth - d.clientWidth === 0; d.remove();
+      const st = document.createElement('style'); st.setAttribute('data-sc-clean', ''); st.textContent = css + (overlay ? bars : '');
+      document.documentElement.appendChild(st); return true;
+    }, [CLEAN_CSS, CLEAN_BARS], 3000, { noContext: 'skip' }).catch(() => false);
+    if (ok) done.push(f);
+  }
+  // Parked, unless that changes the screen (a menu or card open because the pointer is on it): then back where it was.
+  const look = () => p.evaluate(() => (document.body ? document.body.innerText.length : 0) + '|' + document.querySelectorAll('[aria-expanded="true"],[role=dialog],[role=menu],[role=tooltip]').length).catch(() => null);
+  const at = await p.evaluate(() => ({ w: innerWidth, ptr: window.__rkrec && window.__rkrec.pointer })).catch(() => null);
+  if (at) {
+    const before = await look();
+    await p.mouse.move(at.w - 1, 2).catch(() => {});
+    await poll(150);
+    if ((await look()) !== before && at.ptr) { await p.mouse.move(at.ptr[0], at.ptr[1]).catch(() => {}); await poll(250); }
+  }
+  return async () => { for (const f of done) await frameEval(p, f, () => { for (const s of document.querySelectorAll('style[data-sc-clean]')) s.remove(); }, undefined, 3000, { noContext: 'skip' }).catch(() => {}); };
+}
 async function snap(p, id, opts = {}) {
   const t0 = Date.now();
-  if (opts.shot !== false) { const b = await p.screenshot({ timeout: 60000 }); await post('/shot', { id, b64: b.toString('base64') }); }
+  if (opts.shot !== false) {
+    const undo = opts.clean ? await cleanFor(p) : null;
+    try { const b = await p.screenshot({ timeout: 60000 }); await post('/shot', { id, b64: b.toString('base64') }); } finally { if (undo) await undo(); }
+  }
   const keys = await frameKeys(p);
   await exposeShadow(p).catch(e => rlog(`snap ${id}: closed shadow roots: ${e.message}`));
   const docs = [];

@@ -26,4 +26,5 @@ step('redirected tab', process.execPath, ['packages/selftest/redirect-tab.mjs'])
 step('pause and go on', process.execPath, ['packages/selftest/pause-go-on.mjs']);
 step('selftest', process.execPath, ['packages/selftest/selftest.mjs']);
 step('fidelity loop', process.execPath, ['packages/selftest/fidelity-loop.mjs']);
+step('real Chrome checker', process.execPath, ['packages/selftest/real-chrome-checker.mjs']);
 step('ai modes', process.execPath, ['packages/selftest/ai-modes.mjs']);
