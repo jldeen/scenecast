@@ -106,6 +106,8 @@ try {
   }
   const cfg = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8'));
   Object.assign(cfg, { raw: join(tmp, 'raw'), receiverPort: RX_PORT, viewport: { width: 1600, height: 900, dpr: 1 }, zooms: [67, 150, 200] });
+  // The agent recorder runs this very build (no version to check), in a browser preflight doesn't look for.
+  if (MODE === 'agent') cfg.recorder = 'agent';
   Object.assign(cfg.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200 });
   writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(cfg, null, 2));
   const at = { cwd: DEMO };
@@ -159,10 +161,23 @@ export default flow => {
   } else {
     r = await run(['agent', join(tmp, 'agent')], at);
     check('agent builds', r.code === 0, r.out);
+    if (process.env.SCENECAST_CAPTURE_BROWSER) {
+      // Spike (stage C): the recorder over CDP in the capture browser (real Chrome, its own profile, every page a
+      // window of its own, off the screen), at the same viewport the other runs use.
+      const { launchCaptureBrowser } = await import('../../spikes/capture-browser/browser.mjs');
+      const cb = await launchCaptureBrowser({ mode: process.env.SCENECAST_CAPTURE_BROWSER, width: 1600, height: 900 });
+      if (!cb) throw new Error('no capture browser');
+      browser = { close: () => cb.close() }; ctx = cb.ctx;
+      const at = { width: 1600, height: 900, viewport: 'emulated', dpr: 1 };
+      chat = await cb.newPage({ url: fx.chat, ...at });
+      admin = await cb.newPage({ url: fx.admin, ...at });
+      console.log('capture browser: ' + JSON.stringify(await cb.info()));
+    } else {
     browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
     ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1, colorScheme: 'light' });
     chat = await ctx.newPage(); await chat.goto(fx.chat);
     admin = await ctx.newPage(); await admin.goto(fx.admin);
+    }
     await chat.bringToFront(); await sleep(500);
     const agent = eval(readFileSync(join(tmp, 'agent', 'agent.js'), 'utf8'));
     check('agent starts', (await agent(chat)) === 'agent started');
@@ -172,7 +187,7 @@ export default flow => {
   // "+N", resize handles, zoom, every row of a long list) are captured as it goes: one Chrome pass, nothing after.
   const settled = async () => { await sleep(450); for (let i = 0, ok = 0; i < 1200; i++) { const s = await cmd('record', 'status'); if (!s.busy && !(s.typing || []).length) { if (++ok >= 2) return s; } else ok = 0; await sleep(250); } throw new Error('recorder never settled'); };
   const tRec = Date.now();
-  let s = await cmd('record', 'start');
+  let s = await cmd('record', 'start', ...(MODE === 'agent' ? ['--no-check'] : []));
   check('record start, automatic side paths on', s.recording === true && s.auto === true, JSON.stringify(s));
   await settled();
   // Chat: prompt 1 typed and sent with Enter at once (the recorder holds Enter, captures the typed screen first).
