@@ -4119,6 +4119,8 @@ dependencies = [
 name = "scenecast-desktop"
 version = "0.5.2"
 dependencies = [
+ "libc",
+ "objc2",
  "scenecast-app",
  "serde",
  "serde_json",

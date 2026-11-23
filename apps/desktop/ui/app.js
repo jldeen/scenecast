@@ -2245,3 +2245,18 @@ setInterval(() => { if (U.available && !U.busy) { const b = $('#update-now'); if
 window.__scenecast = S;
 // The UI test opens a shared file the way a double-click does.
 S.openFile = openShared;
+// The window drawing: animation frames come while it's on screen. None for 6 s while the page's timers still run
+// means the page is fine but nothing reaches the screen (WebKit's GPU process wedged: a blank window for two hours,
+// Nov 2026). The app starts the page again (window_not_drawing); at most once a minute.
+(() => {
+  let last = performance.now(), told = 0;
+  const frame = () => { last = performance.now(); requestAnimationFrame(frame); };
+  requestAnimationFrame(frame);
+  const W = window.__drawing = { stalledMs: 0, told: 0 };
+  setInterval(() => {
+    const now = performance.now();
+    if (document.visibilityState !== 'visible') { last = now; W.stalledMs = 0; return; }
+    W.stalledMs = Math.round(now - last);
+    if (W.stalledMs > 6000 && now - told > 60000) { told = now; W.told++; call('window_not_drawing', { ms: W.stalledMs }).catch(() => {}); }
+  }, 1000);
+})();
