@@ -215,8 +215,10 @@ capture pass runs it before and after a run: Undo, then Set first, then Check.
 - **Undo**, per app: plan steps, run the same way as the plan's. `You:` is a step for a person. `Undoes:` says which
   writes the group undoes; `Note:` what the app pack says about it. `Undo with the app pack: <pack>:<write>` is a
   private pack's API undo, named and not written out (its host and IDs stay in the pack): the capture pass calls it in
-  its own signed-in session with what its run made (`{taskId}`, `{skill}`), and the `Note:` has the steps by hand for
-  when it can't. What a run leaves besides its writes (saved memories) is undone only when its check finds something.
+  its own signed-in session, its `{placeholders}` filled from the demo's values (demo.json `apps[].values`: which
+  plugin, which section), else from what its run made (`{taskId}`, `{skill}`), and the `Note:` has the steps by hand
+  for when it can't. What a run leaves besides its writes (saved memories) is undone only when its check finds
+  something.
 - **Set first**: the state the demo starts in, as the first screen that shows each thing has it, in the plan's order:
   what's switched on or off, the option picked (Chat | Cowork), and the theme. `Set:` is the control that changes it
   and the app pack's write for it (only when the pack knows one), `Opens:` where, `Seen:` the screen it's read from.

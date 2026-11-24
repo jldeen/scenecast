@@ -436,7 +436,7 @@ test('the reset: each write undone in reverse, a pack\'s undo with what the run 
   // A private pack's API undo: named, not written out; the steps by hand are what's left if it can't.
   const api = { forApp: { chat: { ...pack, writes: [{ ...pack.writes[0], undo: { ...pack.writes[0].undo, api: { use: 'notes', method: 'DELETE', path: '/notes/{skill}' } } }] } }, writeFor };
   const viaApi = resetFor(plan, { walker, packs: api }).undo.find(u => /notes:save-note/.test(u.steps[0]));
-  assert.deepEqual([viaApi.steps, viaApi.note], [['Undo with the app pack: notes:save-note'], `an API call in the capture browser's own signed-in session, with {skill} from the run; if it can't: Click "Delete kestrel-note"`]);
+  assert.deepEqual([viaApi.steps, viaApi.note], [['Undo with the app pack: notes:save-note'], `an API call in the capture browser's own signed-in session, with {skill} from the demo's values (demo.json, apps[].values), else from the run; if it can't: Click "Delete kestrel-note"`]);
   // Two new chats the captures title the same: one undo, done for each.
   const send = '- Type "x" in "Message"\n- Press Enter — ask first\n  Writes: sends a prompt (a new chat)\n  Lands on: chat-answer\n';
   const twice = resetFor(parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n${send}\n## Beat 2 · B\n\n- Click "New chat"\n${send}`), { walker });

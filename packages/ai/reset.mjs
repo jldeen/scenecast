@@ -186,7 +186,9 @@ function fromPack(w, ctx, packs) {
     const from = [...new Set((JSON.stringify(undo.api).match(/\{(\w+)\}/g) || []).map(x => x.slice(1, -1)))];
     const byHand = out.undo.length ? `if it can't: ${out.undo.join(' › ')}` : null;
     out.undo = [`Undo with the app pack: ${pack.id}:${pw.id}`];
-    out.note = [`an API call in the capture browser's own signed-in session${from.length ? `, with ${from.map(x => `{${x}}`).join(', ')} from the run` : ''}`, byHand].filter(Boolean).join('; ');
+    // Its {placeholders} come from the demo's own values first (demo.json apps[].values: which plugin, which section),
+    // then from what the run made.
+    out.note = [`an API call in the capture browser's own signed-in session${from.length ? `, with ${list(from.map(x => `{${x}}`))} from the demo's values (demo.json, apps[].values), else from the run` : ''}`, byHand].filter(Boolean).join('; ');
     if (pw.verified === false) out.needs = `${w.text}: its undo (${pack.id}: ${pw.id}) hasn't been tried yet`;
     return out;
   }
