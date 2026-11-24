@@ -305,4 +305,83 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
   return { chat: `http://127.0.0.1:${chatPort}/`, admin: `http://127.0.0.1:${adminPort}/`, close: () => { a.close(); b.close(); } };
 }
 
+// A third app with a server of its own, for the unattended capture pass (selftest/capture-run.mjs): its writes change
+// what the server keeps, so a test can see what reached it.
+//   tasks http://127.0.0.1:47821/  a task list (each with "Delete <name>"), a "New task" box that adds one on Enter
+//         (the page moves to /task/<id>), a Sync switch, Refresh (it posts, though nothing on the page changes),
+//         Archive all, and Help on another host (localhost). Every load posts /api/telemetry.
+const tasksPage = port => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+<link rel="icon" href="/icon.png"><style>
+body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
+main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
+.bar{display:flex;gap:8px;align-items:center;margin:0 0 16px} button{font:inherit;padding:4px 10px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;cursor:pointer}
+button[role=switch][aria-checked=true]{background:#1f6feb;color:#fff} ul{list-style:none;padding:0;margin:0 0 16px}
+li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #eaeef2}
+textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid #d0d7de;border-radius:6px}
+</style></head><body><main>
+<h1>Tasks</h1>
+<div class="bar"><button role="switch" aria-checked="false" aria-label="Sync" id="sync">Sync</button><span id="syncText">Sync is off</span>
+<button aria-label="Refresh" id="refresh">Refresh</button><button aria-label="Archive all" id="archive">Archive all</button>
+<a href="http://localhost:${port}/help" id="help">Help</a></div>
+<ul id="list" aria-label="Task list"></ul>
+<p id="none">No tasks yet</p>
+<textarea aria-label="New task" id="box" rows="2" placeholder="New task"></textarea>
+<p id="saved" role="status"></p>
+</main><script>
+const $ = id => document.getElementById(id);
+const post = (u, b) => fetch(u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b || {}) }).then(r => r.json());
+function render(st) {
+  $('list').innerHTML = st.tasks.map(t => '<li><span>' + t.name + '</span><button aria-label="Delete ' + t.name + '" data-id="' + t.id + '">Delete</button></li>').join('');
+  $('none').hidden = st.tasks.length > 0;
+  $('sync').setAttribute('aria-checked', String(st.sync)); $('syncText').textContent = 'Sync is ' + (st.sync ? 'on' : 'off');
+}
+const load = () => fetch('/api/tasks').then(r => r.json()).then(render);
+$('box').addEventListener('keydown', async e => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  e.preventDefault();
+  const name = $('box').value.trim(); if (!name) return;
+  const r = await post('/api/tasks', { name });
+  history.pushState({}, '', '/task/' + r.id);
+  $('saved').textContent = 'Task saved: ' + name; $('box').value = '';
+  await load();
+});
+$('list').addEventListener('click', async e => { const b = e.target.closest('button[data-id]'); if (!b) return; await fetch('/api/tasks/' + b.dataset.id, { method: 'DELETE' }); $('saved').textContent = ''; await load(); });
+$('sync').addEventListener('click', async () => { await post('/api/sync', { on: $('sync').getAttribute('aria-checked') !== 'true' }).catch(() => {}); await load(); });
+$('refresh').addEventListener('click', async () => { await post('/api/refresh').catch(() => {}); await load(); });
+$('archive').addEventListener('click', async () => { await post('/api/archive').catch(() => {}); await load(); });
+post('/api/telemetry', { at: location.pathname }).catch(() => {});
+load();
+</script></body></html>`;
+
+export function startTasks({ port = 47821 } = {}) {
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001 };
+  const log = [];
+  const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
+  const send = (s, code, type, out) => { s.writeHead(code, { 'content-type': type }); s.end(out); };
+  const view = () => ({ tasks: st.tasks.map(t => ({ ...t })), sync: st.sync });
+  const server = createServer(async (q, s) => {
+    const path = q.url.split('?')[0];
+    log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
+    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port));
+    if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
+    if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
+    if (q.method === 'GET' && path === '/api/tasks') return send(s, 200, 'application/json', JSON.stringify(view()));
+    if (q.method === 'POST' && path === '/api/tasks') { const b = await body(q); const t = { id: st.next++, name: String(b.name || '').slice(0, 200) }; st.tasks.push(t); return send(s, 200, 'application/json', JSON.stringify(t)); }
+    const del = /^\/api\/tasks\/(\d+)$/.exec(path);
+    if (q.method === 'DELETE' && del) { st.tasks = st.tasks.filter(t => t.id !== +del[1]); return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && path === '/api/sync') { st.sync = !!(await body(q)).on; return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && path === '/api/refresh') { await body(q); st.refreshes++; return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && path === '/api/archive') { await body(q); st.archives++; st.tasks = []; return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && path === '/api/telemetry') { await body(q); return send(s, 200, 'application/json', '{}'); }
+    send(s, 404, 'text/plain', 'not found');
+  }).listen(port, '127.0.0.1');
+  return {
+    url: `http://127.0.0.1:${port}/`, help: `http://localhost:${port}/help`, log,
+    state: () => ({ ...view(), refreshes: st.refreshes, archives: st.archives }),
+    // What an earlier run could have left: a task, Sync on.
+    seed: ({ tasks = [], sync = false, next } = {}) => { if (next) st.next = next; st.tasks = tasks.map(name => ({ id: st.next++, name })); st.sync = sync; },
+    close: () => server.close(),
+  };
+}
+
 if (process.argv[1] && process.argv[1].endsWith('server.mjs')) { const f = startFixture(); console.log(`fixture: ${f.chat} ${f.admin}`); }

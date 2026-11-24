@@ -15,6 +15,8 @@ import { holds, liveProof, writeGate } from './landing.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
+import { walkPlan } from './walk.mjs';
+import { undoGroups, checkClaim } from './reset-run.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, reviewHtml } from './finish.mjs';
@@ -508,6 +510,40 @@ test('the approval is the plan\'s exact text: an edit needs approving again', ()
   assert.equal(approval(demo).approved, true);
   writeFileSync(join(demo.dir, 'plan.md'), readFileSync(join(demo.dir, 'plan.md'), 'utf8').replace('Save"', 'Save all"'));
   assert.equal(approval(demo).approved, false);
+  // Unattended needs it all approved: the plan, reset.md's steps that change the tenant, and the list's hash.
+  approve(demo);
+  writeFileSync(join(demo.dir, 'reset.md'), '# Reset: T\n\n## Undo · Admin center\n\n- Go to admin\n- Click "Delete it"\n  Undoes: beat 1, Click "Save all"\n');
+  assert.deepEqual([approval(demo).approved, approval(demo).full], [true, false]);
+  const a = approve(demo);
+  assert.deepEqual([a.reset.map(r => r.text), approval(demo).full], [['Click "Delete it"'], true]);
+  writeFileSync(join(demo.dir, 'reset.md'), readFileSync(join(demo.dir, 'reset.md'), 'utf8').replace('Delete it', 'Delete all'));
+  assert.deepEqual([approval(demo).approved, approval(demo).full, approval(demo).why], [true, false, 'reset.md changed since it was approved']);
+});
+
+test('a read-only walk: a write isn\'t run, the rest of its beat waits on it, the next beat goes on', async () => {
+  const demo = demoDir(), walker = walkerFromDemo(demo);
+  const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker });
+  const w = await walkPlan(plan, walker);
+  assert.deepEqual(w.beats.map(b => b.steps.map(s => s.status)), [['reached', 'reached', 'reached', 'write', 'after-write', 'after-write'], ['reached', 'write']]);
+  assert.deepEqual(w.writes.map(x => [x.beat, x.text]), [[1, 'Press Enter'], [2, 'Click "Certified"']]);
+  // A step that doesn't land where the plan says is a miss; behind a write that didn't run, it says which one.
+  plan.beats[1].steps = [{ kind: 'app', app: 'chat' }, { kind: 'click', target: 'Save: Save note', lands: { screen: 'chat-saved' } }];
+  const m = (await walkPlan(plan, walker)).beats[1].steps;
+  assert.deepEqual([m[1].status, m[1].needs], ['missed', 'beat 1\'s write: Press Enter']);
+});
+
+test('the reset a capture pass runs: undo groups by what they undo; a check it can\'t read fails', () => {
+  const walker = walkerFromDemo(demoDir());
+  const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker });
+  const g = undoGroups(formatReset(resetFor(plan, { walker })));
+  assert.deepEqual(g.map(x => [x.app, x.steps.map(s => s.text), x.undoes]), [
+    ['admin', ['Remove the endorsement ("Certified")'], ['beat 2, Click "Certified"']],
+    ['chat', ['Delete "kestrel-note"'], ['beat 1, Click "Save: Save note"']],
+    ['chat', ['Delete the task it made ("Kestrel delay answer")'], ['beat 1, Press Enter']],
+  ]);
+  const screen = { words: 'Plugin admin 17 curated here', items: [{ role: 'switch', name: 'Sync', checked: false }, { role: 'tab', name: 'Notes', checked: true }], light: true };
+  const verdicts = ['shows "17 curated here"', 'shows "18 curated here"', '"Sync" is off', '"Sync" is on', '"Notes" is picked (Chat | Notes)', 'renders light', 'no "kestrel-note"', 'no endorsement'].map(c => checkClaim(c, screen).ok);
+  assert.deepEqual(verdicts, [true, false, true, false, true, true, true, false]);
 });
 
 test('a walkthrough makes the same kind of plan: steps, landings, writes, a beat per app and answer', () => {

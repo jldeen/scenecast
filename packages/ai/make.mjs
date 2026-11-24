@@ -8,11 +8,11 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { parsePlan, formatPlan, writesOf, stepCount } from './plan.mjs';
+import { parsePlan, formatPlan, formatStep, writesOf, stepCount } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
-import { resetFor, formatReset } from './reset.mjs';
+import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { readTalkTrack, talkTrackText } from '@scenecast/script/talk.mjs';
 import { aiDir } from './run.mjs';
 
@@ -71,22 +71,50 @@ export async function planFromWalkthrough({ demo, file, script = null, packs, em
   return { text, plan, review };
 }
 
-// The presenter's one approval: the plan's exact words and the writes it lets the capture pass do. Any edit to plan.md
-// after it needs approving again (Phase 6's guard: a write runs only as approved).
-export function approve(demo) {
+// The presenter's one approval: the plan's exact words and the writes it lets the capture pass do, and the reset's
+// (reset.md: its undo and set-first steps, which change the tenant too). The approval screen lists every one of them
+// by beat and step; list256 is their hash, so the list approved is the list that runs. Any edit to plan.md or reset.md
+// after it needs approving again (a write runs only as approved).
+export function writeList(demo) {
   const f = join(demo.dir, PLAN);
   if (!existsSync(f)) throw new Error('make the plan first');
   const text = readFileSync(f, 'utf8');
-  const a = { at: new Date().toISOString(), sha256: sha(text), writes: writesOf(parsePlan(text)).map(w => ({ beat: w.beat, step: w.step, text: w.text, writes: w.writes })) };
+  const writes = writesOf(parsePlan(text)).map(w => ({ beat: w.beat, step: w.step, text: w.text, writes: w.writes }));
+  const rf = join(demo.dir, RESET), resetText = existsSync(rf) ? readFileSync(rf, 'utf8') : null;
+  const reset = resetText ? resetSteps(resetText) : [];
+  return { text, writes, resetText, reset };
+}
+// The reset's steps that change something: each undo step (but Go to, which only switches), and each set first.
+export function resetSteps(resetText) {
+  const r = parseReset(resetText), out = [];
+  r.undo.beats.forEach((b, bi) => b.steps.forEach((s, si) => { if (s.kind !== 'app') out.push({ part: 'undo', app: b.title, n: bi, step: si, text: formatStep(s) }); }));
+  r.set.forEach((x, i) => out.push({ part: 'set', n: i, text: x.what, set: x.set || null }));
+  return out;
+}
+const listSha = (writes, reset) => sha(JSON.stringify({ writes, reset }));
+export function approve(demo) {
+  const { text, writes, resetText, reset } = writeList(demo);
+  const a = { at: new Date().toISOString(), sha256: sha(text), writes, ...(resetText ? { reset256: sha(resetText), reset } : {}), list256: listSha(writes, reset) };
   mkdirSync(aiDir(demo), { recursive: true });
   writeFileSync(join(aiDir(demo), 'approved.json'), JSON.stringify(a, null, 1) + '\n');
   return a;
 }
+// approved: the plan is word for word the one approved; full: the reset too, and the list hash (an unattended run
+// needs full).
 export function approval(demo) {
   const f = join(aiDir(demo), 'approved.json'), p = join(demo.dir, PLAN);
-  if (!existsSync(f) || !existsSync(p)) return { approved: false };
+  if (!existsSync(f) || !existsSync(p)) return { approved: false, full: false };
   const a = JSON.parse(readFileSync(f, 'utf8'));
-  return { ...a, approved: a.sha256 === sha(readFileSync(p, 'utf8')) };
+  const approved = a.sha256 === sha(readFileSync(p, 'utf8'));
+  let full = false, why = approved ? null : 'plan.md changed since it was approved';
+  if (approved) {
+    const now = writeList(demo);
+    const resetOk = now.resetText ? a.reset256 === sha(now.resetText) : !a.reset256;
+    if (!resetOk) why = now.resetText ? 'reset.md changed since it was approved' : 'reset.md was approved and is gone';
+    else if (a.list256 !== listSha(now.writes, now.reset)) why = 'the approval doesn\'t list these writes (approve again)';
+    else full = true;
+  }
+  return { ...a, approved, full, ...(why ? { why } : {}) };
 }
 
 export async function writeReset(demo, { packs } = {}) {

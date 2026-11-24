@@ -101,6 +101,24 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
   "only opens" a picker or menu, it's never a sign-in or account control, and no write in the pack has the same step.
   `safeFor(pack, step)` finds one.
 
+### The read-only guard (`guard`)
+
+An unattended capture pass holds every request that isn't a read (GET, HEAD, OPTIONS), on every host, unless the
+app's pack allows it: what an app sends while it's only looked at (Teams' presence and telemetry, a search that's a
+POST). A planned write opens the app's own hosts for its one step.
+
+```json
+"guard": { "hosts": ["substrate.office.com"], "allow": ["teams.cloud.microsoft/api/telemetry", "/^POST [^ ]+/search$/"] }
+```
+
+- `hosts`: the app's own hosts besides its `match` (where its writes go): a planned write opens them too.
+- `allow`: a host and path prefix (any method), or a `/regex/` over `METHOD host/path`. Never everything
+  (`checkPack` refuses `*`, an empty prefix and a regex that matches anything). Lists come from measured traffic
+  (method, host and path, never bodies) and are read by a person before they go in. A tenant's own hosts and
+  pre-release hosts go in a private pack.
+
+`guardFor(cfg)` gives a demo's: `{ hosts, allow }` (its apps' and their packs', plus `capture.allow`).
+
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
 with `apis.<name>` naming the page that signs in (`open`) and the host; the call uses the browser's own signed-in
@@ -128,6 +146,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `themePack(app, theme)`, `platformPack(app, platform)` | a theme or platform pack, by demo app id or pack id |
 | `writeFor(pack, step, field)` | the write a parsed plan step makes, or null |
 | `safeFor(pack, step, field)` | the safe entry for a plan step (it only opens a picker or menu), or null |
+| `guardFor(cfg)` | the read-only guard's `{ hosts, allow }` for a demo (its apps' packs, plus `capture.allow`) |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice

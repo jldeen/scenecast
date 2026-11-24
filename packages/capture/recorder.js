@@ -297,7 +297,16 @@ async function recLoop() {
       if (!REC.paused && REC.autoQueue.length) {
         REC.busyNow = true;
         REC.sweepWhy = 'start';
-        try { while (REC.autoQueue.length && !REC.stop) { const A = recApp(REC.autoQueue.shift()); await recAuto(A); recCheckpoint(); } const act = REC.apps.find(a => a.id === REC.active); if (act) await act.page.bringToFront(); }
+        try {
+          // The capture browser (parallel): an app per window, each window draws on its own, so their start sweeps
+          // run side by side. Elsewhere one at a time (the extension's tabs only draw at the front).
+          if (REC.parallel && REC.autoQueue.length > 1) {
+            const ids = REC.autoQueue.splice(0);
+            for (const r of await Promise.allSettled(ids.map(id => REC.stop ? null : recAuto(recApp(id))))) if (r.status === 'rejected') rlogr('auto: ' + String(r.reason && r.reason.message || r.reason).slice(0, 200));
+            recCheckpoint();
+          }
+          while (REC.autoQueue.length && !REC.stop) { const A = recApp(REC.autoQueue.shift()); await recAuto(A); recCheckpoint(); }
+          const act = REC.apps.find(a => a.id === REC.active); if (act) await act.page.bringToFront(); }
         finally { REC.busyNow = false; REC.sweepWhy = 'screen'; }
       }
       let got = 0;
@@ -433,6 +442,7 @@ OPS.recordStart = async c => {
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
   Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {} });
+  REC.parallel = !!c.parallel;
   if (c.resume) return recResume(c);
   // Every app's tab, or nothing starts: which aren't open, all at once.
   const missing = [];

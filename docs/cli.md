@@ -236,6 +236,10 @@ scenecast ai reground --demo <dir> [--walk <dir>] [--plan <file>]   # each step'
                                                     # .out/ai/reground.md and plan.reground.md (plan.md stays)
 scenecast ai finish --demo <dir>      # after the build: script.md for the guide, ⌥1–⌥9, focus points, .out/review/
 scenecast ai record --demo <dir>      # Record for me: the approved plan, in the browser, while recording; then script.md
+scenecast ai record --demo <dir> --unattended   # the same in the capture browser with nobody there: the approved
+                                      # writes only, the read-only guard, the reset before and after (.out/ai/run.json)
+scenecast ai walk   --demo <dir> [--live]       # a read-only walk of plan.md: the recording's screens, or the product
+                                      # in the capture browser (.out/ai/walk.json); it never writes
 scenecast ai script --demo <dir>      # the talk track (script.md) from the recording: one beat per replica beat
 scenecast ai coach  --demo <dir>      # Coach me: the next step and line, live, until the recording stops
 scenecast ai answer --demo <dir> q2 do|self|skip|stop|done [text]   # answer a question it asked
