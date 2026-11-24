@@ -217,7 +217,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // step and no input ran since. run.reads counts what was read and what was used again.
     const lastAfter = {};
     let stepSeq = 0;
-    run.reads = { before: { read: 0, reused: 0 }, after: { one: 0, two: 0 } };
+    run.reads = { before: { read: 0, reused: 0, changed: 0 }, after: { one: 0, two: 0 } };
     const packCheck = known => {
       const p = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(x => x && x.id === known.pack) : null;
       const pw = p && (p.writes || []).find(x => x.id === known.write);
@@ -266,9 +266,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const pre = await w.landsBefore(app, step, prev);
       // The page before it: for a Go to, the screen before it in plan order (the app it leaves); none before the first.
       const seq = ++stepSeq, bApp = step.kind === 'app' ? prev : app, kept = lastAfter[bApp];
-      const reuse = !!kept && kept.seq === seq - 1 && kept.inputs === w.inputs().length && !sb;
+      const now = { seq, inputs: w.inputs().length, setBefore: !!sb, sig: null };
+      if (kept && kept.sig && canReuse(kept, { ...now, sig: kept.sig })) now.sig = await w.sigNow(bApp);
+      const reuse = canReuse(kept, now);
       const before = bi === 0 && si === 0 ? [] : reuse ? [kept.read] : await w.reads(bApp, { n: 1 }).catch(() => []);
-      if (bi || si) run.reads.before[reuse ? 'reused' : 'read']++;
+      if (bi || si) { run.reads.before[reuse ? 'reused' : 'read']++; if (!reuse && now.sig && now.sig !== kept.sig) run.reads.before.changed++; }
       // Would it write? Read the screen as the step will find it.
       let wr = null;
       if (step.kind === 'click' || step.kind === 'press') {
@@ -307,6 +309,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const c = await w.check(app, step);
       // Read once after it; a second read, about a second later, only when the first doesn't prove it strongly (a
       // proof then has to hold on both).
+      const sig0 = await w.sigNow(app);
       let afters = await w.reads(app, { n: 1 }).catch(() => []);
       lastReads[app] = afters;
       if (!c.ok) return { kind: c.kind, why: c.why };
@@ -315,7 +318,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       let lp = proofOn(afters);
       if (!byCheck && lp.strength !== 'strong') { await sleep(1000); afters = [...afters, ...await w.reads(app, { n: 1 }).catch(() => [])]; lastReads[app] = afters; lp = proofOn(afters); }
       run.reads.after[afters.length > 1 ? 'two' : 'one']++;
-      lastAfter[app] = { read: afters[afters.length - 1], seq, inputs: w.inputs().length };
+      // Kept for the next step with the recorder's signature, only when it was the same before and after this read.
+      const sig1 = await w.sigNow(app);
+      lastAfter[app] = { read: afters[afters.length - 1], seq, inputs: w.inputs().length, sig: sig0 && sig0 === sig1 ? sig1 : null };
       const strength = byCheck ? 'strong' : lp.strength;
       const url = (await w.controls(app).catch(() => ({}))).url || null;
       run.landings.push({ beat: bi + 1, index: si, app, step: at.text, expected: step.lands ? formatLands(step.lands) : null, got: { screen: c.screen || null, url, text: byCheck ? `the pack's check: ${checked.status}${checked.picked ? ` ${JSON.stringify(checked.picked)}` : ''}` : proofWords(lp.lands) }, ok: true, strength, basis: byCheck ? 'pack check' : 'live', ...(strength === 'strong' ? {} : { why: lp.why }), ...(r.wrote ? { wrote: true } : {}), ...(checked ? { check: checked } : {}) });
@@ -452,6 +457,13 @@ function keepBodiesOut(demo, bodies) {
 }
 // Each app's hosts (its address and match, its pack's match, guard hosts and frames), to name the app a request came
 // from by its tab, else its frame: never by when it came (a background tab sends during another app's step).
+// Whether a step's read before can be the last step's read after (kept: { seq, inputs, sig }) instead of a new one: it
+// was the very step before, no input ran since, nothing was set off camera for this step, and the page's recorder
+// signature now (now.sig) is the one it had at that read. A page that changed on its own (a stream ending, a toast, a
+// background refresh) gets a new read.
+export function canReuse(kept, now) {
+  return !!kept && !!kept.sig && kept.seq === now.seq - 1 && kept.inputs === now.inputs && !now.setBefore && now.sig === kept.sig;
+}
 export function senderApps(cfg, packs) {
   const byApp = packs && packs.packsForDemo ? packs.packsForDemo(cfg) || {} : {};
   const hostOf = x => { try { return new URL(/^[a-z]+:\/\//i.test(x) ? x : `https://${x}`).host; } catch (e) { return null; } };
