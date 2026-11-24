@@ -29,4 +29,5 @@ step('selftest', process.execPath, ['packages/selftest/selftest.mjs']);
 step('fidelity loop', process.execPath, ['packages/selftest/fidelity-loop.mjs']);
 step('real Chrome checker', process.execPath, ['packages/selftest/real-chrome-checker.mjs']);
 step('capture browser', process.execPath, ['packages/selftest/capture-browser.mjs']);
+step('capture run', process.execPath, ['packages/selftest/capture-run.mjs']);
 step('ai modes', process.execPath, ['packages/selftest/ai-modes.mjs']);

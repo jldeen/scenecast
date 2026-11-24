@@ -35,6 +35,8 @@ import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSyn
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
+import { fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
+import { fetchEveryTarget } from './fetch-all.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -59,7 +61,9 @@ export function browserApp(channel = 'chrome') {
 }
 
 // The window mode that draws off the screen on this OS.
-export const platformWindow = (platform = process.platform) => platform === 'win32' ? 'offscreen' : 'minimized';
+// Linux (a CI runner, no display): Chrome's own headless mode, the same browser and the same DevTools protocol, for
+// what doesn't depend on drawing (the run, its writes and guard, the recorder's output).
+export const platformWindow = (platform = process.platform) => platform === 'win32' ? 'offscreen' : platform === 'linux' ? 'headless' : 'minimized';
 // The mode to try when this one doesn't draw here. Windows has none: a minimized window there passes a short probe
 // and then barely draws under work (measured: 3 fps, screenshots timing out).
 export const otherWindow = (mode, platform = process.platform) => mode === 'minimized' ? 'offscreen' : mode === 'offscreen' && platform !== 'win32' ? 'minimized' : null;
@@ -196,6 +200,10 @@ export async function storageKeys(page) {
   return out;
 }
 
+// A request's path as a shape, for the guard's log and a pack's allow-list: ids and long numbers as {id}, never a
+// query string or a body.
+export const pathShape = path => String(path || '/').split('/').map(seg => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) || /^\d{4,}$/.test(seg) || /^[A-Za-z0-9_-]{24,}$/.test(seg) && /\d/.test(seg) || /^[0-9a-f]{16,}$/i.test(seg) || /@/.test(seg) ? '{id}' : seg).join('/');
+
 const freePort = () => new Promise((res, rej) => { const s = createServer(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 // A profile a running browser has open (Chrome hands a second start on it to the first, which never answers us).
@@ -228,6 +236,8 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   const where = browserApp(channel);
   if (!where) { log(`capture browser: no ${channel} installed here`); return null; }
   const throwaway = !profile;
+  // A capture profile is signed in to a tenant: a selftest only ever uses one of its own.
+  if (!throwaway) fencePath(profile, 'capture profile');
   const dir = throwaway ? mkdtempSync(join(tmpdir(), 'stuntdouble-capture-')) : resolve(profile);
   if (!throwaway) {
     mkdirSync(dir, { recursive: true });
@@ -280,11 +290,12 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   // macOS: through open, hidden (-g: not brought forward, -j: launched hidden), so it never takes her screen. On CI
   // (and when open gets no answer) the browser's own binary instead: a CI Mac's first start through open waits on a
   // dialog no one can answer (measured: open never answered; the binary answered in 1 to 3 s).
-  const viaOpen = !!where.app && (launch === 'open' || (launch === 'auto' && !process.env.CI));
+  const viaOpen = !!where.app && mode !== 'headless' && (launch === 'open' || (launch === 'auto' && !process.env.CI));
   const startDirect = () => {
     direct = true;
     const out = openSync(chromeLog, 'a');
-    child = spawn(where.exe, [...(mode === 'visible' || where.app ? [] : ['--start-minimized', `--window-position=${OFF.left},${OFF.top}`]), ...flags], { stdio: ['ignore', out, out], detached: false });
+    const placed = mode === 'headless' ? ['--headless=new'] : mode === 'visible' || where.app ? [] : ['--start-minimized', `--window-position=${OFF.left},${OFF.top}`];
+    child = spawn(where.exe, [...placed, ...flags], { stdio: ['ignore', out, out], detached: false });
     child.on('error', e => log(`capture browser: ${e.message}`));
   };
   if (viaOpen) {
@@ -493,24 +504,25 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     return { ok: out.every(r => r.at === 'app'), apps: out, cookies: cookieExpiries(await ctx.cookies()), secs: +((Date.now() - t0) / 1000).toFixed(1) };
   }
 
-  // One Fetch dispatcher on the browser (every page and frame): the read-only guard and the pinned account each
-  // add a hook with the requests it wants; a hook may change the address or fail the request.
+  // One Fetch dispatcher on every target (fetch-all.mjs: each page, frame and worker, now and new): the read-only
+  // guard and the pinned account each add a hook with the requests it wants; a hook may change the address or fail
+  // the request.
   const hooks = new Set();
-  let fetching = false;
+  let everyTarget = null;
   const onPaused = async e => {
     let url = e.request.url;
     for (const h of hooks) {
       const r = await h.on(e.request, url).catch(() => null);
-      if (r && r.fail) return top.send('Fetch.failRequest', { requestId: e.requestId, errorReason: 'BlockedByClient' }).catch(() => {});
+      if (r && r.fail) return { fail: true };
       if (r && r.url) url = r.url;
     }
-    await top.send('Fetch.continueRequest', { requestId: e.requestId, ...(url !== e.request.url ? { url } : {}) }).catch(() => {});
+    return url !== e.request.url ? { url } : null;
   };
   const refetch = async () => {
     const pats = [...hooks].flatMap(h => h.patterns);
-    if (!pats.length) { if (fetching) { top.off('Fetch.requestPaused', onPaused); fetching = false; await top.send('Fetch.disable').catch(() => {}); } return; }
-    if (!fetching) { top.on('Fetch.requestPaused', onPaused); fetching = true; }
-    await top.send('Fetch.enable', { patterns: pats.some(p => p.urlPattern === '*' && !p.resourceType) ? [{ urlPattern: '*', requestStage: 'Request' }] : pats });
+    if (!pats.length) { if (everyTarget) await everyTarget.set(null); return; }
+    if (!everyTarget) everyTarget = await fetchEveryTarget(at, { onPaused, log });
+    await everyTarget.set(pats.some(p => p.urlPattern === '*' && !p.resourceType) ? [{ urlPattern: '*', requestStage: 'Request' }] : pats);
   };
   const addHook = async h => { hooks.add(h); await refetch(); return async () => { hooks.delete(h); await refetch(); }; };
 
@@ -528,7 +540,8 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       if (v === 'hold' && u && passing(u)) v = 'pass';
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
       st.counts[k] = (st.counts[k] || 0) + 1;
-      if (v === 'hold' && gm === 'hold') { st.held.push({ method, host: u && u.host, at: new Date().toISOString() }); return { fail: true }; }
+      if (v === 'hold') st.held.push({ method, host: u && u.host, path: u ? pathShape(u.pathname) : '', at: new Date().toISOString(), held: gm === 'hold' });
+      if (v === 'hold' && gm === 'hold') return { fail: true };
       return null;
     } });
     guarding = {
@@ -565,7 +578,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   async function close() {
     process.removeListener('exit', kill);
     for (const sig of ['SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal);
-    hooks.clear(); await refetch().catch(() => {});
+    hooks.clear(); if (everyTarget) await everyTarget.close().catch(() => {});
     await top.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
     if (bpid) for (let i = 0; i < 30; i++) { if (!alive(bpid.id)) break; await sleep(150); if (i === 29) try { process.kill(bpid.id, 'SIGKILL'); } catch (e) {} }

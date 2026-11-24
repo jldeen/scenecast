@@ -11,6 +11,10 @@
 //                               reground.md, and plan.reground.md (plan.md stays)
 //   ai finish  --demo <dir>     after the build: her script for the guide, the beat keys, focus points, the review
 //   ai record  --demo <dir>     Record for me: run the approved plan in the browser while recording; then the script
+//   ai record  --demo <dir> --unattended   the same in the capture browser, with nobody there: pre-approved writes
+//                               only, the read-only guard, the demo's reset before and after (run.json)
+//   ai walk    --demo <dir> [--live]       a read-only walk of plan.md: the recording's screens, or the product in the
+//                               capture browser (walk.json); a walker never writes
 //   ai script  --demo <dir>     the talk track (script.md) from what was recorded
 //   ai coach   --demo <dir>     Coach me: the next step and line, live, until the recording stops
 //   ai answer  --demo <dir> <id> <do|self|skip|stop|done> [text]      answer a question the AI asked
@@ -81,12 +85,23 @@ async function main() {
         if (!r.ready) throw new Error(pf.notReady(r));
       }
       const { recordForMe } = await import('./drive.mjs');
+      if (args.includes('--unattended')) return recordForMe({ demo: d, emit, unattended: true });
       const { writeScript } = await import('./write.mjs');
       const m = await model(d);
       const r = await recordForMe({ demo: d, model: m, settings, emit });
       emit({ event: 'stage', name: 'script', label: 'Writing the talk track from what happened' });
       const s = await writeScript({ demo: d, model: m, settings, emit });
       return { ...r, script: { beats: s.beats, lines: s.lines } };
+    }
+    case 'walk': {
+      const d = demo();
+      if (args.includes('--live')) { const { walkLive } = await import('./unattended.mjs'); const w = await walkLive({ demo: d, emit }); return { secs: w.secs, beats: w.beats.map(b => ({ beat: b.beat, secs: b.secs, steps: b.steps.map(s => s.status) })), held: (w.guard.held || []).length }; }
+      const { walkerFromDemo } = await import('./walker.mjs'), { walkPlan } = await import('./walk.mjs'), { readPlan } = await import('./draft.mjs');
+      const walker = walkerFromDemo(d);
+      if (!walker) throw new Error('build the demo first: an offline walk needs its screens');
+      const w = await walkPlan(readPlan(d), walker, { emit });
+      walker.save();
+      return { beats: w.beats.map(b => ({ beat: b.beat, steps: b.steps.map(s => s.status) })) };
     }
     case 'bench': {
       const d = demo(), { bench } = await import('./bench.mjs');

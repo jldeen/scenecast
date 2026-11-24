@@ -18,6 +18,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openCaptureBrowser, signInWindow, landedOn, profileDir, resolveTenant, tenantVerdict, isTenantId, hintedUrl, ownSignInPage } from './browser.mjs';
 import { agentCode } from './build.mjs';
+import { hostOps } from './host-ops.mjs';
+import { fencePort } from '@stuntdouble/core/lib/test-fence.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -40,9 +42,13 @@ export function hostState(demo) {
 
 // The recorder in the capture browser, started on one of its pages: the same recorder the extension and the agent
 // run, telling the receiver it's in the capture browser.
-export async function startRecorder(page, port) {
+// ops: the host's own commands (host-ops.mjs), added to the recorder's.
+export async function startRecorder(page, port, ops = null) {
+  fencePort(port);
   const shadow = readFileSync(join(here, 'cdp-shadow.js'), 'utf8').replace(/^\/\/.*\n/gm, '');
-  const agent = new Function('return ' + agentCode(port, { browser: 'capture', shadow }))();
+  if (ops) globalThis.__stuntdoubleCaptureOps = ops;
+  const extra = ops ? 'Object.assign(OPS, globalThis.__stuntdoubleCaptureOps || {});\n' : '';
+  const agent = new Function('return ' + agentCode(port, { browser: 'capture', shadow, extra }))();
   return agent(page);
 }
 
@@ -98,7 +104,7 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
       await cb.close(); process.exit(3);
     }
   }, 20000).unref();
-  const started = pages.length ? await startRecorder(pages[0], port).catch(e => String(e.message || e)) : 'no apps';
+  const started = pages.length ? await startRecorder(pages[0], port, hostOps(cb, { log })).catch(e => String(e.message || e)) : 'no apps';
   const info = await cb.info();
   return say({ pid: process.pid, phase: started === 'agent started' ? 'recording-ready' : 'failed', at: new Date().toISOString(), profile: o.profile,
     mode: info.mode, fellBack: info.fellBack, startMs: info.startMs, cdp: info.port, browserPid: info.pid, tenant: tv.all.length ? tv.all : null, apps: landed.map(l => ({ id: l.id, at: l.at })), ...(signIn.length ? { signIn } : {}),
