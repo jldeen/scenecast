@@ -20,8 +20,9 @@ mkdirSync(out, { recursive: true });
 const wait = (demo.cfg.presenter || {}).shotWait || {};
 const VP = demo.cfg.viewport;
 const srv = await replicaServer(demo, arg(args, '--url'));
-const b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+let b = null;
 try {
+  b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
   const p = await b.newPage({ viewport: { width: VP.width, height: VP.height }, deviceScaleFactor: 0.5 });
   await p.goto(srv.url); await p.waitForFunction(() => window.d1 && window.d1.state && window.d1.state.active);
   for (const s of notes.shots) {
@@ -36,4 +37,4 @@ try {
   // What these pictures are of, so a tool can tell when they need making again (the desktop app does).
   writeFileSync(join(out, 'shots.json'), JSON.stringify(notes.shots.map(s => [s.name, s.app, s.state])) + '\n');
   console.log(`${notes.shots.length} pictures → ${out}`);
-} finally { await b.close(); srv.stop(); }
+} finally { srv.stop(); if (b) await b.close().catch(() => {}); }

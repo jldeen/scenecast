@@ -24,6 +24,13 @@ import { compileFlow } from '@stuntdouble/core/compile/flow.mjs';
 import { buildInputs, buildDiff } from '@stuntdouble/core/lib/buildkey.mjs';
 import { compileEdits, applyEdits, applyEditsJson } from '@stuntdouble/core/lib/edits.mjs';
 
+// Started for a check or a test (REPLICA_EXIT_WITH_PARENT=1): it goes when what started it goes, crashed or killed
+// too. A check that crashed before stopping it left it serving, orphaned, for hours (Nov 2026).
+if (process.env.REPLICA_EXIT_WITH_PARENT === '1') {
+  const parent = process.ppid;
+  const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+  setInterval(() => { if (process.ppid !== parent || !alive(parent)) process.exit(0); }, 1000).unref();
+}
 const APP = join(dirname(fileURLToPath(import.meta.url)), 'app');
 const PRESENTER = join(dirname(fileURLToPath(import.meta.url)), 'presenter');
 const args = process.argv.slice(2);
