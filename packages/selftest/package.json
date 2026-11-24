@@ -5,9 +5,10 @@
   "type": "module",
   "description": "End-to-end tests: the fixture app recorded, built, served and checked through the scenecast binary.",
   "dependencies": {
-    "@stuntdouble/core": "0.5.4",
+    "@scenecast/script": "0.5.4",
     "@stuntdouble/capture": "0.5.4",
-    "@stuntdouble/player": "0.5.4",
-    "@stuntdouble/checks": "0.5.4"
+    "@stuntdouble/checks": "0.5.4",
+    "@stuntdouble/core": "0.5.4",
+    "@stuntdouble/player": "0.5.4"
   }
 }

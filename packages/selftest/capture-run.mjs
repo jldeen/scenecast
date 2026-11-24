@@ -4,9 +4,11 @@
 //   1. the approved plan runs: the reset before (a task an earlier run left, Sync left on), the pre-approved write
 //      (a new task), a step the plan calls read-only whose request the guard holds (Refresh posts), the reset after;
 //      the two apps' start sweeps side by side
+//   1b. the reader and the served replica name the run's recorded controls alike (name-parity.mjs)
 //   2. a write the plan didn't approve (Archive all) stops the run before it, with a picture
 //   3. a step that leaves the app (Help, on another host) stops it
-//   3b. a step whose landing words were on the screen before it stops it (unproven); a walk notes it
+//   3b. a step it can't prove (its words were there before): it goes on only by its next control, and stops
+//       before a write; a walk notes it as unproven
 //   4. a plan edited after it was approved doesn't run at all
 //   5. a read-only live walk of the plan: it stops at the write and goes on with the next beat
 //   6. the same plan through the recorder extension (Record for me, attended) records the same screens
@@ -21,6 +23,7 @@ import { chromium } from 'playwright-core';
 import { startTasks, startFixture } from '../../examples/fixture-app/server.mjs';
 import { browserApp } from '@stuntdouble/capture/browser.mjs';
 import { selftestGuard } from './guard.mjs';
+import { nameParity } from './name-parity.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -31,9 +34,9 @@ const keep = process.argv.includes('--keep');
 const withExtension = !process.argv.includes('--no-extension');
 // Receiver ports away from every other test's and the app's (47621–47630): a recorder extension looks for its receiver
 // on its own port and the nine after it, so two tests' within ten of each other can find each other's.
-const RX = 47741, RX_EXT = 47751, REPLICA_PORT = 4741, TASKS = 47821, CHAT = 47822, ADMIN = 47823;
+const RX = 47741, RX_EXT = 47751, REPLICA_PORT = 4741, PARITY_PORT = 4742, TASKS = 47821, CHAT = 47822, ADMIN = 47823;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-run-'));
-await selftestGuard({ tmp, receivers: [RX, RX_EXT], extensions: [RX_EXT], ports: [REPLICA_PORT, TASKS, CHAT, ADMIN] });
+await selftestGuard({ tmp, receivers: [RX, RX_EXT], extensions: [RX_EXT], ports: [REPLICA_PORT, PARITY_PORT, TASKS, CHAT, ADMIN] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [], times = {};
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 2000)}` : '')); if (!ok) fails.push(name); };
@@ -75,6 +78,7 @@ const PLAN = extra => `# Tasks demo
 - Go to tasks
   Lands on: "No tasks yet"
 - Type "Call Kestrel" in "New task"
+  Lands on: box "New task" says "Call Kestrel"
 - Press Enter — ask first
   Writes: adds the task "Call Kestrel" · fixture-tasks:new-task
   Lands on: "Task saved: Call Kestrel"
@@ -161,6 +165,12 @@ try {
   check('the start sweeps of both apps ran side by side', spans.every(Boolean) && spans[0][0] < spans[1][1] && spans[1][0] < spans[0][1], JSON.stringify({ spans, n: sweeps.length }));
   times.startSweeps = spans.every(Boolean) ? +((Math.max(spans[0][1], spans[1][1]) - Math.min(spans[0][0], spans[1][0])) / 1000).toFixed(1) : null;
 
+  // 1b · The reader (what plans name controls by) and a live page name every control on the run's recorded screens
+  // alike: built, served, and read both ways (name-parity.mjs).
+  const builtRun = await run(['build', '--from-raw'], { cwd: DEMO, env: E });
+  const np = builtRun.code === 0 ? await nameParity({ demo: DEMO, port: PARITY_PORT }).catch(e => ({ error: e.message })) : null;
+  check('the reader and the served replica name every recorded control alike', np && !np.error && np.screens > 0 && np.differ.length === 0, JSON.stringify(np || builtRun.out.slice(-800)));
+
   // 2 · A write the plan didn't approve: the run stops before it, with a picture; nothing reaches the server.
   writeFileSync(join(DEMO, 'plan.md'), PLAN('- Click "Archive all"\n'));
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
@@ -178,18 +188,21 @@ try {
   check('leaving the app (another host) stops the run, with a picture', rj.stopped && rj.stopped.kind === 'offplan' && /localhost/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture), JSON.stringify(rj.stopped));
   check('and the reset after still puts it back', rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ state: tasks.state(), after: rj.reset.after }));
 
-  // 3b · Landing words that were on the screen before the step prove nothing: a run stops there (fail closed), with a
-  // picture; a walk notes it as unproven and goes on.
-  const UNPROVEN = PLAN('').replace('Lands on: "Up to date: 1 task"', 'Lands on: "Sync is off"');
+  // 3b · A step it can't prove (its words were on the screen before it): logged, and the run goes on only by the next
+  // step's control (one, by its exact name), never into a write. A walk notes it as unproven.
+  const UNPROVEN = PLAN('- Click "Refresh"\n  Lands on: "Up to date: 1 task"\n- Click "Delete Call Kestrel"\n  Writes: deletes the task "Call Kestrel" · fixture-tasks:delete-task\n  Lands on: "No tasks yet"\n').replace('Lands on: "Up to date: 1 task"', 'Lands on: "Sync is off"');
   writeFileSync(join(DEMO, 'plan.md'), UNPROVEN);
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
   rj = readRun(DEMO);
-  check('a landing whose words were there before the step stops the run, with a picture', rj.stopped && rj.stopped.kind === 'unproven' && /Refresh/.test(rj.stopped.why) && /Sync is off/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture) && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after }));
+  const un = (rj.unprovable || []).map(u => u.text);
+  check('a step it can\'t prove: it goes on by the next control, and stops before a write, with a picture', rj.stopped && rj.stopped.kind === 'unprovable' && /a write never follows/.test(rj.stopped.why) && /Delete Call Kestrel/.test(rj.stopped.at && rj.stopped.at.text || '') && rj.stopped.picture && existsSync(rj.stopped.picture) && un.length === 2 && un.every(t => t === 'Click "Refresh"'), JSON.stringify({ stopped: rj.stopped, unprovable: rj.unprovable }));
+  check('and the delete never ran: the reset after removed the run\'s task', count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ log: tasks.log, after: rj.reset.after }));
   res = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
   const wu = existsSync(join(DEMO, '.out', 'ai', 'walk.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')) : { beats: [] };
   const su = (wu.beats[1] && wu.beats[1].steps[0]) || {};
-  check('and a walk reports it as unproven, with every input it sent', su.status === 'unproven' && (wu.inputs || []).some(i => i.kind === 'click' && i.on === 'Refresh' && i.fit === 'exact' && i.frame === 'page'), JSON.stringify({ su, inputs: wu.inputs }));
+  check('and a walk reports it as unproven, with every input it sent and what each click hit', su.status === 'unproven' && (wu.inputs || []).some(i => i.kind === 'click' && i.on === 'Refresh' && i.fit === 'exact' && i.frame === 'page' && i.landed && i.landed.on === 'Refresh' && i.landed.role === 'button'), JSON.stringify({ su, inputs: wu.inputs }));
 
   // 4 · An edit after the approval: nothing runs.
   writeFileSync(join(DEMO, 'plan.md'), PLAN('').replace('Call Kestrel"', 'Call Kestrel now"'));
