@@ -245,7 +245,7 @@ still the lines' words; `lines` has the same lines with `focus: [{ texts, around
 and `approval(demo)` (whether `plan.md` is still the text that was approved). `packages/ai/landing.mjs`:
 `proveLandings(plan, walker, flags)` chooses each step's proof (`chooseProof()`), `holds(screen, lands)` checks one on
 a screen the reader read (`true`, `false`, or `null` for none). `packages/ai/walker.mjs`: `landed(at, step)` (`{ ok,
-why }`), `written(text)`, `unstable(text, app)`.
+why }`: on the screen its `Lands on` names, with its proof holding there), `written(text)`, `unstable(text, app)`.
 
 ## Changes
 
