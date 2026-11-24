@@ -649,7 +649,8 @@ try {
   // its own and draws, with no restart.
   if (process.platform === 'darwin') {
     await b.execute(() => { window.__before = 1; });
-    await b.execute(() => { window.__TAURI__.core.invoke('test_recover_window').catch(() => {}); });
+    // Fired after a moment, so this call has returned before the page it runs in ends.
+    await b.execute(() => { setTimeout(() => window.__TAURI__.core.invoke('test_recover_window').catch(() => {}), 300); return true; });
     let back = false;
     for (let i = 0; i < 40 && !back; i++) { await sleep(500); back = await b.execute(() => window.__before !== 1 && !!document.querySelector('[data-test]')).catch(() => false); }
     check('the window\'s page loads again on its own after its web process ends', back);
