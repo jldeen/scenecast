@@ -114,8 +114,13 @@ POST). A planned write opens the app's own hosts for its one step.
 - `hosts`: the app's own hosts besides its `match` (where its writes go): a planned write opens them too.
 - `allow`: a host and path prefix (any method), or a `/regex/` over `METHOD host/path`. Never everything
   (`checkPack` refuses `*`, an empty prefix and a regex that matches anything). Lists come from measured traffic
-  (method, host and path, never bodies) and are read by a person before they go in. A tenant's own hosts and
-  pre-release hosts go in a private pack.
+  (method, host and path) and are read by a person before they go in. A tenant's own hosts and pre-release hosts go
+  in a private pack, and a private pack's list replaces the public one, so it carries the public entries it needs.
+- An entry can end in `when body /regex/` for a request that only reads when its body says so, e.g. a catalog
+  listing with nothing typed in it: it passes only when the body matches, and a body the guard can't see is held.
+- `why`: one line per entry (the entry is the key): what the app sends it for, why it changes nothing, and what the
+  app looks like with it held. An app that shows an error with a read held gets that read allowed, after review: a
+  replica never shows an error the product doesn't.
 
 `guardFor(cfg)` gives a demo's: `{ hosts, allow }` (its apps' and their packs', plus `capture.allow`).
 

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parsePlan, parseStep, formatPlan, risk, writesOf } from './plan.mjs';
 import { redact, compactOutline, makeModel } from './model.mjs';
-import { findItem } from './find.mjs';
+import { findItem, nameFits } from './find.mjs';
 import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
@@ -71,6 +71,14 @@ test('find: by name, exact first, then words', () => {
   assert.equal(findItem(items, 'search', 'field').name, 'Search tools by name');
   assert.equal(findItem(items, 'alpha-6').name, 'alpha-6');
   assert.equal(findItem(items, 'Settings'), null);
+});
+
+test('find in a frame: the name has to fit, not only share a word', () => {
+  assert.ok(nameFits('SC Supply Chain Operations', 'Supply Chain Operations'));
+  assert.ok(nameFits('Plugins (12)', 'Plugins'));
+  assert.ok(!nameFits('Search business plugins', 'Plugins'));
+  assert.ok(!nameFits('Our numbers', 'Add content to Our numbers'));
+  assert.ok(!nameFits('Add content', 'Add content to Our numbers'));
 });
 
 test('what leaves the computer: no emails, IDs, tokens or URL queries; page words only if allowed', () => {

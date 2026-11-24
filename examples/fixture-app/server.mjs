@@ -308,7 +308,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 // A third app with a server of its own, for the unattended capture pass (selftest/capture-run.mjs): its writes change
 // what the server keeps, so a test can see what reached it.
 //   tasks http://127.0.0.1:47821/  a task list (each with "Delete <name>"), a "New task" box that adds one on Enter
-//         (the page moves to /task/<id>), a Sync switch, Refresh (it posts, though nothing on the page changes),
+//         (the page moves to /task/<id>), a Sync switch, Refresh (it posts, then says "Up to date: <n> tasks"),
 //         Archive all, and Help on another host (localhost). Every load posts /api/telemetry.
 const tasksPage = port => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
@@ -322,7 +322,7 @@ textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px so
 <h1>Tasks</h1>
 <div class="bar"><button role="switch" aria-checked="false" aria-label="Sync" id="sync">Sync</button><span id="syncText">Sync is off</span>
 <button aria-label="Refresh" id="refresh">Refresh</button><button aria-label="Archive all" id="archive">Archive all</button>
-<a href="http://localhost:${port}/help" id="help">Help</a></div>
+<a href="http://localhost:${port}/help" id="help">Help</a><span id="fresh" role="status"></span></div>
 <ul id="list" aria-label="Task list"></ul>
 <p id="none">No tasks yet</p>
 <textarea aria-label="New task" id="box" rows="2" placeholder="New task"></textarea>
@@ -347,7 +347,7 @@ $('box').addEventListener('keydown', async e => {
 });
 $('list').addEventListener('click', async e => { const b = e.target.closest('button[data-id]'); if (!b) return; await fetch('/api/tasks/' + b.dataset.id, { method: 'DELETE' }); $('saved').textContent = ''; await load(); });
 $('sync').addEventListener('click', async () => { await post('/api/sync', { on: $('sync').getAttribute('aria-checked') !== 'true' }).catch(() => {}); await load(); });
-$('refresh').addEventListener('click', async () => { await post('/api/refresh').catch(() => {}); await load(); });
+$('refresh').addEventListener('click', async () => { await post('/api/refresh').catch(() => {}); await load(); const n = $('list').children.length; $('fresh').textContent = 'Up to date: ' + n + (n === 1 ? ' task' : ' tasks'); });
 $('archive').addEventListener('click', async () => { await post('/api/archive').catch(() => {}); await load(); });
 post('/api/telemetry', { at: location.pathname }).catch(() => {});
 load();

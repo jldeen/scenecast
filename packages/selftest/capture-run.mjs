@@ -6,6 +6,7 @@
 //      the two apps' start sweeps side by side
 //   2. a write the plan didn't approve (Archive all) stops the run before it, with a picture
 //   3. a step that leaves the app (Help, on another host) stops it
+//   3b. a step whose landing words were on the screen before it stops it (unproven); a walk notes it
 //   4. a plan edited after it was approved doesn't run at all
 //   5. a read-only live walk of the plan: it stops at the write and goes on with the next beat
 //   6. the same plan through the recorder extension (Record for me, attended) records the same screens
@@ -81,7 +82,7 @@ const PLAN = extra => `# Tasks demo
 ## Beat 2 · A look around
 
 - Click "Refresh"
-  Lands on: "Call Kestrel"
+  Lands on: "Up to date: 1 task"
 ${extra}`;
 const RESET = `# Reset: Tasks demo
 
@@ -177,6 +178,19 @@ try {
   check('leaving the app (another host) stops the run, with a picture', rj.stopped && rj.stopped.kind === 'offplan' && /localhost/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture), JSON.stringify(rj.stopped));
   check('and the reset after still puts it back', rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ state: tasks.state(), after: rj.reset.after }));
 
+  // 3b · Landing words that were on the screen before the step prove nothing: a run stops there (fail closed), with a
+  // picture; a walk notes it as unproven and goes on.
+  const UNPROVEN = PLAN('').replace('Lands on: "Up to date: 1 task"', 'Lands on: "Sync is off"');
+  writeFileSync(join(DEMO, 'plan.md'), UNPROVEN);
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  check('a landing whose words were there before the step stops the run, with a picture', rj.stopped && rj.stopped.kind === 'unproven' && /Refresh/.test(rj.stopped.why) && /Sync is off/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture) && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after }));
+  res = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
+  const wu = existsSync(join(DEMO, '.out', 'ai', 'walk.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')) : { beats: [] };
+  const su = (wu.beats[1] && wu.beats[1].steps[0]) || {};
+  check('and a walk reports it as unproven, with every input it sent', su.status === 'unproven' && (wu.inputs || []).some(i => i.kind === 'click' && i.on === 'Refresh' && i.fit === 'exact' && i.frame === 'page'), JSON.stringify({ su, inputs: wu.inputs }));
+
   // 4 · An edit after the approval: nothing runs.
   writeFileSync(join(DEMO, 'plan.md'), PLAN('').replace('Call Kestrel"', 'Call Kestrel now"'));
   tasks.log.length = 0;
@@ -189,7 +203,7 @@ try {
   res = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
   const wj = existsSync(join(DEMO, '.out', 'ai', 'walk.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')) : { beats: [] };
   const st = wj.beats.map(b => b.steps.map(s => s.status).join(','));
-  check('a live walk: reached, then the write not run, then the next beat (its words need that write)', res.code === 0 && st[0] === 'reached,reached,write' && st[1] === 'drifted' && /Call Kestrel/.test(wj.beats[1].steps[0].why || '') && wj.beats[1].steps[0].needs === 'beat 1\'s write: Press Enter', JSON.stringify({ st, b2: wj.beats[1], err: res.err.slice(-800) }));
+  check('a live walk: reached, then the write not run, then the next beat (its words need that write)', res.code === 0 && st[0] === 'reached,reached,write' && st[1] === 'drifted' && /Up to date: 1 task/.test(wj.beats[1].steps[0].why || '') && wj.beats[1].steps[0].needs === 'beat 1\'s write: Press Enter', JSON.stringify({ st, b2: wj.beats[1], err: res.err.slice(-800) }));
   check('and it wrote nothing', !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry') && tasks.state().tasks.length === 0, tasks.log.join(', '));
   const cl = (wj.beats[0] && wj.beats[0].steps[2] && wj.beats[0].steps[2].cleared) || {};
   check('the beat stopped at the write: what it typed for it is cleared, no draft left', cl.cleared === true && cl.in === 'New task', JSON.stringify(wj.beats[0] && wj.beats[0].steps[2]));
