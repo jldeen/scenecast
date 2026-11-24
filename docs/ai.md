@@ -27,7 +27,9 @@ click in each, and makes the plan:
   - a section it names or describes ("the right people") frames its first card, and "every step" frames the list's
     heading and its first step;
 - where the product isn't what your script says, it says so once (your script says **Approve** on a **Copy file**
-  card; the product shows **Save skill**). Steps your script leaves out, it takes from the recording and marks.
+  card; the product shows **Save skill**). Steps your script leaves out, it takes from the recording and marks. A
+  search the recording made before a click (and that isn't a write) goes in as you recorded it, and the review lists
+  it under **Added from your recording**, for information.
 
 When the demo has been recorded before, the plan is checked against every recorded screen, so a new version of your
 script takes minutes. A script written for presenting the replica works too: its ⌥ keys say where each beat starts.

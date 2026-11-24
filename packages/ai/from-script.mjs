@@ -397,8 +397,10 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           const m = walker.moves(id).find(mv => mv.steps.length === 1 && mv.steps[0].kind === 'type' && same(mv.steps[0].value, box.value) && same(mv.steps[0].target, box.name));
           const then = m && (walker.recorded || walker.step)(m.to, { ...step, strict: true, role: opts.role });
           if (!m || !then || then.to !== r.to) continue;
-          flag('added', `Before "${step.target}", a step your script leaves out, as recorded: ${formatStep(m.steps[0])} (the screen after it shows what that found)`, where(line));
-          push({ kind: 'type', target: m.steps[0].target, value: m.steps[0].value }, '(not in your script: as recorded)', line);
+          const text = `Before "${step.target}", a step your script leaves out, as recorded: ${formatStep(m.steps[0])} (the screen after it shows what that found)`;
+          const typed = push({ kind: 'type', target: m.steps[0].target, value: m.steps[0].value }, '(not in your script: as recorded)', line);
+          // Her own recording's, and not a write: for information (the review's "Added from your recording").
+          flag(typed && typed.writes ? 'added' : 'restored', text, where(line));
           id = at(); sc = scr(id); r = go({ ...step, strict: true, role: opts.role });
           break;
         }

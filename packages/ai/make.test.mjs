@@ -17,7 +17,7 @@ import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
-import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou } from './finish.mjs';
+import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, reviewHtml } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
@@ -341,11 +341,16 @@ test('a step the recording took before a click (a search before a tab), and the 
     ['Click "Plugins"', 'picker-plugins · "Fabrikam Orders"'],
     ['Click "Fabrikam Orders"', 'review · "Review Fabrikam Orders"'],
   ]);
-  assert.match(flags.find(f => f.kind === 'added').text, /^Before "Plugins", a step your script leaves out, as recorded: Type "Fabrikam" in "Search contexts"/);
+  const restored = flags.find(f => f.kind === 'restored');
+  assert.match(restored.text, /^Before "Plugins", a step your script leaves out, as recorded: Type "Fabrikam" in "Search contexts"/);
+  // It's from her own recording and isn't a write: the review lists it for information, not under Needs you.
+  assert.ok(!needsYou({ planReview: { flags }, plan: { beats: [] } }).some(n => n.text === restored.text));
+  assert.deepEqual(addedFromRecording({ flags }), [{ where: `line ${restored.line}`, text: restored.text }]);
+  assert.match(reviewHtml({ title: 'T', beats: [], timings: [], needs: [], added: addedFromRecording({ flags }), stats: [] }), /<h2>Added from your recording<\/h2>.*Before &quot;Plugins&quot;, a step your script leaves out/s);
   // When her script types it, it's typed once.
   const own = steps('# T\n\n## 1. Add it\n\n> We add it.\n\n**Do:** Click "Add content". Type "Fabrikam" in "Search contexts". Click "Plugins". Click "Fabrikam Orders".\n');
   assert.equal(own.plan.beats[0].steps.filter(st => st.kind === 'type').length, 1);
-  assert.equal(own.flags.filter(f => f.kind === 'added').length, 0);
+  assert.equal(own.flags.filter(f => f.kind === 'added' || f.kind === 'restored').length, 0);
 });
 
 test('a control in a live region proves a step only when the next step clicks it; its words never do', () => {

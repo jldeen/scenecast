@@ -110,17 +110,21 @@ export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
 
 // ---- the one-page review -----------------------------------------------------------------------------------------
 const readJson = f => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { return null; } };
+// Steps the plan took from her own recording that aren't writes (a search the recording made before a click): for
+// information, not for her to do.
+const INFO = new Set(['restored']);
+export const addedFromRecording = planReview => ((planReview && planReview.flags) || []).filter(f => INFO.has(f.kind)).map(f => ({ where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text }));
 export function needsYou({ planReview, reset, plan, fidelity, points }) {
   const out = [];
   const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step", number: 'A number that can change' };
-  for (const f of (planReview && planReview.flags) || []) out.push({ kind: KIND[f.kind] || 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
+  for (const f of ((planReview && planReview.flags) || []).filter(f => !INFO.has(f.kind))) out.push({ kind: KIND[f.kind] || 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
   for (const n of (reset && reset.needs) || []) out.push({ kind: n.kind === 'start' ? 'A step is missing' : 'Reset', where: `beat ${n.beat}`, text: n.text });
   plan.beats.forEach((b, bi) => (b.lines || []).forEach((l, li) => { if (!(l.focus || []).some(f => f.on)) out.push({ kind: 'No focus point', where: `line ${bi + 1}.${li + 1}`, text: `Nothing on its screens backs “${l.text.slice(0, 80)}${l.text.length > 80 ? '…' : ''}”. Add one in the editor if it needs one.` }); }));
   for (const i of ((fidelity && fidelity.items) || []).filter(i => i.status === 'fail' || i.status === 'manual')) out.push({ kind: i.status === 'fail' ? 'Check failed' : 'Look yourself', where: '', text: `${i.title}: ${(i.detail || '').split('\n')[0]}` });
   if (points && !points.length) out.push({ kind: 'No focus point', where: '', text: 'The plan has no focus points yet: build the demo, then finish again.' });
   return out;
 }
-export function reviewHtml({ title, beats, timings, needs, stats }) {
+export function reviewHtml({ title, beats, timings, needs, added = [], stats }) {
   const card = s => `<figure><div class="img">${s.img ? `<img loading="lazy" src="${esc(s.img)}" alt="">` : '<span>No picture</span>'}</div><figcaption><b>${esc(s.step)}</b>${s.words ? `<span>${esc(s.words)}</span>` : ''}</figcaption></figure>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}: review</title><style>
 body{margin:0;padding:24px 28px;font:14px/1.45 -apple-system,"Segoe UI",system-ui,sans-serif;color:#1b1b1b;background:#fff}
@@ -130,6 +134,7 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;text-transform:uppercase;lett
 figcaption{font-size:12px;margin-top:4px}figcaption span{display:block;color:#666}table{border-collapse:collapse}td,th{padding:4px 12px 4px 0;text-align:left;border-bottom:1px solid #eee;font-variant-numeric:tabular-nums}</style></head><body>
 <h1>${esc(title)}</h1><div class="sum">${stats.map(([k, v]) => `<b>${esc(v)}</b> ${esc(k)}`).join(' · ')}</div>
 <h2>Needs you</h2>${needs.length ? `<ul class="needs">${needs.map(n => `<li><span class="k">${esc(n.kind)}</span><span class="w">${esc(n.where)}</span>${esc(n.text)}</li>`).join('')}</ul>` : '<p class="ok">Nothing. It\u2019s ready to present.</p>'}
+${added.length ? `<h2>Added from your recording</h2><p class="sum">Steps your script leaves out, done as you recorded them. Nothing to do.</p><ul class="needs">${added.map(a => `<li><span class="w">${esc(a.where)}</span>${esc(a.text)}</li>`).join('')}</ul>` : ''}
 <h2>Timings</h2><table>${timings.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>Every screen</h2>${beats.map(b => `<div class="beat">Beat ${b.n} · ${esc(b.title)}</div><div class="sheet">${b.shots.map(card).join('')}</div>`).join('')}
 </body></html>`;
@@ -181,11 +186,11 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], o
   if (fidelity) timings.push(['Checks', `${fidelity.secs} s · ${fidelity.items.filter(i => i.status === 'pass').length} of ${fidelity.items.length} pass`]);
   timings.push(...beatTimings(plan, slots));
   const points = (readFocusJson(demo.dir).points || []).filter(p => p.source === 'plan');
-  const needs = needsYou({ planReview, reset, plan, fidelity, points });
+  const needs = needsYou({ planReview, reset, plan, fidelity, points }), added = addedFromRecording(planReview);
   const writes = plan.beats.flatMap(b => b.steps).filter(s => s.writes).length;
-  const html = reviewHtml({ title: `${demo.cfg.title || plan.title}: review`, beats, timings, needs, stats: [['beats', plan.beats.length], ['screens', beats.reduce((n, b) => n + b.shots.length, 0)], ['writes', writes], ['focus points', points.length], ['things for you', needs.length]] });
+  const html = reviewHtml({ title: `${demo.cfg.title || plan.title}: review`, beats, timings, needs, added, stats: [['beats', plan.beats.length], ['screens', beats.reduce((n, b) => n + b.shots.length, 0)], ['writes', writes], ['focus points', points.length], ['things for you', needs.length]] });
   writeFileSync(join(out, 'index.html'), html);
-  return { file: join(out, 'index.html'), needs };
+  return { file: join(out, 'index.html'), needs, added };
 }
 
 export async function finish({ demo, packs, emit = () => {} }) {
