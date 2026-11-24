@@ -68,13 +68,13 @@ After the screen's name and ` · `, one proof, in plain words. Either part may b
 | `control "Name" on` | …and it's checked or pressed (`checked`, `aria-checked="true"`, `aria-pressed="true"`). | `{ …, state: 'on' }` |
 | `control "Name" off` | …and it isn't (an unchecked checkbox or radio, `aria-checked="false"`, `aria-pressed="false"`). | `{ …, state: 'off' }` |
 | `box "Name" says "text"` | A box you type in (an input, a text area, an editable area) with that name starts with the text. | `{ screen, kind: 'box', text: null, box, says }` |
-| `gone "words"` | Its words no longer include them: they were on the page before the step. | `{ screen, kind: 'gone', text: null, gone }` |
+| `gone "words", still "words"` | Its words no longer include the first, and still include the second. The first were on the page before the step; the second, on it before and after, are the page's own (its heading, or a line that doesn't change between runs): it's the same page with something taken away, not a blank page, an error or somewhere else. | `{ screen, kind: 'gone', text: null, gone, still }` |
 | (none) | Nothing: the review lists the step under **Needs you**. | `{ screen, kind: null, text: null }` |
 
 - **The page's words:** what it shows in every frame (`innerText`), not what's in a closed dialog.
-- **A control's name:** its `aria-label`, else its text.
-- **Comparing:** words, names and a box's text are compared lowercased, with quotes (`"“”'‘’`) dropped and runs of
-  spaces as one space. A name is the whole name; a box's text is its start.
+- **A control:** as below, the same rule the reader uses on a recorded page.
+- **Comparing:** words, names and a box's text are compared lowercased, with quotes (`"“”'‘’`) and invisible
+  characters dropped and runs of spaces as one space. A name is the whole name; a box's text is its start.
 - **Quotes:** a value with a straight quote in it is written in curly quotes (`“He said "go"”`). `text` is only ever
   the words a run looks for in the page's words.
 
@@ -84,8 +84,30 @@ After the screen's name and ` · `, one proof, in plain words. Either part may b
 - Type "IQ" in "Search tools by name"
   Lands on: adm-iq-typed · box "Search tools by name" says "IQ"
 - Click "Close panel"
-  Lands on: iq-landing · gone "Delegation of spend authority"
+  Lands on: iq-landing · gone "Use When", still "Supply Chain Operations"
 ```
+
+### Controls, their roles and names
+
+One rule, `controlOf(el, acc)` in `packages/script/naming.mjs`: the reader uses it on a recorded page, and a run sends
+it to the live page as it is (it's self-contained; its comment shows how). Plan steps (`Click "Name"`) and proofs
+(`control "Name"`) name controls by it.
+
+- **A control** is an `input` (not `hidden` or `password`), `button`, `summary`, `select`, `textarea`, an `a` with
+  `href`, an editable area (`contenteditable` empty or `"true"`), an element with `role` button, link, tab, menuitem,
+  menuitemcheckbox, menuitemradio, option, treeitem, switch, checkbox, radio, textbox, searchbox, combobox or
+  gridcell, a `row` or `listitem` with `tabindex`, or anything with `tabindex="0"`.
+- **Its role** is its `role` attribute; else from its tag: an `a` with `href` is a link; `button` and `summary`, a
+  button; `select`, a combobox; `textarea`, a textbox; an `input` is a checkbox, a radio, a button (`button`,
+  `submit`, `reset`, `image`), a searchbox (`search`) or else a textbox; an editable area, a textbox; anything else,
+  its tag.
+- **Its name** is the first of these that isn't empty: `aria-label`; the words of the elements its `aria-labelledby`
+  names, joined by a space; its own words (`innerText`; not for an `input`, a `textarea` or an editable area);
+  `placeholder`; `data-placeholder`; `aria-placeholder`; `title`; `alt`; `value`. Each is cleaned first: invisible
+  characters (zero-width spaces and joiners, direction marks) dropped, runs of spaces as one, ends trimmed. A name
+  said twice in a row (`Share Share`) counts once, and a name is cut at 90 characters.
+- **Not counted:** what's hidden (`hidden`, `display: none`, `visibility: hidden`) and what's inside
+  `aria-hidden="true"` or `inert`. A control in a closed `<dialog>` is read but never a proof.
 
 `Lands on:` proofs come from the recording, as the run will read the page: its words in every frame, not what's in a
 closed dialog, and nothing a reload changes (a time, a size). Some steps leave nothing new on the screen to check by:

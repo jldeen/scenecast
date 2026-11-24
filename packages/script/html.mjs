@@ -1,8 +1,10 @@
-// A captured page read without a browser: its controls (named the way the recorder's outline names them,
-// packages/capture/outline-page.js), its text items (the way the script matcher indexes a screen,
+// A captured page read without a browser: its controls (what's a control, its role and its name: naming.mjs, the rule
+// a run uses on the live page too), its text items (the way the script matcher indexes a screen,
 // packages/player/app/focus-target.js, with a box that's its place in the page's order) and its words. Captures are
 // serialized DOM, so a small stack parser is enough. Used to map a talk track's Do lines to real controls, and its
 // lines to what's on screen, before there's a replica to look at.
+import { controlOf } from './naming.mjs';
+
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const RAW = new Set(['script', 'style', 'template', 'noscript', 'title']);
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”', mdash: '—', ndash: '–', hellip: '…', middot: '·', rsaquo: '›' };
@@ -55,30 +57,7 @@ export function textOf(el, out = []) {
 }
 export const wordsOf = el => textOf(el).join('').split('\n').map(clean).filter(Boolean).join('\n');
 
-// Roles and names as packages/capture/outline-page.js gives them.
-const ROLE_SEL = /^(button|link|tab|menuitem|menuitemcheckbox|menuitemradio|option|treeitem|switch|checkbox|radio|textbox|searchbox|combobox|gridcell)$/;
-function roleOf(el) {
-  const r = el.attrs.role;
-  if (r) return r;
-  const t = el.tag;
-  if (t === 'a' && 'href' in el.attrs) return 'link';
-  if (t === 'button' || t === 'summary') return 'button';
-  if (t === 'select') return 'combobox';
-  if (t === 'textarea') return 'textbox';
-  if (t === 'input') { const ty = (el.attrs.type || 'text').toLowerCase(); return ty === 'checkbox' ? 'checkbox' : ty === 'radio' ? 'radio' : /^(button|submit|reset|image)$/.test(ty) ? 'button' : ty === 'search' ? 'searchbox' : 'textbox'; }
-  if (el.attrs.contenteditable === '' || el.attrs.contenteditable === 'true') return 'textbox';
-  return t;
-}
-function isControl(el) {
-  const a = el.attrs, t = el.tag;
-  if (t === 'input') return !/^(hidden|password)$/i.test(a.type || '');
-  if (/^(button|summary|select|textarea)$/.test(t) || (t === 'a' && 'href' in a)) return true;
-  if (a.contenteditable === '' || a.contenteditable === 'true') return true;
-  if (a.role && ROLE_SEL.test(a.role)) return true;
-  if ((a.role === 'row' || a.role === 'listitem') && 'tabindex' in a) return true;
-  return a.tabindex === '0';
-}
-
+// What's a control, its role and its name: one rule, a run's too (naming.mjs).
 // A small CSS selector engine, for the recorder's matchers ([data-testid="x"], #id, a[href*="/edit/"],
 // section[aria-label="Reviewers"] button): tags, ids, classes, attributes (= ^= $= *= ~= |=), and the descendant,
 // child and sibling combinators. Pseudo-classes are skipped.
@@ -182,12 +161,7 @@ export function readScreen(docs, { specs = [] } = {}) {
     const index = el => { if (typeof el === 'string') return; if (el.attrs.id) ids.set(el.attrs.id, el); el.children.forEach(index); };
     index(root);
     const own = el => clean(el.children.filter(c => typeof c === 'string').join(' '));
-    const nameOf = el => {
-      const a = el.attrs;
-      const by = a['aria-labelledby'] ? a['aria-labelledby'].split(/\s+/).map(id => ids.get(id)).filter(Boolean).map(wordsOf).join(' ') : '';
-      const inner = el.tag === 'input' || el.tag === 'textarea' || a.contenteditable === 'true' || a.contenteditable === '' ? '' : wordsOf(el).replace(/\n/g, ' ');
-      return clean(a['aria-label'] || by || inner || a.placeholder || a['data-placeholder'] || a['aria-placeholder'] || a.title || a.alt || a.value).replace(/^(.{2,}?) ?\1$/, '$1').slice(0, 90);
-    };
+    const acc = { tag: el => el.tag, attr: (el, n) => (n in el.attrs ? el.attrs[n] : null), text: el => wordsOf(el), byId: id => ids.get(id) || null };
     // shut: inside a closed dialog (no open attribute) or a template, so not on the page as it shows (innerText):
     // the item or control is marked, and kept as it was.
     const walk = (el, aria = false, bar = false, shut = false) => {
@@ -197,8 +171,9 @@ export function readScreen(docs, { specs = [] } = {}) {
       bar = bar || el.tag === 'header' || el.tag === 'nav' || /^(banner|navigation)$/.test(el.attrs.role || '');
       shut = shut || (el.tag === 'dialog' && !('open' in el.attrs)) || el.tag === 'template';
       const start = pos++;
-      if (!aria && isControl(el)) {
-        const role = roleOf(el), name = nameOf(el);
+      const ctl = el.tag === '#root' ? null : controlOf(el, acc);
+      if (!aria && ctl && ctl.control) {
+        const { role, name } = ctl;
         if (name || /textbox|searchbox|combobox/.test(role)) {
           const c = { i: controls.length, role, name, frame: key === 'main' ? undefined : key };
           if (role === 'textbox' || el.tag === 'textarea' || el.attrs.contenteditable) { c.editable = el.attrs.contenteditable !== undefined ? 'content' : 'field'; if (el.tag === 'textarea' || c.editable === 'content') c.multiline = true; }
@@ -218,7 +193,7 @@ export function readScreen(docs, { specs = [] } = {}) {
       }
       if (/^h[1-6]$/.test(el.tag) || el.attrs.role === 'heading') { const h = clean(wordsOf(el)); if (h) (bar ? barHeadings : headings).push(h); }
       const mine = own(el);
-      const item = mine && el.tag !== '#root' ? { i: items.length, kind: isControl(el) ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
+      const item = mine && el.tag !== '#root' ? { i: items.length, kind: ctl && ctl.control ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
       if (item) { if (shut) item.shut = true; items.push(item); }
       el.children.forEach(c => walk(c, aria, bar, shut));
       if (item) { item.text = clean(wordsOf(el).replace(/\n/g, ' ')).slice(0, 2000); item.box = [start, 0, pos, 1]; }
