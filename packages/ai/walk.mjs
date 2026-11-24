@@ -13,8 +13,8 @@
 //   missed        it didn't run, or didn't land where the plan says (why says which)
 //   after-miss    later in a beat after a miss
 import { formatStep } from './plan.mjs';
+import { norm } from './find.mjs';
 
-const norm = s => String(s || '').toLowerCase().replace(/[“”"'’]/g, '').replace(/\s+/g, ' ').trim();
 
 // walker: { start(app), step(at, s), writeOf?(s, at) → why it writes | null, landed?(at, s) → { ok, why } }
 export async function walkPlan(plan, walker, { emit = () => {} } = {}) {
