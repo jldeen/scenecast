@@ -25,6 +25,7 @@ import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
 import { CONTROL_NAME_SRC } from '@stuntdouble/capture/page-naming.mjs';
+import { READ_DOCS_SRC } from '@stuntdouble/capture/page-read.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 
 // The words of an app showing an error instead of what it should.
@@ -604,5 +605,19 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     return { app: id, url: o.url || null, title: o.title || null, words: String(await words(id)).split('\n').map(x => x.trim()).filter(Boolean),
       controls: items.map(it => ({ name: it.name, role: it.role, frame: it.fh || 'page', ...(it.selected != null ? { selected: it.selected === 'true' } : {}), ...(it.expanded != null ? { open: it.expanded === 'true' } : {}), ...(it.checked != null ? { on: it.checked === 'true' } : it.pressed != null ? { on: it.pressed === 'true' } : {}), ...(it.value != null ? { value: it.value } : {}), ...(it.disabled ? { disabled: true } : {}) })) };
   }
-  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, uniqueControl, startCheck, proofOf, screenNow, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
+  // The screen in the reader's shape, twice about gapMs apart once it's quiet ([{ at, docs: [{ key, html }] }, …]):
+  // for readScreen and the landing rules, as on a recorded screen; words that differ between the two come and go by
+  // themselves (an answer still streaming, a toast, a clock).
+  async function reads(app, { n = 2, gapMs = 1000 } = {}) {
+    const id = appOf(app) || app;
+    await quiet(id, 800, 15000);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      if (i) await sleep(gapMs);
+      const docs = await cmd('js', { tab: tab(id), code: READ_DOCS_SRC }, 90).catch(() => null);
+      out.push({ at: new Date().toISOString(), docs: Array.isArray(docs) ? docs : [] });
+    }
+    return out;
+  }
+  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, uniqueControl, startCheck, proofOf, screenNow, reads, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
 }

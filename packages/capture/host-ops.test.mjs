@@ -19,7 +19,7 @@ function fakeBrowser({ from = 'https://frame.example.test' } = {}) {
   const page = { url: () => main.url(), goto: async () => {}, frames: () => [main, inner], mainFrame: () => main, on() {}, evaluate: main.evaluate, isClosed: () => false };
   let auth = null;
   const g = {
-    watchAuth(re) { if (re) auth = { origin: API, host: 'api.example.test', value: 'Bearer t', from }; },
+    watchAuth(re, only) { if (re && (!only || only === new URL(from).host)) auth = { origin: API, host: 'api.example.test', value: 'Bearer t', from }; },
     peekAuth: () => !!auth, takeAuth: () => { const a = auth; auth = null; return a; },
     pass(fn, o) { opened.push(o); return fn(); },
     stop: async () => {},
@@ -50,9 +50,30 @@ test('with no frame of that origin, from the page; a path off the origin or a re
   const { ops, calls, opened } = fakeBrowser({ from: 'https://elsewhere.example.test' });
   await ops.capGuard({});
   assert.equal((await ops.capApi({ tab: 'portal', open: 'x', host: 'api.example.test', method: 'PUT', path: '/v1/a', body: { stage: 0 } })).from, 'portal.example.test');
-  for (const [method, path] of [['DELETE', '/v1/items/../admin'], ['DELETE', '//evil.test/x'], ['GET', '/v1/a']]) {
+  for (const [method, path] of [['DELETE', '/v1/items/../admin'], ['DELETE', '//evil.test/x'], ['GET', '/v1/../a'], ['OPTIONS', '/v1/a']]) {
     assert.equal((await ops.capApi({ tab: 'portal', open: 'x', host: 'api.example.test', method, path })).ok, false, `${method} ${path}`);
   }
   assert.equal(opened.length, 1);
   assert.equal(calls.length, 1);
+});
+
+test("a pack's API check reads: no opening, no body, and only the number and true/false fields it names", async () => {
+  const { ops, calls, opened } = fakeBrowser();
+  await ops.capGuard({});
+  const r = await ops.capApi({ tab: 'portal', open: 'x', host: 'api.example.test', method: 'GET', path: '/v1/gallery/p1', body: { stage: 0 }, pick: ['stage'] });
+  assert.equal(r.ok, true);
+  assert.equal(opened.length, 0);
+  assert.deepEqual(calls.map(c => [c.in, c.method, c.body, c.pick]), [['frame', 'GET', null, ['stage']]]);
+});
+
+test('with from, only that frame\'s session and only from that frame, never the page around it', async () => {
+  const { ops, calls } = fakeBrowser({ from: 'https://portal.example.test' });
+  await ops.capGuard({});
+  const r = await ops.capApi({ tab: 'portal', open: 'x', host: 'api.example.test', from: 'frame.example.test', method: 'GET', path: '/v1/a', waitS: 1 });
+  assert.equal(r.ok, false);
+  assert.match(r.why, /from frame\.example\.test/);
+  assert.equal(calls.length, 0);
+  const f = fakeBrowser();
+  await f.ops.capGuard({});
+  assert.equal((await f.ops.capApi({ tab: 'portal', open: 'x', host: 'api.example.test', from: 'frame.example.test', method: 'GET', path: '/v1/a' })).from, 'frame.example.test');
 });

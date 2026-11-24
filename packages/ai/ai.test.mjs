@@ -11,7 +11,7 @@ import { findItem, nameFits, norm } from './find.mjs';
 import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
-import { fillApi } from './reset-run.mjs';
+import { fillApi, checkLine } from './reset-run.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -200,4 +200,10 @@ test("an API undo filled in: the demo's values win, each one a single encoded se
   assert.equal(f.path, '/v1/plugins/p1/sections/Our%20numbers/..%2Fadmin%3Fx%3D1.md?resource=context');
   assert.deepEqual(f.body, { stage: 0, note: '../admin?x=1' });
   assert.deepEqual(fillApi(api, {}, { pluginId: 'p1' }).left, ['{section}', '{item}']);
+});
+
+test("a Check line reads the same from either parser: a string, or { app, screen, text } with the claim alone", () => {
+  assert.equal(checkLine('tasks: no "Call Kestrel"'), 'tasks: no "Call Kestrel"');
+  assert.equal(checkLine({ app: 'tasks', screen: 'tasks-home', text: 'no "Call Kestrel"' }), 'tasks: no "Call Kestrel"');
+  assert.equal(checkLine({ app: null, screen: null, text: 'no app here' }), 'no app here');
 });
