@@ -6,12 +6,14 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { selftestGuard } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = resolve(process.env.SCENECAST_BIN || join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast'));
 const keepFile = process.env.SCENECAST_SELFTEST_KEEP;
 const tmp = process.argv[2] || (keepFile && existsSync(keepFile) ? readFileSync(keepFile, 'utf8').trim() : null);
 if (!tmp) { console.log('no kept demo: run npm test with SCENECAST_SELFTEST_KEEP=<file>, or pass the folder'); process.exit(1); }
+await selftestGuard({ tmp, kept: [existsSync(join(tmp, 'demo.json')) ? dirname(resolve(tmp)) : tmp] });
 const DEMO = existsSync(join(tmp, 'demo.json')) ? tmp : join(tmp, 'fixture-demo');
 const LOOPS = +(process.env.LOOPS || 10), PORT = 4731, URL = `http://127.0.0.1:${PORT}/`;
 const sleep = ms => new Promise(r => setTimeout(r, ms));

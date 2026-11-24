@@ -17,10 +17,12 @@ import { chromium } from 'playwright-core';
 import { buildExtension } from '@stuntdouble/capture/build.mjs';
 import { send } from '@stuntdouble/capture/cli.mjs';
 import { luminance } from '@stuntdouble/checks/compare.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RX = 47698, WEB = 47896;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-real-tabs-'));
+await selftestGuard({ tmp, receivers: [RX], extensions: [RX] });
 const raw = join(tmp, 'raw');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];

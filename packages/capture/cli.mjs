@@ -6,11 +6,23 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fenced, fencePort, fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
 // Exit once everything printed is out (a pipe to the app is written asynchronously; exiting at once cut it at 64 KB).
 const exitWhenOut = code => process.stdout.write('', () => process.exit(code));
 
+// In a selftest: a receiver this test started (its raw folder is the test's own), never another test's or the app's.
+const ownReceivers = new Set();
+async function fenceReceiver(RX, port) {
+  fencePort(port);
+  if (!fenced() || ownReceivers.has(port)) return;
+  const p = await fetch(RX + '/ping').then(r => r.json()).catch(() => null);
+  if (!p) return;
+  try { fencePath(p.raw || p.demo, 'receiver\'s raw folder'); } catch (e) { throw new Error(`a selftest only talks to its own receivers: the one on ${port} is ${p.demo || p.raw}`); }
+  ownReceivers.add(port);
+}
 export async function send(cmd, tmo = 300, port = process.env.REPLICA_RX_PORT || 47621) {
   const RX = `http://127.0.0.1:${port}`;
+  await fenceReceiver(RX, port);
   const { id } = await (await fetch(RX + '/cmd', { method: 'POST', body: JSON.stringify(cmd) })).json();
   const t0 = Date.now();
   for (;;) {
