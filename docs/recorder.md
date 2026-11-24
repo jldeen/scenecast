@@ -142,10 +142,37 @@ stays the extension in her own browser.
   restart. `capture.macSso: false` turns the Mac's sign-on off in the profile alone; then the profile's own sign-in
   has to carry every app (measured: on a managed Mac it carried only Teams).
 - **A guard for read-only steps** (`guard()` in `browser.mjs`, not on by default): every request that isn't a read
-  (GET, HEAD, OPTIONS) to a guarded host is held before it leaves, every page and frame included; `pass()` lets a
-  planned write through. WebSocket messages don't go through it.
+  (GET, HEAD, OPTIONS) to a guarded host is held before it leaves, except what the app's pack allows
+  (`guard.allow`); `pass()` lets a planned write through. It's set on every target, the pages there already and every
+  new one, their frames and workers, and service workers (`fetch-all.mjs`: a browser-wide one only caught pages made
+  after it). WebSocket messages don't go through it, so a chat box's Enter counts as a write.
 
 The tenant and the account live in the demo's own `demo.json`, never in this repository.
+
+### Record for me, unattended
+
+`scenecast ai record --unattended` (`packages/ai/unattended.mjs`) runs the approved plan in the capture browser with
+nobody there, while the recorder records. It's what the capture browser is for: no screen, no clicks, no waiting.
+
+- **Approved, all of it.** The plan word for word, and the list of every write by beat and step, with reset.md's
+  undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
+  app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
+  for that one step. A write that isn't approved stops the run before it, with a picture.
+- **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json.
+- **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
+  leaving the app's hosts, a sign-in page (never signed in: Sign in again), what a step lands on not showing, a
+  control that isn't there, a step only a person can do.
+- **The reset before and after.** The demo's `preflight.reset`/`resetFix`, else reset.md: before, the check, then the
+  undos and the set-first steps, then the check again (it fails closed: nothing is recorded when the tenant isn't
+  as the demo starts); after, the undos of what ran, the start set again, the check.
+- **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
+  the time per beat, the reset, what the guard held and every host reached outside the apps', the stop.
+- The recording is the recorder's own (build, checks and Review work unchanged); its start sweeps run side by
+  side, an app per window.
+
+`scenecast ai walk --live` walks the plan read-only (`walkLive`): at a write it skips the rest of that beat and goes
+on with the next; walk.json says, for each step, reached, a write, after a write, or missed (and which write it
+needed). `ai walk` without `--live` walks the recording's screens instead (`walkerFromDemo`), for comparison.
 
 `scenecast capture start|stop|status|sign-in|run` (preflight runs `start`). The host's state is `.out/capture.json`
 and its log `.out/capture.log`. `demo.json`:
@@ -180,7 +207,16 @@ sent (`scenecast run`); every built-in command and side path works.
   the Playwright agent instead, `--capture` in the capture browser (preflight starts it); `--record-only` stops
   after recording (for timing).
 - `packages/selftest/capture-browser.mjs`: the capture browser on the fixture apps: off the screen on this OS,
-  drawing, at the demo's viewport, twins, sign-in landing, the guard, closed shadow roots, nothing left running.
+  drawing, at the demo's viewport, twins, sign-in landing, the guard (on a page open before it, and turned off and
+  on), closed shadow roots, nothing left running.
+- `packages/selftest/capture-run.mjs`: Record for me, unattended, on the fixture's tasks app (its server keeps what
+  writes change): the reset before and after, an approved write, a POST the guard holds, a write that isn't approved
+  and a step off the app (each stops the run), an edited plan (nothing runs), a live walk, and the same raw
+  recording as the extension's. Headless on Linux.
+- `packages/selftest/guard.mjs`: every selftest calls it first. Nothing a test starts reaches a presenter's
+  Scenecast: no receiver, command or recorder on the app's ports (47621–47630), no demo, raw folder, extension or
+  capture profile outside the test's own temp folder, no command to a receiver the test didn't start (the engine
+  refuses them while `SCENECAST_SELFTEST` is set: `@stuntdouble/core/lib/test-fence.mjs`).
 - `packages/selftest/hover-repeat.mjs`: the hover check and the checklist over and over on a kept selftest demo
   (`.github/workflows/repeat.yml`). A missed hover prints the player's hover trace (`d1.hoverTrace()`); the hover
   check reads the player once it has settled, never at a fixed time, and the selftest proves it with every page timer

@@ -99,6 +99,10 @@ in the plan, and when it gets there it stops and asks: **Do it**, **I'll click i
 fine. When a screen isn't what it expected, it waits for it, then works out what to do instead, then asks you
 (**I did it**, **Skip it**, or tell it what to do in plain words).
 
+Unattended (in the capture browser, nobody there: `ai record --unattended`), there's nobody to ask, so you approve
+every write before it starts: the approval lists each one by beat and step, and the run does only those. Anything
+else that could change something is held, and stops the run with a picture of where it was.
+
 ## The plan
 
 `plan.md` in the demo folder, in plain words you can edit on the Record step:
