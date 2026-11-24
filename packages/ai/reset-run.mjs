@@ -114,6 +114,103 @@ export function checkClaim(claim, { words = '', items = [], light = null } = {})
   return { ok: false, why: `can't check "${claim}" on its own: say it as shows "…", no "…", "…" is on/off or "…" is picked` };
 }
 
+// "<app>: <claim>" → { app, rest } when app is one of the demo's.
+const appTextOf = appIds => t => { const m = /^([\w-]+)\s*:\s*(.*)$/.exec(t); return m && appIds.includes(m[1]) ? { app: m[1], rest: m[2] } : null; };
+const allowedIn = approval => (part, t) => ((approval && approval.reset) || []).some(x => x.part === part && norm(x.text) === norm(t));
+
+// One reset step that changes something: approved (its part and words are in the approval), its placeholders filled,
+// run by the walker as a write (the guard open for that one step, the control matched again). An API undo goes to
+// apiUndo when given. → step(part, app, s, approvedText, { note }) → { ok, missing?, why? }
+function writeStepper({ walker, approval, results = {}, did, apiUndo = null }) {
+  const allowed = allowedIn(approval);
+  const fill = t => String(t).replace(/\{(\w+)\}/g, (m, k) => results[k] || m);
+  const step = async (part, app, s, approvedText, { note = null } = {}) => {
+    if (apiUndo && s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) return apiUndo(part, app, s, approvedText, note);
+    const filled = parseStep(fill(formatStep(s)));
+    if (/\{\w+\}/.test(formatStep(filled))) return { ok: false, why: `${formatStep(s)}: the run didn't record what to fill in` };
+    if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
+    if (filled.kind === 'manual') return { ok: false, why: `${formatStep(filled)}: a person's step, and nobody's there` };
+    if (filled.kind === 'free') return { ok: false, why: /^undo with the app pack/i.test(filled.text) ? `${filled.text}: the pack's API undo isn't run by the capture pass yet` : `"${filled.text}" isn't a step it can do on its own` };
+    const r = await walker.write(app, filled);
+    if (r.missing) return { ok: false, missing: true, why: r.why };
+    if (r.needsYou) return { ok: false, why: r.why };
+    did.push(`${app}: ${formatStep(filled)}`);
+    return { ok: true };
+  };
+  return { step, allowed };
+}
+
+// What a claim line is read on, in the walker's tab for its app: its words, its controls, and whether it renders light.
+const LIGHT_SRC = "return await page.evaluate(() => { const c = getComputedStyle(document.body).backgroundColor.match(/\\d+(\\.\\d+)?/g); if (!c) return null; const [r, g, b, a] = c.map(Number); if (a === 0) return null; return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5; })";
+export async function claimScreen(walker, cmd, tab, app) {
+  const o = await walker.controls(app);
+  const words = await walker.words(app);
+  const light = await cmd('js', { tab, code: LIGHT_SRC }, 30).catch(() => null);
+  return { words, items: o.items || [], light };
+}
+
+// One Set first or Set before line ({ what, set, opens }), in the walker's tab for its app: read on its page (Opens:,
+// else the app's start), and when it isn't so, its control through its path ("Settings and more › Settings"), each
+// click an approved write of `part`. → { ok, already?, why? }
+async function setLine({ cmd, walker, tab, step, appOfText }, part, s) {
+  const a = appOfText(s.what);
+  if (!a) return { ok: false, why: `${s.what}: which app?` };
+  if (s.opens) await cmd('goto', { tab: tab(a.app), url: s.opens }, 60).catch(() => {}); else await walker.home(a.app);
+  await walker.quiet(a.app, 800, 15000);
+  const now = checkClaim(a.rest, await claimScreen(walker, cmd, tab(a.app), a.app));
+  if (now.ok) return { ok: true, already: true };
+  const [control] = quoted(s.set || '');
+  const path = (/\(([^)]+)\)/.exec(s.set || '') || [])[1];
+  if (!control) return { ok: false, why: `${s.what}: no control to set it with` };
+  for (const p of path ? path.split(/\s*›\s*/) : []) { const r = await step(part, a.app, parseStep(`Click "${p}"`), s.what); if (!r.ok) return r; }
+  const r = await step(part, a.app, parseStep(`Click "${control}"`), s.what);
+  return r.ok ? { ok: true } : r;
+}
+
+// reset.md's "## Set before beat N, <step>" (parseReset's before: { beat, text, n, items }): just before that step,
+// off camera, each line set as Set first sets it, as an approved write (part 'before'), in a tab of its own of the same
+// capture browser (capTab, at its Opens: page), then read there again. The recorded tab is never navigated, and no
+// screen of it is saved. Fails closed before any tab opens: a line whose app pack lacks the write its Set: names, or
+// that the approval doesn't list. walkerFor(tabs): a live walker for those tabs ({ app: mark }), not recording.
+// → { ok, did: [...], items: [{ text, already, ok, why? }], why }
+export async function setBefore({ demo, cmd, packs = null, approval, block, walkerFor, results = {}, emit = () => {} }) {
+  const appIds = (demo.cfg.apps || []).map(a => a.id), appOfText = appTextOf(appIds), allowed = allowedIn(approval);
+  const byPack = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).filter(Boolean) : [];
+  const did = [], items = [];
+  for (const s of block.items) {
+    const a = appOfText(s.what);
+    if (!a) return { ok: false, did, items, why: `${s.what}: which app?` };
+    const tag = /·\s*([\w-]+):([\w-]+)\s*$/.exec(s.set || '');
+    if (!tag) return { ok: false, did, items, why: `${s.what}: its Set: line names no pack write, so it isn't set` };
+    const pack = byPack.find(x => x.id === tag[1]);
+    if (!pack || !(pack.writes || []).some(w => w.id === tag[2])) return { ok: false, did, items, why: `${s.what}: the ${tag[1]} pack has no "${tag[2]}" write, so it isn't set` };
+    if (!allowed('before', s.what)) return { ok: false, did, items, why: `"${s.what}" isn't in the approved reset` };
+  }
+  const marks = {};
+  try {
+    for (const s of block.items) {
+      const a = appOfText(s.what), app = a.app;
+      if (!marks[app]) {
+        marks[app] = `set-before:${app}`;
+        const url = s.opens || ((demo.cfg.apps || []).find(x => x.id === app) || {}).url;
+        await cmd('capTab', { open: url, mark: marks[app] }, 120);
+        emit({ event: 'set-before', stage: 'tab', app });
+      }
+      const walker = walkerFor({ [app]: marks[app] }), tab = () => marks[app];
+      const { step } = writeStepper({ walker, approval, results, did });
+      const r = await setLine({ cmd, walker, tab, step, appOfText }, 'before', s);
+      if (!r.ok) { items.push({ text: s.what, ok: false, why: r.why }); return { ok: false, did, items, why: `${s.what}: ${r.why}` }; }
+      await walker.quiet(app, 800, 15000);
+      const now = checkClaim(a.rest, await claimScreen(walker, cmd, tab(), app));
+      items.push({ text: s.what, already: !!r.already, ok: now.ok, ...(now.ok ? {} : { why: now.why }) });
+      if (!now.ok) return { ok: false, did, items, why: `${s.what}: set off camera, then ${now.why}` };
+    }
+  } finally {
+    for (const m of Object.values(marks)) await cmd('capTab', { close: m }, 30).catch(() => {});
+  }
+  return { ok: true, did, items, why: null };
+}
+
 export async function runReset({ demo, cmd, walker, phase, approval, ran = [], results = {}, emit = () => {} }) {
   const P = (demo.cfg && demo.cfg.preflight) || {};
   // The demo's own scripts: the check, then the fix and the check again (preflight's checkReset).
@@ -131,26 +228,11 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   const { parseReset } = await import('./reset.mjs');
   const parsed = parseReset(text);
   const groups = undoGroups(text);
-  const allowed = (part, t) => ((approval && approval.reset) || []).some(x => x.part === part && norm(x.text) === norm(t));
   const appIds = (demo.cfg.apps || []).map(a => a.id);
-  const appOfText = t => { const m = /^([\w-]+)\s*:\s*(.*)$/.exec(t); return m && appIds.includes(m[1]) ? { app: m[1], rest: m[2] } : null; };
+  const appOfText = appTextOf(appIds);
   const did = [];
   const home = app => walker.home(app);
-  const fill = t => String(t).replace(/\{(\w+)\}/g, (m, k) => results[k] || m);
-  // One reset step that changes something: approved, its placeholders filled, run as a write.
-  const step = async (part, app, s, approvedText, { note = null } = {}) => {
-    if (s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) return apiUndo(part, app, s, approvedText, note);
-    const filled = parseStep(fill(formatStep(s)));
-    if (/\{\w+\}/.test(formatStep(filled))) return { ok: false, why: `${formatStep(s)}: the run didn't record what to fill in` };
-    if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
-    if (filled.kind === 'manual') return { ok: false, why: `${formatStep(filled)}: a person's step, and nobody's there` };
-    if (filled.kind === 'free') return { ok: false, why: /^undo with the app pack/i.test(filled.text) ? `${filled.text}: the pack's API undo isn't run by the capture pass yet` : `"${filled.text}" isn't a step it can do on its own` };
-    const r = await walker.write(app, filled);
-    if (r.missing) return { ok: false, missing: true, why: r.why };
-    if (r.needsYou) return { ok: false, why: r.why };
-    did.push(`${app}: ${formatStep(filled)}`);
-    return { ok: true };
-  };
+  const { step, allowed } = writeStepper({ walker, approval, results, did, apiUndo: (...a) => apiUndo(...a) });
   // "Undo with the app pack: <pack>:<write>": the pack's API undo (a private pack's), in the app's own signed-in session,
   // with what the run made; if it can't, the steps its Note gives, each approved and run as a write.
   const apiUndo = async (part, app, s, approvedText, note) => {
@@ -194,28 +276,12 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   };
   const setFirst = async () => {
     for (const s of parsed.set) {
-      const a = appOfText(s.what);
-      if (!a) return { ok: false, why: `${s.what}: which app?` };
-      if (s.opens) await cmd('goto', { tab: appTab(demo, a.app), url: s.opens }, 60).catch(() => {}); else await home(a.app);
-      await walker.quiet(a.app, 800, 15000);
-      const now = checkClaim(a.rest, await readScreen(a.app));
-      if (now.ok) continue;
-      // Its control, through its path ("Settings and more › Settings › Appearance"), as approved.
-      const [control] = quoted(s.set || '');
-      const path = (/\(([^)]+)\)/.exec(s.set || '') || [])[1];
-      if (!control) return { ok: false, why: `${s.what}: no control to set it with` };
-      for (const p of path ? path.split(/\s*›\s*/) : []) { const r = await step('set', a.app, parseStep(`Click "${p}"`), s.what); if (!r.ok) return r; }
-      const r = await step('set', a.app, parseStep(`Click "${control}"`), s.what);
+      const r = await setLine({ cmd, walker, tab: a => appTab(demo, a), step, appOfText }, 'set', s);
       if (!r.ok) return r;
     }
     return { ok: true };
   };
-  const readScreen = async app => {
-    const o = await walker.controls(app);
-    const words = await walker.words(app);
-    const light = await cmd('js', { tab: appTab(demo, app), code: "return await page.evaluate(() => { const c = getComputedStyle(document.body).backgroundColor.match(/\\d+(\\.\\d+)?/g); if (!c) return null; const [r, g, b, a] = c.map(Number); if (a === 0) return null; return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5; })" }, 30).catch(() => null);
-    return { words, items: o.items || [], light };
-  };
+  const readScreen = app => claimScreen(walker, cmd, appTab(demo, app), app);
   // Each check on its app's start screen, or (a check that names one) on the screen it names, reached by the plan's own
   // read-only steps under the guard, before any of the reset's writes.
   let plan;

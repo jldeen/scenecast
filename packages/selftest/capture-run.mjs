@@ -305,6 +305,35 @@ try {
   check('a named service failing during a beat: the run stops before its write, lists it for her, and the reset after runs', rj.stopped && rj.stopped.kind === 'service' && /^Press Enter/.test(rj.stopped.why) && /Tasks' catalog service answered 500 during this beat/.test(rj.stopped.why) && (rj.needsYou || []).some(n => n.text === 'Press Enter') && count(tasks.log, 'POST /api/tasks') === 0 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ stopped: rj.stopped, needsYou: rj.needsYou, log: tasks.log.filter(l => !l.startsWith('GET')) }));
   tasks.catalog('ok');
 
+  // 1g · Set before: Sync, which the script has on by beat 2, set off camera just before Refresh, in a tab of its own
+  // (the recorded tab never moves, and no screen of it is saved), approved with the writes; Refresh's screen then
+  // shows it on, and Set first turns it off after. A pack without the write its line names fails closed.
+  const SB = tag => RESET.replace('## Check', `## Set before beat 2, Click "Refresh"\n\n- tasks: "Sync" is on\n  Set: "Sync" · ${tag}\n  Opens: ${tasks.url}\n  Seen: beat 2, tasks\n\n## Check`);
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), SB('fixture-tasks:sync'));
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  const apSB = JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'approved.json'), 'utf8'));
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const sbr = (rj.setBefore || [])[0] || {}, inSB = e => Date.parse(e.at) >= Date.parse(sbr.from) && Date.parse(e.at) <= Date.parse(sbr.to);
+  const sbLoads = (rj.events || []).filter(e => e.kind === 'loaded' && inSB(e));
+  check('Set before: approved with the writes, set off camera just before its step, and that step\'s screen shows it', (apSB.reset || []).some(x => x.part === 'before' && x.text === 'tasks: "Sync" is on' && /off camera, before Click "Refresh"/.test(x.label)) && !rj.stopped && sbr.ok && sbr.items.length === 1 && sbr.items[0].ok && !sbr.items[0].already && sbr.seen.length === 1 && sbr.seen[0].ok && rj.writes.length === 1 && count(tasks.log, 'POST /api/sync') === 2 && tasks.state().sync === false && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: rj.stopped, setBefore: rj.setBefore, writes: rj.writes.length, log: tasks.log.filter(l => !l.startsWith('GET')), after: rj.reset.after && rj.reset.after.why }));
+  check('and it ran in a tab of its own: the recorded tab didn\'t load anything meanwhile', sbLoads.length > 0 && sbLoads.every(e => e.side === 'set-before:tasks'), JSON.stringify(sbLoads));
+  // Two tabs of one app at the same address: a lookup by the app's tab finds its own by its mark, never the other.
+  const SPEC = (c => c.apps[0].match || c.apps[0].url)(JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')));
+  const MARK_JS = "return { mark: await page.evaluate(() => sessionStorage.getItem('d1tab')) }";
+  const twoOpen = json((await run(['cmd', 'capTab', JSON.stringify({ open: tasks.url, mark: 'set-before:tasks' })], { env: E })).out);
+  const byApp = json((await run(['cmd', 'js', JSON.stringify({ tab: SPEC, code: MARK_JS })], { env: E })).out), bySide = json((await run(['cmd', 'js', JSON.stringify({ tab: 'set-before:tasks', code: MARK_JS })], { env: E })).out);
+  const closed = json((await run(['cmd', 'capTab', JSON.stringify({ close: 'set-before:tasks' })], { env: E })).out);
+  check('two tabs of one app: a lookup by the app\'s tab finds its own by its mark', twoOpen.mark === 'set-before:tasks' && byApp.mark === SPEC && bySide.mark === 'set-before:tasks' && closed.closed === true, JSON.stringify({ twoOpen, byApp, bySide, closed }));
+  writeFileSync(join(DEMO, 'reset.md'), SB('fixture-tasks:sync-all'));
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  check('a Set before line whose pack lacks its write: nothing set, the run stops before the step, and the reset after runs', rj.stopped && rj.stopped.kind === 'set-before' && /the fixture-tasks pack has no "sync-all" write/.test(rj.stopped.why) && (rj.needsYou || []).some(n => n.text === 'Click "Refresh"') && count(tasks.log, 'POST /api/sync') === 0 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ stopped: rj.stopped, needsYou: rj.needsYou, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  writeFileSync(join(DEMO, 'reset.md'), RESET);
+
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
   // tenant check, and still refuses when it never does.
   const TID = '11111111-2222-3333-4444-555555555555';

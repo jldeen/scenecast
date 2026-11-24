@@ -103,10 +103,11 @@ export function startUrls(demo) {
   return out;
 }
 
-export function liveWalker({ demo, cmd, packs = null, recording = false, log = () => {} }) {
+// tabs: { app: mark } a tab of its own for an app instead of the app's (Set before's side tab, capTab).
+export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = null, log = () => {} }) {
   const apps = demo.cfg.apps || [];
   const appOf = name => { const ids = apps.map(a => a.id); return ids.find(a => a === name) || ids.find(a => a.startsWith(name) || name.startsWith(a)) || null; };
-  const tab = id => appTab(demo, id);
+  const tab = id => (tabs && tabs[id]) || appTab(demo, id);
   // An app's own hosts: its address, its match, its pack's.
   const hostsOf = id => {
     const a = apps.find(x => x.id === id) || {};

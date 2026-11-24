@@ -205,6 +205,14 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   on a screen other than the start is reached by the plan's own read-only steps there, under the guard, before any
   of the reset's writes; `pathTo`), then the undos and the set-first steps, then the check again (it fails closed: nothing is recorded when the tenant isn't
   as the demo starts); after, the undos of what ran, the start set again, the check.
+- **Set before** (reset.md's `## Set before beat N, <step>`): just before that step, each line is set off camera in a
+  tab of its own of the same capture browser (`capTab`, at its `Opens:` page), as Set first sets it: read, and when
+  it isn't so, its control as an approved write (the approval lists the lines with the writes), under the write gate;
+  then read there again, and the tab closed. The recorded tab never moves and no screen of the set is saved. A line
+  whose app pack lacks the write its `Set:` names, or that the approval doesn't list, fails closed before any tab
+  opens. Once the step lands, each line is checked on that screen as drawn: one that reads the old way (a cached
+  list) stops the run there, before the beat's next write, with a picture. Lookups by an app's tab find its own by
+  its mark first (`pickTab`), so a second tab at the same address never stands in for it. run.json: `setBefore`.
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
   the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
   write), every host reached outside the apps', every input sent (`inputs`: what it was for, the control's name, its

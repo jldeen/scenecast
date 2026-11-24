@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hostOps, apiTarget } from './host-ops.mjs';
+import { hostOps, apiTarget, pickTab } from './host-ops.mjs';
 
 const API = 'https://api.example.test';
 
@@ -11,10 +11,19 @@ test("an API undo's address: a plain path on the session's origin, else refused"
   }
 });
 
+test("an app's tab by its mark, whatever order the tabs come in: a second tab of the app at its address never stands in", () => {
+  const own = { url: 'https://chat.example.test/plugins' }, side = { url: 'https://chat.example.test/plugins?tab=added' };
+  assert.equal(pickTab([side, own], 'chat.example.test', ['set-before:chat', 'chat.example.test']), 1);
+  // Its own lost its mark (a reload before the host marks it again): by address, never the tab marked as another's.
+  assert.equal(pickTab([side, own], 'chat.example.test', ['set-before:chat', null]), 1);
+  assert.equal(pickTab([side], 'chat.example.test', ['set-before:chat']), -1);
+});
+
 // A capture browser with one tab: the portal page and the app's frame on its own origin.
 function fakeBrowser({ from = 'https://frame.example.test' } = {}) {
   const calls = [], opened = [];
-  const frame = (url, name) => ({ url: () => url, evaluate: async (fn, args) => { calls.push({ in: name, ...args }); return { status: 204 }; } });
+  // A call with no arguments is a read of the tab's mark (none here); one with arguments is the API call.
+  const frame = (url, name) => ({ url: () => url, evaluate: async (fn, args) => { if (args === undefined) return null; calls.push({ in: name, ...args }); return { status: 204 }; } });
   const main = frame('https://portal.example.test/home', 'portal'), inner = frame('https://frame.example.test/app', 'frame');
   const page = { url: () => main.url(), goto: async () => {}, frames: () => [main, inner], mainFrame: () => main, on() {}, evaluate: main.evaluate, isClosed: () => false };
   let auth = null;

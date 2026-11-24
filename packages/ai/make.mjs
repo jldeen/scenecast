@@ -85,7 +85,8 @@ export function writeList(demo) {
   const reset = resetText ? resetSteps(resetText) : [];
   return { text, writes, resetText, reset };
 }
-// The reset's steps that change something: each undo step (but Go to, which only switches), and each set first.
+// The reset's steps that change something: each undo step (but Go to, which only switches), each set first, and each
+// set before.
 export function resetSteps(resetText) {
   const r = parseReset(resetText), out = [];
   r.undo.beats.forEach((b, bi) => b.steps.forEach((s, si) => { if (s.kind !== 'app') out.push({ part: 'undo', app: b.title, n: bi, step: si, text: formatStep(s) }); }));
@@ -94,6 +95,8 @@ export function resetSteps(resetText) {
     for (const t of fallbackSteps(g.note)) out.push({ part: 'undo', app: g.title, of: s.text, text: t, fallback: true });
   }
   r.set.forEach((x, i) => out.push({ part: 'set', n: i, text: x.what, set: x.set || null }));
+  // Set before: off camera, just before its step, an approved write too (listed only when reset.md has them).
+  for (const b of r.before || []) b.items.forEach((x, i) => out.push({ part: 'before', beat: b.beat, before: b.text, ...(b.n ? { stepN: b.n } : {}), n: i, text: x.what, set: x.set || null, label: `off camera, before ${b.text}: ${x.what}` }));
   return out;
 }
 const listSha = (writes, reset) => sha(JSON.stringify({ writes, reset }));

@@ -27,6 +27,9 @@
 //                                   already filled and encoded; one that leaves the origin or that the address would
 //                                   change (dot segments, a backslash) is refused
 //                                   → { ok, status, method, host, path, from, picked? } | { ok: false, why }
+//   capTab({ open, mark } | { close: mark })   a tab of its own for a moment, in the same signed-in browser under the
+//                                    same guard (Set before: a state set off camera), marked so a lookup by an app's
+//                                    address never takes it for the app's own tab; its events say side: mark
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
 //                                    user is active and the screen unlocked (the capture browser has no person)
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -44,20 +47,31 @@ export function apiTarget(path, origin) {
   return t.origin === origin && t.pathname + t.search === s && !t.hash ? t : null;
 }
 
+// A tab by its mark first (the host marks each app's tab with its match), else by part of its address, never one marked
+// as something else: a second tab of the app at the same address (Set before's) doesn't stand in for the app's own,
+// whatever order the browser lists them in. pages: [{ url }], marks: each page's mark (null: none). → index or -1
+export function pickTab(pages, spec, marks) {
+  const own = marks.findIndex(m => m === spec);
+  if (own >= 0) return own;
+  return pages.findIndex((p, i) => String(p.url || '').includes(spec) && !marks[i]);
+}
+
 export function hostOps(cb, { log = () => {}, base = null } = {}) {
   const events = [];
   const at = () => new Date().toISOString();
   const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } };
-  const watched = new WeakSet();
+  const watched = new WeakSet(), sides = new Map(), sideOf = new WeakMap();
+  // A side tab's events (capTab) say so: they're not the app's own tab.
+  const push = (p, e) => events.push(sideOf.has(p) ? { ...e, side: sideOf.get(p) } : e);
   const watch = p => {
     if (watched.has(p)) return;
     watched.add(p);
-    p.on('popup', q => { events.push({ kind: 'popup', from: hostOf(p.url()), host: hostOf(q.url()), at: at() }); });
-    p.on('dialog', d => { events.push({ kind: 'dialog', type: d.type(), host: hostOf(p.url()), at: at() }); d.dismiss().catch(() => {}); });
-    p.on('framenavigated', f => { if (f === p.mainFrame()) events.push({ kind: 'navigated', host: hostOf(f.url()), path: (() => { try { return new URL(f.url()).pathname; } catch (e) { return ''; } })(), at: at() }); });
+    p.on('popup', q => { push(p, { kind: 'popup', from: hostOf(p.url()), host: hostOf(q.url()), at: at() }); });
+    p.on('dialog', d => { push(p, { kind: 'dialog', type: d.type(), host: hostOf(p.url()), at: at() }); d.dismiss().catch(() => {}); });
+    p.on('framenavigated', f => { if (f === p.mainFrame()) push(p, { kind: 'navigated', host: hostOf(f.url()), path: (() => { try { return new URL(f.url()).pathname; } catch (e) { return ''; } })(), at: at() }); });
     // A new document in the tab (a real load or reload; an in-page route change is only navigated): where a delayed
     // effect of a held request ends.
-    p.on('load', () => { let path = ''; try { path = new URL(p.url()).pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, '{id}'); } catch (e) {} events.push({ kind: 'loaded', host: hostOf(p.url()), path, at: at() }); });
+    p.on('load', () => { let path = ''; try { path = new URL(p.url()).pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, '{id}'); } catch (e) {} push(p, { kind: 'loaded', host: hostOf(p.url()), path, at: at() }); });
   };
   for (const p of cb.ctx.pages()) watch(p);
   cb.ctx.on('page', watch);
@@ -65,11 +79,12 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   // Each one found is remembered: a tab that left for another host (an off-plan landing) has neither the address nor
   // its mark (sessionStorage is per site), and the walker still needs its picture and its way back.
   const known = new Map();
+  const markOf = p => Promise.race([p.evaluate(() => sessionStorage.getItem('d1tab')), new Promise(r => setTimeout(() => r(null), 3000))]).then(m => typeof m === 'string' && m ? m : null, () => null);
   const tabOf = async spec => {
     const pages = cb.ctx.pages().filter(p => /^https?:/.test(p.url()));
     if (!spec) return pages[0];
-    let hit = pages.find(p => p.url().includes(spec));
-    for (const p of hit ? [] : pages) { const m = await p.evaluate(() => sessionStorage.getItem('d1tab')).catch(() => null); if (m === spec) { hit = p; break; } }
+    const marks = await Promise.all(pages.map(markOf));
+    const i = pickTab(pages.map(p => ({ url: p.url() })), spec, marks), hit = i >= 0 ? pages[i] : null;
     if (hit) { known.set(spec, hit); return hit; }
     const k = known.get(spec);
     if (k && !k.isClosed()) return k;
@@ -189,6 +204,17 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       if (!active.has(p)) active.set(p, await cb.ctx.newCDPSession(p));
       await active.get(p).send('Emulation.setIdleOverride', { isUserActive: true, isScreenUnlocked: true });
       return { perms, active: true };
+    },
+    async capTab(c) {
+      if (c.close) { const p = sides.get(c.close); sides.delete(c.close); if (p && !p.isClosed()) await p.close().catch(() => {}); return { closed: !!p }; }
+      if (!c.mark || !c.open) throw new Error('capTab: open and mark, or close');
+      const mark = String(c.mark), put = p => p.evaluate(k => { try { sessionStorage.setItem('d1tab', k); } catch (e) {} }, mark).catch(() => {});
+      const p = await cb.open('about:blank');
+      sideOf.set(p, mark); sides.set(mark, p);
+      p.on('framenavigated', f => { if (f === p.mainFrame()) put(p); });
+      await p.goto(c.open, { waitUntil: 'domcontentloaded', timeout: 90000 }).catch(e => log(`side tab ${mark}: ${String(e.message).split('\n')[0]}`));
+      await put(p);
+      return { mark, url: p.url() };
     },
     async capUrl(c) { const p = await tabOf(c.tab); return { url: p.url(), title: await p.title().catch(() => '') }; },
     async capShot(c) { const p = await tabOf(c.tab); mkdirSync(dirname(c.file), { recursive: true }); writeFileSync(c.file, await p.screenshot()); return { file: c.file }; },

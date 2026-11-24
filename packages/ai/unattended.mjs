@@ -23,7 +23,7 @@ import { rx, settled, aiDir, appTab } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 import { approval as approvalOf } from './make.mjs';
 import { liveWalker, walkerPacks } from './live.mjs';
-import { runReset, fillApi } from './reset-run.mjs';
+import { runReset, fillApi, setBefore, claimScreen, checkClaim } from './reset-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
@@ -59,13 +59,22 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   if (!plan || !stepCount(plan)) throw new Error('make and approve the plan first');
   const ap = approvalOf(demo);
   if (!ap.full) throw new Error(`approve the plan first: ${ap.why || 'it isn\'t approved'}`);
+  // reset.md's Set before blocks, each at its plan step (beat, the step's words, its number when the beat has them
+  // twice). One the plan has no step for stops the run before anything runs.
+  const setBeforeAt = new Map();
+  { const rf = join(demo.dir, 'reset.md');
+    if (existsSync(rf)) { const { parseReset } = await import('./reset.mjs'); for (const b of parseReset(readFileSync(rf, 'utf8')).before || []) {
+      const steps = (plan.beats[b.beat - 1] || {}).steps || [], si = steps.findIndex((x, i) => formatStep(x) === b.text && (!b.n || i + 1 === b.n));
+      if (si < 0) throw new Error(`reset.md sets something before beat ${b.beat}, ${b.text}, and the plan has no such step`);
+      setBeforeAt.set(`${b.beat - 1}-${si}`, b);
+    } } }
   const status0 = await cmd('recordStatus', {}, 30);
   if (status0.recording) throw new Error('the recorder is already recording: stop that recording first');
   packs = packs === undefined ? await walkerPacks() : packs;
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
-  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [] };
+  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [] };
   const save = () => writeFileSync(join(out, 'run.json'), JSON.stringify(run, null, 1));
   const shot = async (app, name) => { const file = join(stops, `${name}.png`); try { await cmd('capShot', { tab: appTab(demo, app), file }, 60); return file; } catch (e) { return null; } };
   const stopWith = async (app, at, kind, why) => { run.stopped = { kind, why, at, app, picture: await shot(app, `${at.beat + 1}-${at.step + 1}-${kind}`) }; emit({ event: 'stopped', ...run.stopped }); };
@@ -166,6 +175,25 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const failingIn = {};
     const doStep = async (bi, si, step, at, prev) => {
       for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
+      // Set before: what her script has already set when she gets here, set off camera just before the step, in a tab
+      // of its own, as approved writes under the write gate (reset-run.mjs setBefore). The step's screen must show it.
+      const sb = setBeforeAt.get(`${bi}-${si}`);
+      let sbRec = null;
+      if (sb) {
+        if (doubt) return { kind: 'unprovable', why: `the step before it (${doubt.text}) couldn't be proven (${doubt.why}), and what's set off camera before it is a write`, beforeWrite: true };
+        const down = failingIn[bi];
+        if (down) return { kind: 'service', why: `${down.service} answered ${down.status || down.failed} during this beat: what's set off camera waits until the service works. Try again later.`, beforeWrite: true };
+        for (const id of new Set(sb.items.map(x => (/^([\w-]+)\s*:/.exec(x.what) || [])[1]).filter(Boolean))) {
+          const gate = writeGate(run.landings, id);
+          if (!gate.ok) return { kind: 'gate', why: `${gate.why}: what's set off camera is a write, and runs only after strong landings in its app`, beforeWrite: true };
+        }
+        emit({ event: 'stage', name: 'set-before', label: 'Setting things up off camera' });
+        const from = new Date().toISOString();
+        const r = await setBefore({ demo, cmd, packs, approval: ap, block: sb, walkerFor: tabs => liveWalker({ demo, cmd, packs, tabs, log }), results, emit });
+        sbRec = { beat: bi + 1, step: si, text: at.text, from, to: new Date().toISOString(), ok: r.ok, did: r.did, items: r.items, seen: [], ...(r.why ? { why: r.why } : {}) };
+        run.setBefore.push(sbRec);
+        if (!r.ok) return { kind: 'set-before', why: r.why, beforeWrite: true };
+      }
       const pre = await w.landsBefore(app, step, prev);
       // The page before it: for a Go to, the screen before it in plan order (the app it leaves); none before the first.
       const before = bi === 0 && si === 0 ? [] : await w.reads(step.kind === 'app' ? prev : app, { n: 1 }).catch(() => []);
@@ -218,6 +246,18 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
       else doubt = null;
       Object.assign(lastDid, { did: r.did, screen: c.screen });
+      // What was set off camera, on the screen the step lands on (its Seen:), as drawn once the page is quiet. A page
+      // that still shows it the old way (a cached list) stops the run here, before the beat's next write.
+      if (sbRec) {
+        await w.quiet(app, 800, 15000);
+        for (const x of sb.items) {
+          const m = /^([\w-]+)\s*:\s*(.*)$/.exec(x.what);
+          if (!m) continue;
+          const seen = checkClaim(m[2], await claimScreen(w, cmd, appTab(demo, m[1]), m[1]));
+          sbRec.seen.push({ text: x.what, ok: seen.ok, ...(seen.ok ? {} : { why: seen.why }) });
+          if (!seen.ok) return { kind: 'set-before', why: `${x.what} was set off camera, but after this step ${seen.why}`, beforeWrite: true };
+        }
+      }
       return null;
     };
     const total = stepCount(plan);
