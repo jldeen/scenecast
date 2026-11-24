@@ -14,6 +14,10 @@ import { parseStep, formatStep } from './plan.mjs';
 import { appTab, sleep } from './run.mjs';
 import { norm } from './find.mjs';
 
+// A reset.md Check line as "<app>: <claim>": a string (the older parser), or parseReset's { app, screen, text } with
+// text the claim alone ("- tasks on tasks-home: no …").
+export const checkLine = c => typeof c === 'string' ? c : (c.app ? `${c.app}: ${c.text}` : c.text);
+
 // A pack's API undo filled in: its {placeholders} from the demo's own values (demo.json apps[].values: which business
 // plugin, which workspace) and what the run made (run.json's results). The demo's values win. Each value goes in as a
 // value only: encoded as one path segment (free text such as what was typed can't add a segment or a query), and into
@@ -169,7 +173,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     const f = fillApi(api, results, appCfg.values);
     if (f.left.length) return fall(`the run didn't record ${f.left.join(', ')}`);
     const { path, body } = f;
-    const r = await cmd('capApi', { tab: appTab(demo, app), open: at.open, host: at.host, hostPattern: at.hostPattern, method: api.method, path, body }, 150).catch(e => ({ ok: false, why: e.message }));
+    const r = await cmd('capApi', { tab: appTab(demo, app), open: at.open, host: at.host, hostPattern: at.hostPattern, from: at.from || null, method: api.method, path, body }, 150).catch(e => ({ ok: false, why: e.message }));
     if (!r.ok) return fall(r.why || `the API answered ${r.status}`);
     did.push(`${app}: ${s.text} (${api.method}, ${r.status})`);
     return { ok: true };
@@ -218,7 +222,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   const checkAll = async () => {
     const out = [];
     for (const c of parsed.checks) {
-      const line = typeof c === 'string' ? c : c.text, screen = c && typeof c === 'object' ? c.screen || null : null;
+      const line = checkLine(c), screen = c && typeof c === 'object' ? c.screen || null : null;
       const a = appOfText(line);
       if (!a) { out.push({ text: line, ok: false, why: 'which app?' }); continue; }
       await home(a.app);

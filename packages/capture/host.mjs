@@ -224,7 +224,7 @@ async function baseGuard(cb, cfg, log) {
   const { guardFor } = await import('@stuntdouble/apps/index.mjs');
   const g = guardFor(cfg);
   const local = g.hosts.some(h => /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i.test(h));
-  const on = async () => { on.guard = await cb.guard({ hosts: null, allow: g.allow, mode: 'hold', local }); log(`guard on from the start (hold): every web host; ${g.allow.length} allowed`); };
+  const on = async () => { on.guard = await cb.guard({ hosts: null, allow: g.allow, stayHeld: g.stayHeld || [], mode: 'hold', local }); log(`guard on from the start (hold): every web host; ${g.allow.length} allowed`); };
   // What it held (method, host, path; never a body), for the log: what an app couldn't do while it loaded.
   on.held = () => { const n = {}; for (const h of on.guard ? on.guard.held() : []) { const k = `${h.method} ${h.host}${h.path}`; n[k] = (n[k] || 0) + 1; } return Object.entries(n).map(([k, c]) => `${k}${c > 1 ? ` ×${c}` : ''}`); };
   return on;
