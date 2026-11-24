@@ -15,13 +15,12 @@ import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readScreen } from '@scenecast/script/html.mjs';
-import { findItem } from './find.mjs';
+import { findItem, norm } from './find.mjs';
 import { holds, proofWords, isBox } from './landing.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
 const READER = 15;
 
-const norm = s => String(s || '').toLowerCase().replace(/[“”"'’]/g, '').replace(/\s+/g, ' ').trim();
 
 // A recorded matcher's name and what it pins down: its aria-label, test id, text.
 export function specParts(m) {

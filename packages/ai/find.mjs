@@ -1,5 +1,7 @@
 // Finding a control on the page outline by the name a plan gives it: exact first, then the name's words.
-const norm = s => String(s || '').toLowerCase().replace(/[“”"']/g, '').replace(/\s+/g, ' ').trim();
+// Text as the walker compares it: lower case, no quotes, one space, and no invisible marks (the admin center wraps
+// numbers and names in left-to-right marks: "Showing \u200e16\u200e items").
+export const norm = s => String(s || '').toLowerCase().replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g, '').replace(/[“”"'’‘]/g, '').replace(/\s+/g, ' ').trim();
 const words = s => norm(s).split(/[^a-z0-9$.%-]+/).filter(w => w && !STOP.has(w)).map(w => w.length > 3 ? w.replace(/s$/, '') : w);
 const STOP = new Set(['the', 'a', 'an', 'to', 'on', 'of', 'in', 'and', 'it', 'its', 'this', 'that', 'button', 'link', 'tab', 'page', 'menu', 'row', 'item', 'details', 'pane', 'box', 'field', 'app', 'open', 'click', 'select']);
 const CLICKABLE = /^(button|link|tab|menuitem|menuitemcheckbox|menuitemradio|option|treeitem|gridcell|row|listitem|switch|checkbox|radio|summary|combobox)$/;
