@@ -277,7 +277,8 @@ rectangle; `via <step>` for a point one click or hover away (⌥F takes that ste
 ## Approval, and what runs on its own
 
 Approving a plan approves its exact text: Scenecast keeps the SHA-256 of `plan.md` (`.out/ai/approved.json`), and any
-edit after that needs approving again. Its writes are approved with it, ahead of the run.
+edit after that needs approving again. Its writes are approved with it, ahead of the run. So are the reset's
+`Set before` lines, which a run makes off camera: the approval lists them with the plan's writes.
 
 **How each step is proven is the rules' part, not hers** (the rule, built after stage F: stage F's first approval
 comes after its re-ground):
@@ -325,7 +326,8 @@ each `{ app, strength, wrote, step }`).
 ## The reset (`reset.md`)
 
 Made from the plan's writes, in reverse, and from the state the demo's first screens show (`scenecast ai reset`). The
-capture pass runs it before and after a run: Undo, then Set first, then Check.
+capture pass runs it before and after a run: Undo, then Set first, then Check. During the run, it makes each
+`Set before` just before its step.
 
 ```markdown
 # Reset: Supplier delay
@@ -346,6 +348,17 @@ capture pass runs it before and after a run: Undo, then Set first, then Check.
   Set: "Notes" · chat-app:composer-mode
   Opens: https://chat.example.com/
   Seen: beat 1, chat-home
+- chat: "Sync" is off
+  Set: "Enable Sync" · chat-app:plugin-switch
+  Opens: https://chat.example.com/plugins
+  Seen: beat 2, chat-plugins
+
+## Set before beat 3, Click "Manage all"
+
+- chat: "Sync" is on
+  Set: "Enable Sync" · chat-app:plugin-switch
+  Opens: https://chat.example.com/plugins
+  Seen: beat 3, chat-added
 
 ## Check
 
@@ -353,12 +366,14 @@ capture pass runs it before and after a run: Undo, then Set first, then Check.
   From: beat 2
 - chat on chat-home: "Notes" is picked (Chat | Notes)
   From: start: beat 1, chat-home
+- chat on chat-plugins: "Sync" is off
+  From: start: beat 2, chat-plugins
 
 ## Needs you
 
 - Beat 1: Press Enter: part of its undo is by hand (delete the task "Supplier delay" from Recent)
-- Beat 3: "Sync" is off before Click "Manage all" and on after it, and no step turns it on: a run of your script won't
-  show that. Add Click "Enable Sync" after it
+- Beat 3: "Drafts" is off before Click "Manage all" and on after it, and no step turns it on: a run of your script
+  won't show that. Add Click "Enable Drafts" after it
 ```
 
 - **Undo**, per app: plan steps, run the same way as the plan's. `You:` is a step for a person. `Undoes:` says which
@@ -372,6 +387,12 @@ capture pass runs it before and after a run: Undo, then Set first, then Check.
   what's switched on or off, the option picked (Chat | Cowork), and the theme. `Set:` is the control that changes it
   and the app pack's write for it (only when the pack knows one), `Opens:` where, `Seen:` the screen it's read from.
   The capture pass sets each one that isn't already, then checks it.
+- **Set before beat N, <step>**: a state a later screen shows that no step of the plan makes, like a script's "they're
+  already on". When the app pack has the write that sets it, and Set first puts it back, the capture pass sets each
+  one that isn't already just before that step, off camera: an approved write, run under the guard, with no screen
+  saved and nothing in the replica. Its lines read like Set first's; `Seen:` is the screen that step lands on.
+  `(step N)` follows the step's words when its beat has them more than once (N counted from 1). The plan doesn't
+  change.
 - **Check**: read-only. Each line is something the screen shows, and none of them clicks anything that changes. With
   the writes' checks come the start state's (`From: start: …`): the settings above, versions ("is version 1.4.9"),
   what a list of switches holds, the theme each app renders in, and what the demo points at on an app's first screen
@@ -379,13 +400,15 @@ capture pass runs it before and after a run: Undo, then Set first, then Check.
   the screen a check is read on, when Scenecast knows it (where a start state was seen, an app's first screen); the
   capture pass gets there by the plan's read-only steps. Without it, the check reads the app as the run finds it.
 - **Needs you**: what the reset can't do on its own (an undo by hand, or one nobody has tried yet), and a state that a
-  later screen shows changed with no step of the plan between: a run can't show it until the plan has that step.
+  later screen shows changed with no step of the plan between, when the app pack can't set it: a run can't show it
+  until the plan has that step.
 
 Names come from the captures (the task's title, the skill's name). Copilot can name things differently on each run,
 so the capture pass fills in what its own run made.
 
-`packages/ai/reset.mjs`: `resetFor(plan, { walker, packs })`, `formatReset(r)`, `parseReset(text)` (`{ undo, set, checks,
-needs }`: its Undo as a plan; each check `{ app, screen, text, from }`, `screen` null when the line has none).
+`packages/ai/reset.mjs`: `resetFor(plan, { walker, packs })`, `formatReset(r)`, `parseReset(text)` (`{ undo, set,
+before, checks, needs }`: its Undo as a plan; each `before` `{ beat, text, n, items }`, its items read like `set`'s
+`{ what, set, opens, seen }`; each check `{ app, screen, text, from }`, `screen` null when the line has none).
 `packages/ai/start.mjs`: `startState(plan, { walker, packs })` (`{ facts, changes }`).
 
 ## In code

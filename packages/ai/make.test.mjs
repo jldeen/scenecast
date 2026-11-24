@@ -452,7 +452,7 @@ test('the reset: each write undone in reverse, a pack\'s undo with what the run 
   assert.match(formatReset(twice), /Note: do these steps 2 times, once for each/);
 });
 
-test('the start state: what the first screens show is set first and checked; a change no step makes needs one', () => {
+test('the start state: what the first screens show is set first and checked; a change no step makes is set before its step, or needs one', () => {
   const walker = walkerFromDemo(demoDir());
   const pack = { id: 'admin', writes: [{ id: 'sync', on: { kind: 'click', target: 'Enable Sync' }, undo: { open: 'https://admin.test/sync', steps: ['Click "Enable Sync"'] } }] };
   const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && w.on.target.toLowerCase() === String(step.target).toLowerCase()) || null;
@@ -460,9 +460,19 @@ test('the start state: what the first screens show is set first and checked; a c
   const r = resetFor(plan, { walker, packs: { forApp: { admin: pack }, writeFor } });
   assert.deepEqual(r.set.map(s => [s.app, s.text, s.how.control, s.how.open]), [['admin', '"Sync" is off', 'Enable Sync', 'https://admin.test/sync']]);
   assert.deepEqual(r.checks.filter(c => /^start/.test(c.from)).map(c => `${c.app}: ${c.text}`), ['chat: "Notes" is picked (Chat | Notes)', 'chat: renders light', 'admin: "Sync" is off', 'admin: Plugin admin is version 2.1.0', 'admin: renders light']);
-  // On before the certify and on after it, with no step between that switches it: the plan needs that step.
-  assert.match(r.needs.find(n => n.kind === 'start').text, /^"Sync" is off before Click "Certified" and on after it.*Add Click "Enable Sync" after it$/);
+  // Off before the certify and on after it, with no step between that switches it: the pack can switch it, so the
+  // capture pass does, off camera, just before that step. Set first puts it back.
+  assert.deepEqual(r.needs.filter(n => n.kind === 'start'), []);
+  assert.match(formatReset(r), /^## Set before beat 2, Click "Certified"$/m);
+  assert.deepEqual(parseReset(formatReset(r)).before, [{ beat: 2, text: 'Click "Certified"', n: null, items: [{ what: 'admin: "Sync" is on', set: '"Enable Sync" · admin:sync', opens: 'https://admin.test/sync', seen: 'beat 2, admin-certified' }] }]);
   assert.deepEqual(parseReset(formatReset(r)).set, [{ what: 'admin: "Sync" is off', set: '"Enable Sync" · admin:sync', opens: 'https://admin.test/sync', seen: 'beat 2, admin-home' }]);
+  // A step its beat has twice is named by its number.
+  assert.deepEqual(parseReset(formatReset({ ...r, before: [{ ...r.before[0], text: 'Scroll down', n: 4 }] })).before.map(b => [b.beat, b.text, b.n]), [[2, 'Scroll down', 4]]);
+  // When the pack has no write for that switch, a run can't show it: the plan needs that step.
+  const other = resetFor(plan, { walker, packs: { forApp: { admin: { id: 'admin', writes: [{ id: 'seat', on: { kind: 'click', target: 'Add one seat' } }] } }, writeFor } });
+  assert.deepEqual([other.before, other.set], [[], []]);
+  assert.match(other.needs.find(n => n.kind === 'start').text, /^"Sync" is off before Click "Certified" and on after it.*Add Click "Enable Sync" after it$/);
+  assert.doesNotMatch(formatReset(other), /## Set before/);
   // A check names the screen it's read on when the reset knows it; the capture pass gets there by the plan.
   const checks = parseReset(formatReset(r)).checks;
   assert.match(formatReset(r), /^- admin on admin-home: "Sync" is off$/m);

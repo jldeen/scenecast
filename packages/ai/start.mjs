@@ -72,7 +72,7 @@ export function startState(plan, { walker, packs = null } = {}) {
         // Explained by a step between the two screens that acts on it (its switch, its name, the option picked).
         const between = steps.slice(Math.max(0, was.last.step), Math.max(0, v.step));
         const acts = between.some(s => (s.kind === 'click' || s.kind === 'hover' || s.kind === 'manual') && [f.subject, f.control, f.value].filter(Boolean).some(t => norm(s.target || s.what || '').includes(norm(t))));
-        if (!acts) changes.push({ app: f.app, kind: f.kind, subject: f.subject, control: f.control || was.fact.control, from: was.last.value, to: f.value, before: { beat: was.last.beat, screen: was.last.screen }, after: at });
+        if (!acts) changes.push({ app: f.app, kind: f.kind, key: f.key, subject: f.subject, control: f.control || was.fact.control, from: was.last.value, to: f.value, before: { beat: was.last.beat, screen: was.last.screen }, after: at });
       }
       was.last = { value: f.value, ...at };
     }
