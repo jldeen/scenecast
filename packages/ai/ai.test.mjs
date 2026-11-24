@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parsePlan, parseStep, formatPlan, risk, writesOf } from './plan.mjs';
 import { redact, compactOutline, makeModel } from './model.mjs';
-import { findItem, nameFits } from './find.mjs';
+import { findItem, nameFits, norm } from './find.mjs';
 import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
@@ -79,6 +79,9 @@ test('find in a frame: the name has to fit, not only share a word', () => {
   assert.ok(!nameFits('Search business plugins', 'Plugins'));
   assert.ok(!nameFits('Our numbers', 'Add content to Our numbers'));
   assert.ok(!nameFits('Add content', 'Add content to Our numbers'));
+  // Invisible marks don't count (the admin center wraps numbers and names in them).
+  assert.equal(norm('Showing \u200e16\u200e items'), 'showing 16 items');
+  assert.ok(nameFits('About this \u200ePlugin\u200e', 'About this Plugin'));
 });
 
 test('what leaves the computer: no emails, IDs, tokens or URL queries; page words only if allowed', () => {

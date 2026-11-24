@@ -12,8 +12,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseStep, formatStep } from './plan.mjs';
 import { appTab, sleep } from './run.mjs';
+import { norm } from './find.mjs';
 
-const norm = s => String(s || '').toLowerCase().replace(/[“”"'’‘]/g, '').replace(/\s+/g, ' ').trim();
 const quoted = s => [...String(s).matchAll(/["“]([^"“”]+)["”]/g)].map(m => m[1]);
 
 // reset.md's Undo sections, with what each group of steps undoes (reset.mjs writes "Undoes:" under a group's first).
