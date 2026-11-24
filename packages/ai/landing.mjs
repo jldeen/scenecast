@@ -11,6 +11,8 @@ const read = new WeakMap();
 export const pageWords = sc => { if (!sc) return ''; if (!read.has(sc)) read.set(sc, pnorm(shows(sc).map(i => i.text).join('\n'))); return read.get(sc); };
 const STATE = { selected: c => c.selected === true, open: c => c.expanded === true, on: c => c.on === true || c.pressed === true, off: c => c.on === false || c.pressed === false };
 const stateOf = c => Object.keys(STATE).find(k => STATE[k](c)) || null;
+// A box you type in: an editable control, or a text box, search box or combo box.
+export const isBox = c => !!c.editable || /^(textbox|searchbox|combobox)$/.test(c.role || '');
 
 // Whether a proof holds on a screen as the reader read it: true or false, or null when there's nothing to check.
 export function holds(sc, l) {
@@ -19,7 +21,7 @@ export function holds(sc, l) {
   const named = n => (sc.controls || []).filter(c => !c.shut && pnorm(c.name) === pnorm(n));
   if (l.kind === 'words') return has(l.text);
   if (l.kind === 'control') return named(l.control).some(c => !l.state || (STATE[l.state] || (() => false))(c));
-  if (l.kind === 'box') return named(l.box).some(c => !!c.editable && pnorm(c.value).startsWith(pnorm(l.says)));
+  if (l.kind === 'box') return named(l.box).some(c => isBox(c) && pnorm(c.value).startsWith(pnorm(l.says)));
   if (l.kind === 'gone') return !has(l.gone) && (!l.still || has(l.still));
   return null;
 }
@@ -103,8 +105,15 @@ export function chooseProof(s, from, to, walker, { typed = [] } = {}) {
   if (from === to) return none('it lands where it already was');
   if (!pageWords(after) && !(after.controls || []).length) return none(`the screen it lands on (${to}) has no words`);
 
-  const usable = i => !i.shut && !i.live && !i.time && i.tag !== 'textarea' && !(walker.writtenItem && walker.writtenItem(i, after));
+  const usableOn = sc => i => !i.shut && !i.live && !i.time && i.tag !== 'textarea' && !(walker.writtenItem && walker.writtenItem(i, sc));
+  const usable = usableOn(after);
   const all = shows(after), items = all.filter(usable);
+  // What a proof reads must come from words a run can count on, not only from a toast, a time or Copilot's words.
+  const sound = sc => pnorm(shows(sc).filter(usableOn(sc)).map(i => i.text).join('\n'));
+  const soundAfter = sound(after), soundBefore = before[0] ? sound(before[0]) : '';
+  const fromSound = l => l.kind === 'words' ? soundAfter.includes(pnorm(l.text))
+    : l.kind === 'control' || l.kind === 'box' ? (after.controls || []).some(c => !c.shut && !c.live && !c.time && pnorm(c.name) === pnorm(l.kind === 'box' ? l.box : l.control))
+    : l.kind === 'gone' ? soundAfter.includes(pnorm(l.still)) && soundBefore.includes(pnorm(l.gone)) : false;
   const bad = new Set(all.filter(i => !usable(i)).map(i => pnorm(i.text)));
   const lines = items.filter(i => i.kind === 'text').map(i => i.text), labels = items.filter(i => i.kind !== 'text').map(i => i.text);
   const heads = (after.headings || []).filter(h => !bad.has(pnorm(h)));
@@ -127,13 +136,13 @@ export function chooseProof(s, from, to, walker, { typed = [] } = {}) {
   for (const digits of [false, true]) {
     // A number in what nearly all the site's screens show (its name: "Microsoft 365") doesn't change from screen to screen.
     const fine = t => stable(t) && (digits || !numbered(t) || frame.always.has(pnorm(t)));
-    const pick = l => textsOf(l).every(fine) && proves(l);
+    const pick = l => textsOf(l).every(fine) && fromSound(l) && proves(l);
     const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))) });
     // The plan's own proof, while it still proves the step.
     if (own && pick(own)) return found(own);
     for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
     for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
-    for (const c of controls) if (c.editable && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });
+    for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });
     for (const mine of [true, false]) for (const c of controls) if ((!mine || !(frame.has(pnorm(c.name)) || c.nav)) && pick({ kind: 'control', control: c.name, state: null })) return found({ kind: 'control', control: c.name, state: null });
     if (gone) for (const x of goneFrom(before[0], after)) if (pick({ kind: 'gone', gone: x, still: gone })) return found({ kind: 'gone', gone: x, still: gone });
   }
@@ -150,10 +159,13 @@ function typing(s, from, after, before, walker) {
   const seen = before.some(b => pageWords(b).includes(pnorm(own)));
   const lands = field && field.editable === 'content' && !seen ? { kind: 'words', text: own } : field && field.name ? { kind: 'box', box: field.name, says: own } : null;
   if (!lands) return null;
-  // Other words in that box on the recorded screen, and not these anywhere: the recording can't show this step.
-  const box = field.name && holds(after, lands) === false ? (after.controls || []).find(c => c.editable && c.value && pnorm(c.name) === pnorm(field.name)) : null;
-  const was = box && box.value;
-  const differs = was && !pnorm(was).startsWith(pnorm(own)) ? `the recording has “${lead(was, 50)}${was.length > lead(was, 50).length ? '…' : ''}” typed here` : null;
+  // Other words in that box on the recorded screen, or typed in another box, and not these anywhere: the recording
+  // can't show this step.
+  const typedIn = holds(after, lands) === false ? (after.controls || []).filter(c => isBox(c) && c.value) : [];
+  const box = typedIn.find(c => field.name && pnorm(c.name) === pnorm(field.name)), other = !box && typedIn.find(c => pnorm(c.value).startsWith(pnorm(own)));
+  const said = t => `“${lead(t, 50)}${t.length > lead(t, 50).length ? '…' : ''}”`;
+  const differs = box && !pnorm(box.value).startsWith(pnorm(own)) ? `the recording has ${said(box.value)} typed here`
+    : other ? `the recording typed it in “${other.name}”` : null;
   return { lands, number: false, differs };
 }
 

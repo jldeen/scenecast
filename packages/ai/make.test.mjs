@@ -330,6 +330,12 @@ test('typing lands on its own words, never what was recorded in the box: Differs
   const p2 = { beats: [{ steps: [{ kind: 'app', app: 'shop', lands: { screen: 'empty' } }, { kind: 'type', value: 'SPRING25', target: 'Promo code', lands: { screen: 'field' } }] }] };
   proveLandings(p2, w2);
   assert.equal(formatLands(p2.beats[0].steps[1].lands), 'field · box "Promo code" says "SPRING25"');
+  // Recorded in another box: the step says so.
+  const gift = { controls: [{ role: 'textbox', name: 'Promo code', editable: 'field' }, { role: 'searchbox', name: 'Gift card', value: 'SPRING25' }], items: [{ text: 'Checkout' }], headings: [] };
+  const w3 = { ...w2, screen: id => ({ empty, gift })[id], shown: id => ({ empty, gift })[id], states: ['empty', 'gift'], flow: { states: { empty: { app: 'shop' }, gift: { app: 'shop' } } } };
+  const p3 = { beats: [{ steps: [{ kind: 'app', app: 'shop', lands: { screen: 'empty' } }, { kind: 'type', value: 'SPRING25', target: 'Promo code', lands: { screen: 'gift' } }] }] };
+  proveLandings(p3, w3);
+  assert.equal(p3.beats[0].steps[1].differs, 'the recording typed it in “Gift card”');
 });
 
 test('a walker never writes; offline, the recording says where a write went', () => {

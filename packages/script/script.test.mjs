@@ -141,7 +141,7 @@ test('a capture read without a browser: where words are (its frame, a live regio
     + '<main><article><h2>Copilot said:</h2><p>Fabrikam moved the date.</p></article><section aria-label="Skill preview: triage"><h3>When to use</h3></section>'
     + '<p>Updated <relative-time datetime="2026-11-17">Nov 17, 2026</relative-time></p><div role="status">Message sent</div>'
     + '<div role="tablist"><div role="tab" aria-selected="true">Overview</div><div role="tab" aria-selected="false">Files</div></div>'
-    + '<input aria-label="Promo code" value="SPRING25"><div contenteditable="true" aria-label="Message">Hello there</div>'
+    + '<input aria-label="Promo code" value="SPRING25"><input type="search" aria-label="Search tools" value="IQ"><div contenteditable="true" aria-label="Message">Hello there</div>'
     + '<aside><h4>Details</h4></aside><article><header><span>Card header</span></header></article></main>' }]);
   const item = t => sc.items.find(i => i.text === t) || {};
   assert.deepEqual(['Admin center', 'Plugins', 'Details', 'Card header', 'When to use'].map(t => !!item(t).nav), [true, true, true, false, false]);
@@ -149,7 +149,7 @@ test('a capture read without a browser: where words are (its frame, a live regio
   assert.equal(item('Copilot said:').article, item('Fabrikam moved the date.').article);
   assert.equal(sc.regions[item('When to use').region][0], 'Skill preview: triage');
   const ctl = n => sc.controls.find(c => c.name === n) || {};
-  assert.deepEqual([ctl('Overview').selected, ctl('Files').selected, ctl('Promo code').value, ctl('Message').value], [true, false, 'SPRING25', 'Hello there']);
+  assert.deepEqual([ctl('Overview').selected, ctl('Files').selected, ctl('Promo code').value, ctl('Search tools').value, ctl('Message').value], [true, false, 'SPRING25', 'IQ', 'Hello there']);
 });
 
 test('a capture read without a browser: an id names what getElementById finds, the first with it', () => {

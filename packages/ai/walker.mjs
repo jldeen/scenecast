@@ -16,10 +16,10 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readScreen } from '@scenecast/script/html.mjs';
 import { findItem } from './find.mjs';
-import { holds, proofWords } from './landing.mjs';
+import { holds, proofWords, isBox } from './landing.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
-const READER = 14;
+const READER = 15;
 
 const norm = s => String(s || '').toLowerCase().replace(/[“”"'’]/g, '').replace(/\s+/g, ' ').trim();
 
@@ -376,7 +376,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     const sig = sigOf(at), sc = screen(sig), l = s && s.lands;
     if (!l || !l.kind) return { ok: null, why: 'nothing to check this step by' };
     if (!sc) return { ok: false, why: `no screen ${sig}` };
-    if (s.kind === 'type' && (s.differs || (l.kind === 'box' && !sc.controls.some(c => c.editable && c.value)))) return { ok: true, why: `the recording has other words typed here${s.differs ? `: ${s.differs}` : ''}` };
+    if (s.kind === 'type' && (s.differs || (l.kind === 'box' && !sc.controls.some(c => isBox(c) && c.value)))) return { ok: true, why: `the recording has other words typed here${s.differs ? `: ${s.differs}` : ''}` };
     return holds(sc, l) ? { ok: true, why: null } : { ok: false, why: `${proofWords(l)} isn't on ${sig}` };
   }
   return { flow, apps, start, screen, view, shown, opened, step, recorded, landed, written, writtenItem, unstable, typedTexts, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
