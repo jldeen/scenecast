@@ -332,6 +332,8 @@ try {
   const gl = (rj.landings || []).find(l => l.step === 'Click "Refresh"');
   check('a write after a landing that isn\'t strong stops before it, with a picture and both reads, and is listed for her', rj.stopped && rj.stopped.kind === 'gate' && /Click "Refresh"/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture) && rj.stopped.reads && JSON.parse(gunzipSync(readFileSync(rj.stopped.reads))).length === 2 && gl && gl.strength !== 'strong' && (rj.needsYou || []).some(n => /Delete Call Kestrel/.test(n.text)), JSON.stringify({ stopped: rj.stopped, refresh: gl, needsYou: rj.needsYou }));
   check('and the delete never reached the server; the reset after removed the run\'s task', count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ log: tasks.log.filter(l => !l.startsWith('GET')), after: rj.reset.after }));
+  // The walk after this walks the unprovable plan again.
+  writeFileSync(join(DEMO, 'plan.md'), UNPROVEN);
   res = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
   const wu = existsSync(join(DEMO, '.out', 'ai', 'walk.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')) : { beats: [] };
   const su = (wu.beats[1] && wu.beats[1].steps[0]) || {};
