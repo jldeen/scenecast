@@ -215,7 +215,10 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 - **The reset before and after.** The demo's `preflight.reset`/`resetFix`, else reset.md: before, the check (a check
   on a screen other than the start is reached by the plan's own read-only steps there, under the guard, before any
   of the reset's writes; `pathTo`), then the undos and the set-first steps, then the check again (it fails closed: nothing is recorded when the tenant isn't
-  as the demo starts); after, the undos of what ran, the start set again, the check.
+  as the demo starts); after, the undos of what ran, the start set again, the check. Check first: the lines on one
+  screen share one read; Set first reads each page once and sets only the lines that aren't so; an undo group runs
+  only for an app whose check finds something (the other apps' only if the checks still fail after that). run.json
+  keeps each phase's `reads` and `secs`.
 - **Set before** (reset.md's `## Set before beat N, <step>`): just before that step, each line is set off camera in a
   tab of its own of the same capture browser (`capTab`, at its `Opens:` page), as Set first sets it: read, and when
   it isn't so, its control as an approved write (the approval lists the lines with the writes), under the write gate;

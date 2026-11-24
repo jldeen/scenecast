@@ -297,63 +297,106 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     }
     return { ok: true, out };
   };
+  // Set first, check first: each page its lines are read on (Opens:, else the app's start) read once, and only the
+  // lines that aren't so are set (each then on a read of its own, as approved writes).
   const setFirst = async () => {
+    const pages = new Map();
     for (const s of parsed.set) {
+      const a = appOfText(s.what);
+      if (!a) return { ok: false, why: `${s.what}: which app?` };
+      const k = `${a.app}|${s.opens || ''}`;
+      if (!pages.has(k)) pages.set(k, { app: a.app, opens: s.opens || null, lines: [] });
+      pages.get(k).lines.push(s);
+    }
+    const todo = new Set();
+    for (const pg of pages.values()) {
+      if (pg.opens) await cmd('goto', { tab: appTab(demo, pg.app), url: pg.opens }, 60).catch(() => {}); else await home(pg.app);
+      await walker.quiet(pg.app, 800, 15000);
+      const sc = await readScreen(pg.app);
+      for (const s of pg.lines) if (!checkClaim(appOfText(s.what).rest, sc).ok) todo.add(s);
+    }
+    for (const s of parsed.set.filter(x => todo.has(x))) {
       const r = await setLine({ cmd, walker, tab: a => appTab(demo, a), step, appOfText }, 'set', s);
       if (!r.ok) return r;
+      reads++;
     }
-    return { ok: true };
+    return { ok: true, set: todo.size };
   };
-  const readScreen = app => claimScreen(walker, cmd, appTab(demo, app), app);
+  let reads = 0;
+  const t0 = Date.now();
+  const readScreen = app => { reads++; return claimScreen(walker, cmd, appTab(demo, app), app); };
   // Each check on its app's start screen, or (a check that names one) on the screen it names, reached by the plan's own
-  // read-only steps under the guard, before any of the reset's writes.
+  // read-only steps under the guard, before any of the reset's writes. The lines on one screen share one read: per app
+  // (in the order the checks name them), its start screen, then each screen named.
   let plan;
   const checkAll = async () => {
-    const out = [];
-    for (const c of parsed.checks) {
-      const line = checkLine(c), screen = c && typeof c === 'object' ? c.screen || null : null;
-      const a = appOfText(line);
-      if (!a) { out.push({ text: line, ok: false, why: 'which app?' }); continue; }
-      await home(a.app);
-      if (screen) {
+    const out = new Array(parsed.checks.length), order = [], by = new Map();
+    parsed.checks.forEach((c, i) => {
+      const line = checkLine(c), screen = c && typeof c === 'object' ? c.screen || null : null, a = appOfText(line);
+      if (!a) { out[i] = { text: line, ok: false, why: 'which app?' }; return; }
+      if (!order.includes(a.app)) order.push(a.app);
+      const k = `${a.app}|${screen || ''}`;
+      if (!by.has(k)) by.set(k, { app: a.app, screen, lines: [] });
+      by.get(k).lines.push({ i, line, rest: a.rest });
+    });
+    const groups = [...by.values()].sort((x, y) => order.indexOf(x.app) - order.indexOf(y.app) || (x.screen ? 1 : 0) - (y.screen ? 1 : 0));
+    for (const g of groups) {
+      await home(g.app);
+      if (g.screen) {
         if (plan === undefined) { const { readPlan } = await import('./draft.mjs'); plan = readPlan(demo); }
-        const path = pathTo(plan, a.app, screen, x => (walker.appOf && walker.appOf(x)) || x);
-        if (!path) { out.push({ text: line, ok: false, why: `the plan reaches ${screen} only after a write, or never: no read-only way there` }); continue; }
-        let at = { app: a.app }, bad = null;
-        for (const s of path) {
+        const path = pathTo(plan, g.app, g.screen, x => (walker.appOf && walker.appOf(x)) || x);
+        let bad = path ? null : `the plan reaches ${g.screen} only after a write, or never: no read-only way there`;
+        let at = { app: g.app };
+        for (const s of path || []) {
           const r = await walker.step(at, s).catch(e => ({ landed: false, why: e.message }));
-          if (!r.landed && r.kind !== 'unproven') { bad = `${formatStep(s)}: ${r.why}`; break; }
+          if (!r.landed && r.kind !== 'unproven') { bad = `on the way to ${g.screen}: ${formatStep(s)}: ${r.why}`; break; }
           at = r.screen || at;
         }
-        if (bad) { out.push({ text: line, ok: false, why: `on the way to ${screen}: ${bad}` }); continue; }
+        if (bad) { for (const x of g.lines) out[x.i] = { text: x.line, ok: false, why: bad }; continue; }
       }
-      out.push({ text: line, ...(screen ? { screen } : {}), ...checkClaim(a.rest, await readScreen(a.app)) });
+      const sc = await readScreen(g.app);
+      for (const x of g.lines) out[x.i] = { text: x.line, ...(g.screen ? { screen: g.screen } : {}), ...checkClaim(x.rest, sc) };
     }
     return out;
   };
   const failing = cs => cs.filter(c => !c.ok);
+  const appsFailing = cs => new Set(failing(cs).map(c => (appOfText(c.text) || {}).app).filter(Boolean));
+  const done = r => ({ ...r, how: 'reset.md', did, reads, secs: +((Date.now() - t0) / 1000).toFixed(1) });
   emit({ event: 'reset', phase, stage: 'check' });
-  if (phase === 'before') {
-    let checks = await checkAll();
-    if (!failing(checks).length) return { ok: true, how: 'reset.md', did, checks, why: null };
-    emit({ event: 'reset', phase, stage: 'fix', failing: failing(checks).map(c => c.text) });
-    const u = await runGroups(groups);
-    if (!u.ok) return { ok: false, how: 'reset.md', did, checks, undo: u.out, why: `the undo stopped: ${u.why}` };
+  // Undo groups only where a check finds something to undo: an app's groups when one of its checks fails; the other
+  // apps' only if the checks still fail after that.
+  const fix = async (list, checks) => {
+    const apps = appsFailing(checks), first = list.filter(g => apps.has(g.app)), rest = list.filter(g => !apps.has(g.app));
+    const u = await runGroups(first);
+    if (!u.ok) return { ok: false, why: `the undo stopped: ${u.why}`, undo: u.out, checks };
     const st = await setFirst();
-    if (!st.ok) return { ok: false, how: 'reset.md', did, checks, why: `setting the start: ${st.why}` };
-    checks = await checkAll();
-    return { ok: !failing(checks).length, how: 'reset.md', did, checks, undo: u.out, why: failing(checks).length ? `still not as the demo starts: ${failing(checks).map(c => `${c.text} (${c.why})`).join('; ')}` : null };
+    if (!st.ok) return { ok: false, why: `setting the start: ${st.why}`, undo: u.out, checks };
+    let now = await checkAll(), out = u.out;
+    if (failing(now).length && rest.length) {
+      const u2 = await runGroups(rest);
+      out = [...out, ...u2.out];
+      if (!u2.ok) return { ok: false, why: `the undo stopped: ${u2.why}`, undo: out, checks: now };
+      const st2 = await setFirst();
+      if (!st2.ok) return { ok: false, why: `setting the start: ${st2.why}`, undo: out, checks: now };
+      now = await checkAll();
+    }
+    return { ok: !failing(now).length, undo: out, checks: now, why: failing(now).length ? `not as the demo starts: ${failing(now).map(c => `${c.text} (${c.why})`).join('; ')}` : null };
+  };
+  if (phase === 'before') {
+    const checks = await checkAll();
+    if (!failing(checks).length) return done({ ok: true, checks, why: null });
+    emit({ event: 'reset', phase, stage: 'fix', failing: failing(checks).map(c => c.text) });
+    const r = await fix(groups, checks);
+    return done({ ...r, why: r.ok ? null : r.why.replace(/^not as the demo starts/, 'still not as the demo starts') });
   }
-  // After: the undos of what ran, the start set again, the check; the rest only if the check still fails.
+  // After: the undos of what ran (each has something to undo), the start set again, the check; the other groups only
+  // where a check still finds something.
   const mine = groups.filter(g => undoesAny(g, ran));
   const u = await runGroups(mine);
   const st = u.ok ? await setFirst() : { ok: false, why: u.why };
-  let checks = await checkAll();
-  let u2 = null;
-  if (failing(checks).length) {
-    u2 = await runGroups(groups.filter(g => !mine.includes(g)));
-    checks = await checkAll();
-  }
-  const ok = u.ok && st.ok && !failing(checks).length;
-  return { ok, how: 'reset.md', did, checks, undo: [...(u.out || []), ...((u2 && u2.out) || [])], why: ok ? null : [!u.ok && `the undo stopped: ${u.why}`, !st.ok && `setting the start: ${st.why}`, failing(checks).length && `not as the demo starts: ${failing(checks).map(c => `${c.text} (${c.why})`).join('; ')}`].filter(Boolean).join('; ') };
+  let checks = await checkAll(), undo = u.out || [];
+  let r2 = null;
+  if (failing(checks).length) { r2 = await fix(groups.filter(g => !mine.includes(g)), checks); checks = r2.checks; undo = [...undo, ...(r2.undo || [])]; }
+  const ok = u.ok && st.ok && !failing(checks).length && (!r2 || r2.ok);
+  return done({ ok, checks, undo, why: ok ? null : [!u.ok && `the undo stopped: ${u.why}`, !st.ok && `setting the start: ${st.why}`, r2 && !r2.ok && /^the undo|^setting/.test(r2.why || '') && r2.why, failing(checks).length && `not as the demo starts: ${failing(checks).map(c => `${c.text} (${c.why})`).join('; ')}`].filter(Boolean).join('; ') });
 }
