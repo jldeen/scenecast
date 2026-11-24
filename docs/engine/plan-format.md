@@ -248,7 +248,7 @@ included: never Copilot's words, another step's typing, a time, or a live region
 
 | Strength | What proves the step | Example |
 |---|---|---|
-| **Strong** | The plan's own proof; the step's own control in its new state; what it typed, in its box; the control the plan's next step needs, there now. After a write: its app pack's read-only check. | Click "Plugins", then `control "Plugins" selected`. |
+| **Strong** | The plan's own proof; the step's own control in its new state ("Show more X" now `control "Show less X" open`, and back); what it typed, in its box; the control the plan's next step needs, there now. After a write: its app pack's read-only check. | Click "Plugins", then `control "Plugins" selected`. |
 | **Weak** | The page changed, in a way the plan doesn't name (new words, another control, words gone), or only by a number. | A panel opens with words the script never mentions. |
 | **None** | Nothing a run can count on changed. | Escape when nothing was open. |
 

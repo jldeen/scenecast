@@ -288,14 +288,19 @@ const sameProof = (a, b) => !!a && !!b && a.kind === b.kind && (a.state || null)
 // Copilot wrote, the words its captures show differently), never its screens. next: the plan's next step that acts.
 // → { lands, strength, why }, strength:
 //   strong  the plan's own proof; the step's own control in its new state (the tab it clicked selected, a menu it
-//           opened, what it typed in its box); or the control the plan's next step needs, there now
+//           opened, "Show more X" now "Show less X", what it typed in its box); or the control the plan's next step
+//           needs, there now
 //   weak    the page changed, in a way the plan doesn't name (new words, another control, words gone), or by a number
 //   none    nothing a run can count on changed
 export function liveProof(s, { before = [], afters = [], next = null, typed = [], walker = null } = {}) {
   const screen = (s.lands && s.lands.screen) || null, reads = afters.filter(Boolean);
   if (!reads.length) return { lands: { screen, kind: null, text: null }, strength: 'none', why: "the page after it wasn't read" };
   const states = s.target && s.kind !== 'type' ? Object.keys(STATE).map(state => ({ kind: 'control', control: s.target, state })) : [];
-  const expected = [...states, ...(next && next.target ? [{ kind: 'control', control: next.target, state: null }] : [])];
+  // A "Show more X" that was clicked is a "Show less X", open (and "Show less X" a "Show more X"): the step's own
+  // control in its new state.
+  const flip = s.kind === 'click' && /^show (more|less)\b/i.exec(s.target || '');
+  const toggled = flip ? [{ kind: 'control', control: s.target.replace(/^(show )(more|less)/i, (m, a, b) => a + ({ more: 'less', less: 'more', More: 'Less', Less: 'More' }[b] || b)), state: /^more$/i.test(flip[1]) ? 'open' : null }] : [];
+  const expected = [...states, ...toggled, ...(next && next.target ? [{ kind: 'control', control: next.target, state: null }] : [])];
   const r = chooseProof(s, null, screen, walker || NONE, { typed, next, first: expected, live: { afters: reads, befores: before.filter(Boolean), only: true } });
   const l = r.lands, lands = { screen, ...l, text: l.kind === 'words' ? l.text : null };
   if (!l.kind) return { lands, strength: 'none', why: r.why };

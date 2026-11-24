@@ -677,6 +677,11 @@ test('a landing proven on the live page: what the plan expects is strong, any ot
   assert.deepEqual(grade({ kind: 'press', key: 'Enter', lands: { screen: 'x', kind: 'words', text: 'Message sent' } }, noise), ['x', 'none']);
   const tip = t => sc(['Operations', 'Our numbers', `Tip of the day: ${t}`], tabs(true, false));
   assert.equal(liveProof({ kind: 'press', key: 'Escape' }, { before: [page], afters: [tip('pin your agents'), tip('try a shorter prompt')] }).strength, 'none');
+  // A "Show more" toggle clicked is a "Show less" one, open: the step's own control in its new state. And back.
+  const more = (open, label) => sc(['Operations', 'Get started', 'Fabrikam Orders', ...(open ? ['Contoso Returns'] : [])], [{ role: 'button', name: `Show ${label} in Get started`, expanded: open }]);
+  assert.deepEqual(liveProof({ kind: 'click', target: 'Show more in Get started' }, { before: [more(false, 'more')], afters: [more(true, 'less'), more(true, 'less')] }).strength, 'strong');
+  assert.deepEqual(formatLands(liveProof({ kind: 'click', target: 'Show more in Get started' }, { before: [more(false, 'more')], afters: [more(true, 'less'), more(true, 'less')] }).lands), 'control "Show less in Get started" open');
+  assert.deepEqual(liveProof({ kind: 'click', target: 'Show less in Get started' }, { before: [more(true, 'less')], afters: [more(false, 'more'), more(false, 'more')] }).strength, 'strong');
   // Before a write: the app's landings since its last write all strong.
   const L = (strength, more = {}) => ({ app: 'iq', strength, ...more });
   assert.deepEqual(writeGate([L('strong'), L('strong')], 'iq'), { ok: true, why: null });
