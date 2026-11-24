@@ -108,11 +108,13 @@ export const cookieExpiries = cookies => cookies.filter(c => AUTH_COOKIE.test(c.
 
 // The read-only guard's call on one request: a read (GET, HEAD, OPTIONS) passes; anything else to a guarded host is
 // held, unless the allow-list names it. hosts: null guards every web host but this machine's own. allow: strings
-// ('host/path-prefix', any method) or regular expressions over 'METHOD host/path'.
+// ('host/path-prefix', any method) or regular expressions over 'METHOD host/path', either with ' when body /regex/'
+// after it for a request that only reads when its body says so (a listing with nothing typed in it): no body seen, no
+// pass.
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?$/i;
 const hostIs = (host, h) => { const bare = host.replace(/:\d+$/, ''); return host === h || bare === h || bare.endsWith('.' + h); };
-export function guardVerdict({ method, url }, { hosts = null, allow = [], local = false } = {}) {
+export function guardVerdict({ method, url, body = null }, { hosts = null, allow = [], local = false } = {}) {
   const m = String(method || 'GET').toUpperCase();
   if (READS.has(m)) return 'pass';
   let u; try { u = new URL(url); } catch (e) { return 'pass'; }
@@ -120,9 +122,14 @@ export function guardVerdict({ method, url }, { hosts = null, allow = [], local 
   if (!local && LOOPBACK.test(u.host)) return 'pass';
   if (hosts && !hosts.some(h => hostIs(u.host, h))) return 'pass';
   const at = u.host + u.pathname;
+  const reOf = s => s instanceof RegExp ? s : typeof s === 'string' && /^\/.+\/[a-z]*$/.test(s) ? new RegExp(s.slice(1, s.lastIndexOf('/')), s.slice(s.lastIndexOf('/') + 1)) : null;
   for (const a of allow) {
-    const re = a instanceof RegExp ? a : typeof a === 'string' && /^\/.+\/[a-z]*$/.test(a) ? new RegExp(a.slice(1, a.lastIndexOf('/')), a.slice(a.lastIndexOf('/') + 1)) : null;
-    if (re ? re.test(`${m} ${at}`) : at.startsWith(a)) return 'pass';
+    const [req, when] = typeof a === 'string' && a.includes(' when body ') ? a.split(' when body ') : [a, null];
+    const re = reOf(req);
+    if (!(re ? re.test(`${m} ${at}`) : at.startsWith(req))) continue;
+    if (when === null) return 'pass';
+    const bre = reOf(when);
+    if (bre && typeof body === 'string' && bre.test(body)) return 'pass';
   }
   return 'hold';
 }
@@ -532,15 +539,18 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   let guarding = null;
   async function guard({ hosts = null, allow = [], mode: gm = 'hold', local = false } = {}) {
     if (guarding) await guarding.stop();
-    const st = { open: [], counts: {}, held: [] };
+    const st = { open: [], counts: {}, held: [], passed: [] };
     const passing = u => st.open.some(o => !o || o.some(h => hostIs(u.host, h)));
-    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method }, url) => {
+    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData }, url) => {
       let u = null; try { u = new URL(url); } catch (x) {}
-      let v = guardVerdict({ method, url }, { hosts, allow, local });
-      if (v === 'hold' && u && passing(u)) v = 'pass';
+      let v = guardVerdict({ method, url, body: postData }, { hosts, allow, local }), by = v === 'pass' ? 'allowed' : null;
+      if (v === 'hold' && u && passing(u)) { v = 'pass'; by = 'a planned write'; }
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
       st.counts[k] = (st.counts[k] || 0) + 1;
       if (v === 'hold') st.held.push({ method, host: u && u.host, path: u ? pathShape(u.pathname) : '', at: new Date().toISOString(), held: gm === 'hold' });
+      // Every non-read that went out, and why: the allow-list (or a read, a local or an unguarded host), or a planned
+      // write's opening.
+      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by });
       if (v === 'hold' && gm === 'hold') return { fail: true };
       return null;
     } });
@@ -548,6 +558,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       async pass(fn, { hosts: only = null } = {}) { const o = only; st.open.push(o); try { return await fn(); } finally { st.open.splice(st.open.indexOf(o), 1); } },
       counts: () => ({ ...st.counts }),
       held: () => st.held.slice(),
+      passed: () => st.passed.slice(),
       async stop() { await remove(); guarding = null; },
     };
     return guarding;

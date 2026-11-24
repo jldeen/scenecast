@@ -20,12 +20,14 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { findItem, composer, searchBox } from './find.mjs';
+import { findItem, nameFits, composer, searchBox } from './find.mjs';
 import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
 
 const norm = s => String(s || '').toLowerCase().replace(/[“”"'’‘]/g, '').replace(/\s+/g, ' ').trim();
+// The words of an app showing an error instead of what it should.
+const TROUBLE = /could not be loaded|couldn['’]t (?:be )?load(?:ed)?|can['’]t load|something went wrong|failed to load|unable to (?:load|sign|connect)|having trouble connecting|trouble connecting/gi;
 const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https://${s}`).host; } catch (e) { return ''; } };
 
 // The demo's packs as the walker uses them (@stuntdouble/apps): the one for a page's address, its writes and safe.
@@ -85,43 +87,75 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     log(`the recorder didn't see that step within ${maxS} s`);
     return false;
   };
-  // A control by name, given a few seconds to show up: the page's own, else one in its frames (Microsoft IQ's controls
-  // are in Power BI's), by the same names, at its place on the page.
+  // A control by name, given a few seconds to show up: the page's own on screen, else one anywhere in the page or its
+  // frames (Microsoft IQ's controls are in Power BI's; a long list can scroll a control off the screen), by the same
+  // names, brought into view.
   const locate = async (id, name, kind) => {
     let o = null;
     for (let i = 0; i < 6; i++) {
       o = await controls(id);
       const el = kind === 'composer' ? composer(o.items) : findItem(o.items, name, kind);
       if (el) return { el, o };
+      // The rest of the page and its frames get the same few seconds (IQ's draw late, in Power BI's frames).
+      if (i > 0 && kind !== 'composer' && name) { const f = await inPage(id, name, kind).catch(() => null); if (f) return { el: f, o }; }
       if (i < 5) await sleep(800);
     }
-    if (kind !== 'composer' && name) { const el = await inFrames(id, name, kind).catch(() => null); if (el) return { el, o }; }
     return { el: null, o };
   };
-  const inFrames = async (id, name, kind) => {
+  const inPage = async (id, name, kind) => {
     const sel = kind === 'field' ? 'input,textarea,[contenteditable=true],[role=textbox],[role=searchbox],[role=combobox]'
       : 'button,a[href],input,textarea,[contenteditable=true],[role=button],[role=link],[role=treeitem],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[role=textbox],[role=searchbox],[role=combobox]';
-    // Each frame's controls, at their place on the page: the frame's own box plus the control's place in it.
+    // Each frame's controls (the page's own too), at their place on the page: the frame's box plus the control's place
+    // in it.
     const items = await cmd('js', { tab: tab(id), code: `
-      const out = [];
-      for (const f of page.frames()) {
-        if (f === page.mainFrame()) continue;
-        const fe = await f.frameElement().catch(() => null), fb = fe ? await fe.boundingBox().catch(() => null) : null;
+      const out = [], frames = page.frames();
+      for (const [fi, f] of frames.entries()) {
+        const main = f === page.mainFrame();
+        const fe = main ? null : await f.frameElement().catch(() => null), fb = main ? { x: 0, y: 0 } : fe ? await fe.boundingBox().catch(() => null) : null;
         if (!fb) continue;
-        const list = await f.evaluate(sel => [...document.querySelectorAll(sel)].slice(0, 600).map(e => {
+        const list = await f.evaluate(sel => [...document.querySelectorAll(sel)].slice(0, 2000).map((e, ei) => {
           const r = e.getBoundingClientRect();
           if (!r.width || !r.height) return null;
-          return { name: (e.getAttribute('aria-label') || e.innerText || e.value || e.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 200), role: e.getAttribute('role') || e.tagName.toLowerCase(), editable: e.isContentEditable || /^(INPUT|TEXTAREA)$/.test(e.tagName), disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true', x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          return { ei, name: (e.getAttribute('aria-label') || e.innerText || e.value || e.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 200), role: e.getAttribute('role') || e.tagName.toLowerCase(), editable: e.isContentEditable || /^(INPUT|TEXTAREA)$/.test(e.tagName), disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true', x: r.x + r.width / 2, y: r.y + r.height / 2 };
         }).filter(Boolean), ${JSON.stringify(sel)}).catch(() => []);
-        for (const it of list) if (it.name) out.push({ ...it, x: Math.round(fb.x + it.x), y: Math.round(fb.y + it.y), frame: true });
+        const fh = main ? 'page' : (() => { try { return new URL(f.url()).host; } catch (e) { return 'a frame'; } })();
+        for (const it of list) if (it.name) out.push({ ...it, x: Math.round(fb.x + it.x), y: Math.round(fb.y + it.y), frame: !main, fi, fh });
       }
       return out;` }, 60).catch(() => null);
-    // By its name only (equal, or one inside the other): a few shared words found the wrong control in a frame.
+    // By its name only (nameFits): a name that only contains it, a small part of it or a few shared words found the
+    // wrong control in a frame.
     const el = Array.isArray(items) ? findItem(items, name, kind) : null;
-    const a = norm(el && el.name), w = norm(name);
-    return el && (a === w || a.includes(w) || w.includes(a) && a.length > 3) ? el : null;
+    if (!el || !nameFits(el.name, name)) return null;
+    // Where a person would click it: brought into view first (IQ scrolls inside its frame, so a wheel on the page
+    // doesn't), then measured again.
+    const at = await cmd('js', { tab: tab(id), code: `
+      const f = page.frames()[${el.fi}]; if (!f) return null;
+      const main = f === page.mainFrame();
+      const fe = main ? null : await f.frameElement().catch(() => null), fb = main ? { x: 0, y: 0 } : fe ? await fe.boundingBox().catch(() => null) : null;
+      const vp = page.viewportSize() || await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+      const r = await f.evaluate(([sel, ei]) => {
+        const e = [...document.querySelectorAll(sel)][ei]; if (!e) return null;
+        const b = e.getBoundingClientRect();
+        if (b.top < 0 || b.left < 0 || b.bottom > innerHeight || b.right > innerWidth) e.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const c = e.getBoundingClientRect(); return { x: c.x + c.width / 2, y: c.y + c.height / 2 };
+      }, [${JSON.stringify(sel)}, ${el.ei}]).catch(() => null);
+      return r && fb ? { x: Math.round(fb.x + r.x), y: Math.round(fb.y + r.y), vw: vp.width, vh: vp.height } : null;` }, 30).catch(() => null);
+    if (!at || at.x < 0 || at.y < 0 || at.x > at.vw || at.y > at.vh) return null;
+    if (at.x !== el.x || at.y !== el.y) await sleep(400);
+    return { ...el, x: at.x, y: at.y };
   };
   const focusedField = o => (o.items || []).find(it => it.focused && (it.editable || /textbox|searchbox|combobox/.test(it.role))) || null;
+
+  // Every input it sends (click, hover, key, typing, wheel), with what it was for and what it hit: the control's name,
+  // its frame ('page', else the frame's host) and whether it's the one the step names (exact, fits, or near: a few of
+  // the same words, on the page's own outline). Typing keeps its length, never the words.
+  const inputs = [];
+  const fitOf = (name, want) => !want ? null : norm(name) === norm(want) ? 'exact' : nameFits(name, want) ? 'fits' : 'near';
+  const send = (id, kind, args, secs, note = {}) => {
+    inputs.push({ at: new Date().toISOString(), app: id, kind, ...(args.x !== undefined ? { x: args.x, y: args.y } : {}), ...(args.key ? { key: args.key } : {}), ...(args.text !== undefined ? { chars: String(args.text).length } : {}), ...(args.dy !== undefined ? { dy: args.dy } : {}), ...note });
+    return cmd(kind, { tab: tab(id), ...args }, secs);
+  };
+  const hitOf = (el, step, want = step.target) => ({ for: formatStep(step), on: el.name, frame: el.fh || 'page', fit: fitOf(el.name, want) });
 
   // Would this step write? The plan's word first, then the app's pack, then the step itself.
   function writeOf(step, el, field, url) {
@@ -145,7 +179,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       case 'wait': await settle(id, 300); if (!recording) await quiet(id, 1500, 180000); return { did: 'waited' };
       case 'scroll': {
         const o = await controls(id);
-        await cmd('wheel', { tab: tab(id), x: Math.round(o.vw / 2), y: Math.round(o.vh / 2), dy: step.dir === 'up' ? -600 : 600 }, 30);
+        await send(id, 'wheel', { x: Math.round(o.vw / 2), y: Math.round(o.vh / 2), dy: step.dir === 'up' ? -600 : 600 }, 30, { for: formatStep(step) });
         await settle(id, 30);
         return { did: 'scrolled' };
       }
@@ -154,14 +188,15 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       case 'click': case 'hover': {
         const { el, o } = await locate(id, step.target);
         if (!el) return { missing: true, why: `no "${step.target}" on this screen` };
-        if (step.kind === 'hover') { await cmd('hover', { tab: tab(id), x: el.x, y: el.y }, 30); await settle(id, 30); return { did: 'hovered', on: el.name }; }
+        const hit = hitOf(el, step);
+        if (step.kind === 'hover') { await send(id, 'hover', { x: el.x, y: el.y }, 30, hit); await settle(id, 30); return { did: 'hovered', on: el.name, hit }; }
         const w = writeOf(step, el, null, o.url);
         if (w && !write) refuse(step, w);
         const before = await actions();
-        await cmd('click', { tab: tab(id), x: el.x, y: el.y }, 60);
+        await send(id, 'click', { x: el.x, y: el.y }, 60, hit);
         await seen(before);
         await settle(id, 120);
-        return { did: 'clicked', on: el.name, wrote: !!w };
+        return { did: 'clicked', on: el.name, hit, wrote: !!w };
       }
       case 'type': {
         let field = null, o = null;
@@ -171,14 +206,15 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
           field = focusedField(o) || composer(o.items) || searchBox(o.items);
           if (!field) return { missing: true, why: 'no box to type in on this screen' };
         }
-        if (!field.focused) { await cmd('click', { tab: tab(id), x: field.x, y: field.y }, 30); await sleep(250); }
-        await cmd('clear', { tab: tab(id) }, 30).catch(() => {});
+        const hit = hitOf(field, step);
+        if (!field.focused) { await send(id, 'click', { x: field.x, y: field.y }, 30, hit); await sleep(250); }
+        await send(id, 'clear', {}, 30, { for: formatStep(step) }).catch(() => {});
         const before = await actions();
-        await cmd('type', { tab: tab(id), text: step.value, delay: 18 }, 180);
+        await send(id, 'type', { text: step.value, delay: 18 }, 180, hit);
         await seen(before, 15);
         lastField = field; lastTyped[id] = step.value; typedIn[id] = field.name;
         await settle(id, 30);
-        return { did: 'typed', in: field.name };
+        return { did: 'typed', in: field.name, on: field.name, hit };
       }
       case 'press': {
         const o = await controls(id);
@@ -186,7 +222,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
         const w = writeOf(step, null, field, o.url);
         if (w && !write) refuse(step, w);
         const before = await actions();
-        await cmd('press', { tab: tab(id), key: step.key }, 30);
+        await send(id, 'press', { key: step.key }, 30, { for: formatStep(step), on: field ? field.name : null });
         if (/^(Enter|Escape)$/.test(step.key)) await seen(before);
         if (step.key === 'Enter') { lastField = null; delete typedIn[id]; }
         await settle(id, 120);
@@ -220,18 +256,23 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     if (text.at === 'blocked') return { ok: false, kind: 'signin', why: `a sign-in policy page (${host})` };
     if (!onHosts(host, id)) return { ok: false, kind: 'offplan', why: `it left ${id} for ${host}` };
     const want = step.lands && step.lands.text;
+    let wd = null;
     if (want && step.kind !== 'wait') {
       for (const t0 = Date.now(); ;) {
-        if (norm(await words(id)).includes(norm(want))) break;
-        if (Date.now() - t0 > landsS * 1000) return { ok: false, kind: 'elsewhere', why: `"${want}" isn't on the screen` };
+        wd = await words(id);
+        if (norm(wd).includes(norm(want))) break;
+        if (Date.now() - t0 > landsS * 1000) return { ok: false, kind: 'elsewhere', why: `"${want}" isn't on the screen`, trouble: troubleIn(wd) };
         await sleep(1000);
       }
     }
-    return { ok: true, screen: screenOf(id, o) };
+    // An error the app shows ("could not be loaded"): a held request, or the service, and a replica must never show
+    // one the real product doesn't. Noted for whoever reads the walk.
+    return { ok: true, screen: screenOf(id, o), trouble: troubleIn(wd === null ? await words(id) : wd) };
   }
+  const troubleIn = t => { const m = String(t || '').match(TROUBLE); return m ? [...new Set(m.map(x => x.toLowerCase()))] : undefined; };
   // Back from an off-plan landing: Escape, then the page before.
   async function goBack(id) {
-    await cmd('press', { tab: tab(id), key: 'Escape' }, 30).catch(() => {});
+    await send(id, 'press', { key: 'Escape' }, 30, { for: 'back from an off-plan landing' }).catch(() => {});
     await sleep(500);
     const at = await cmd('capUrl', { tab: tab(id) }, 30).catch(() => null) || await controls(id).catch(() => null);
     if (at && at.url && !onHosts(hostOf(at.url), id)) await cmd('capBack', { tab: tab(id) }, 40).catch(() => {});
@@ -271,8 +312,9 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     if (!name) return null;
     const { el } = await locate(id, name, 'field');
     if (!el) return { cleared: false, why: `no "${name}" box to clear` };
-    if (!el.focused) { await cmd('click', { tab: tab(id), x: el.x, y: el.y }, 30); await sleep(250); }
-    await cmd('clear', { tab: tab(id) }, 30).catch(() => {});
+    const hit = { for: `clear what it typed in "${name}"`, on: el.name, frame: el.fh || 'page', fit: fitOf(el.name, name) };
+    if (!el.focused) { await send(id, 'click', { x: el.x, y: el.y }, 30, hit); await sleep(250); }
+    await send(id, 'clear', {}, 30, hit).catch(() => {});
     await quiet(id, 400, 4000);
     const left = await cmd('js', { tab: tab(id), code: "return await page.evaluate(() => { const e = document.activeElement; return e ? (e.value !== undefined ? e.value : e.innerText || '').trim() : ''; })" }, 30).catch(() => null);
     if (!left) delete typedIn[id];
@@ -292,14 +334,25 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     const id = s.kind === 'app' ? appOf(s.app) : (at && at.app) || current;
     if (!id) return { screen: at, landed: false, wrote: false, kind: 'missing', why: `no app called "${s.app}" in this demo` };
     current = id;
+    const pre = await landsBefore(id, s);
     const r = await act(id, s);
     if (r.missing || r.needsYou) return { screen: screenOf(id, await controls(id)), landed: false, wrote: false, kind: r.missing ? 'missing' : 'needs-you', why: r.why };
     const c = await check(id, s);
     if (!c.ok) {
       if (c.kind === 'offplan') await goBack(id);
-      return { screen: screenOf(id, await controls(id)), landed: false, wrote: false, kind: c.kind, why: c.why };
+      return { screen: screenOf(id, await controls(id)), landed: false, wrote: false, kind: c.kind, why: c.why, hit: r.hit, trouble: c.trouble };
     }
-    return { screen: c.screen, landed: true, wrote: false, did: r.did };
+    if (pre) return { screen: c.screen, landed: false, wrote: false, kind: 'unproven', why: pre, hit: r.hit, trouble: c.trouble };
+    return { screen: c.screen, landed: true, wrote: false, did: r.did, hit: r.hit, trouble: c.trouble };
+  }
+  // Words a step lands on that were on the screen before it prove nothing ("Foundry IQ" on IQ's page before its picker
+  // opens): why, for a step that moves between screens (click, hover, press), else null. Typing and scrolling stay on
+  // the screen they started on.
+  async function landsBefore(app, s) {
+    const want = s.lands && s.lands.text;
+    if (!want || !['click', 'hover', 'press'].includes(s.kind)) return null;
+    const id = appOf(app) || app;
+    return norm(await words(id)).includes(norm(want)) ? `"${want}" was on the screen before the step, so landing there proves nothing` : null;
   }
   // An app on its start screen: opened again at its address (a read), then its own startSteps in demo.json, for a
   // start screen no address reaches (Microsoft IQ's business plugin: a click on its sidebar item). They're read-only
@@ -319,8 +372,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       if (r.missing || r.needsYou) { log(`${id}: its start step "${text}": ${r.why}`); break; }
     }
     // The pointer off what it clicked (its hover state isn't the start screen's).
-    if (did.length) { const o = await controls(id).catch(() => ({})); await cmd('hover', { tab: tab(id), x: (o.vw || 1600) - 3, y: (o.vh || 900) - 3 }, 30).catch(() => {}); await quiet(id, 500, 5000); }
+    if (did.length) { const o = await controls(id).catch(() => ({})); await send(id, 'hover', { x: (o.vw || 1600) - 3, y: (o.vh || 900) - 3 }, 30, { for: 'the pointer off the start step' }).catch(() => {}); await quiet(id, 500, 5000); }
     return did;
   }
-  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, typed: () => ({ ...typedIn }) };
+  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
 }

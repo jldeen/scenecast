@@ -78,6 +78,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // One step: null when it's done and landed where the plan says, else why the run stops ({ kind, why }).
     const lastDid = {};
     const doStep = async (bi, si, step, at) => {
+      // Its landing words already on the screen prove nothing: noted now, and the run stops after the step (before
+      // anything else, a write above all) if that's all it has to go on.
+      const pre = await w.landsBefore(app, step);
       // Would it write? Read the screen as the step will find it.
       let wr = null;
       if (step.kind === 'click' || step.kind === 'press') {
@@ -102,6 +105,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why };
       const c = await w.check(app, step);
       if (!c.ok) return { kind: c.kind, why: c.why };
+      if (pre) return { kind: 'unproven', why: pre };
       Object.assign(lastDid, { did: r.did, screen: c.screen });
       return null;
     };
@@ -137,6 +141,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       try { run.reset.after = await runReset({ demo, cmd, walker: liveWalker({ demo, cmd, packs, log }), phase: 'after', approval: ap, ran, results, emit }); } catch (e) { run.reset.after = { ok: false, why: e.message }; }
     }
     Object.assign(run.guard, await guardOff(cmd, g.hosts));
+    if (wRun) run.inputs = wRun.inputs();
     try { run.events = (await cmd('capEvents', {}, 30)).events.filter(e => e.kind !== 'navigated'); } catch (e) {}
     save();
   }
@@ -181,7 +186,7 @@ async function guardOff(cmd, hosts) {
   const out = {};
   try {
     const l = await cmd('capLog', {}, 30);
-    out.held = l.held; out.counts = l.counts;
+    out.held = l.held; out.counts = l.counts; out.passed = l.passed || [];
     const own = h => hosts.some(x => h === x || h.replace(/:\d+$/, '') === x || h.replace(/:\d+$/, '').endsWith('.' + x));
     const away = {};
     for (const [k, n] of Object.entries(l.counts || {})) { const host = k.split(' ').pop(); if (host && host !== '?' && !own(host)) away[k] = n; }
@@ -230,7 +235,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       emit(e);
       // A picture of each miss and each drifted landing, for whoever reads walk.json; for a drifted one, what the
       // screen says instead (its title, headings and first lines), so a plan's landing words can follow the product.
-      if ((e.status === 'missed' || e.status === 'drifted') && e.app) {
+      if ((e.status === 'missed' || e.status === 'drifted' || e.status === 'unproven') && e.app) {
         const id = w.appOf(e.app) || e.app;
         await cmd('capShot', { tab: appTab(demo, id), file: join(shots, `${e.beat}-${e.step + 1}.png`) }, 60).catch(() => {});
         if (e.status === 'drifted') {
@@ -241,7 +246,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     } });
   } finally {
     for (const b of (walk && walk.beats) || []) for (const s of b.steps) if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
-    walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), guard: { hosts: g.hosts, allow: g.allow.length, ...(await guardOff(cmd, g.hosts)) } };
+    walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...(await guardOff(cmd, g.hosts)) } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });
     writeFileSync(join(aiDir(demo), 'walk.json'), JSON.stringify(walk, null, 1));

@@ -26,6 +26,16 @@ export function findItem(items, want, kind) {
   return bs >= 15 ? best : null;
 }
 
+// A control found by its name alone (in a frame, where there's no outline to go on), is it the one? Equal, starting
+// with it, or one inside the other when it's most of it ("SC Supply Chain Operations" for "Supply Chain
+// Operations"). Not a name that only contains it ("Search business plugins" for "Plugins") or a small part of it ("Our
+// numbers" for "Add content to Our numbers").
+export function nameFits(name, want) {
+  const a = norm(name), w = norm(want);
+  if (!a || !w) return false;
+  return a === w || a.startsWith(w) || (a.includes(w) || w.includes(a)) && Math.min(a.length, w.length) >= 0.6 * Math.max(a.length, w.length);
+}
+
 // The box a question to an AI assistant goes in: a multi-line field, else one labelled like a message.
 export function composer(items) {
   const f = (items || []).filter(it => it.editable || /textbox/.test(it.role));
