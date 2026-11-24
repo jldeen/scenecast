@@ -1,7 +1,7 @@
 // Every selftest's first call, before it starts anything: nothing a test starts reaches a presenter's Scenecast.
 //   const g = await selftestGuard({ tmp, receivers: [RX], extensions: [RX], dirs: [] })
 // It refuses (exits) a receiver port in the app's 47621–47630, a recorder built to look there, a port already in use,
-// and then fences everything the test starts (SCENECAST_SELFTEST, @stuntdouble/core/lib/test-fence.mjs): the engine
+// and then fences everything the test starts (SCENECAST_TEST_FENCE, @stuntdouble/core/lib/test-fence.mjs): the engine
 // sends no command to the app's ports, starts no receiver there, builds no recorder that looks there, and loads no demo,
 // raw folder, recorder extension or capture profile outside the test's own folders (tmp and dirs). A command or a
 // receiver with no port of its own gets the test's (REPLICA_RX_PORT), and the recorder extension's default folder is
@@ -9,6 +9,7 @@
 //   await g.own(port)   before sending a receiver anything: it must be one this test started (its raw folder is the
 //                       test's), not another test's or the app's on the same port.
 import { createServer } from 'node:net';
+import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve, sep } from 'node:path';
@@ -26,7 +27,7 @@ export async function selftestGuard({ tmp, receivers = [], extensions = [], dirs
   const temp = realTemp();
   for (const k of kept) if (!realOf(k).startsWith(temp + sep)) refuse(`${k} isn't a folder a selftest kept (it's outside ${tmpdir()})`);
   dirs = [...dirs, ...kept];
-  process.env.SCENECAST_SELFTEST = [tmp, ...dirs].join(delimiter);
+  process.env.SCENECAST_TEST_FENCE = [tmp, ...dirs].join(delimiter);
   try {
     for (const p of receivers) fencePort(p);
     for (const p of extensions) fencePort(p, 'extension');
@@ -45,5 +46,19 @@ export async function selftestGuard({ tmp, receivers = [], extensions = [], dirs
       return p;
     },
   };
+}
+// A test of the app itself on the app's own ports (the packaged app, its update): it can't be fenced off them, so it
+// refuses to start while anything is on 47621–47630 or a Scenecast it didn't start is running (a presenter's: its
+// receiver would be asked to make way, and her browser's recorder could find the test's).
+export async function appPortsGuard({ ports = [] } = {}) {
+  for (let p = APP_PORTS[0]; p <= APP_PORTS[1]; p++) if (await busy(p)) refuse(`something is on the app's port ${p}: this test runs in CI, or quit Scenecast first`);
+  const running = scenecastRunning();
+  if (running) refuse(`Scenecast is running (${running}): this test runs in CI, or quit Scenecast first`);
+  for (const p of ports) if (await busy(p)) refuse(`port ${p} is in use: stop whatever is on it and run again`);
+}
+function scenecastRunning() {
+  if (process.platform === 'darwin') return ((spawnSync('pgrep', ['-fl', 'Scenecast.app/Contents/MacOS/'], { encoding: 'utf8' }).stdout || '').trim().split('\n').filter(Boolean)[0] || '').slice(0, 120) || null;
+  if (process.platform === 'win32') return /Scenecast\.exe/i.test(spawnSync('tasklist', ['/FI', 'IMAGENAME eq Scenecast.exe', '/NH'], { encoding: 'utf8' }).stdout || '') ? 'Scenecast.exe' : null;
+  return null;
 }
 export { APP_PORTS };

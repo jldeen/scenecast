@@ -10,7 +10,7 @@ import { buildExtension } from '@stuntdouble/capture/build.mjs';
 
 test('in a selftest: never the app\'s receivers, never a folder outside the test\'s own', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'fence-'));
-  const env = { SCENECAST_SELFTEST: tmp };
+  const env = { SCENECAST_TEST_FENCE: tmp };
   assert.throws(() => fencePort(47621, 'receiver', env), /app's receivers/);
   assert.doesNotThrow(() => fencePort(47741, 'receiver', env));
   // A recorder looks on its port and the nine after it.
@@ -20,10 +20,10 @@ test('in a selftest: never the app\'s receivers, never a folder outside the test
   assert.throws(() => fencePath(join(homedir(), 'Documents', 'Scenecast', 'a-demo'), 'demo', env), /own folders/);
   // Outside a selftest it does nothing.
   assert.doesNotThrow(() => fencePort(47621, 'receiver', {}));
-  process.env.SCENECAST_SELFTEST = tmp;
+  process.env.SCENECAST_TEST_FENCE = tmp;
   try {
     await assert.rejects(send({ op: 'recordStatus' }, 1, 47621), /app's receivers/);
     assert.throws(() => buildExtension(join(tmp, 'ext'), 47621), /app's receivers/);
     assert.throws(() => buildExtension(join(homedir(), 'Documents', 'Scenecast', 'Recorder Extension'), 47741), /own folders/);
-  } finally { delete process.env.SCENECAST_SELFTEST; }
+  } finally { delete process.env.SCENECAST_TEST_FENCE; }
 });
