@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin } from './browser.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
 
@@ -160,4 +160,20 @@ test('an app\'s own "which account" landing gets the demo account in its address
   assert.equal(ownSignInPage(landedOn('https://app.example.com/', 'Welcome. Sign in to start chatting', 'app.example.com')), true);
   assert.equal(ownSignInPage(landedOn('https://login.microsoftonline.com/x', 'Pick an account')), false);
   assert.equal(ownSignInPage(landedOn('https://app.example.com/', 'Hello', 'app.example.com')), false);
+});
+
+test("what a write or an API undo opened: its hosts, or its one call (method and exact address)", () => {
+  const u = x => new URL(x);
+  const call = [{ hosts: ['api.example.com'], method: 'DELETE', url: 'https://api.example.com/v1/a?x=1' }];
+  assert.equal(openFor(call, u('https://api.example.com/v1/a?x=1'), 'delete'), true);
+  assert.equal(openFor(call, u('https://api.example.com/v1/b'), 'POST'), false);
+  assert.equal(openFor(call, u('https://api.example.com/v1/a?x=1'), 'PUT'), false);
+  assert.equal(openFor([{ hosts: ['example.com'] }], u('https://api.example.com/v1/b'), 'POST'), true);
+  assert.equal(openFor([{ hosts: [] }, { method: 'POST' }], u('https://api.example.com/v1/b'), 'POST'), false);
+});
+
+test("which page or frame sent a request: its Origin, else its Referer's", () => {
+  assert.equal(senderOrigin({ Origin: 'https://frame.example.com' }), 'https://frame.example.com');
+  assert.equal(senderOrigin({ origin: 'null', referer: 'https://frame.example.com/app?x=1' }), 'https://frame.example.com');
+  assert.equal(senderOrigin({}), null);
 });

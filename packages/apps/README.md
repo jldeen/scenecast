@@ -128,7 +128,9 @@ POST). A planned write opens the app's own hosts for its one step.
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
 with `apis.<name>` naming the page that signs in (`open`) and the host (`host`, or `hostPattern`); the capture pass
-calls it from that page with the Authorization the page itself sends there, held in memory for the one call. Packs never hold credentials or tokens (`checkPack` refuses them).
+calls it from the page or frame that sends the app's own calls there, with the Authorization it sends, held in memory
+for the one call. A path's `{placeholders}` are one segment each, filled from the demo's `apps[].values` (its IDs)
+and the run's results. Packs never hold credentials or tokens (`checkPack` refuses them).
 
 ## Private packs
 

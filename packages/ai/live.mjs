@@ -456,7 +456,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     }
     const before = await controls(id).catch(() => ({}));
     let id1 = null;
-    try { id1 = (await cmd('capOpen', { hosts: hosts || [...hostsOf(id)] }, 30)).id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }
+    try { const o = await cmd('capOpen', { hosts: hosts || [...hostsOf(id)] }, 30); if (o.refused) return { missing: true, why: `the guard won't open: ${o.refused}` }; id1 = o.id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }
     let r;
     try { r = await act(id, step, { write: true, el: target }); } finally { await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
     if (r.missing || r.needsYou) return r;
