@@ -1,9 +1,9 @@
-// A captured page read without a browser: its controls (what's a control, its role and its name: naming.mjs, the rule
-// a run uses on the live page too), its text items (the way the script matcher indexes a screen,
+// A captured page read without a browser: its controls (what's a control, its role and its name:
+// @stuntdouble/core/lib/control-name.mjs, the rule a run uses on the live page too), its text items (the way the script matcher indexes a screen,
 // packages/player/app/focus-target.js, with a box that's its place in the page's order) and its words. Captures are
 // serialized DOM, so a small stack parser is enough. Used to map a talk track's Do lines to real controls, and its
 // lines to what's on screen, before there's a replica to look at.
-import { controlOf } from './naming.mjs';
+import { controlOf } from '@stuntdouble/core/lib/control-name.mjs';
 
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const RAW = new Set(['script', 'style', 'template', 'noscript', 'title']);
@@ -57,7 +57,6 @@ export function textOf(el, out = []) {
 }
 export const wordsOf = el => textOf(el).join('').split('\n').map(clean).filter(Boolean).join('\n');
 
-// What's a control, its role and its name: one rule, a run's too (naming.mjs).
 // A small CSS selector engine, for the recorder's matchers ([data-testid="x"], #id, a[href*="/edit/"],
 // section[aria-label="Reviewers"] button): tags, ids, classes, attributes (= ^= $= *= ~= |=), and the descendant,
 // child and sibling combinators. Pseudo-classes are skipped.
@@ -157,8 +156,9 @@ export function readScreen(docs, { specs = [] } = {}) {
     const root = parseHtml(html);
     roots.push({ key: key || 'main', root });
     if (!theme) theme = themeOf(root);
+    // Ids as getElementById finds them: the first with that id.
     const ids = new Map();
-    const index = el => { if (typeof el === 'string') return; if (el.attrs.id) ids.set(el.attrs.id, el); el.children.forEach(index); };
+    const index = el => { if (typeof el === 'string') return; if (el.attrs.id && !ids.has(el.attrs.id)) ids.set(el.attrs.id, el); el.children.forEach(index); };
     index(root);
     const own = el => clean(el.children.filter(c => typeof c === 'string').join(' '));
     const acc = { tag: el => el.tag, attr: (el, n) => (n in el.attrs ? el.attrs[n] : null), text: el => wordsOf(el), byId: id => ids.get(id) || null };

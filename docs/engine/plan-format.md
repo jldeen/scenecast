@@ -89,23 +89,24 @@ After the screen's name and ` · `, one proof, in plain words. Either part may b
 
 ### Controls, their roles and names
 
-One rule, `controlOf(el, acc)` in `packages/script/naming.mjs`: the reader uses it on a recorded page, and a run sends
-it to the live page as it is (it's self-contained; its comment shows how). Plan steps (`Click "Name"`) and proofs
-(`control "Name"`) name controls by it.
+One rule, `controlOf(el, acc)` in `packages/core/lib/control-name.mjs` (`@stuntdouble/core`): Scenecast's reader uses
+it on a recorded page, and a run sends it to the live page as it is (it's self-contained; its comment shows how). Plan
+steps (`Click "Name"`) and proofs (`control "Name"`) name controls by it.
 
 - **A control** is an `input` (not `hidden` or `password`), `button`, `summary`, `select`, `textarea`, an `a` with
-  `href`, an editable area (`contenteditable` empty or `"true"`), an element with `role` button, link, tab, menuitem,
-  menuitemcheckbox, menuitemradio, option, treeitem, switch, checkbox, radio, textbox, searchbox, combobox or
-  gridcell, a `row` or `listitem` with `tabindex`, or anything with `tabindex="0"`.
+  `href`, an editable area (`contenteditable` empty, `"true"` or `"plaintext-only"`), an element with `role` button,
+  link, tab, menuitem, menuitemcheckbox, menuitemradio, option, treeitem, switch, checkbox, radio, textbox, searchbox,
+  combobox or gridcell, a `row` or `listitem` with `tabindex`, or anything with `tabindex="0"`.
 - **Its role** is its `role` attribute; else from its tag: an `a` with `href` is a link; `button` and `summary`, a
   button; `select`, a combobox; `textarea`, a textbox; an `input` is a checkbox, a radio, a button (`button`,
   `submit`, `reset`, `image`), a searchbox (`search`) or else a textbox; an editable area, a textbox; anything else,
   its tag.
 - **Its name** is the first of these that isn't empty: `aria-label`; the words of the elements its `aria-labelledby`
-  names, joined by a space; its own words (`innerText`; not for an `input`, a `textarea` or an editable area);
-  `placeholder`; `data-placeholder`; `aria-placeholder`; `title`; `alt`; `value`. Each is cleaned first: invisible
-  characters (zero-width spaces and joiners, direction marks) dropped, runs of spaces as one, ends trimmed. A name
-  said twice in a row (`Share Share`) counts once, and a name is cut at 90 characters.
+  names (for each id, the first element with it), joined by a space; its own words (`innerText`; not for an `input`,
+  a `textarea` or an editable area); `placeholder`; `data-placeholder`; `aria-placeholder`; `title`; `alt`; `value`.
+  Each is cleaned first: invisible characters (zero-width spaces and joiners, direction marks) dropped, runs of
+  spaces as one, ends trimmed. A name said twice in a row (`Share Share`) counts once, and a name is cut at 90
+  characters.
 - **Not counted:** what's hidden (`hidden`, `display: none`, `visibility: hidden`) and what's inside
   `aria-hidden="true"` or `inert`. A control in a closed `<dialog>` is read but never a proof.
 
