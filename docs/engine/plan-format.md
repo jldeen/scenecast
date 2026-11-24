@@ -140,12 +140,12 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
    lists the step under **Needs you** ("Words in a message"), unless it's a write its app pack checks: a run proves
    that by the pack's check.
 6. **Never:** what a reload, the clock or the computer changes (a time or a date, a duration, a size, a long number,
-   a shortcut's keys like `⌘⇧B`); what's in a live region (a toast, a status: role `status`, `alert`, `log`,
-   `marquee` or `timer`, `aria-live`, an `output`), but for the control the next step clicks (above); what Copilot
-   wrote as the recording ran (its answers, a heading or
-   a button it named, the names it made up, and what's in a part of the page named by one); what another step types;
-   words the screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each
-   visit); what's in a closed dialog.
+   a shortcut's keys like `⌘⇧B`); someone's presence ("Your profile, status Available"); what's in a live region (a
+   toast, a status: role `status`, `alert`, `log`, `marquee` or `timer`, `aria-live`, an `output`), but for the
+   control the next step clicks (above); what Copilot wrote as the recording ran (its answers, a heading or a button
+   it named, the names it made up, and what's in a part of the page named by one); what another step types; words the
+   screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each visit); what's
+   in a closed dialog.
 7. **`still`:** the page's own words: not in a nav, an aside or its header, not a skip link ("Skip to main content"),
    not what half the site's pages show, a heading first, no number, on the screen before and after.
 8. **Nothing proves it:** the review lists the step under **Needs you** ("A run can't check this step").

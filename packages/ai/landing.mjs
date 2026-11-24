@@ -36,13 +36,16 @@ export function proofWords(l) {
 const textsOf = l => (l.kind === 'words' ? [l.text] : l.kind === 'control' ? [l.control] : l.kind === 'box' ? [l.box, l.says] : l.kind === 'gone' ? [l.gone, l.still] : []).filter(Boolean);
 
 // Words that change between runs, or between a Mac and a PC, never prove a step: a time or a date, a duration, a size,
-// a long number, a shortcut's keys.
+// a long number, a shortcut's keys, someone's presence.
 const VOLATILE = /\d+(?:[.,]\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?|hrs?|hours?|kb|mb|gb)\b|\bago\b|\bjust now\b|\b\d{1,2}:\d{2}\b|\d{8,}/i;
 const MONTH = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?';
 const DATE = new RegExp(`\\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday|tomorrow)\\b|\\b${MONTH}\\s+\\d{1,2}\\b|\\b\\d{1,2}\\s+${MONTH}(?![a-z])|\\b\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b`, 'i');
 // A shortcut's keys differ between a Mac and a Windows PC (⌘⇧B, Ctrl+Shift+B).
 const KEYS = /[⌘⌥⇧⌃]|\b(?:ctrl|cmd|alt|shift|option)\s*\+/i;
-export const changes = t => VOLATILE.test(t) || DATE.test(t) || KEYS.test(t);
+// Someone's presence ("Your profile, status Available"): it's whatever they're set to when the page is read.
+const PRESENCE = /\b(?:status|presence)\b[\s:,-]*(?:is\s+|set to\s+)?(?:available|away|busy|do not disturb|be right back|appear(?:ing)? (?:offline|away)|offline|in a (?:meeting|call)|on a call|presenting|out of (?:the )?office|focusing|inactive)\b|\b(?:do not disturb|be right back)\b/i;
+export const presence = t => PRESENCE.test(String(t || ''));
+export const changes = t => VOLATILE.test(t) || DATE.test(t) || KEYS.test(t) || PRESENCE.test(t);
 
 const count = t => String(t).split(/\s+/).filter(Boolean).length;
 // The start of a long text, whole words up to n characters, before any straight quote (a plan line can't hold one).

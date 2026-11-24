@@ -260,10 +260,10 @@ test('a landing proves its step: new words, a control\'s state, a control only i
   const sc = (items, controls = [], headings = []) => ({ headings, controls, items: [{ text: 'Skip to main content', role: 'link', tag: 'a' }, ...items].map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
   const S = {
     page: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: true }, { role: 'tab', name: 'Plugins', selected: false }]),
-    // Words a run can't count on, all new here: a time, a toast, a date, a shortcut's keys, what Copilot wrote, a
-    // greeting that changes on each visit, a closed dialog's heading. Then its own new tab.
+    // Words a run can't count on, all new here: a time, a toast, a date, a shortcut's keys, someone's presence, what
+    // Copilot wrote, a greeting that changes on each visit, a closed dialog's heading. Then its own new tab.
     picker: sc(['Operations', 'Our numbers', '17 curated here', 'Add content', { text: '2 min ago', time: true }, { text: 'Message sent', live: true }, 'Commented on Nov 17, 2026', 'Show panel ⌘⇧B',
-      'Fabrikam moved the ship date', 'Hi, how can I help?', { text: 'Response time details', shut: true }, 'Web IQ'], [{ role: 'tab', name: 'Web IQ' }]),
+      'Avery Chen, status Available', 'Fabrikam moved the ship date', 'Hi, how can I help?', { text: 'Response time details', shut: true }, 'Web IQ'], [{ role: 'tab', name: 'Web IQ' }]),
     tabbed: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: false }, { role: 'tab', name: 'Plugins', selected: true }]),
     badge: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: true }, { role: 'button', name: 'Endorsement: Certified' }]),
     panel: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content', { text: 'Use When', role: 'heading', nav: true }, { text: 'Spend policy', nav: true }], [{ role: 'tab', name: 'Agents', selected: true }, { role: 'tab', name: 'Plugins', selected: false }]),
