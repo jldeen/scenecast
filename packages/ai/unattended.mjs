@@ -82,7 +82,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const r = await cmd('capNet', { since: netSeen }, 30).catch(() => null);
     if (!r) return [];
     netSeen = r.total;
-    const got = (r.net || []).filter(n => n.service);
+    const got = (r.net || []).filter(n => n.service).map(n => ({ app: (svcs.find(s => s.name === n.service) || {}).app, ...n }));
     run.services.push(...got);
     return got;
   };
