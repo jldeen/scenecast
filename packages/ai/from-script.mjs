@@ -4,7 +4,7 @@
 // every time, and what the tests run); Copilot works out what the rules can't, on screen, when the plan runs.
 import { formatStep, risk } from './plan.mjs';
 import { findItem, composer, searchBox } from './find.mjs';
-import { proveLandings } from './landing.mjs';
+import { proveLandings, isBox } from './landing.mjs';
 import { words, facts, pickItems, sentences } from '@scenecast/script/match.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
@@ -385,6 +385,23 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       if (step.kind === 'click' && r.control && (!r.to || r.to === id) && APPROVE.test(step.target)) {
         const ms = walker.moves(id).filter(m => m.steps.length === 1 && m.steps[0].kind === 'click' && APPROVE.test(m.steps[0].target));
         if (ms.length === 1) r = { ...r, to: ms[0].to, recorded: ms[0].recorded || ms[0].steps[0].target };
+      }
+      // A click the recording made after typing in a box here (a search before a tab: the list after it shows only what
+      // the search found): the screen it lands on has those words in the box, and this one doesn't. The recording's
+      // typing goes first, as recorded.
+      if (step.kind === 'click' && r.to && r.to !== id) {
+        const here = sc.controls || [], same = (a, b) => norm(a || '') === norm(b || '');
+        const typedThere = ((scr(r.to) || {}).controls || []).filter(c => isBox(c) && c.value && !here.some(x => isBox(x) && same(x.name, c.name) && same(x.value, c.value)));
+        for (const box of typedThere) {
+          if (same(S.typed[S.app], box.value)) continue;
+          const m = walker.moves(id).find(mv => mv.steps.length === 1 && mv.steps[0].kind === 'type' && same(mv.steps[0].value, box.value) && same(mv.steps[0].target, box.name));
+          const then = m && (walker.recorded || walker.step)(m.to, { ...step, strict: true, role: opts.role });
+          if (!m || !then || then.to !== r.to) continue;
+          flag('added', `Before "${step.target}", a step your script leaves out, as recorded: ${formatStep(m.steps[0])} (the screen after it shows what that found)`, where(line));
+          push({ kind: 'type', target: m.steps[0].target, value: m.steps[0].value }, '(not in your script: as recorded)', line);
+          id = at(); sc = scr(id); r = go({ ...step, strict: true, role: opts.role });
+          break;
+        }
       }
       const prev = beat.steps[beat.steps.length - 1];
       if (step.kind === 'click' && prev && prev.kind === 'click' && prev.target === step.target && (prev.lands || {}).screen === id && r.to === id) return drop();

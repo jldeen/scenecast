@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { formatPlan, parsePlan, formatLands } from './plan.mjs';
+import { formatPlan, parsePlan, formatLands, formatStep } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, proveLandings } from './from-script.mjs';
 import { holds } from './landing.mjs';
@@ -304,6 +304,46 @@ test('a landing proves its step: new words, a control\'s state, a control only i
   assert.deepEqual(needsYou({ planReview: { flags }, plan: { beats: [] } }).map(n => [n.kind, n.where]), [['A number that can change', 'line 1.8'], ["A run can't check this step", 'line 1.9']]);
   const input = scriptPlanInput(parseTalkTrack(PROSE, 'p.md'), null, { draft: { plan: { beats: [] }, flags: [{ kind: 'landing', at: '1.1', text: 'x' }, { kind: 'number', at: '1.1', text: 'y' }, { kind: 'differs', at: '1.1', text: 'The product shows "Save"' }] } });
   assert.deepEqual(input.script.beats[0].lines[0].issues, ['The product shows "Save"']);
+});
+
+test('a step the recording took before a click (a search before a tab), and the script leaves out, goes first', () => {
+  // A picker: the recording searched for "Fabrikam", then opened the Plugins tab, whose list then showed only that.
+  // The build also lets the tab open straight from the picker, onto that same filtered list.
+  const dir = mkdtempSync(join(tmpdir(), 'sc-picker-'));
+  const SEARCH = { sel: 'textarea[data-testid="search"]' }, TAB = { sel: '[data-testid="tab-plugins"]' };
+  const flow = {
+    apps: [{ id: 'iq', key: 'I' }],
+    states: {
+      page: { app: 'iq', snap: 'page', on: [{ click: { sel: 'button[aria-label="Add content"]' }, to: 'picker' }] },
+      picker: { app: 'iq', snap: 'picker', on: [{ type: SEARCH, to: 'picker-typed' }, { click: TAB, to: 'picker-plugins' }], fill: [{ ...SEARCH, value: 'Fabrikam' }] },
+      'picker-typed': { app: 'iq', snap: 'picker-typed', on: [{ click: TAB, to: 'picker-plugins', keep: SEARCH }], fill: [{ ...SEARCH, value: 'Fabrikam' }] },
+      'picker-plugins': { app: 'iq', snap: 'picker-plugins', on: [{ click: { sel: 'li[data-testid^="item-"]', textStarts: 'Fabrikam Orders' }, to: 'review' }] },
+      review: { app: 'iq', snap: 'review' },
+    },
+    beats: [{ active: 'iq', states: { iq: 'page' } }], path: [],
+  };
+  const picker = (typed, tab) => `<h1>Operations</h1><div role="dialog" aria-label="Add content"><textarea data-testid="search" aria-label="Search contexts">${typed}</textarea>`
+    + `<div role="tablist"><div role="tab" data-testid="tab-files" aria-selected="${!tab}">Files</div><div role="tab" data-testid="tab-plugins" aria-selected="${tab}">Plugins</div></div>`
+    + (tab ? '<ul><li role="listitem" tabindex="0" data-testid="item-orders">Fabrikam Orders</li></ul>' : '<p>Spend policy</p>') + '</div>';
+  const snaps = { page: '<h1>Operations</h1><button aria-label="Add content">Add</button>', picker: picker('', false), 'picker-typed': picker('Fabrikam', false), 'picker-plugins': picker('Fabrikam', true), review: '<h2>Review Fabrikam Orders</h2>' };
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  for (const [id, body] of Object.entries(snaps)) writeFileSync(join(dir, 'data', 'snaps', id + '.html'), `<!doctype html><html><head><title>t</title></head><body>${body}</body></html>`);
+  writeFileSync(join(dir, 'flow.json'), JSON.stringify(flow));
+  const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps: [{ id: 'iq', key: 'I', title: 'IQ' }] } };
+  const steps = track => planFromTrack(parseTalkTrack(track, 'x.md'), { walker: walkerFromDemo(demo) });
+  const { plan, flags } = steps('# T\n\n## 1. Add it\n\n> We add it.\n\n**Do:** Click "Add content". Click "Plugins". Click "Fabrikam Orders".\n');
+  assert.deepEqual(plan.beats[0].steps.map(st => [formatStep(st), formatLands(st.lands || {})]), [
+    ['Go to iq', 'page · "Operations"'],
+    ['Click "Add content"', 'picker · "Spend policy"'],
+    ['Type "Fabrikam" in "Search contexts"', 'picker-typed · box "Search contexts" says "Fabrikam"'],
+    ['Click "Plugins"', 'picker-plugins · "Fabrikam Orders"'],
+    ['Click "Fabrikam Orders"', 'review · "Review Fabrikam Orders"'],
+  ]);
+  assert.match(flags.find(f => f.kind === 'added').text, /^Before "Plugins", a step your script leaves out, as recorded: Type "Fabrikam" in "Search contexts"/);
+  // When her script types it, it's typed once.
+  const own = steps('# T\n\n## 1. Add it\n\n> We add it.\n\n**Do:** Click "Add content". Type "Fabrikam" in "Search contexts". Click "Plugins". Click "Fabrikam Orders".\n');
+  assert.equal(own.plan.beats[0].steps.filter(st => st.kind === 'type').length, 1);
+  assert.equal(own.flags.filter(f => f.kind === 'added').length, 0);
 });
 
 test('a control in a live region proves a step only when the next step clicks it; its words never do', () => {
