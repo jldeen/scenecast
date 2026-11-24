@@ -167,6 +167,22 @@ async function setLine({ cmd, walker, tab, step, appOfText }, part, s) {
   return r.ok ? { ok: true } : r;
 }
 
+// What stops a Set before block from running at all, before anything opens: a line for no app of the demo, one whose
+// Set: names no pack write or a write its app pack lacks, one the approval doesn't list. → why, or null.
+export function setBeforeProblem(block, { demo, packs = null, approval = null }) {
+  const appOfText = appTextOf((demo.cfg.apps || []).map(a => a.id)), allowed = allowedIn(approval);
+  const byPack = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).filter(Boolean) : [];
+  for (const s of block.items || []) {
+    if (!appOfText(s.what)) return `${s.what}: which app?`;
+    const tag = /·\s*([\w-]+):([\w-]+)\s*$/.exec(s.set || '');
+    if (!tag) return `${s.what}: its Set: line names no pack write, so it isn't set`;
+    const pack = byPack.find(x => x.id === tag[1]);
+    if (!pack || !(pack.writes || []).some(w => w.id === tag[2])) return `${s.what}: the ${tag[1]} pack has no "${tag[2]}" write, so it isn't set`;
+    if (!allowed('before', s.what)) return `"${s.what}" isn't in the approved reset`;
+  }
+  return null;
+}
+
 // reset.md's "## Set before beat N, <step>" (parseReset's before: { beat, text, n, items }): just before that step,
 // off camera, each line set as Set first sets it, as an approved write (part 'before'), in a tab of its own of the same
 // capture browser (capTab, at its Opens: page), then read there again. The recorded tab is never navigated, and no
@@ -174,18 +190,10 @@ async function setLine({ cmd, walker, tab, step, appOfText }, part, s) {
 // that the approval doesn't list. walkerFor(tabs): a live walker for those tabs ({ app: mark }), not recording.
 // → { ok, did: [...], items: [{ text, already, ok, why? }], why }
 export async function setBefore({ demo, cmd, packs = null, approval, block, walkerFor, results = {}, emit = () => {} }) {
-  const appIds = (demo.cfg.apps || []).map(a => a.id), appOfText = appTextOf(appIds), allowed = allowedIn(approval);
-  const byPack = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).filter(Boolean) : [];
+  const appIds = (demo.cfg.apps || []).map(a => a.id), appOfText = appTextOf(appIds);
   const did = [], items = [];
-  for (const s of block.items) {
-    const a = appOfText(s.what);
-    if (!a) return { ok: false, did, items, why: `${s.what}: which app?` };
-    const tag = /·\s*([\w-]+):([\w-]+)\s*$/.exec(s.set || '');
-    if (!tag) return { ok: false, did, items, why: `${s.what}: its Set: line names no pack write, so it isn't set` };
-    const pack = byPack.find(x => x.id === tag[1]);
-    if (!pack || !(pack.writes || []).some(w => w.id === tag[2])) return { ok: false, did, items, why: `${s.what}: the ${tag[1]} pack has no "${tag[2]}" write, so it isn't set` };
-    if (!allowed('before', s.what)) return { ok: false, did, items, why: `"${s.what}" isn't in the approved reset` };
-  }
+  const bad = setBeforeProblem(block, { demo, packs, approval });
+  if (bad) return { ok: false, did, items, why: bad };
   const marks = {};
   try {
     for (const s of block.items) {

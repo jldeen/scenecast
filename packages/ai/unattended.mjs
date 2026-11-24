@@ -23,7 +23,7 @@ import { rx, settled, aiDir, appTab } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 import { approval as approvalOf } from './make.mjs';
 import { liveWalker, walkerPacks } from './live.mjs';
-import { runReset, fillApi, setBefore, claimScreen, checkClaim } from './reset-run.mjs';
+import { runReset, fillApi, setBefore, setBeforeProblem, claimScreen, checkClaim } from './reset-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
@@ -59,18 +59,20 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   if (!plan || !stepCount(plan)) throw new Error('make and approve the plan first');
   const ap = approvalOf(demo);
   if (!ap.full) throw new Error(`approve the plan first: ${ap.why || 'it isn\'t approved'}`);
+  const status0 = await cmd('recordStatus', {}, 30);
+  if (status0.recording) throw new Error('the recorder is already recording: stop that recording first');
+  packs = packs === undefined ? await walkerPacks() : packs;
   // reset.md's Set before blocks, each at its plan step (beat, the step's words, its number when the beat has them
-  // twice). One the plan has no step for stops the run before anything runs.
+  // twice). One the plan has no step for, or that can't run (setBeforeProblem), stops the run before anything runs.
   const setBeforeAt = new Map();
   { const rf = join(demo.dir, 'reset.md');
     if (existsSync(rf)) { const { parseReset } = await import('./reset.mjs'); for (const b of parseReset(readFileSync(rf, 'utf8')).before || []) {
       const steps = (plan.beats[b.beat - 1] || {}).steps || [], si = steps.findIndex((x, i) => formatStep(x) === b.text && (!b.n || i + 1 === b.n));
       if (si < 0) throw new Error(`reset.md sets something before beat ${b.beat}, ${b.text}, and the plan has no such step`);
+      const bad = setBeforeProblem(b, { demo, packs, approval: ap });
+      if (bad) throw new Error(`reset.md's Set before beat ${b.beat}, ${b.text}: ${bad}`);
       setBeforeAt.set(`${b.beat - 1}-${si}`, b);
     } } }
-  const status0 = await cmd('recordStatus', {}, 30);
-  if (status0.recording) throw new Error('the recorder is already recording: stop that recording first');
-  packs = packs === undefined ? await walkerPacks() : packs;
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
