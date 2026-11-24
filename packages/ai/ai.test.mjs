@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parsePlan, parseStep, formatPlan, risk, writesOf } from './plan.mjs';
+import { parsePlan, parseStep, formatPlan, risk, writesOf, parseLands, formatLands } from './plan.mjs';
 import { redact, compactOutline, makeModel } from './model.mjs';
 import { findItem } from './find.mjs';
 import { matches } from './coach.mjs';
@@ -28,6 +28,29 @@ test('plan: plain words to steps and back', () => {
   assert.equal(parseStep("Click 'Save'").target, 'Save');
 });
 
+test('what proves a step: words, a control (and its state), a box\'s text, words gone; read and written back', () => {
+  const forms = {
+    'chat-answer · "Kestrel moved the ship date"': { screen: 'chat-answer', kind: 'words', text: 'Kestrel moved the ship date' },
+    'iq-certified · control "Endorsement: Certified"': { screen: 'iq-certified', kind: 'control', text: null, control: 'Endorsement: Certified', state: null },
+    'picker · control "Plugins" selected': { screen: 'picker', kind: 'control', text: null, control: 'Plugins', state: 'selected' },
+    'menu · control "More" open': { screen: 'menu', kind: 'control', text: null, control: 'More', state: 'open' },
+    'search-typed · box "Search tools by name" says "IQ"': { screen: 'search-typed', kind: 'box', text: null, box: 'Search tools by name', says: 'IQ' },
+    'landing · gone "Delegation of spend authority"': { screen: 'landing', kind: 'gone', text: null, gone: 'Delegation of spend authority' },
+    'landing · "Fabric IQ · Semantic model"': { screen: 'landing', kind: 'words', text: 'Fabric IQ · Semantic model' },
+    'chat-saved': { screen: 'chat-saved', kind: null, text: null },
+    '"words only"': { screen: null, kind: 'words', text: 'words only' },
+    'x · box "Message" says “He said "go"”': { screen: 'x', kind: 'box', text: null, box: 'Message', says: 'He said "go"' },
+  };
+  for (const [text, shape] of Object.entries(forms)) {
+    assert.deepEqual(parseLands(text), shape, text);
+    assert.equal(formatLands(parseLands(text)), text);
+  }
+  // In a plan, under a step, as any other detail.
+  const plan = '# D\n\n## Beat 1 · B\n\n- Click "Plugins"\n  Lands on: picker · control "Plugins" selected\n- Press Escape\n  Lands on: landing · gone "Plugins"\n';
+  assert.equal(formatPlan(parsePlan(plan)), plan);
+  assert.deepEqual(parsePlan(plan).beats[0].steps.map(s => s.lands.kind), ['control', 'gone']);
+});
+
 test('plan v2: details under steps and lines, written back as read; steps the same as without them', () => {
   const text = [
     '# Demo', '', '## Beat 1 · Keep it', '',
@@ -39,8 +62,8 @@ test('plan v2: details under steps and lines, written back as read; steps the sa
   ].join('\n');
   const p = parsePlan(text);
   const [, enter, save] = p.beats[0].steps;
-  assert.deepEqual([enter.writes, enter.lands], ['sends a prompt (a new chat)', { screen: 'chat-answer', text: 'Kestrel moved the ship date' }]);
-  assert.deepEqual([save.kind, save.target, save.script, save.undo, save.lands], ['click', 'Save', 'Click "Approve" on the "Copy file" card', 'delete the skill "triage"', { screen: 'chat-saved', text: null }]);
+  assert.deepEqual([enter.writes, enter.lands], ['sends a prompt (a new chat)', { screen: 'chat-answer', kind: 'words', text: 'Kestrel moved the ship date' }]);
+  assert.deepEqual([save.kind, save.target, save.script, save.undo, save.lands], ['click', 'Save', 'Click "Approve" on the "Copy file" card', 'delete the skill "triage"', { screen: 'chat-saved', kind: null, text: null }]);
   assert.deepEqual(p.beats[0].say, ['Now I can share it · with my team.']);
   const [share, card] = p.beats[0].lines[0].focus;
   assert.deepEqual(share, { texts: ['Share'], mark: 'arrow', dir: 'sw' });

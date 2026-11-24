@@ -73,14 +73,45 @@ export function formatFocus(f) {
   if (f.on) s += ` · on ${f.on}`;
   return s;
 }
-// "chat-answer · "Kestrel moved the ship date"": the screen, then words on it (either may be left out).
-function parseLands(v) {
-  const [first = '', ...rest] = splitDots(v);
-  const text = quotes([first, ...rest].join(' '))[0] || null;
-  const screen = /^["“]/.test(first) ? null : first || null;
-  return { screen, text };
+// "Lands on": the screen a step lands on, then what proves it ran there (docs/engine/plan-format.md). Either part may
+// be left out. Parsed, as step.lands:
+//   "words"                                  { screen, kind: 'words', text }
+//   control "Name"                           { screen, kind: 'control', text: null, control, state: null }
+//   control "Name" selected|open|on|off      { screen, kind: 'control', text: null, control, state }
+//   box "Name" says "text"                   { screen, kind: 'box', text: null, box, says }
+//   gone "words"                             { screen, kind: 'gone', text: null, gone }
+//   (nothing)                                { screen, kind: null, text: null }
+// `text` is only ever the words a run looks for in the page's text.
+const PROOF = {
+  words: new RegExp(`^${Q}$`),
+  control: new RegExp(`^control\\s+${Q}(?:\\s+(selected|open|on|off))?$`, 'i'),
+  box: new RegExp(`^box\\s+${Q}\\s+says\\s+${Q}$`, 'i'),
+  gone: new RegExp(`^gone\\s+${Q}$`, 'i'),
+};
+const isProof = t => Object.values(PROOF).some(re => re.test(t));
+export function parseLands(v) {
+  const parts = splitDots(clean(v));
+  const screen = parts.length && !isProof(parts[0]) && !/^["“]/.test(parts[0]) ? parts.shift() : null;
+  const p = parts[0] || '';
+  let m;
+  if ((m = PROOF.words.exec(p))) return { screen, kind: 'words', text: q(m, 1) };
+  if ((m = PROOF.control.exec(p))) return { screen, kind: 'control', text: null, control: q(m, 1), state: m[4] ? m[4].toLowerCase() : null };
+  if ((m = PROOF.box.exec(p))) return { screen, kind: 'box', text: null, box: q(m, 1), says: q(m, 4) };
+  if ((m = PROOF.gone.exec(p))) return { screen, kind: 'gone', text: null, gone: q(m, 1) };
+  // Anything else with words in quotes: those words.
+  const t = quotes(parts.join(' '))[0] || null;
+  return { screen, kind: t ? 'words' : null, text: t };
 }
-const formatLands = l => [l.screen, l.text ? `"${l.text}"` : null].filter(Boolean).join(' · ');
+// A value in quotes: “…” when it has a straight quote in it.
+const qt = t => /"/.test(t) && !/[“”]/.test(t) ? `“${t}”` : `"${t}"`;
+export function formatLands(l) {
+  const kind = l.kind || (l.text ? 'words' : null);
+  const proof = kind === 'words' && l.text ? qt(l.text)
+    : kind === 'control' && l.control ? `control ${qt(l.control)}${l.state ? ` ${l.state}` : ''}`
+    : kind === 'box' && l.box ? `box ${qt(l.box)} says ${qt(l.says || '')}`
+    : kind === 'gone' && l.gone ? `gone ${qt(l.gone)}` : null;
+  return [l.screen, proof].filter(Boolean).join(' · ');
+}
 function addDetail(at, key, value) {
   if (at.kind) {
     if (key === 'lands on') at.lands = parseLands(value);
@@ -139,7 +170,7 @@ export function parsePlan(text) {
 // A step's details, as written under it.
 function stepDetails(s) {
   const out = STEP_DETAILS.filter(([k]) => s[k]).map(([k, label]) => `${label}: ${clean(s[k])}`);
-  if (s.lands && (s.lands.screen || s.lands.text)) out.push(`Lands on: ${formatLands(s.lands)}`);
+  if (s.lands && formatLands(s.lands)) out.push(`Lands on: ${formatLands(s.lands)}`);
   return out;
 }
 
