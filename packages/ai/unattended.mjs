@@ -47,7 +47,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
-  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], writes: [], stopped: null, reset: {}, guard: {}, events: [] };
+  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], writes: [], unprovable: [], starts: [], stopped: null, reset: {}, guard: {}, events: [] };
   const save = () => writeFileSync(join(out, 'run.json'), JSON.stringify(run, null, 1));
   const shot = async (app, name) => { const file = join(stops, `${name}.png`); try { await cmd('capShot', { tab: appTab(demo, app), file }, 60); return file; } catch (e) { return null; } };
   const stopWith = async (app, at, kind, why) => { run.stopped = { kind, why, at, app, picture: await shot(app, `${at.beat + 1}-${at.step + 1}-${kind}`) }; emit({ event: 'stopped', ...run.stopped }); };
@@ -65,8 +65,16 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
 
     emit({ event: 'stage', name: 'start', label: 'Starting the recording' });
     const appIds = demo.cfg.apps.map(a => a.id);
-    // Every app on its start screen, as the recording begins.
-    { const h = liveWalker({ demo, cmd, packs, log }); for (const id of appIds) await h.home(id); }
+    // Every app on its start screen, as the recording begins: its start steps (navigation only), then its recorded
+    // start screen checked. One that isn't stops the run before anything is recorded.
+    { const h = liveWalker({ demo, cmd, packs, log });
+      for (const id of appIds) {
+        const did = await h.home(id);
+        const bad = did.find(d => d.why);
+        const sc = bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await h.startCheck(id, plan);
+        run.starts.push({ app: id, did, ...sc });
+        if (!sc.ok) { run.stopped = { kind: 'start', why: `${id}: ${sc.why}`, app: id, picture: await shot(id, `start-${id}`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
+      } }
     const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
     let app = first && first.kind === 'app' && w.appOf(first.app) || appIds[0];
@@ -76,11 +84,13 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     await w.start(app);
 
     // One step: null when it's done and landed where the plan says, else why the run stops ({ kind, why }).
+    // A failed check stops it. A step it can't prove (the plan gives no proof, or its words were on the screen before)
+    // goes in run.unprovable, and then the next step goes on only if its control is the one (exactly one, by its exact
+    // name, of its kind), and never if it's a write: the step before every write has a proven landing.
     const lastDid = {};
-    const doStep = async (bi, si, step, at) => {
-      // Its landing words already on the screen prove nothing: noted now, and the run stops after the step (before
-      // anything else, a write above all) if that's all it has to go on.
-      const pre = await w.landsBefore(app, step);
+    let doubt = null;
+    const doStep = async (bi, si, step, at, prev) => {
+      const pre = await w.landsBefore(app, step, prev);
       // Would it write? Read the screen as the step will find it.
       let wr = null;
       if (step.kind === 'click' || step.kind === 'press') {
@@ -88,6 +98,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const el = step.kind === 'click' ? (await w.locate(app, step.target)).el : null;
         wr = w.writeOf(step, el, step.kind === 'press' ? w.focusedField(o) : null, o.url);
       } else if (step.writes) wr = w.writeOf(step, null, null, null);
+      if (doubt) {
+        const before = `the step before it (${doubt.text}) couldn't be proven (${doubt.why})`;
+        if (wr) return { kind: 'unprovable', why: `${before}, and a write never follows a step it couldn't prove` };
+        if (step.kind !== 'app') { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; }
+      }
       let r;
       if (wr) {
         if (!ap.writes.some(x => x.beat === bi && x.step === si && x.text === at.text)) return { kind: 'unapproved', why: `${wr.why}, and the approved plan doesn't list it as a write` };
@@ -105,7 +120,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why };
       const c = await w.check(app, step);
       if (!c.ok) return { kind: c.kind, why: c.why };
-      if (pre) return { kind: 'unproven', why: pre };
+      const why = pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
+      if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
+      else doubt = null;
       Object.assign(lastDid, { did: r.did, screen: c.screen });
       return null;
     };
@@ -117,9 +134,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       for (const [si, step] of beat.steps.entries()) {
         const at = { beat: bi, step: si, text: formatStep(step) };
         emit({ event: 'step', beat: bi, step: si, n: ++n, of: total, text: at.text });
+        const prev = app;
         if (step.kind === 'app') app = w.appOf(step.app) || app;
         const ts = Date.now();
-        const stop = await doStep(bi, si, step, at).catch(e => ({ kind: 'error', why: e.message }));
+        const stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
         if (stop) { await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`); break outer; }
         run.steps.push({ ...at, app, did: lastDid.did, secs: +((Date.now() - ts) / 1000).toFixed(1), screen: lastDid.screen });
         emit({ event: 'step-done', beat: bi, step: si, did: lastDid.did });
@@ -213,7 +231,9 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const seenAt = {};
   let walk;
   try {
-    for (const a of demo.cfg.apps) await w.home(a.id);
+    const starts = [];
+    for (const a of demo.cfg.apps) { const did = await w.home(a.id); const bad = did.find(d => d.why); starts.push({ app: a.id, did, ...(bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await w.startCheck(a.id, plan)) }); }
+    seenAt.starts = starts;
     walk = await walkPlan(plan, {
       live: true,
       // A walk only measures: words that changed are noted and it goes on (a run stops there).
@@ -246,6 +266,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     } });
   } finally {
     for (const b of (walk && walk.beats) || []) for (const s of b.steps) if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
+    if (walk) walk.starts = seenAt.starts || [];
     walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...(await guardOff(cmd, g.hosts)) } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });

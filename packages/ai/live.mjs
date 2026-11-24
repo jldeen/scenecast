@@ -18,14 +18,59 @@
 // recording: the recorder is recording (it holds each click until it has captured the screen, so a step waits for
 // it to have seen and done it).
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { findItem, nameFits, composer, searchBox, norm } from './find.mjs';
 import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
+import { controlOf } from '@scenecast/script/naming.mjs';
+import { readScreen } from '@scenecast/script/html.mjs';
 
 // The words of an app showing an error instead of what it should.
+// A step's proof that it landed (plan.mjs parseLands, docs/engine/plan-format.md "What proves a step"): words on the
+// screen, a control (in a state), a box's text, or words gone. None (kind null): the step can't be proven (a walk
+// says unproven; a run goes on only by its next control, and never into a write).
+export const proofOf = s => {
+  const l = s && s.lands;
+  if (!l) return null;
+  const kind = l.kind !== undefined ? l.kind : l.text ? 'words' : null;
+  if (!kind || (kind === 'words' && !l.text)) return null;
+  return { ...l, kind };
+};
+const NO_PROOF = 'the plan gives this step no proof of where it lands';
+// What an app's start steps may be: navigation, nothing that types, presses or writes.
+const NAVIGATION = new Set(['click', 'hover', 'scroll', 'wait']);
+const isAddress = x => /^https?:\/\//i.test(String(x || '').trim());
+// An app's start steps: apps[].start as a list (an address and/or plan steps), then the older startSteps.
+export const startSteps = a => [...(Array.isArray(a && a.start) ? a.start.filter(x => !isAddress(x)) : []), ...((a && a.startSteps) || [])];
+const startAddress = a => Array.isArray(a.start) ? a.start.find(isAddress) || null : isAddress(a.start) ? a.start : null;
+// A control's role and name in a page, by the reader's own rule (controlOf, naming.mjs), so a plan's step finds the
+// same control live as the reader named on the recorded screen.
+const NAMING = `const controlOf = ${controlOf};
+const NAMING_ACC = { tag: e => e.localName, attr: (e, n) => e.getAttribute(n), text: e => e.innerText || '', byId: id => document.getElementById(id) };
+const domControl = e => controlOf(e, NAMING_ACC);`;
+// What's at a point in one frame: the nearest control at or around it (by the same rule), else the element itself.
+const HIT = `(() => { ${NAMING}
+  const e = document.elementFromPoint(__X__, __Y__);
+  if (!e) return null;
+  for (let c = e; c; c = c.parentElement) { const d = domControl(c); if (d.control) return { name: d.name, role: d.role }; }
+  return { name: '', role: e.localName, none: true };
+})()`;
+// Every control in one frame, on screen or not: its name and role the reader's way (controlOf), its state, and
+// what a box holds now (an input's or a text area's value, an editable area's words: never the value attribute,
+// which doesn't change as you type).
+const FRAME_CONTROLS = sel => `(() => { ${NAMING}
+  return [...document.querySelectorAll(${JSON.stringify(sel)})].slice(0, 2000).map((e, ei) => {
+    const r = e.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    const c = domControl(e), field = /^(INPUT|TEXTAREA)$/.test(e.tagName);
+    return { ei, name: c.name, role: c.role, editable: e.isContentEditable || field, disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true',
+      selected: e.getAttribute('aria-selected'), expanded: e.getAttribute('aria-expanded'), pressed: e.getAttribute('aria-pressed'),
+      checked: e.type === 'checkbox' || e.type === 'radio' ? String(!!e.checked) : e.getAttribute('aria-checked'),
+      value: field ? String(e.value || '') : e.isContentEditable ? String(e.innerText || '') : null,
+      x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }).filter(Boolean); })()`;
 const TROUBLE = /could not be loaded|couldn['’]t (?:be )?load(?:ed)?|can['’]t load|something went wrong|failed to load|unable to (?:load|sign|connect)|having trouble connecting|trouble connecting/gi;
 const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https://${s}`).host; } catch (e) { return ''; } };
 
@@ -42,7 +87,7 @@ export async function walkerPacks() {
 // beat), else its address. The capture browser opens an app at its address; a demo starts on a page of its own.
 export function startUrls(demo) {
   const out = Object.fromEntries((demo.cfg.apps || []).map(a => [a.id, a.url]));
-  const own = new Set((demo.cfg.apps || []).filter(a => a.start).map(a => a.id));
+  const own = new Set((demo.cfg.apps || []).filter(a => startAddress(a)).map(a => a.id));
   let flow; try { flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8')); } catch (e) { return out; }
   const S = flow.states || {};
   for (const [app, sig] of Object.entries(((flow.beats || [])[0] || {}).states || {})) {
@@ -52,7 +97,7 @@ export function startUrls(demo) {
       try { const u = JSON.parse(readFileSync(f, 'utf8')).url; if (/^https?:/.test(u || '')) { out[app] = u; break; } } catch (e) {}
     }
   }
-  for (const a of demo.cfg.apps || []) if (a.start) out[a.id] = a.start;
+  for (const a of demo.cfg.apps || []) if (startAddress(a)) out[a.id] = startAddress(a);
   return out;
 }
 
@@ -101,26 +146,24 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     }
     return { el: null, o };
   };
-  const inPage = async (id, name, kind) => {
-    const sel = kind === 'field' ? 'input,textarea,[contenteditable=true],[role=textbox],[role=searchbox],[role=combobox]'
-      : 'button,a[href],input,textarea,[contenteditable=true],[role=button],[role=link],[role=treeitem],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[role=textbox],[role=searchbox],[role=combobox]';
-    // Each frame's controls (the page's own too), at their place on the page: the frame's box plus the control's place
-    // in it.
-    const items = await cmd('js', { tab: tab(id), code: `
+  const selFor = kind => kind === 'field' ? 'input,textarea,[contenteditable=true],[role=textbox],[role=searchbox],[role=combobox]'
+    : 'button,a[href],input,textarea,[contenteditable=true],[role=button],[role=link],[role=treeitem],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[role=textbox],[role=searchbox],[role=combobox]';
+  // Every control in the page and its frames, on screen or not, at its place on the page: the frame's box plus the
+  // control's place in it.
+  const pageControls = (id, kind) => { const sel = selFor(kind); return cmd('js', { tab: tab(id), code: `
       const out = [], frames = page.frames();
       for (const [fi, f] of frames.entries()) {
         const main = f === page.mainFrame();
         const fe = main ? null : await f.frameElement().catch(() => null), fb = main ? { x: 0, y: 0 } : fe ? await fe.boundingBox().catch(() => null) : null;
         if (!fb) continue;
-        const list = await f.evaluate(sel => [...document.querySelectorAll(sel)].slice(0, 2000).map((e, ei) => {
-          const r = e.getBoundingClientRect();
-          if (!r.width || !r.height) return null;
-          return { ei, name: (e.getAttribute('aria-label') || e.innerText || e.value || e.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 200), role: e.getAttribute('role') || e.tagName.toLowerCase(), editable: e.isContentEditable || /^(INPUT|TEXTAREA)$/.test(e.tagName), disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true', x: r.x + r.width / 2, y: r.y + r.height / 2 };
-        }).filter(Boolean), ${JSON.stringify(sel)}).catch(() => []);
+        const list = await f.evaluate(${JSON.stringify(FRAME_CONTROLS(sel))}).catch(() => []);
         const fh = main ? 'page' : (() => { try { return new URL(f.url()).host; } catch (e) { return 'a frame'; } })();
         for (const it of list) if (it.name) out.push({ ...it, x: Math.round(fb.x + it.x), y: Math.round(fb.y + it.y), frame: !main, fi, fh });
       }
-      return out;` }, 60).catch(() => null);
+      return out;` }, 60); };
+  const inPage = async (id, name, kind) => {
+    const sel = selFor(kind);
+    const items = await pageControls(id, kind).catch(() => null);
     // By its name only (nameFits): a name that only contains it, a small part of it or a few shared words found the
     // wrong control in a frame.
     const el = Array.isArray(items) ? findItem(items, name, kind) : null;
@@ -144,6 +187,39 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     return { ...el, x: at.x, y: at.y };
   };
   const focusedField = o => (o.items || []).find(it => it.focused && (it.editable || /textbox|searchbox|combobox/.test(it.role))) || null;
+  // What a click at x, y on the page would land on: down through the frames under it, the control there.
+  const hitAt = (id, x, y) => cmd('js', { tab: tab(id), code: `
+    const HIT = ${JSON.stringify(HIT)};
+    let f = page.mainFrame(), ox = 0, oy = 0;
+    for (let i = 0; i < 6; i++) {
+      const lx = ${x} - ox, ly = ${y} - oy;
+      const h = await f.evaluateHandle(([x, y]) => document.elementFromPoint(x, y), [lx, ly]).catch(() => null);
+      const el = h && h.asElement();
+      if (!el) return null;
+      const cf = await el.contentFrame().catch(() => null);
+      if (cf) { const b = await el.boundingBox(); if (!b) return null; ox = b.x; oy = b.y; f = cf; continue; }
+      const r = await f.evaluate(HIT.replace('__X__', String(lx)).replace('__Y__', String(ly))).catch(() => null);
+      let host = 'page'; if (f !== page.mainFrame()) { try { host = new URL(f.url()).host; } catch (e) { host = 'a frame'; } }
+      return r && { ...r, frame: host };
+    }
+    return null;` }, 30);
+  // Before a click: what's at the point has to be the control it means (the same role and name, in the same frame),
+  // not whatever's on top of it (a toast, a banner, a dialog's backdrop, a sticky header after a scroll). Measured
+  // again for up to 2 s; still covered, it isn't clicked.
+  const sameControl = (h, el) => h && !h.none && h.role === el.role && (norm(h.name) === norm(el.name) || nameFits(h.name, el.name)) && (h.frame || 'page') === (el.fh || 'page');
+  async function uncovered(id, el, want, kind) {
+    let h = null;
+    for (const t0 = Date.now(); ;) {
+      h = await hitAt(id, el.x, el.y).catch(() => null);
+      if (sameControl(h, el)) return { ok: true, el, hit: { on: h.name, role: h.role, frame: h.frame } };
+      if (Date.now() - t0 > 2000) break;
+      await sleep(250);
+      const again = want ? (await locate(id, want, kind)).el : null;
+      if (again) el = again;
+    }
+    const by = !h ? 'nothing it can see' : h.none ? `a ${h.role}` : `"${h.name}" (${h.role})`;
+    return { ok: false, el, hit: h && { on: h.name, role: h.role, frame: h.frame }, why: `"${el.name}" is covered by ${by}${h && h.frame && h.frame !== 'page' ? ` in ${h.frame}` : ''}` };
+  }
 
   // Every input it sends (click, hover, key, typing, wheel), with what it was for and what it hit: the control's name,
   // its frame ('page', else the frame's host) and whether it's the one the step names (exact, fits, or near: a few of
@@ -191,8 +267,10 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
         if (step.kind === 'hover') { await send(id, 'hover', { x: el.x, y: el.y }, 30, hit); await settle(id, 30); return { did: 'hovered', on: el.name, hit }; }
         const w = writeOf(step, el, null, o.url);
         if (w && !write) refuse(step, w);
+        const u = await uncovered(id, el, step.target);
+        if (!u.ok) return { missing: true, why: u.why, hit: { ...hit, covered: u.hit } };
         const before = await actions();
-        await send(id, 'click', { x: el.x, y: el.y }, 60, hit);
+        await send(id, 'click', { x: u.el.x, y: u.el.y }, 60, { ...hit, landed: u.hit });
         await seen(before);
         await settle(id, 120);
         return { did: 'clicked', on: el.name, hit, wrote: !!w };
@@ -206,7 +284,11 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
           if (!field) return { missing: true, why: 'no box to type in on this screen' };
         }
         const hit = hitOf(field, step);
-        if (!field.focused) { await send(id, 'click', { x: field.x, y: field.y }, 30, hit); await sleep(250); }
+        if (!field.focused) {
+          const u = await uncovered(id, field, step.target, 'field');
+          if (!u.ok) return { missing: true, why: u.why, hit: { ...hit, covered: u.hit } };
+          await send(id, 'click', { x: u.el.x, y: u.el.y }, 30, { ...hit, landed: u.hit }); await sleep(250);
+        }
         await send(id, 'clear', {}, 30, { for: formatStep(step) }).catch(() => {});
         const before = await actions();
         await send(id, 'type', { text: step.value, delay: 18 }, 180, hit);
@@ -254,13 +336,15 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     }
     if (text.at === 'blocked') return { ok: false, kind: 'signin', why: `a sign-in policy page (${host})` };
     if (!onHosts(host, id)) return { ok: false, kind: 'offplan', why: `it left ${id} for ${host}` };
-    const want = step.lands && step.lands.text;
+    // Its proof, given time (an answer streams in): words, a control (in a state), a box's text, or words gone.
+    const p = proofOf(step);
     let wd = null;
-    if (want && step.kind !== 'wait') {
+    if (p && step.kind !== 'wait') {
       for (const t0 = Date.now(); ;) {
-        wd = await words(id);
-        if (norm(wd).includes(norm(want))) break;
-        if (Date.now() - t0 > landsS * 1000) return { ok: false, kind: 'elsewhere', why: `"${want}" isn't on the screen`, trouble: troubleIn(wd) };
+        const r = await proofHolds(id, p, step);
+        wd = r.words === undefined ? wd : r.words;
+        if (r.ok) break;
+        if (Date.now() - t0 > landsS * 1000) return { ok: false, kind: 'elsewhere', why: r.why, trouble: troubleIn(wd) };
         await sleep(1000);
       }
     }
@@ -269,6 +353,55 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     return { ok: true, screen: screenOf(id, o), trouble: troubleIn(wd === null ? await words(id) : wd) };
   }
   const troubleIn = t => { const m = String(t || '').match(TROUBLE); return m ? [...new Set(m.map(x => x.toLowerCase()))] : undefined; };
+  // One proof against the page now: { ok, why, words? }.
+  const stateOk = (it, st) => !st || (st === 'selected' ? it.selected === 'true' : st === 'open' ? it.expanded === 'true'
+    : st === 'on' ? it.checked === 'true' || it.pressed === 'true' : st === 'off' ? it.checked === 'false' || it.pressed === 'false' : false);
+  async function proofHolds(id, p, step) {
+    if (p.kind === 'words') { const w = await words(id); return { ok: norm(w).includes(norm(p.text)), why: `"${p.text}" isn't on the screen`, words: w }; }
+    if (p.kind === 'control' || p.kind === 'box') {
+      const items = await pageControls(id, p.kind === 'box' ? 'field' : undefined).catch(() => []) || [];
+      const name = p.kind === 'box' ? p.box : p.control;
+      const named = items.filter(it => norm(it.name) === norm(name) && (p.kind !== 'box' || it.editable));
+      if (!named.length) return { ok: false, why: `no ${p.kind === 'box' ? 'box' : 'control'} called "${name}" on the screen` };
+      if (p.kind === 'box') return named.some(it => norm(it.value).startsWith(norm(p.says))) ? { ok: true } : { ok: false, why: `"${name}" doesn't say "${p.says}"` };
+      return named.some(it => stateOk(it, p.state)) ? { ok: true } : { ok: false, why: `"${name}" isn't ${p.state}` };
+    }
+    if (p.kind === 'gone') {
+      const w = await words(id), b = goneBefore.get(step);
+      if (!b || !b.there) return { ok: false, why: `"${p.gone}" wasn't on the screen before the step`, words: w };
+      if (norm(w).includes(norm(p.gone))) return { ok: false, why: `"${p.gone}" is still on the screen`, words: w };
+      // Words gone also pass on a blank page, an error or a wrong page: its still words (the page's own, there before
+      // and after) have to be there, else (a plan without them) its recorded screen's heading; the same host, its
+      // frames still there.
+      const still = p.still || screenHeading(p.screen || (step.lands && step.lands.screen));
+      if (!still) return { ok: false, why: `"${p.gone}" is gone, but the plan gives no words that stay (still "…") and the recording no heading for ${(step.lands && step.lands.screen) || 'its screen'}`, words: w };
+      if (p.still && !b.still) return { ok: false, why: `"${p.still}" wasn't on the screen before the step, so it can't show it's the same page`, words: w };
+      if (!norm(w).includes(norm(still))) return { ok: false, why: `"${p.gone}" is gone, but so is "${still}"${p.still ? '' : ' (its screen\'s heading)'}`, words: w };
+      const now = await where(id);
+      if (now.host !== b.host) return { ok: false, why: `"${p.gone}" is gone, but the page is on ${now.host}, not ${b.host}`, words: w };
+      const lost = b.frames.filter(f => !now.frames.includes(f));
+      if (lost.length) return { ok: false, why: `"${p.gone}" is gone, and so is ${lost.join(', ')}`, words: w };
+      return { ok: true, words: w };
+    }
+    return { ok: false, why: `a proof it doesn't know (${p.kind})` };
+  }
+  // The page's host and its frames' hosts.
+  const where = id => cmd('js', { tab: tab(id), code: "const h = u => { try { return new URL(u).host; } catch (e) { return ''; } }; return { host: h(page.url()), frames: [...new Set(page.frames().filter(f => f !== page.mainFrame()).map(f => h(f.url())).filter(Boolean))] };" }, 30).catch(() => ({ host: '', frames: [] }));
+  // A recorded screen's own first heading (the reader's), from its snapshot and its frames'.
+  const headings = new Map();
+  function screenHeading(screen) {
+    if (!screen) return null;
+    if (headings.has(screen)) return headings.get(screen);
+    let h = null;
+    try {
+      const dir = join(demo.dir, 'data', 'snaps');
+      const docs = readdirSync(dir).filter(f => f === `${screen}.html` || f.startsWith(`${screen}.f`) && f.endsWith('.html')).sort().map(f => ({ key: f === `${screen}.html` ? 'main' : f.slice(screen.length + 1, -5), html: readFileSync(join(dir, f), 'utf8') }));
+      if (docs.length) h = (readScreen(docs).headings || [])[0] || null;
+    } catch (e) {}
+    headings.set(screen, h);
+    return h;
+  }
+  const goneBefore = new WeakMap();
   // Back from an off-plan landing: Escape, then the page before.
   async function goBack(id) {
     await send(id, 'press', { key: 'Escape' }, 30, { for: 'back from an off-plan landing' }).catch(() => {});
@@ -287,10 +420,15 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       const o = await controls(id);
       const same = (o.items || []).filter(it => !it.disabled && norm(it.name) === norm(step.target));
       if (same.length !== 1) return { missing: true, why: same.length ? `${same.length} controls called "${step.target}": a write needs exactly one` : `no "${step.target}" on this screen` };
+      const ra = await readerAgrees(id, step.target, same[0].role);
+      if (!ra.ok) return { missing: true, why: `${ra.why}: a write runs only where the reader and the page name its control alike` };
     }
     if (step.kind === 'press' && step.key === 'Enter') {
       const o = await controls(id);
-      if (!focusedField(o) && !lastField) return { missing: true, why: 'no box with the focus for Enter to send' };
+      const field = focusedField(o) || lastField;
+      if (!field) return { missing: true, why: 'no box with the focus for Enter to send' };
+      const ra = await readerAgrees(id, field.name, field.role);
+      if (!ra.ok) return { missing: true, why: `${ra.why}: a write runs only where the reader and the page name its control alike` };
     }
     const before = await controls(id).catch(() => ({}));
     let id1 = null;
@@ -302,6 +440,20 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     const ids = (() => { try { return new URL(after.url).pathname.split('/').filter(x => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(x) || /^\d{4,}$/.test(x) || /^[A-Za-z0-9_-]{20,}$/.test(x) && /\d/.test(x)); } catch (e) { return []; } })();
     return { ...r, wrote: true, result: { url: after.url || null, title: after.title || null, ids, from: before.url || null, typed: step.kind === 'press' && lastTyped[id] ? lastTyped[id] : null } };
   }
+  // Until name-parity shows the reader and a live page name every control alike, a write runs only if the reader,
+  // reading this screen's markup as it is now (each frame's), finds its control as the page does: one control by that
+  // exact name, of the same role, in the same frame.
+  async function readerAgrees(id, name, role, frame = 'page') {
+    const docs = await cmd('js', { tab: tab(id), code: "const out = []; for (const f of page.frames()) { const main = f === page.mainFrame(); let key = 'main'; if (!main) { try { key = new URL(f.url()).host; } catch (e) { key = 'a frame'; } } out.push({ key, html: await f.content().catch(() => '') }); } return out;" }, 60).catch(() => null);
+    if (!Array.isArray(docs)) return { ok: false, why: "it couldn't read the screen's markup" };
+    let rs; try { rs = readScreen(docs); } catch (e) { return { ok: false, why: `the reader couldn't read the screen (${e.message})` }; }
+    const same = (rs.controls || []).filter(c => norm(c.name) === norm(name));
+    if (same.length !== 1) return { ok: false, why: same.length ? `the reader finds ${same.length} controls called "${name}"` : `the reader finds no control called "${name}"` };
+    const c = same[0], cf = c.frame || 'page';
+    if (c.role !== role) return { ok: false, why: `the reader calls "${name}" a ${c.role}, the page a ${role}` };
+    if (cf !== frame) return { ok: false, why: `the reader finds "${name}" in ${cf}, the page in ${frame}` };
+    return { ok: true };
+  }
   const lastTyped = {};
   // What it typed and hasn't sent, by app: a beat that stops before its Enter clears it, so no run leaves a draft.
   const typedIn = {};
@@ -312,7 +464,11 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     const { el } = await locate(id, name, 'field');
     if (!el) return { cleared: false, why: `no "${name}" box to clear` };
     const hit = { for: `clear what it typed in "${name}"`, on: el.name, frame: el.fh || 'page', fit: fitOf(el.name, name) };
-    if (!el.focused) { await send(id, 'click', { x: el.x, y: el.y }, 30, hit); await sleep(250); }
+    if (!el.focused) {
+      const u = await uncovered(id, el, name, 'field');
+      if (!u.ok) return { cleared: false, in: name, why: u.why };
+      await send(id, 'click', { x: u.el.x, y: u.el.y }, 30, { ...hit, landed: u.hit }); await sleep(250);
+    }
     await send(id, 'clear', {}, 30, hit).catch(() => {});
     await quiet(id, 400, 4000);
     const left = await cmd('js', { tab: tab(id), code: "return await page.evaluate(() => { const e = document.activeElement; return e ? (e.value !== undefined ? e.value : e.innerText || '').trim() : ''; })" }, 30).catch(() => null);
@@ -332,8 +488,9 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
   async function step(at, s) {
     const id = s.kind === 'app' ? appOf(s.app) : (at && at.app) || current;
     if (!id) return { screen: at, landed: false, wrote: false, kind: 'missing', why: `no app called "${s.app}" in this demo` };
+    const prev = current;
     current = id;
-    const pre = await landsBefore(id, s);
+    const pre = await landsBefore(id, s, prev);
     const r = await act(id, s);
     if (r.missing || r.needsYou) return { screen: screenOf(id, await controls(id)), landed: false, wrote: false, kind: r.missing ? 'missing' : 'needs-you', why: r.why };
     const c = await check(id, s);
@@ -341,29 +498,69 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       if (c.kind === 'offplan') await goBack(id);
       return { screen: screenOf(id, await controls(id)), landed: false, wrote: false, kind: c.kind, why: c.why, hit: r.hit, trouble: c.trouble };
     }
-    if (pre) return { screen: c.screen, landed: false, wrote: false, kind: 'unproven', why: pre, hit: r.hit, trouble: c.trouble };
+    const why = pre || (proofOf(s) ? null : NO_PROOF);
+    if (why) return { screen: c.screen, landed: false, wrote: false, kind: 'unproven', why, hit: r.hit, trouble: c.trouble };
     return { screen: c.screen, landed: true, wrote: false, did: r.did, hit: r.hit, trouble: c.trouble };
   }
   // Words a step lands on that were on the screen before it prove nothing ("Foundry IQ" on IQ's page before its picker
-  // opens): why, for a step that moves between screens (click, hover, press), else null. Typing and scrolling stay on
-  // the screen they started on.
-  async function landsBefore(app, s) {
-    const want = s.lands && s.lands.text;
-    if (!want || !['click', 'hover', 'press'].includes(s.kind)) return null;
+  // opens): why, else null. The screen before is the one the plan was on: for "Go to X", the other app's (prev), never
+  // X's own tab, which shows its words already; the first app has none before it.
+  async function landsBefore(app, s, prev = null) {
+    const p = proofOf(s);
+    if (!p) return null;
     const id = appOf(app) || app;
-    return norm(await words(id)).includes(norm(want)) ? `"${want}" was on the screen before the step, so landing there proves nothing` : null;
+    const on = s.kind === 'app' ? (prev && prev !== id ? prev : null) : id;
+    if (!on) return null;
+    const was = on !== id ? ` (${on})` : '';
+    if (p.kind === 'gone') {
+      const w = await words(on);
+      goneBefore.set(s, { there: norm(w).includes(norm(p.gone)), still: !p.still || norm(w).includes(norm(p.still)), ...(await where(on)) });
+      return null;
+    }
+    const r = await proofHolds(on, p, s);
+    if (!r.ok) return null;
+    const what = p.kind === 'words' ? `"${p.text}"` : p.kind === 'box' ? `box "${p.box}" saying "${p.says}"` : `control "${p.control}"${p.state ? ` ${p.state}` : ''}`;
+    return `${what} was on the screen before the step${was}, so landing there proves nothing`;
   }
-  // An app on its start screen: opened again at its address (a read), then its own startSteps in demo.json, for a
-  // start screen no address reaches (Microsoft IQ's business plugin: a click on its sidebar item). They're read-only
-  // steps: one that would write is refused.
+  // After a step it couldn't prove, the next one goes on only if its control is the one: exactly one on the page or in
+  // its frames with that exact name, of the step's kind (a box to type in, else something to click). A step with no
+  // control of its own (a scroll, a wait, a key) can't show that.
+  async function uniqueControl(app, s) {
+    const id = appOf(app) || app;
+    if (!['click', 'hover', 'type'].includes(s.kind) || !s.target) return { ok: false, why: `"${formatStep(s)}" has no control of its own to find` };
+    const field = s.kind === 'type';
+    const items = await pageControls(id, field ? 'field' : undefined).catch(() => null) || [];
+    const at = new Set();
+    const same = items.filter(it => !it.disabled && norm(it.name) === norm(s.target) && (!field || it.editable || /textbox|searchbox|combobox/.test(it.role))).filter(it => { const k = `${Math.round(it.x / 4)},${Math.round(it.y / 4)}`; return at.has(k) ? false : (at.add(k), true); });
+    return same.length === 1 ? { ok: true } : { ok: false, why: same.length ? `${same.length} controls are called "${s.target}"` : `no control is called exactly "${s.target}"` };
+  }
+  // Each app's start screen as recorded: the words its first "Go to" in the plan lands on (the recording starts there).
+  async function startCheck(app, plan) {
+    const id = appOf(app) || app;
+    const s = ((plan && plan.beats) || []).flatMap(b => b.steps).find(x => x.kind === 'app' && appOf(x.app) === id);
+    if (!s) return { ok: true, skipped: 'the plan never goes to it' };
+    const p = proofOf(s);
+    if (!p) return { ok: false, why: `the plan gives ${id}'s start screen no proof` };
+    if (p.kind !== 'words') return { ok: true, skipped: p.kind };
+    for (const t0 = Date.now(); ;) {
+      if (norm(await words(id)).includes(norm(p.text))) return { ok: true };
+      if (Date.now() - t0 > 30000) return { ok: false, why: `${id} isn't on its recorded start screen: "${p.text}" isn't there` };
+      await sleep(1500);
+    }
+  }
+  // An app on its start screen: opened again at its address (a read), then its start steps in demo.json
+  // (`apps[].start`: an address and/or plan steps; `startSteps`, the older name), for a start screen no address reaches
+  // (Microsoft IQ's business plugin: a click on its sidebar item). Navigation only, under the guard: a click, a hover,
+  // a scroll or a wait; anything else is refused, and so is a step that would write.
   const starts = startUrls(demo);
   async function home(app) {
     const id = appOf(app) || app;
     await cmd('goto', { tab: tab(id), url: starts[id] }, 90).catch(e => log(`${id}: couldn't open its start screen (${e.message})`));
     await quiet(id, 800, 20000);
     const did = [];
-    for (const text of (apps.find(a => a.id === id) || {}).startSteps || []) {
+    for (const text of startSteps(apps.find(a => a.id === id))) {
       const s = parseStep(text);
+      if (!NAVIGATION.has(s.kind)) { did.push({ step: text, why: 'start steps are navigation only (a click, a hover, a scroll or a wait)', refused: true }); log(`${id}: its start step "${text}" isn't navigation: not run`); break; }
       // Its control, given time to draw (IQ's Power BI takes a while): up to 30 s.
       if (s.target) for (let i = 0; i < 5 && !(await locate(id, s.target, s.kind === 'type' ? 'field' : undefined)).el; i++) await sleep(1500);
       const r = await act(id, s).catch(e => ({ missing: true, why: e.message }));
@@ -374,5 +571,5 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     if (did.length) { const o = await controls(id).catch(() => ({})); await send(id, 'hover', { x: (o.vw || 1600) - 3, y: (o.vh || 900) - 3 }, 30, { for: 'the pointer off the start step' }).catch(() => {}); await quiet(id, 500, 5000); }
     return did;
   }
-  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
+  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, uniqueControl, startCheck, proofOf, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
 }
