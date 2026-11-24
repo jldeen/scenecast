@@ -233,13 +233,17 @@ export async function setBefore({ demo, cmd, packs = null, approval, block, walk
 // there (the app's start, the pack's address or steps, or the plan's navigation steps), proven, then read as the reader
 // reads it. recorded: the recording's walker (walker.mjs), for the routes and the start screen's rows. shot(app, name):
 // a picture of each screen read. → [{ text, from, status: 'pass' | 'wrong' | 'cant', ok, why, picture? }]
-export async function checkLines({ demo, cmd, walker, lines, plan, packs = null, recorded = null, shot = null }) {
+// count: { reads } counts the screens it reads. The lines on one screen (its app and way there) share one read, in
+// whatever order they come.
+export async function checkLines({ demo, cmd, walker, lines, plan, packs = null, recorded = null, shot = null, count = null }) {
   const appIds = (demo.cfg.apps || []).map(a => a.id), appOf = x => (walker.appOf && walker.appOf(x)) || x;
   const index = packIndex(packs, demo.cfg);
   const ctx = { plan, index, walker: recorded, values: checkValues({ plan, walker: recorded, cfg: demo.cfg, appOf }), appIds, appOf };
   const out = [];
-  let at = null, seen = null, n = 0;
+  const seenBy = new Map();
+  let n = 0;
   const visit = async (app, route) => {
+    if (count) count.reads = (count.reads || 0) + 1;
     if (route.open) await cmd('goto', { tab: appTab(demo, app), url: route.open }, 90).catch(() => {});
     else await walker.home(app);
     await walker.quiet(app, 800, 20000);
@@ -262,7 +266,8 @@ export async function checkLines({ demo, cmd, walker, lines, plan, packs = null,
     const c = checkable(line, ctx);
     if (!c.ok) { out.push({ text, from, status: 'cant', ok: false, why: c.why }); continue; }
     const key = routeKey(c.app, c.route);
-    if (key !== at) { at = key; seen = await visit(c.app, c.route); }
+    if (!seenBy.has(key)) seenBy.set(key, await visit(c.app, c.route));
+    const seen = seenBy.get(key);
     if (seen.why) { out.push({ text, from, status: 'cant', ok: false, why: seen.why }); continue; }
     let kept = null;
     if (c.claim.kind === 'rows' && recorded) {
@@ -296,6 +301,9 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   const appOfText = appTextOf(appIds);
   const did = [];
   const home = app => walker.home(app);
+  // Each phase's screens read and time (run.json reset.before/after: reads, secs).
+  const count = { reads: 0 }, t0 = Date.now();
+  const done = r => ({ ...r, reads: count.reads, secs: +((Date.now() - t0) / 1000).toFixed(1) });
   const { walkerPacks } = await import('./live.mjs');
   const packs = await walkerPacks();
   const index = packIndex(packs, demo.cfg);
@@ -365,14 +373,33 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     }
     return { ok: true, out };
   };
+  // Set first: each page its lines are read on (Opens:, else the app's start) read once, and only the lines that aren't
+  // so are set (each then on a read of its own, as approved writes).
   const setFirst = async () => {
+    const pages = new Map();
     for (const s of parsed.set) {
+      const a = appOfText(s.what);
+      if (!a) return { ok: false, why: `${s.what}: which app?` };
+      const k = `${a.app}|${s.opens || ''}`;
+      if (!pages.has(k)) pages.set(k, { app: a.app, opens: s.opens || null, lines: [] });
+      pages.get(k).lines.push({ s, rest: a.rest });
+    }
+    const todo = new Set();
+    for (const pg of pages.values()) {
+      if (pg.opens) await cmd('goto', { tab: appTab(demo, pg.app), url: pg.opens }, 60).catch(() => {}); else await home(pg.app);
+      await walker.quiet(pg.app, 800, 15000);
+      count.reads++;
+      const sc = await claimScreen(walker, cmd, appTab(demo, pg.app), pg.app);
+      for (const x of pg.lines) if (!checkClaim(x.rest, sc, { app: pg.app, pack: index.of(pg.app) }).ok) todo.add(x.s);
+    }
+    for (const s of parsed.set.filter(x => todo.has(x))) {
+      count.reads++;
       const r = await setLine({ cmd, walker, tab: a => appTab(demo, a), step, appOfText, packOf: index.of }, 'set', s);
       if (!r.ok) return r;
     }
-    return { ok: true };
+    return { ok: true, set: todo.size };
   };
-  const checkAll = () => checkLines({ demo, cmd, walker, lines: parsed.checks, plan, packs, recorded, shot });
+  const checkAll = () => checkLines({ demo, cmd, walker, lines: parsed.checks, plan, packs, recorded, shot, count });
   // After the reset did something: a line still wrong is read again once, a few seconds later. An app can still be
   // answering the undo's call when its screen reloads to be read (the page went quiet before its server did).
   const checkAfterDoing = async () => { let cs = await checkAll(); if (did.length && cs.some(c => c.status === 'wrong')) { await sleep(4000); cs = await checkAll(); } return cs; };
@@ -405,16 +432,16 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   if (phase === 'before') {
     let checks = await checkAll();
     // A line it can't read stops it here, as itself: nothing is undone for what it can't see.
-    if (cantOf(checks).length) return { ok: false, kind: 'check', how: 'reset.md', did, checks, why: `it can't read ${cantOf(checks).length === 1 ? 'a check' : `${cantOf(checks).length} checks`}: ${listOf(cantOf(checks))}` };
-    if (!wrongOf(checks).length) return { ok: true, how: 'reset.md', did, checks, why: null };
+    if (cantOf(checks).length) return done({ ok: false, kind: 'check', how: 'reset.md', did, checks, why: `it can't read ${cantOf(checks).length === 1 ? 'a check' : `${cantOf(checks).length} checks`}: ${listOf(cantOf(checks))}` });
+    if (!wrongOf(checks).length) return done({ ok: true, how: 'reset.md', did, checks, why: null });
     emit({ event: 'reset', phase, stage: 'fix', failing: wrongOf(checks).map(c => c.text) });
     const u = await runGroups(groupsFor(wrongOf(checks)));
-    if (!u.ok) return { ok: false, how: 'reset.md', did, checks, undo: u.out, why: `the undo stopped: ${u.why}` };
+    if (!u.ok) return done({ ok: false, how: 'reset.md', did, checks, undo: u.out, why: `the undo stopped: ${u.why}` });
     const st = await setFirst();
-    if (!st.ok) return { ok: false, how: 'reset.md', did, checks, undo: u.out, why: `setting the start: ${st.why}` };
+    if (!st.ok) return done({ ok: false, how: 'reset.md', did, checks, undo: u.out, why: `setting the start: ${st.why}` });
     checks = await checkAfterDoing();
     const bad = [...wrongOf(checks), ...cantOf(checks)];
-    return { ok: !bad.length, ...(cantOf(checks).length ? { kind: 'check' } : {}), how: 'reset.md', did, checks, undo: u.out, why: bad.length ? `still not as the demo starts: ${listOf(bad)}` : null };
+    return done({ ok: !bad.length, ...(cantOf(checks).length ? { kind: 'check' } : {}), how: 'reset.md', did, checks, undo: u.out, why: bad.length ? `still not as the demo starts: ${listOf(bad)}` : null });
   }
   // After: the undos of what ran, the start set again, the check; the rest only for lines read and found wrong.
   const mine = groups.filter(g => undoesAny(g, ran));
@@ -428,5 +455,5 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   }
   const bad = [...wrongOf(checks), ...cantOf(checks)];
   const ok = u.ok && st.ok && !bad.length;
-  return { ok, ...(cantOf(checks).length ? { kind: 'check' } : {}), how: 'reset.md', did, checks, undo: [...(u.out || []), ...((u2 && u2.out) || [])], why: ok ? null : [!u.ok && `the undo stopped: ${u.why}`, !st.ok && `setting the start: ${st.why}`, bad.length && `not as the demo starts: ${listOf(bad)}`].filter(Boolean).join('; ') };
+  return done({ ok, ...(cantOf(checks).length ? { kind: 'check' } : {}), how: 'reset.md', did, checks, undo: [...(u.out || []), ...((u2 && u2.out) || [])], why: ok ? null : [!u.ok && `the undo stopped: ${u.why}`, !st.ok && `setting the start: ${st.why}`, bad.length && `not as the demo starts: ${listOf(bad)}`].filter(Boolean).join('; ') });
 }
