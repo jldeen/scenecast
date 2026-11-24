@@ -55,9 +55,24 @@ export function pathTo(plan, app, screen, appOf = x => x) {
 }
 
 // A Note's steps for when an API undo can't run ("…; if it can't: Click \"More actions\" › Click \"Delete\""), in order.
+// Only a top-level › parts them: one in quotes (Click "A › B") or in parentheses ("(its More options › Delete)") is
+// part of its step.
 export function fallbackSteps(note) {
   const m = /if it can['’]t:\s*(.+)$/i.exec(String(note || ''));
-  return m ? m[1].split(/\s*›\s*/).map(x => x.trim()).filter(Boolean) : [];
+  if (!m) return [];
+  const out = [];
+  let cur = '', depth = 0, quote = null;
+  for (const ch of m[1]) {
+    if (quote) { if (ch === quote) quote = null; }
+    else if (ch === '"') quote = '"';
+    else if (ch === '“') quote = '”';
+    else if (ch === '(') depth++;
+    else if (ch === ')' && depth) depth--;
+    else if (ch === '›' && !depth) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map(x => x.trim()).filter(Boolean);
 }
 
 const quoted = s => [...String(s).matchAll(/["“]([^"“”]+)["”]/g)].map(m => m[1]);

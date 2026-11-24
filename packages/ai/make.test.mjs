@@ -1062,6 +1062,20 @@ test('an API undo\'s Note gives the steps for when it can\'t, and the approval l
   const { resetSteps } = await import('./make.mjs');
   assert.deepEqual(fallbackSteps('an API call; if it can\'t: Click "More actions for {skill}" › Click "Delete"'), ['Click "More actions for {skill}"', 'Click "Delete"']);
   assert.deepEqual(fallbackSteps('an API call, nothing else'), []);
+  // Only a top-level › parts steps: one in parentheses (the packs' by-hand steps) or in quotes is part of its step.
+  const note = steps => `an API call in the capture browser's own signed-in session, with {id} from the run; if it can't: ${steps}`;
+  assert.deepEqual(fallbackSteps(note('You: delete the task "{task}" from Recent (its More options › Delete)')), ['You: delete the task "{task}" from Recent (its More options › Delete)']);
+  assert.deepEqual(fallbackSteps(note('You: delete the comment "{comment}" (its options menu › Delete)')), ['You: delete the comment "{comment}" (its options menu › Delete)']);
+  assert.deepEqual(fallbackSteps(note('Click "A › B" › Click "Delete"')), ['Click "A › B"', 'Click "Delete"']);
+  // A reset's four Notes, as stage F's has them: 1 + 3 + 2 + 1 whole steps.
+  const four = [
+    note('You: delete the task "Fabrikam order summary" from Recent (its More options › Delete)'),
+    note('Click "More actions for order-triage" › Click "Delete" › Click "Delete"'),
+    note('Click "Certified" › You: choose no endorsement'),
+    note('You: remove "Fabrikam orders" from business plugin'),
+  ].map(fallbackSteps);
+  assert.deepEqual(four.map(x => x.length), [1, 3, 2, 1]);
+  assert.ok(four.flat().every(x => !/^\w*\)|\($/.test(x) && (x.match(/\(/g) || []).length === (x.match(/\)/g) || []).length), JSON.stringify(four));
   const list = resetSteps('# Reset: X\n\n## Undo · Chat\n\n- Go to chat\n- Undo with the app pack: chat-app:new-task\n  Undoes: beat 1, Press Enter\n  Note: an API call; if it can\'t: Click "Delete {task}"\n');
   assert.deepEqual(list.map(x => [x.text, !!x.fallback]), [['Undo with the app pack: chat-app:new-task', false], ['Click "Delete {task}"', true]]);
 });
