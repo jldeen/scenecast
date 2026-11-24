@@ -20,12 +20,11 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { findItem, nameFits, composer, searchBox } from './find.mjs';
+import { findItem, nameFits, composer, searchBox, norm } from './find.mjs';
 import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
 
-const norm = s => String(s || '').toLowerCase().replace(/[“”"'’‘]/g, '').replace(/\s+/g, ' ').trim();
 // The words of an app showing an error instead of what it should.
 const TROUBLE = /could not be loaded|couldn['’]t (?:be )?load(?:ed)?|can['’]t load|something went wrong|failed to load|unable to (?:load|sign|connect)|having trouble connecting|trouble connecting/gi;
 const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https://${s}`).host; } catch (e) { return ''; } };
