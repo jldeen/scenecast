@@ -76,7 +76,7 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHel
     { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}) } },
     { id: 'delete-task', what: 'Deletes a task', on: { kind: 'click', target: '/^Delete /' }, undo: null },
     { id: 'sync', what: 'Turns Sync on or off', on: { kind: 'switch', target: 'Sync' }, undo: { same: 'sync' } },
-    { id: 'pin-note', what: 'Pins the note', on: { kind: 'click', target: 'Pin note' }, undo: { steps: ['Click "Unpin note"'], ...(notesApi ? { api: { use: 'notes', method: 'POST', path: '/api/unpin' } } : {}) } },
+    { id: 'pin-note', what: 'Pins the note', on: { kind: 'click', target: 'Pin note' }, undo: { steps: ['Click "Unpin note"'], ...(notesApi ? { api: { use: 'notes', method: 'POST', path: '/api/unpin' } } : {}) }, check: { api: { use: 'notes', method: 'GET', path: '/api/note', made: { pinned: true } } } },
     { id: 'unpin-note', what: 'Unpins the note', on: { kind: 'click', target: 'Unpin note' }, undo: null },
   ],
   guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}), ...(stayHeld ? { stayHeld } : {}) },
@@ -161,11 +161,15 @@ try {
   times.run = Math.round((Date.now() - t0) / 1000);
   let rj = existsSync(join(DEMO, '.out', 'ai', 'run.json')) ? readRun(DEMO) : {};
   check('runs the approved plan to the end, unattended', res.code === 0 && res.done && !res.done.result.stopped && res.done.result.writes === 1, JSON.stringify({ code: res.code, err: res.err.slice(-1500), stopped: rj.stopped, done: res.done }));
+  const L = rj.landings || [], wroteAt = L.findIndex(l => l.wrote);
+  check('each landing proven on the live page, with its strength; the write only after strong ones', L.length >= 4 && L.every(l => ['strong', 'weak', 'none'].includes(l.strength) && l.got) && wroteAt === 2 && L.slice(0, wroteAt).every(l => l.strength === 'strong') && (rj.needsYou || []).length === 0, JSON.stringify(L.map(l => [l.step, l.strength, l.basis, l.got && l.got.text, l.why])));
   check('the reset before: the leftover task deleted, Sync turned off, then checked', rj.reset && rj.reset.before && rj.reset.before.ok && rj.reset.before.did.join('|') === 'tasks: Click "Delete Call Kestrel"|tasks: Click "Sync"', JSON.stringify(rj.reset && rj.reset.before));
   const w = (rj.writes || [])[0] || {};
   check('the approved write ran, and run.json keeps what it made (for the undo)', w.write === 'new-task' && w.result && w.result.ids.length === 1 && /^\d{6}$/.test(w.result.ids[0]) && w.result.typed === 'Call Kestrel', JSON.stringify(w));
   const held = (rj.guard && rj.guard.held) || [];
   check('the guard held the read-only step\'s POST, and it never reached the server', held.some(h => h.method === 'POST' && h.path === '/api/refresh' && h.held) && !tasks.log.includes('POST /api/refresh') && tasks.state().refreshes === 0, JSON.stringify({ held, log: tasks.log }));
+  const tele = (rj.guard.passed || []).find(p => p.path === '/api/telemetry');
+  check('a passed non-read names the allow entry that let it through, and its app', tele && tele.by === 'allowed' && tele.entry === `${HOST}/api/telemetry` && tele.app === 'tasks' && tele.tab === HOST, JSON.stringify(tele));
   check('the pack\'s allow-list let the app\'s telemetry through', tasks.log.includes('POST /api/telemetry') && !held.some(h => h.path === '/api/telemetry'), JSON.stringify({ held, log: tasks.log }));
   check('the server saw exactly the writes approved: one task, two deletes (before and after), Sync once', count(tasks.log, 'POST /api/tasks') === 1 && count(tasks.log, 'DELETE /api/tasks/{id}') === 2 && count(tasks.log, 'POST /api/sync') === 1, tasks.log.join(', '));
   check('the reset after: the demo as it started', rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0 && tasks.state().sync === false, JSON.stringify({ after: rj.reset.after, state: tasks.state() }));
@@ -196,12 +200,16 @@ try {
   rj = readRun(DEMO);
   const pinIn = (rj.inputs || []).find(i => i.kind === 'click' && i.on === 'Pin note');
   check('a write inside a frame: the reader agrees in its frame, the click lands on it, the guard opens the frame\'s host for it', res.code === 0 && !rj.stopped && rj.writes.length === 1 && rj.writes[0].write === 'pin-note' && count(tasks.log, 'POST notes/api/pin') === 1 && pinIn && pinIn.frame === NOTES_HOST && pinIn.landed && pinIn.landed.frame === NOTES_HOST, JSON.stringify({ stopped: rj.stopped, writes: rj.writes, pinIn, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  const pinLand = (rj.landings || []).find(l => l.step === 'Click "Pin note"');
+  check('after a write, its pack\'s read-only check passing is a strong landing', pinLand && pinLand.wrote && pinLand.strength === 'strong' && pinLand.basis === 'pack check' && pinLand.check && pinLand.check.picked && pinLand.check.picked.pinned === true, JSON.stringify(pinLand));
   check('and the reset after unpins it, in the frame', count(tasks.log, 'POST notes/api/unpin') === 1 && rj.reset.after && rj.reset.after.ok && tasks.state().pinned === false, JSON.stringify({ after: rj.reset.after, state: tasks.state() }));
   // Without the frame's host in the pack, the write's POST to it is held: it never reaches the notes server.
   writePack({ frameHost: false });
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
   rj = readRun(DEMO);
+  const pinHeld = (rj.guard.held || []).find(h => h.host === NOTES_HOST && h.path === '/api/pin');
+  check('a held request names the tab, the frame and the app it came from', pinHeld && pinHeld.tab === HOST && pinHeld.frame === NOTES_HOST && pinHeld.app === 'tasks', JSON.stringify(pinHeld));
   check('a frame\'s host the pack doesn\'t name stays held: the write never reaches it, and the run stops', rj.stopped && count(tasks.log, 'POST notes/api/pin') === 0 && tasks.state().pinned === false && (rj.guard.held || []).some(h => h.host === NOTES_HOST && h.path === '/api/pin'), JSON.stringify({ stopped: rj.stopped, held: (rj.guard.held || []).filter(h => h.host === NOTES_HOST), log: tasks.log.filter(l => !l.startsWith('GET')) }));
   writePack();
   writeFileSync(join(DEMO, 'reset.md'), RESET);
@@ -313,6 +321,17 @@ try {
   const un = (rj.unprovable || []).map(u => u.text);
   check('a step it can\'t prove: it goes on by the next control, and stops before a write, with a picture', rj.stopped && rj.stopped.kind === 'unprovable' && /a write never follows/.test(rj.stopped.why) && /Delete Call Kestrel/.test(rj.stopped.at && rj.stopped.at.text || '') && rj.stopped.picture && existsSync(rj.stopped.picture) && un.length === 2 && un.every(t => t === 'Click "Refresh"'), JSON.stringify({ stopped: rj.stopped, unprovable: rj.unprovable }));
   check('and the delete never ran: the reset after removed the run\'s task', count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ log: tasks.log, after: rj.reset.after }));
+  // A step its plan proves, but only by a live region's words ("Up to date": a status line): the check passes, the
+  // landing isn't strong. The write after it doesn't run on its own: the run stops before it, keeps a picture and
+  // both reads, lists it for her, and the reset after puts the demo back.
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('- Click "Delete Call Kestrel"\n  Writes: deletes the task "Call Kestrel" · fixture-tasks:delete-task\n  Lands on: "No tasks yet"\n'));
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const gl = (rj.landings || []).find(l => l.step === 'Click "Refresh"');
+  check('a write after a landing that isn\'t strong stops before it, with a picture and both reads, and is listed for her', rj.stopped && rj.stopped.kind === 'gate' && /Click "Refresh"/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture) && rj.stopped.reads && JSON.parse(gunzipSync(readFileSync(rj.stopped.reads))).length === 2 && gl && gl.strength !== 'strong' && (rj.needsYou || []).some(n => /Delete Call Kestrel/.test(n.text)), JSON.stringify({ stopped: rj.stopped, refresh: gl, needsYou: rj.needsYou }));
+  check('and the delete never reached the server; the reset after removed the run\'s task', count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ log: tasks.log.filter(l => !l.startsWith('GET')), after: rj.reset.after }));
   res = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
   const wu = existsSync(join(DEMO, '.out', 'ai', 'walk.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')) : { beats: [] };
   const su = (wu.beats[1] && wu.beats[1].steps[0]) || {};

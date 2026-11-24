@@ -27,6 +27,7 @@ import { landedOn } from '@stuntdouble/capture/browser.mjs';
 import { CONTROL_NAME_SRC } from '@stuntdouble/capture/page-naming.mjs';
 import { READ_DOCS_SRC } from '@stuntdouble/capture/page-read.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
+import { holds, pageWords, pnorm } from './landing.mjs';
 
 // The words of an app showing an error instead of what it should.
 // A step's proof that it landed (plan.mjs parseLands, docs/engine/plan-format.md "What proves a step"): words on the
@@ -375,29 +376,32 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
   }
   const troubleIn = t => { const m = String(t || '').match(TROUBLE); return m ? [...new Set(m.map(x => x.toLowerCase()))] : undefined; };
   // One proof against the page now: { ok, why, words? }.
-  const stateOk = (it, st) => !st || (st === 'selected' ? it.selected === 'true' : st === 'open' ? it.expanded === 'true'
-    : st === 'on' ? it.checked === 'true' || it.pressed === 'true' : st === 'off' ? it.checked === 'false' || it.pressed === 'false' : false);
+  // The page now as the reader reads a recorded screen (the recorder's serialization, every frame): a plan's proof
+  // is checked on it with the reader's own rule (landing.mjs holds), so marks and invisible characters count alike.
+  const readNow = async id => { const docs = await cmd('js', { tab: tab(id), code: READ_DOCS_SRC }, 90).catch(() => null); try { return Array.isArray(docs) ? readScreen(docs) : null; } catch (e) { return null; } };
+  const hasWords = (sc, t) => !!pnorm(t) && pageWords(sc).includes(pnorm(t));
   async function proofHolds(id, p, step) {
-    if (p.kind === 'words') { const w = await words(id); return { ok: norm(w).includes(norm(p.text)), why: `"${p.text}" isn't on the screen`, words: w }; }
-    if (p.kind === 'control' || p.kind === 'box') {
-      const items = await pageControls(id, p.kind === 'box' ? 'field' : undefined).catch(() => []) || [];
+    if (p.kind === 'words' || p.kind === 'control' || p.kind === 'box') {
+      const sc = await readNow(id);
+      if (!sc) return { ok: false, why: "it couldn't read the screen" };
+      if (holds(sc, p)) return { ok: true };
+      if (p.kind === 'words') return { ok: false, why: `"${p.text}" isn't on the screen` };
       const name = p.kind === 'box' ? p.box : p.control;
-      const named = items.filter(it => norm(it.name) === norm(name) && (p.kind !== 'box' || it.editable));
+      const named = (sc.controls || []).filter(c => !c.shut && pnorm(c.name) === pnorm(name));
       if (!named.length) return { ok: false, why: `no ${p.kind === 'box' ? 'box' : 'control'} called "${name}" on the screen` };
-      if (p.kind === 'box') return named.some(it => norm(it.value).startsWith(norm(p.says))) ? { ok: true } : { ok: false, why: `"${name}" doesn't say "${p.says}"` };
-      return named.some(it => stateOk(it, p.state)) ? { ok: true } : { ok: false, why: `"${name}" isn't ${p.state}` };
+      return { ok: false, why: p.kind === 'box' ? `"${name}" doesn't say "${p.says}"` : `"${name}" isn't ${p.state}` };
     }
     if (p.kind === 'gone') {
-      const w = await words(id), b = goneBefore.get(step);
+      const w = await words(id), sc = await readNow(id), b = goneBefore.get(step);
       if (!b || !b.there) return { ok: false, why: `"${p.gone}" wasn't on the screen before the step`, words: w };
-      if (norm(w).includes(norm(p.gone))) return { ok: false, why: `"${p.gone}" is still on the screen`, words: w };
+      if (!sc || hasWords(sc, p.gone)) return { ok: false, why: sc ? `"${p.gone}" is still on the screen` : "it couldn't read the screen", words: w };
       // Words gone also pass on a blank page, an error or a wrong page: its still words (the page's own, there before
       // and after) have to be there, else (a plan without them) its recorded screen's heading; the same host, its
       // frames still there.
       const still = p.still || screenHeading(p.screen || (step.lands && step.lands.screen));
       if (!still) return { ok: false, why: `"${p.gone}" is gone, but the plan gives no words that stay (still "…") and the recording no heading for ${(step.lands && step.lands.screen) || 'its screen'}`, words: w };
       if (p.still && !b.still) return { ok: false, why: `"${p.still}" wasn't on the screen before the step, so it can't show it's the same page`, words: w };
-      if (!norm(w).includes(norm(still))) return { ok: false, why: `"${p.gone}" is gone, but so is "${still}"${p.still ? '' : ' (its screen\'s heading)'}`, words: w };
+      if (!hasWords(sc, still)) return { ok: false, why: `"${p.gone}" is gone, but so is "${still}"${p.still ? '' : ' (its screen\'s heading)'}`, words: w };
       const now = await where(id);
       if (now.host !== b.host) return { ok: false, why: `"${p.gone}" is gone, but the page is on ${now.host}, not ${b.host}`, words: w };
       const lost = b.frames.filter(f => !now.frames.includes(f));
@@ -540,8 +544,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     if (!on) return null;
     const was = on !== id ? ` (${on})` : '';
     if (p.kind === 'gone') {
-      const w = await words(on);
-      goneBefore.set(s, { there: norm(w).includes(norm(p.gone)), still: !p.still || norm(w).includes(norm(p.still)), ...(await where(on)) });
+      const sc = await readNow(on);
+      goneBefore.set(s, { there: !!sc && hasWords(sc, p.gone), still: !p.still || (!!sc && hasWords(sc, p.still)), ...(await where(on)) });
       return null;
     }
     const r = await proofHolds(on, p, s);

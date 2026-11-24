@@ -17,13 +17,16 @@ import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
-import { formatStep, stepCount } from './plan.mjs';
+import { formatStep, formatLands, stepCount } from './plan.mjs';
 import { recordOpts } from '@stuntdouble/core/lib/demo.mjs';
 import { rx, settled, aiDir, appTab } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 import { approval as approvalOf } from './make.mjs';
 import { liveWalker, walkerPacks } from './live.mjs';
-import { runReset } from './reset-run.mjs';
+import { runReset, fillApi } from './reset-run.mjs';
+import { liveProof, writeGate, proofWords } from './landing.mjs';
+import { walkerFromDemo } from './walker.mjs';
+import { readScreen } from '@scenecast/script/html.mjs';
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i;
 
@@ -49,7 +52,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
-  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], writes: [], unprovable: [], starts: [], stopped: null, reset: {}, guard: {}, events: [] };
+  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [] };
   const save = () => writeFileSync(join(out, 'run.json'), JSON.stringify(run, null, 1));
   const shot = async (app, name) => { const file = join(stops, `${name}.png`); try { await cmd('capShot', { tab: appTab(demo, app), file }, 60); return file; } catch (e) { return null; } };
   const stopWith = async (app, at, kind, why) => { run.stopped = { kind, why, at, app, picture: await shot(app, `${at.beat + 1}-${at.step + 1}-${kind}`) }; emit({ event: 'stopped', ...run.stopped }); };
@@ -89,10 +92,39 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // A failed check stops it. A step it can't prove (the plan gives no proof, or its words were on the screen before)
     // goes in run.unprovable, and then the next step goes on only if its control is the one (exactly one, by its exact
     // name, of its kind), and never if it's a write: the step before every write has a proven landing.
+    // Each landing proven on the live page (landing.mjs liveProof): the page read before the step and twice after it,
+    // in the reader's shape. strong, weak or none goes in run.landings; after a write, its pack's read-only check
+    // passing is strong. A write goes on only as writeGate says: the landings in its app since its last write all
+    // strong. The run never asks: where it would, it stops before the write, keeps a picture and both reads, runs the
+    // reset after, and lists the step in run.needsYou.
+    const recWalker = (() => { try { return walkerFromDemo(demo); } catch (e) { return null; } })();
+    const flat = plan.beats.flatMap((b, bi) => b.steps.map((s, si) => ({ bi, si, s })));
+    const nextActing = (bi, si) => { const i = flat.findIndex(x => x.bi === bi && x.si === si); return ((flat.slice(i + 1).find(x => x.s.target && /^(click|type|press|hover)$/.test(x.s.kind))) || {}).s || null; };
+    const screensOf = reads => (reads || []).map(r => { try { return readScreen(r.docs); } catch (e) { return null; } }).filter(Boolean);
+    const typedSoFar = [], lastReads = {};
+    const packCheck = known => {
+      const p = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(x => x && x.id === known.pack) : null;
+      const pw = p && (p.writes || []).find(x => x.id === known.write);
+      const api = pw && pw.check && pw.check.api, at2 = api && p.apis && p.apis[api.use];
+      return api && at2 && api.made !== undefined && /^(GET|HEAD)$/i.test(api.method || 'GET') ? { api, at: at2 } : null;
+    };
+    // The pack's check of what the write made (check.api.made: a status, or the number and true/false fields it
+    // names), in the app's own session as the write's own calls carried it, the page left where it is.
+    const runPackCheck = async (pc, id) => {
+      const f = fillApi(pc.api, results, ((demo.cfg.apps || []).find(a => a.id === id) || {}).values);
+      if (f.left.length) { await cmd('capAuthWatch', { off: true }, 30).catch(() => {}); return { ok: false, why: `it needs ${f.left.join(', ')}` }; }
+      const made = pc.api.made, pick = made && typeof made === 'object' ? Object.keys(made) : null;
+      const r = await cmd('capApi', { tab: appTab(demo, id), armed: true, host: pc.at.host, hostPattern: pc.at.hostPattern, from: pc.at.from || null, method: pc.api.method || 'GET', path: f.path, pick, waitS: 20 }, 90).catch(e => ({ ok: false, why: e.message }));
+      if (!r.status) return { ok: false, why: r.why || 'no answer' };
+      const ok = pick ? pick.every(k => [].concat(made[k]).includes(r.picked && r.picked[k])) : String(r.status) === String(made);
+      return { ok, status: r.status, ...(r.picked ? { picked: r.picked } : {}) };
+    };
     const lastDid = {};
     let doubt = null;
     const doStep = async (bi, si, step, at, prev) => {
       const pre = await w.landsBefore(app, step, prev);
+      // The page before it: for a Go to, the screen before it in plan order (the app it leaves); none before the first.
+      const before = bi === 0 && si === 0 ? [] : await w.reads(step.kind === 'app' ? prev : app, { n: 1 }).catch(() => []);
       // Would it write? Read the screen as the step will find it.
       let wr = null;
       if (step.kind === 'click' || step.kind === 'press') {
@@ -102,16 +134,21 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       } else if (step.writes) wr = w.writeOf(step, null, null, null);
       if (doubt) {
         const before = `the step before it (${doubt.text}) couldn't be proven (${doubt.why})`;
-        if (wr) return { kind: 'unprovable', why: `${before}, and a write never follows a step it couldn't prove` };
+        if (wr) return { kind: 'unprovable', why: `${before}, and a write never follows a step it couldn't prove`, beforeWrite: true };
         if (step.kind !== 'app') { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; }
       }
-      let r;
+      let r, checked = null;
       if (wr) {
-        if (!ap.writes.some(x => x.beat === bi && x.step === si && x.text === at.text)) return { kind: 'unapproved', why: `${wr.why}, and the approved plan doesn't list it as a write` };
+        if (!ap.writes.some(x => x.beat === bi && x.step === si && x.text === at.text)) return { kind: 'unapproved', why: `${wr.why}, and the approved plan doesn't list it as a write`, beforeWrite: true };
         // Its app's pack knows it (the plan names the pack's write; the pack's own match finds it on this page).
         const known = await packKnows(packs, w, app, step, wr);
-        if (!known.ok) return { kind: 'unknown-write', why: known.why };
+        if (!known.ok) return { kind: 'unknown-write', why: known.why, beforeWrite: true };
+        const gate = writeGate(run.landings, app);
+        if (!gate.ok) return { kind: 'gate', why: `${gate.why}: a write runs on its own only after strong landings in its app`, beforeWrite: true };
+        const pc = packCheck(known);
+        if (pc) await cmd('capAuthWatch', { host: pc.at.host, hostPattern: pc.at.hostPattern, from: pc.at.from || null }, 30).catch(() => {});
         r = await w.write(app, step);
+        if (pc) checked = r.wrote ? await runPackCheck(pc, app) : (await cmd('capAuthWatch', { off: true }, 30).catch(() => {}), null);
         if (r.wrote) {
           const rec = { beat: bi + 1, step: si, text: at.text, writes: step.writes || wr.why, pack: known.pack, write: known.write, undo: step.undo || known.undo || null, result: r.result };
           run.writes.push(rec); ran.push({ beat: bi + 1, text: at.text });
@@ -121,9 +158,17 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       } else r = await w.act(app, step);
       if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why };
       const c = await w.check(app, step);
+      const afters = await w.reads(app).catch(() => []);
+      lastReads[app] = afters;
       if (!c.ok) return { kind: c.kind, why: c.why };
-      const why = pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
-      if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
+      const lp = liveProof(step, { before: screensOf(before), afters: screensOf(afters), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
+      const byCheck = !!(checked && checked.ok);
+      const strength = byCheck ? 'strong' : lp.strength;
+      const url = (await w.controls(app).catch(() => ({}))).url || null;
+      run.landings.push({ beat: bi + 1, index: si, app, step: at.text, expected: step.lands ? formatLands(step.lands) : null, got: { screen: c.screen || null, url, text: byCheck ? `the pack's check: ${checked.status}${checked.picked ? ` ${JSON.stringify(checked.picked)}` : ''}` : proofWords(lp.lands) }, ok: true, strength, basis: byCheck ? 'pack check' : 'live', ...(strength === 'strong' ? {} : { why: lp.why }), ...(r.wrote ? { wrote: true } : {}), ...(checked ? { check: checked } : {}) });
+      if (step.kind === 'type' && step.value) typedSoFar.push(step.value);
+      const why = strength === 'strong' ? null : pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
+      if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
       else doubt = null;
       Object.assign(lastDid, { did: r.did, screen: c.screen });
       return null;
@@ -140,7 +185,16 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (step.kind === 'app') app = w.appOf(step.app) || app;
         const ts = Date.now();
         const stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
-        if (stop) { await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`); break outer; }
+        if (stop) {
+          await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
+          // Before a write: both reads of the page as it was, and the step for her (the reset after still runs).
+          if (stop.beforeWrite) {
+            const reads = lastReads[app];
+            if (reads && reads.length) { mkdirSync(stops, { recursive: true }); run.stopped.reads = join(stops, `${bi + 1}-${si + 1}-${stop.kind}.reads.json.gz`); writeFileSync(run.stopped.reads, gzipSync(JSON.stringify(reads))); }
+            run.needsYou.push({ beat: bi + 1, step: si, text: at.text, why: stop.why });
+          }
+          break outer;
+        }
         run.steps.push({ ...at, app, did: lastDid.did, secs: +((Date.now() - ts) / 1000).toFixed(1), screen: lastDid.screen });
         emit({ event: 'step-done', beat: bi, step: si, did: lastDid.did });
       }
@@ -160,7 +214,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       emit({ event: 'stage', name: 'reset-after', label: 'Putting the demo back as it started' });
       try { run.reset.after = await runReset({ demo, cmd, walker: liveWalker({ demo, cmd, packs, log }), phase: 'after', approval: ap, ran, results, emit }); } catch (e) { run.reset.after = { ok: false, why: e.message }; }
     }
-    { const off = await guardOff(cmd, g.hosts); keepBodiesOut(demo, off.bodies); Object.assign(run.guard, off); }
+    { const off = await guardOff(cmd, g.hosts, senderApps(demo.cfg, packs)); keepBodiesOut(demo, off.bodies); Object.assign(run.guard, off); }
     if (wRun) run.inputs = wRun.inputs();
     try { run.events = (await cmd('capEvents', {}, 30)).events.filter(e => e.kind !== 'navigated'); } catch (e) {}
     save();
@@ -211,11 +265,26 @@ function keepBodiesOut(demo, bodies) {
   if (bodies && bodies.length) { mkdirSync(aiDir(demo), { recursive: true }); writeFileSync(f, JSON.stringify(bodies, null, 1)); }
   else rmSync(f, { force: true });
 }
-async function guardOff(cmd, hosts) {
+// Each app's hosts (its address and match, its pack's match, guard hosts and frames), to name the app a request came
+// from by its tab, else its frame: never by when it came (a background tab sends during another app's step).
+export function senderApps(cfg, packs) {
+  const byApp = packs && packs.packsForDemo ? packs.packsForDemo(cfg) || {} : {};
+  const hostOf = x => { try { return new URL(/^[a-z]+:\/\//i.test(x) ? x : `https://${x}`).host; } catch (e) { return null; } };
+  const list = ((cfg && cfg.apps) || []).map(a => {
+    const p = byApp[a.id] || {}, hs = new Set([hostOf(a.url), hostOf(a.match)].filter(Boolean));
+    for (const m of [...(p.match || []), ...(((p.guard || {}).hosts) || []), ...(((p.frames || {}).match) || [])]) { const h = hostOf(m); if (h && !h.includes('*')) hs.add(h); }
+    return { id: a.id, hosts: [...hs] };
+  });
+  const is = (host, h) => { if (!host) return false; const bare = host.replace(/:\d+$/, ''); return host === h || bare === h || bare.endsWith('.' + h); };
+  return e => { for (const k of ['tab', 'frame']) { const a = list.find(x => x.hosts.some(h => is(e && e[k], h))); if (a) return a.id; } return null; };
+}
+
+async function guardOff(cmd, hosts, appOf = () => null) {
   const out = {};
   try {
     const l = await cmd('capLog', {}, 30);
-    out.held = l.held; out.counts = l.counts; out.passed = l.passed || [];
+    const named = list => (list || []).map(h => ({ ...h, app: appOf(h) }));
+    out.held = named(l.held); out.counts = l.counts; out.passed = named(l.passed);
     // Kept bodies go in a file of their own (keepBodiesOut), never in run.json or walk.json.
     if (l.bodies && l.bodies.length) Object.defineProperty(out, 'bodies', { value: l.bodies, enumerable: false });
     const own = h => hosts.some(x => h === x || h.replace(/:\d+$/, '') === x || h.replace(/:\d+$/, '').endsWith('.' + x));
@@ -259,16 +328,18 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   // can change what a page shows).
   const stepAt = {};
   let lastEnd = Date.now(), heldSince = 0;
-  const heldIn = async (from, to) => {
+  const appOfSender = senderApps(demo.cfg, packs);
+  const heldIn = async (from, to, app) => {
     const l = await cmd('capLog', { since: heldSince }, 30).catch(() => null);
     if (!l) return [];
     const list = l.held || [], upTo = list.findIndex(h => Date.parse(h.at) > to);
     heldSince += upTo < 0 ? list.length : upTo;
     const by = new Map();
     for (const h of list) {
-      const t = Date.parse(h.at);
-      if (t < from || t > to) continue;
-      const k = `${h.method} ${h.host}${h.path}`, x = by.get(k) || { method: h.method, host: h.host, path: h.path, n: 0 };
+      const t = Date.parse(h.at), sent = appOfSender(h);
+      // The step's own app's (another tab's calls in its window aren't its), and ones no app can be named for.
+      if (t < from || t > to || (sent && app && sent !== app)) continue;
+      const k = `${h.method} ${h.host}${h.path}`, x = by.get(k) || { method: h.method, host: h.host, path: h.path, ...(h.frame ? { frame: h.frame } : {}), app: sent, n: 0 };
       x.n++; by.set(k, x);
     }
     return [...by.values()];
@@ -314,7 +385,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
           sn = await w.screenNow(e.app).catch(err => ({ error: err.message }));
           await keepReads(`${e.beat}-${e.step + 1}`, e.app);
         }
-        const to = Date.now(), held = await heldIn(from, to);
+        const to = Date.now(), held = await heldIn(from, to, e.app ? w.appOf(e.app) || e.app : null);
         stepAt[`${e.beat}-${e.step}`] = { from: new Date(from).toISOString(), to: new Date(to).toISOString(), held };
         if (sn) writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn, held }, null, 1));
         lastEnd = to;
@@ -338,7 +409,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     }
     if (walk) walk.heldWhileDrifted = heldWhileDrifted(walk);
     if (walk) walk.starts = seenAt.starts || [];
-    const off = await guardOff(cmd, g.hosts);
+    const off = await guardOff(cmd, g.hosts, appOfSender);
     keepBodiesOut(demo, off.bodies);
     walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}

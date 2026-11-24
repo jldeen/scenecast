@@ -13,6 +13,7 @@ import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
 import { heldWhileDrifted } from './walk.mjs';
+import { senderApps } from './unattended.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -227,4 +228,14 @@ test("what the guard held only while a landing drifted or missed: off telemetry,
     { kind: 'POST api.example.com/search', n: 1, steps: ['2-1'] },
     { kind: 'POST titles.example.com/titles/query', n: 3, steps: ['2-2', '2-4'] },
   ]);
+});
+
+test("the app a request came from: its tab's host, else its frame's, by each app's and its pack's hosts", () => {
+  const cfg = { apps: [{ id: 'iq', url: 'https://iq.example.com/' }, { id: 'chat', url: 'https://chat.example.com/' }] };
+  const packs = { packsForDemo: () => ({ iq: { match: ['iq.example.com'], guard: { hosts: ['api.example.net'] }, frames: { match: ['frames.example.org'] } } }) };
+  const appOf = senderApps(cfg, packs);
+  assert.equal(appOf({ tab: 'iq.example.com', frame: 'x.frames.example.org' }), 'iq');
+  assert.equal(appOf({ tab: 'chat.example.com:443', frame: 'cdn.example.com' }), 'chat');
+  assert.equal(appOf({ tab: null, frame: 'x.frames.example.org' }), 'iq');
+  assert.equal(appOf({ tab: 'other.example.com', frame: null }), null);
 });

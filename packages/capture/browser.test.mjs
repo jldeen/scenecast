@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld, allowedBy } from './browser.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
 
@@ -186,4 +186,11 @@ test("a pack's stay-held entries: its own background calls, matched as allow ent
   assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":""}' }, list), true);
   assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":"x"}' }, list), false);
   assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/refresh' }, []), false);
+});
+
+test('the allow entry that let a request through', () => {
+  const allow = ['api.example.com/v1/telemetry', '/^POST api\\.example\\.com\\/v1\\/search$/ when body /^\\{"q":""\\}$/'];
+  assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/telemetry/x' }, allow), allow[0]);
+  assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":""}' }, allow), allow[1]);
+  assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":"x"}' }, allow), null);
 });
