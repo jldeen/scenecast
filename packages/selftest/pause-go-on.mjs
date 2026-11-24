@@ -14,10 +14,12 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { buildExtension } from '@stuntdouble/capture/build.mjs';
 import { send } from '@stuntdouble/capture/cli.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RX = 47707, WEB = 47907;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-pause-'));
+await selftestGuard({ tmp, receivers: [RX], extensions: [RX] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1200)}` : '')); if (!ok) fails.push(name); };

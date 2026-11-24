@@ -15,11 +15,13 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { buildExtension } from '@stuntdouble/capture/build.mjs';
 import { send } from '@stuntdouble/capture/cli.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const KIT = join(HERE, '..', 'core', 'bin', 'engine.mjs');
 const RX = 47697, WEB = 47897;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-redirect-'));
+await selftestGuard({ tmp, receivers: [RX], extensions: [RX] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1500)}` : '')); if (!ok) fails.push(name); };

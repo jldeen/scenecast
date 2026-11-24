@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
+import { selftestGuard } from './guard.mjs';
 
 const temp = mkdtempSync(join(tmpdir(), 'scenecast-mixed-'));
+await selftestGuard({ tmp: temp });
 const bundle = join(temp, 'bundle'), output = join(temp, 'export');
 const binary = process.env.SCENECAST_BIN ? resolve(process.env.SCENECAST_BIN) : resolve('target/debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');

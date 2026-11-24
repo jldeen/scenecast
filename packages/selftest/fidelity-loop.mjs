@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright-core';
 import { startLab } from '../../examples/fixture-app/lab.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -19,6 +20,7 @@ if (!existsSync(BIN)) { console.log(`no scenecast binary at ${BIN}: cargo build 
 const keep = process.argv.includes('--keep');
 const RX_PORT = 47693, REPLICA_PORT = 4698, LAB_PORT = 47803;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-fidelity-'));
+await selftestGuard({ tmp, receivers: [RX_PORT], extensions: [RX_PORT] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 3000)}` : '')); if (!ok) fails.push(name); };
