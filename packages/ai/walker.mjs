@@ -368,14 +368,18 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
   };
   // Every text the recording typed (its boxes' values, the path's typing): another step's words, never a proof.
   const typedTexts = () => [...new Set([...Object.values(S).flatMap(st => (st.fill || []).map(f => f.value)), ...recPath.filter(p => p.type && p.text).map(p => p.text)].filter(v => typeof v === 'string' && v.trim()))];
-  // Whether a step landed as its plan says, on the screen a walk reached (`at`): its "Lands on" proof, checked the way a
-  // run checks the live page (landing.mjs). ok: true, false, or null when the step has nothing to check it by.
-  // Typing the recording didn't capture with these words (the plan's own prompt where another was recorded) can't be
-  // checked here; a run checks it.
+  // Whether a step landed as its plan says, on the screen a walk reached (`at`): the screen its "Lands on" names, and
+  // its proof holding there, checked the way a run checks the live page (landing.mjs). → { ok, why }: ok is true or
+  // false (a walk counts anything else as a miss); why says what's wrong, or what wasn't checked. A step with nothing
+  // to land on passes. Typing the recording didn't capture with these words (the plan's own prompt where another was
+  // recorded) passes with a note: the recording can't show it, a run checks it.
   function landed(at, s) {
-    const sig = sigOf(at), sc = screen(sig), l = s && s.lands;
-    if (!l || !l.kind) return { ok: null, why: 'nothing to check this step by' };
+    const sig = sigOf(at), l = s && s.lands;
+    if (!l || (!l.screen && !l.kind)) return { ok: true, why: null };
+    if (l.screen && sig !== l.screen) return { ok: false, why: `on ${sig}, not ${l.screen}` };
+    const sc = screen(sig);
     if (!sc) return { ok: false, why: `no screen ${sig}` };
+    if (!l.kind) return { ok: true, why: 'nothing to check this step by' };
     if (s.kind === 'type' && (s.differs || (l.kind === 'box' && !sc.controls.some(c => isBox(c) && c.value)))) return { ok: true, why: `the recording has other words typed here${s.differs ? `: ${s.differs}` : ''}` };
     return holds(sc, l) ? { ok: true, why: null } : { ok: false, why: `${proofWords(l)} isn't on ${sig}` };
   }

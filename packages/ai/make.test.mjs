@@ -321,7 +321,11 @@ test('typing lands on its own words, never what was recorded in the box: Differs
   assert.deepEqual(walker.landed('chat-typed', same), { ok: true, why: null });
   assert.equal(walker.landed('chat-typed', other).ok, true);
   assert.match(walker.landed('chat-typed', other).why, /^the recording has other words typed here/);
-  assert.deepEqual(walker.landed('chat-home', same), { ok: false, why: "“What's changed on PO-1?” isn't on chat-home" });
+  // Somewhere else, or a proof that doesn't hold (a hand edit), is a miss; nothing to land on passes.
+  assert.deepEqual(walker.landed('chat-home', same), { ok: false, why: 'on chat-home, not chat-typed' });
+  assert.deepEqual(walker.landed('chat-typed', { ...same, lands: { screen: 'chat-typed', kind: 'words', text: 'Not there' } }), { ok: false, why: '“Not there” isn\'t on chat-typed' });
+  assert.deepEqual(walker.landed('chat-typed', { kind: 'wait' }), { ok: true, why: null });
+  assert.deepEqual(walker.landed('chat-typed', { kind: 'press', key: 'Escape', lands: { screen: 'chat-typed', kind: null, text: null } }), { ok: true, why: 'nothing to check this step by' });
   // A box whose words aren't in the page's (an input): what it says.
   const field = { controls: [{ role: 'textbox', name: 'Promo code', editable: 'field', value: 'SPRING25' }], items: [{ text: 'Checkout' }], headings: [] };
   const empty = { controls: [{ role: 'textbox', name: 'Promo code', editable: 'field' }], items: [{ text: 'Checkout' }], headings: [] };
