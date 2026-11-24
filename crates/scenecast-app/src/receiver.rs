@@ -203,6 +203,49 @@ fn is_for(ping: &Value, dir: &Path) -> bool {
         .is_some_and(|d| same_dir(Path::new(d), dir))
 }
 
+/// In a test (`SCENECAST_TEST_FENCE`: its own folders, by the path list separator), only a receiver of its own makes
+/// way: its demo and raw folders are inside them. Another test's, or a presenter's, is never asked to quit.
+fn test_fence() -> Option<Vec<PathBuf>> {
+    let v = std::env::var_os("SCENECAST_TEST_FENCE")?;
+    let dirs: Vec<PathBuf> = std::env::split_paths(&v)
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| real(&p))
+        .collect();
+    (!dirs.is_empty()).then_some(dirs)
+}
+
+/// A path as it really is (macOS's /var is /private/var), for one that doesn't exist yet too: its nearest folder that
+/// does, resolved, with the rest after it.
+fn real(p: &Path) -> PathBuf {
+    let mut at = p.to_path_buf();
+    let mut rest = Vec::new();
+    while !at.exists() {
+        let (Some(name), Some(up)) = (
+            at.file_name().map(|n| n.to_owned()),
+            at.parent().map(Path::to_path_buf),
+        ) else {
+            return p.to_path_buf();
+        };
+        rest.push(name);
+        at = up;
+    }
+    let mut out = std::fs::canonicalize(&at).unwrap_or(at);
+    out.extend(rest.iter().rev());
+    out
+}
+
+fn may_make_way(ping: &Value, fence: Option<&[PathBuf]>) -> bool {
+    let Some(dirs) = fence else {
+        return true;
+    };
+    let inside = |k: &str| {
+        ping[k]
+            .as_str()
+            .is_some_and(|p| dirs.iter().any(|d| real(Path::new(p)).starts_with(d)))
+    };
+    inside("demo") && (ping["raw"].is_null() || inside("raw"))
+}
+
 fn child_alive(child: &mut Option<Child>) -> bool {
     match child {
         Some(c) => matches!(c.try_wait(), Ok(None)),
@@ -275,8 +318,11 @@ impl ReceiverHost {
                         g.port = Some(port);
                         return Ok(());
                     }
-                    // Another demo's scenecast receiver, left running: it makes way.
-                    Some(p) if p["scenecast"] == "receiver" => {
+                    // Another demo's scenecast receiver, left running: it makes way (in a test, only its own).
+                    Some(p)
+                        if p["scenecast"] == "receiver"
+                            && may_make_way(&p, test_fence().as_deref()) =>
+                    {
                         let _ = request(port, "POST", "/quit", Duration::from_millis(1500));
                         let t = Instant::now();
                         while listening(port) && t.elapsed() < Duration::from_secs(3) {
@@ -286,6 +332,10 @@ impl ReceiverHost {
                             why.push(format!("{port}: another receiver won't stop"));
                             continue;
                         }
+                    }
+                    Some(p) if p["scenecast"] == "receiver" => {
+                        why.push(format!("{port}: another receiver, not this test's"));
+                        continue;
                     }
                     Some(_) => {
                         why.push(format!("{port}: an older scenecast receiver"));
@@ -463,6 +513,20 @@ pub fn engine_for(dir: &Path) -> Result<scenecast_build::Engine, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn in_a_test_only_its_own_receivers_make_way() {
+        let tmp = std::env::temp_dir().join(format!("sc-fence-{}", std::process::id()));
+        std::fs::create_dir_all(tmp.join("demo")).unwrap();
+        let fence = [real(&tmp)];
+        let own = serde_json::json!({ "scenecast": "receiver", "demo": tmp.join("demo"), "raw": tmp.join("raw") });
+        let hers = serde_json::json!({ "scenecast": "receiver", "demo": "/Users/someone/Documents/Scenecast/demo", "raw": tmp.join("raw") });
+        assert!(may_make_way(&own, Some(&fence)));
+        assert!(!may_make_way(&hers, Some(&fence)));
+        // Outside a test, any demo's receiver makes way, as before.
+        assert!(may_make_way(&hers, None));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn a_slow_receiver_is_not_restarted_at_once() {
