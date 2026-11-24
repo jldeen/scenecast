@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync, mkdirSync, copyFileSync, rmSync } from 'no
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fencePort, fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
+import { CONTROL_NAME_SRC } from './page-naming.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = f => readFileSync(join(here, f), 'utf8');
@@ -20,7 +21,7 @@ export function core() {
   return `const SER = ${JSON.stringify(read('serialize.js'))};
 const HOVER_PAGE = ${JSON.stringify(strip(read('hover-page.js')))};
 const REC_PAGE = ${JSON.stringify(strip(read('recorder-page.js')))};
-const OUTLINE_PAGE = ${JSON.stringify(strip(read('outline-page.js')))};
+const OUTLINE_PAGE = ${JSON.stringify(strip(read('outline-page.js')).replace('/*CONTROL_NAME*/', CONTROL_NAME_SRC))};
 ${read('driver.js')}
 const SIDE_HOVERS = async (ARGS) => {
 ${read('flows/hover-audit.js')}
