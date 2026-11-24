@@ -69,7 +69,7 @@ async function main() {
     }
     case 'approve': { const { approve } = await import('./make.mjs'); return approve(demo()); }
     case 'reset': { const { writeReset } = await import('./make.mjs'); const r = await writeReset(demo()); return { undo: r.reset.undo.length, checks: r.reset.checks.length, needs: r.reset.needs, file: 'reset.md' }; }
-    case 'reground': { const { reground } = await import('./reground.mjs'); return reground(demo(), { from: arg(args, '--walk', null), plan: arg(args, '--plan', null) }); }
+    case 'reground': { const d = demo(); const { reground } = await import('./reground.mjs'); const { loadPacks } = await import('./make.mjs'); return reground(d, { from: arg(args, '--walk', null), plan: arg(args, '--plan', null), packs: await loadPacks(d) }); }
     case 'finish': { const { finish } = await import('./finish.mjs'); return finish({ demo: demo(), emit }); }
     case 'record': {
       const d = demo();

@@ -611,6 +611,9 @@ test('proofs on today\'s product: kept, new, today only, behind a write, missed;
     ['Click "Sale"', 'sale · "Spring sale"', 'missed', 'no “Sale” on this screen'],
   ]);
   assert.equal(formatLands(plan.beats[1].steps[0].lands), 'home · "Shop the catalog"');
+  // What a capture of today's product would lose: words and controls the recorded screen has, and both reads lack.
+  assert.deepEqual([rows[1].missing, rows[2].missing], [{ words: ['Spring catalog'], controls: [] }, { words: ['Fabrikam Boots details'], controls: ['Sale'] }]);
+  assert.match(formatReground(rows), /## Missing since the recording[\s\S]*\| 1 \| Click "Fabrikam Boots" \| item \| “Fabrikam Boots details” \| “Sale” \|/);
   const greeting = regroundPlan(parsePlan(text), { walker: { ...walker, unstable: null }, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[6];
   assert.equal(greeting.now, 'home · "Good to see you again"');
   assert.match(formatReground(rows), /\| Kept: it holds today and in the recording \| 2 \|\n\| New: it holds today and in the recording \| 2 \|\n\| Today's product only: it changed since the recording \| 1 \|/);
@@ -642,17 +645,35 @@ test('proofs on today\'s product: kept, new, today only, behind a write, missed;
     ['write', 'home · control "Catalog"', `needs ${needs}`],
     ['write', 'sale · "Spring sale"', `needs ${needs} (the walk: no “Sale” on this screen)`],
   ]);
-  // While a step ran, the guard held requests. A kind it also held while a step landed as planned is the app's own
-  // background; one it held only while steps didn't may have broken the page, so that step keeps its proof and goes on
-  // Needs you, to check the pack first. By time (the walk's inputs and reads), or the walk's own held list for a step.
-  const events = { method: 'POST', host: 'telemetry.contoso.test', path: '/events' }, items = n => ({ method: 'GET', host: 'api.contoso.test', path: `/catalog/${n}/items` });
+  // The guard held requests while the walk ran. Telemetry, and what a pack has reviewed as staying held, change
+  // nothing; anything else may have broken its app's page, from then on: a step of that app that doesn't land as
+  // planned keeps its proof and goes on Needs you, to check the pack first. By time (the walk's inputs and reads), or
+  // the walk's own held list for a step.
+  const events = { method: 'POST', host: 'telemetry.contoso.test', path: '/events' }, items = n => ({ method: 'POST', host: 'api.contoso.test', path: `/catalog/${n}/items` });
   const guarded = { ...walk, starts: [{ app: 'shop' }], inputs: [{ at: at(25), for: 'Click "Fabrikam Boots"' }], guard: { held: [{ ...events, at: at(5) }, { ...items(2026), at: at(27) }, { ...events, at: at(28) }] } };
   writeFileSync(join(walkDir, 'walk-screens', '2-1.json'), JSON.stringify({ beat: 2, step: 1, held: [items(2027)] }));
-  const g = regroundPlan(parsePlan(text), { walker, walk: guarded, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
-  const held = 'the guard held GET api.contoso.test/catalog/*/items; check the pack before adopting';
-  assert.deepEqual(g.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'missed']);
-  assert.deepEqual([g[2].now, g[2].why, g[6].now, g[6].why], ['item · "Fabrikam Boots details"', held, 'home · control "Catalog"', held]);
-  assert.match(formatReground(g), /\| The guard held a request while it ran \(Needs you\) \| 2 \|[\s\S]*## Needs you\n\nThe guard held a request/);
+  const regrounded = (more = {}) => regroundPlan(parsePlan(text), { walker, walk: guarded, reads: walkReads(join(walkDir, 'walk-screens')), ...more }).rows;
+  const g = regrounded();
+  const held = 'the guard held POST api.contoso.test/catalog/*/items; check the pack before adopting';
+  assert.deepEqual(g.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
+  assert.deepEqual([g[2].now, g[2].why, g[6].now, g[6].why, g[7].why], ['item · "Fabrikam Boots details"', held, 'home · control "Catalog"', held, `${held} (the walk: no “Sale” on this screen)`]);
+  assert.match(formatReground(g), /\| Its app's page may be broken today \(Needs you\) \| 3 \|[\s\S]*## Needs you\n\nThese steps’ pages may have been broken/);
+  // Reviewed in its pack as staying held: nothing to suspect.
+  const reviewed = regrounded({ packs: { forApp: { shop: { guard: { stayHeld: ['/^POST api\\.contoso\\.test\\/catalog\\/[^/]+\\/items$/'] } } } } });
+  assert.deepEqual(reviewed.map(r => r.basis), ['both', 'unreached', 'both', 'both', 'write', 'write', 'today', 'missed']);
+  // Without the guard's log: an error today's screen shows that the recording doesn't, or words the app lost while
+  // nothing ran in it (between its start screen and Go to).
+  const broken = sec => page(`<h1>Contoso Outfitters</h1>${help}<h2>Boots by Fabrikam</h2><div role="alert">Couldn't load your cart. Check your connection and try again.</div><a href="/">Contoso home</a>`);
+  writeFileSync(join(walkDir, 'walk-screens', '1-3.reads.json.gz'), gzipSync(JSON.stringify(two(30, broken(30)))));
+  rmSync(join(walkDir, 'walk-screens', '2-1.json'));
+  const e = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
+  assert.deepEqual(e.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
+  assert.equal(e[2].why, 'today\'s screen shows an error the recording doesn\'t: “Couldn\'t load your cart. Check your connection and try again.”; check the app before adopting');
+  writeFileSync(join(walkDir, 'walk-screens', '1-3.reads.json.gz'), gzipSync(JSON.stringify(two(30, today('')))));
+  writeFileSync(join(walkDir, 'walk-screens', 'start-shop.reads.json.gz'), gzipSync(JSON.stringify(two(0, page(`<h1>Contoso Outfitters</h1><p>Good to see you again</p>${help}<a href="/catalog">Shop the catalog</a><p>Free returns on boots</p>`)))));
+  const l = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
+  assert.deepEqual(l.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
+  assert.equal(l[2].why, 'shop lost words while nothing ran in it, since its start screen: “Free returns on boots”; check the app before adopting');
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {

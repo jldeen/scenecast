@@ -164,31 +164,41 @@ those reads:
    differ (what the greeting says today), or words that change between the two reads; and never for a step the walk
    says needs a write it didn't make (`needs`: what isn't there may be that write's doing).
 3. **Nothing proves it today:** the step goes on **Needs you**.
-4. **The guard held a request while it ran:** a walk holds anything that isn't a read, and a page can lose part of
-   itself for it (a list that never loads). So a kind of request (its method, host and path, ids as `*`) that the
-   guard also held while a step landed as its plan says is the app's background; any other is a suspect. A step that
-   ran while a suspect was held keeps its proof, never gets one from today alone, and goes on **Needs you** ("the
-   guard held <kind>; check the pack before adopting").
+4. **When something other than the product may have broken a page,** the app's steps that don't land as planned
+   from then on keep their proofs, and so does one that landed but whose proof would change. None of them gets a new
+   proof, or one from today alone, and each goes on **Needs you** with its reason:
+   - **The guard held a request** that isn't telemetry and that no pack has reviewed as staying held (`stayHeld`):
+     a walk holds anything that isn't a read, and a page can lose part of itself for it (a list that never loads).
+     Its kind is its method, host and path, with ids as `*`. It counts for the app it was for: the request's own
+     `app` or frame, else the app whose hosts it went to (its address, its pack's `match` and `guard.hosts`), else
+     the app of the step it was held in.
+   - **Today's screen shows an error the recording doesn't:** "couldn't load", "check your connection", "try again",
+     "something went wrong", or anything in an alert.
+   - **An app lost words while nothing ran in it:** what its last read showed and its next one, after a Go to,
+     doesn't.
+
+   A page that's broken stays broken to the end of the walk: a walk can't tell a reload from a route change.
 5. **Not checked today:** a step behind a write the walk didn't make (or that needs one: a step it missed for want of
    one, the steps after that miss in its beat), one it missed, or one it didn't get to keeps its recorded proof,
    marked.
 
-It writes `.out/ai/reground.md` (each proof before and after, and why, and the steps that need you), `reground.json`
-and `plan.reground.md`. `plan.md` stays as it is. Its new proofs go in with `--adopt` (built after stage F,
-[below](#approval-and-what-runs-on-its-own)); until then, adopting `plan.reground.md` means approving it again. A walk
-is of one plan: re-grounding another is refused. `--plan <file>` names the plan the walk walked when it isn't the
+It writes `.out/ai/reground.md` (each proof before and after, and why; the steps that need you; and, screen by screen,
+what's **missing since the recording**: the words and controls the recorded screen has that both of today's reads lack),
+`reground.json` and `plan.reground.md`. `plan.md` stays as it is. Its new proofs go in with `--adopt` (built after stage
+F, [below](#approval-and-what-runs-on-its-own)); until then, adopting `plan.reground.md` means approving it again. A
+walk is of one plan: re-grounding another is refused. `--plan <file>` names the plan the walk walked when it isn't the
 demo's `plan.md` now.
 
-The walk's files, in `.out/ai` (or `--walk <dir>`), as the live walk writes them: `walk.json` (a row per step:
-`{ step, text, status, why }`; `guard.held`, each held request `{ method, host, path, at }`; `inputs`, each thing the
-walk did `{ at, for }`, `for` naming its step) and, in `walk-screens/`, `<beat>-<step>.reads.json.gz` (both counted
+The walk's files, in `.out/ai` (or `--walk <dir>`), as the live walk writes them: `walk.json` (a row per step: `{ step,
+text, status, why }`; `guard.held`, each held request `{ method, host, path, at, app?, frame? }`; `inputs`, each thing
+the walk did `{ at, for }`, `for` naming its step) and, in `walk-screens/`, `<beat>-<step>.reads.json.gz` (both counted
 from 1) and `start-<app>.reads.json.gz`. Each is gzipped JSON, `[{ at, docs: [{ key, html }] }, …]`: the page read
-twice, about a second apart once it's quiet. A read's documents are the page's own (`key: "main"`) and then each
-frame's (by its host), as the recorder's serializer writes them (`packages/capture/serialize.js`, without CSS), so a
-box's value, a checked box and open shadow roots are in the markup. A step whose screen was saved without them (only
+twice, about a second apart once it's quiet. A read's documents are the page's own (`key: "main"`) and then each frame's
+(by its host), as the recorder's serializer writes them (`packages/capture/serialize.js`, without CSS), so a box's
+value, a checked box and open shadow roots are in the markup. A step whose screen was saved without them (only
 `<beat>-<step>.json`'s words and controls) is listed as not reached. What the guard held while a step ran is
-`<beat>-<step>.json`'s `held` (`[{ method, host, path }]`) when the walk gives it; otherwise it's the held requests
-from the step's first input (else the last read before it) to its own last read.
+`<beat>-<step>.json`'s `held` (`[{ method, host, path }]`) when the walk gives it; otherwise it's the held requests from
+the step's first input (else the last read before it) to its own last read.
 
 ## Details under a line
 
