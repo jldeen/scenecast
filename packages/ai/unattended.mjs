@@ -13,9 +13,10 @@
 //   - run.json: every step, each write and what it made (for the undos), the reset, the guard, the stop.
 // The recording is the recorder's own, the same as the extension path's (build, checks and Review work unchanged);
 // its start-screen sweeps run side by side, an app per window.
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { formatStep, stepCount } from './plan.mjs';
 import { recordOpts } from '@stuntdouble/core/lib/demo.mjs';
 import { rx, settled, aiDir, appTab } from './run.mjs';
@@ -235,7 +236,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const plan = viaPlan || readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('make the plan first');
   packs = packs === undefined ? await walkerPacks() : packs;
-  const { walkPlan } = await import('./walk.mjs');
+  const { walkPlan, heldWhileDrifted } = await import('./walk.mjs');
   const g = await guardOn(demo, cmd, packs);
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
@@ -247,9 +248,30 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const screensDir = join(aiDir(demo), 'walk-screens');
   rmSync(screensDir, { recursive: true, force: true });
   mkdirSync(screensDir, { recursive: true });
+  // The plan it walks, by its exact text: a re-ground refuses a walk of another plan.
+  const planFile = join(demo.dir, 'plan.md');
+  const planSha = !viaPlan && existsSync(planFile) ? createHash('sha256').update(readFileSync(planFile)).digest('hex') : null;
   const keepReads = async (name, app) => {
     const r = await w.reads(app).catch(() => null);
     if (r) writeFileSync(join(screensDir, `${name}.reads.json.gz`), gzipSync(JSON.stringify(r)));
+  };
+  // Each step's window, from its first input to its last read, and what the guard held in it (Rule 2: a held read
+  // can change what a page shows).
+  const stepAt = {};
+  let lastEnd = Date.now(), heldSince = 0;
+  const heldIn = async (from, to) => {
+    const l = await cmd('capLog', { since: heldSince }, 30).catch(() => null);
+    if (!l) return [];
+    const list = l.held || [], upTo = list.findIndex(h => Date.parse(h.at) > to);
+    heldSince += upTo < 0 ? list.length : upTo;
+    const by = new Map();
+    for (const h of list) {
+      const t = Date.parse(h.at);
+      if (t < from || t > to) continue;
+      const k = `${h.method} ${h.host}${h.path}`, x = by.get(k) || { method: h.method, host: h.host, path: h.path, n: 0 };
+      x.n++; by.set(k, x);
+    }
+    return [...by.values()];
   };
   const seenAt = {};
   let walk;
@@ -264,6 +286,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       await keepReads(`start-${a.id}`, a.id);
     }
     seenAt.starts = starts;
+    lastEnd = Date.now();
     walk = await walkPlan(plan, {
       live: true,
       // A walk only measures: words that changed are noted and it goes on (a run stops there).
@@ -283,10 +306,18 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       stopBeat: app => w.clearTyped(app),
     }, { emit: async e => {
       emit(e);
-      if (e.event === 'walk' && ['reached', 'drifted', 'unproven'].includes(e.status) && e.app) {
-        const sn = await w.screenNow(e.app).catch(err => ({ error: err.message }));
-        writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn }, null, 1));
-        await keepReads(`${e.beat}-${e.step + 1}`, e.app);
+      if (e.event === 'walk') {
+        const mine = w.inputs().filter(i => Date.parse(i.at) >= lastEnd);
+        const from = mine.length ? Date.parse(mine[0].at) : lastEnd;
+        let sn = null;
+        if (['reached', 'drifted', 'unproven'].includes(e.status) && e.app) {
+          sn = await w.screenNow(e.app).catch(err => ({ error: err.message }));
+          await keepReads(`${e.beat}-${e.step + 1}`, e.app);
+        }
+        const to = Date.now(), held = await heldIn(from, to);
+        stepAt[`${e.beat}-${e.step}`] = { from: new Date(from).toISOString(), to: new Date(to).toISOString(), held };
+        if (sn) writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn, held }, null, 1));
+        lastEnd = to;
       }
       // A picture of each miss and each drifted landing, for whoever reads walk.json; for a drifted one, what the
       // screen says instead (its title, headings and first lines), so a plan's landing words can follow the product.
@@ -300,11 +331,16 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       }
     } });
   } finally {
-    for (const b of (walk && walk.beats) || []) for (const s of b.steps) if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
+    for (const b of (walk && walk.beats) || []) for (const s of b.steps) {
+      if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
+      const at = stepAt[`${b.beat}-${s.step}`];
+      if (at) Object.assign(s, { window: { from: at.from, to: at.to }, held: at.held });
+    }
+    if (walk) walk.heldWhileDrifted = heldWhileDrifted(walk);
     if (walk) walk.starts = seenAt.starts || [];
     const off = await guardOff(cmd, g.hosts);
     keepBodiesOut(demo, off.bodies);
-    walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
+    walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });
     writeFileSync(join(aiDir(demo), 'walk.json'), JSON.stringify(walk, null, 1));
