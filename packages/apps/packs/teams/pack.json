@@ -203,5 +203,10 @@
     "spike E presets teams.json (busy, auto budget)",
     "spike A live captures Nov 20 (themes, scores)",
     "demo1-reset (theme setting, check)"
-  ]
+  ],
+  "guard": {
+    "allow": [
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
+    ]
+  }
 }

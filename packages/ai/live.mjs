@@ -18,6 +18,8 @@
 // recording: the recorder is recording (it holds each click until it has captured the screen, so a step waits for
 // it to have seen and done it).
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { findItem, composer, searchBox } from './find.mjs';
 import { risk, formatStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
@@ -32,6 +34,22 @@ export async function walkerPacks() {
     const m = await import('@stuntdouble/apps/index.mjs');
     return { packFor: url => m.packFor(url), writeFor: m.writeFor, safeFor: m.safeFor, guardFor: m.guardFor, packsForDemo: m.packsForDemo };
   } catch (e) { return null; }
+}
+
+// Where each app starts in the demo: its start screen in the recording (flow.json's first beat), else its address.
+// The capture browser opens an app at its address; a demo starts on a page of its own (a list, a workspace).
+export function startUrls(demo) {
+  const out = Object.fromEntries((demo.cfg.apps || []).map(a => [a.id, a.url]));
+  let flow; try { flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8')); } catch (e) { return out; }
+  const S = flow.states || {};
+  for (const [app, sig] of Object.entries(((flow.beats || [])[0] || {}).states || {})) {
+    if (out[app] === undefined) continue;
+    const snap = (S[sig] || {}).snap || sig;
+    for (const f of [demo.raw && join(demo.raw, 'snaps', snap + '.json'), join(demo.dir, 'data', 'snaps', snap + '.json')].filter(Boolean)) {
+      try { const u = JSON.parse(readFileSync(f, 'utf8')).url; if (/^https?:/.test(u || '')) { out[app] = u; break; } } catch (e) {}
+    }
+  }
+  return out;
 }
 
 export function liveWalker({ demo, cmd, packs = null, recording = false, log = () => {} }) {
@@ -130,7 +148,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
         const before = await actions();
         await cmd('type', { tab: tab(id), text: step.value, delay: 18 }, 180);
         await seen(before, 15);
-        lastField = field; lastTyped[id] = step.value;
+        lastField = field; lastTyped[id] = step.value; typedIn[id] = field.name;
         await settle(id, 30);
         return { did: 'typed', in: field.name };
       }
@@ -142,7 +160,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
         const before = await actions();
         await cmd('press', { tab: tab(id), key: step.key }, 30);
         if (/^(Enter|Escape)$/.test(step.key)) await seen(before);
-        if (step.key === 'Enter') lastField = null;
+        if (step.key === 'Enter') { lastField = null; delete typedIn[id]; }
         await settle(id, 120);
         return { did: 'pressed', key: step.key, wrote: !!w };
       }
@@ -212,6 +230,21 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     return { ...r, wrote: true, result: { url: after.url || null, title: after.title || null, ids, from: before.url || null, typed: step.kind === 'press' && lastTyped[id] ? lastTyped[id] : null } };
   }
   const lastTyped = {};
+  // What it typed and hasn't sent, by app: a beat that stops before its Enter clears it, so no run leaves a draft.
+  const typedIn = {};
+  async function clearTyped(app) {
+    const id = appOf(app) || app;
+    const name = typedIn[id];
+    if (!name) return null;
+    const { el } = await locate(id, name, 'field');
+    if (!el) return { cleared: false, why: `no "${name}" box to clear` };
+    if (!el.focused) { await cmd('click', { tab: tab(id), x: el.x, y: el.y }, 30); await sleep(250); }
+    await cmd('clear', { tab: tab(id) }, 30).catch(() => {});
+    await quiet(id, 400, 4000);
+    const left = await cmd('js', { tab: tab(id), code: "return await page.evaluate(() => { const e = document.activeElement; return e ? (e.value !== undefined ? e.value : e.innerText || '').trim() : ''; })" }, 30).catch(() => null);
+    if (!left) delete typedIn[id];
+    return { cleared: !left, in: name, ...(left ? { why: `"${String(left).slice(0, 40)}" is still there` } : {}) };
+  }
 
   let current = null;
   async function start(app) {
@@ -235,5 +268,12 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     }
     return { screen: c.screen, landed: true, wrote: false, did: r.did };
   }
-  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate };
+  // An app on its start screen (a read: the page is opened again at its address).
+  const starts = startUrls(demo);
+  async function home(app) {
+    const id = appOf(app) || app;
+    await cmd('goto', { tab: tab(id), url: starts[id] }, 90).catch(e => log(`${id}: couldn't open its start screen (${e.message})`));
+    await quiet(id, 800, 20000);
+  }
+  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, typed: () => ({ ...typedIn }) };
 }

@@ -170,6 +170,10 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 - The recording is the recorder's own (build, checks and Review work unchanged); its start sweeps run side by
   side, an app per window.
 
+It needs the capture browser started holding (`"capture": { "guard": "hold" }`): the guard is on from the
+browser's first request, with the apps' allow-lists, so what the apps send while they load is held too; a run's own
+guard replaces it and it comes back after. Each app starts on its start screen in the recording.
+
 `scenecast ai walk --live` walks the plan read-only (`walkLive`): at a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, a write, after a write, or missed (and which write it
 needed). `ai walk` without `--live` walks the recording's screens instead (`walkerFromDemo`), for comparison.
@@ -180,7 +184,7 @@ and its log `.out/capture.log`. `demo.json`:
 ```json
 "recorder": "capture",
 "capture": { "profile": "demo-tenant", "tenant": "<the demo tenant's domain>", "account": "<the demo account>",
-             "channel": "chrome", "window": "auto", "flags": [], "macSso": true }
+             "channel": "chrome", "window": "auto", "flags": [], "macSso": true, "guard": "hold" }
 ```
 
 `packages/capture/browser.mjs` is the launcher (`openCaptureBrowser`, `signInWindow`), and its `launchRealChrome` is
@@ -216,7 +220,7 @@ sent (`scenecast run`); every built-in command and side path works.
 - `packages/selftest/guard.mjs`: every selftest calls it first. Nothing a test starts reaches a presenter's
   Scenecast: no receiver, command or recorder on the app's ports (47621–47630), no demo, raw folder, extension or
   capture profile outside the test's own temp folder, no command to a receiver the test didn't start (the engine
-  refuses them while `SCENECAST_SELFTEST` is set: `@stuntdouble/core/lib/test-fence.mjs`).
+  refuses them while `SCENECAST_TEST_FENCE` is set: `@stuntdouble/core/lib/test-fence.mjs`).
 - `packages/selftest/hover-repeat.mjs`: the hover check and the checklist over and over on a kept selftest demo
   (`.github/workflows/repeat.yml`). A missed hover prints the player's hover trace (`d1.hoverTrace()`); the hover
   check reads the player once it has settled, never at a fixed time, and the selftest proves it with every page timer

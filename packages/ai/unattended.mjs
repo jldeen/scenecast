@@ -25,9 +25,18 @@ import { runReset } from './reset-run.mjs';
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i;
 
+// The capture browser, holding every request that isn't a read from its first one (capture.guard "hold"): what the
+// apps send while they load, before a run turns its own guard on, is held too.
+async function captureBrowser(cmd, what) {
+  let info;
+  try { info = await cmd('capInfo', {}, 20); } catch (e) { throw new Error(`${what} needs the capture browser: "recorder": "capture" in demo.json, then preflight`); }
+  if (!info.guarded) throw new Error(`${what} needs the capture browser started with its guard on: "capture": { "guard": "hold" } in demo.json, then preflight again`);
+  return info;
+}
+
 export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, packs }) {
   const cmd = viaCmd || rx(demo);
-  try { await cmd('capInfo', {}, 20); } catch (e) { throw new Error('an unattended run needs the capture browser: "recorder": "capture" in demo.json, then preflight'); }
+  await captureBrowser(cmd, 'an unattended run');
   const plan = readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('make and approve the plan first');
   const ap = approvalOf(demo);
@@ -46,7 +55,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   // The guard, from the first request to the last.
   const g = await guardOn(demo, cmd, packs);
   run.guard = { hosts: g.hosts, allow: g.allow.length };
-  let recording = false;
+  let recording = false, wRun = null;
   const ran = [], results = {};
   try { main: {
     // Before: the tenant as the demo starts, or nothing is recorded.
@@ -56,7 +65,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
 
     emit({ event: 'stage', name: 'start', label: 'Starting the recording' });
     const appIds = demo.cfg.apps.map(a => a.id);
-    const w = liveWalker({ demo, cmd, packs, recording: true, log });
+    // Every app on its start screen, as the recording begins.
+    { const h = liveWalker({ demo, cmd, packs, log }); for (const id of appIds) await h.home(id); }
+    const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
     let app = first && first.kind === 'app' && w.appOf(first.app) || appIds[0];
     await cmd('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: recordOpts(demo.cfg), parallel: true, zooms: demo.cfg.zooms, first: app }, 300);
@@ -118,6 +129,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     }
     // Off the app (another site): back to it, out of the recording, before the reset needs it.
     if (run.stopped && run.stopped.kind === 'offplan') await liveWalker({ demo, cmd, packs, log }).goBack(run.stopped.app).catch(() => {});
+    // A run that stopped before its Enter leaves nothing typed behind (out of the recording too).
+    if (wRun) for (const id of Object.keys(wRun.typed())) run.cleared = [...(run.cleared || []), { app: id, ...(await wRun.clearTyped(id).catch(e => ({ cleared: false, why: e.message }))) }];
     // After: the undos of what ran, the start set again, the check (when the reset before let anything run).
     if (run.reset.before && run.reset.before.ok) {
       emit({ event: 'stage', name: 'reset-after', label: 'Putting the demo back as it started' });
@@ -183,7 +196,7 @@ async function guardOff(cmd, hosts) {
 // what the guard held; what left the apps' hosts; what the pages did that the plan didn't ask for.
 export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan: viaPlan }) {
   const cmd = viaCmd || rx(demo);
-  try { await cmd('capInfo', {}, 20); } catch (e) { throw new Error('a live walk needs the capture browser: "recorder": "capture" in demo.json, then preflight'); }
+  await captureBrowser(cmd, 'a live walk');
   const plan = viaPlan || readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('make the plan first');
   packs = packs === undefined ? await walkerPacks() : packs;
@@ -191,8 +204,10 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const g = await guardOn(demo, cmd, packs);
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
+  const shots = join(aiDir(demo), 'walk');
   let walk;
   try {
+    for (const a of demo.cfg.apps) await w.home(a.id);
     walk = await walkPlan(plan, {
       live: true,
       start: app => w.start(app),
@@ -207,7 +222,12 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
         return r ? r.why : null;
       },
       landed: () => ({ ok: true }),
-    }, { emit });
+      stopBeat: app => w.clearTyped(app),
+    }, { emit: async e => {
+      emit(e);
+      // A picture of each miss, for whoever reads walk.json.
+      if (e.status === 'missed' && e.app) await cmd('capShot', { tab: appTab(demo, w.appOf(e.app) || e.app), file: join(shots, `${e.beat}-${e.step + 1}.png`) }, 60).catch(() => {});
+    } });
   } finally {
     walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), guard: { hosts: g.hosts, allow: g.allow.length, ...(await guardOff(cmd, g.hosts)) } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
