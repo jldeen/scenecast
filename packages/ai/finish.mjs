@@ -111,7 +111,8 @@ export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
 const readJson = f => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { return null; } };
 export function needsYou({ planReview, reset, plan, fidelity, points }) {
   const out = [];
-  for (const f of (planReview && planReview.flags) || []) out.push({ kind: f.kind === 'added' ? 'Added from the recording' : f.kind === 'order' ? 'Not where your script says' : 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
+  const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step" };
+  for (const f of (planReview && planReview.flags) || []) out.push({ kind: KIND[f.kind] || 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
   for (const n of (reset && reset.needs) || []) out.push({ kind: n.kind === 'start' ? 'A step is missing' : 'Reset', where: `beat ${n.beat}`, text: n.text });
   plan.beats.forEach((b, bi) => (b.lines || []).forEach((l, li) => { if (!(l.focus || []).some(f => f.on)) out.push({ kind: 'No focus point', where: `line ${bi + 1}.${li + 1}`, text: `Nothing on its screens backs “${l.text.slice(0, 80)}${l.text.length > 80 ? '…' : ''}”. Add one in the editor if it needs one.` }); }));
   for (const i of ((fidelity && fidelity.items) || []).filter(i => i.status === 'fail' || i.status === 'manual')) out.push({ kind: i.status === 'fail' ? 'Check failed' : 'Look yourself', where: '', text: `${i.title}: ${(i.detail || '').split('\n')[0]}` });

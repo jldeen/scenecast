@@ -63,10 +63,11 @@ export async function planFromWalkthrough({ demo, file, script = null, packs, em
   packs = packs === undefined ? await loadPacks(demo) : packs;
   const walker = walkerFromDemo(demo);
   const track = script ? readTalkTrack(script) : null;
-  const plan = planFromRecording(rec, { walker, title: demo.cfg.title, track, packs });
-  const review = { at: new Date().toISOString(), from: basename(file), walkthrough: true, checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags: [] };
+  const flags = [];
+  const plan = planFromRecording(rec, { walker, title: demo.cfg.title, track, packs, flags });
+  const review = { at: new Date().toISOString(), from: basename(file), walkthrough: true, checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags };
   const text = save(demo, plan, review);
-  emit({ event: 'plan', beats: plan.beats.length, steps: review.steps, writes: review.writes.length, flags: 0, askFirst: (text.match(/ — ask first/g) || []).length });
+  emit({ event: 'plan', beats: plan.beats.length, steps: review.steps, writes: review.writes.length, flags: flags.length, askFirst: (text.match(/ — ask first/g) || []).length });
   return { text, plan, review };
 }
 

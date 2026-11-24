@@ -18,7 +18,7 @@ import { readScreen } from '@scenecast/script/html.mjs';
 import { findItem, norm } from './find.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
-const READER = 9;
+const READER = 10;
 
 
 // A recorded matcher's name and what it pins down: its aria-label, test id, text.

@@ -188,11 +188,14 @@ export function readScreen(docs, { specs = [] } = {}) {
       const inner = el.tag === 'input' || el.tag === 'textarea' || a.contenteditable === 'true' || a.contenteditable === '' ? '' : wordsOf(el).replace(/\n/g, ' ');
       return clean(a['aria-label'] || by || inner || a.placeholder || a['data-placeholder'] || a['aria-placeholder'] || a.title || a.alt || a.value).replace(/^(.{2,}?) ?\1$/, '$1').slice(0, 90);
     };
-    const walk = (el, aria = false, bar = false) => {
+    // shut: inside a closed dialog (no open attribute) or a template, so not on the page as it shows (innerText):
+    // the item or control is marked, and kept as it was.
+    const walk = (el, aria = false, bar = false, shut = false) => {
       if (typeof el === 'string') return;
       if (el.tag !== '#root' && hiddenEl(el)) return;
       aria = aria || (el.tag !== '#root' && unreachable(el));
       bar = bar || el.tag === 'header' || el.tag === 'nav' || /^(banner|navigation)$/.test(el.attrs.role || '');
+      shut = shut || (el.tag === 'dialog' && !('open' in el.attrs)) || el.tag === 'template';
       const start = pos++;
       if (!aria && isControl(el)) {
         const role = roleOf(el), name = nameOf(el);
@@ -208,6 +211,7 @@ export function readScreen(docs, { specs = [] } = {}) {
           if (ac === 'true' || ac === 'false') c.on = ac === 'true';
           else if (el.tag === 'input' && /^(checkbox|radio)$/i.test(el.attrs.type || '')) c.on = 'checked' in el.attrs;
           if (el.attrs['aria-pressed'] === 'true' || el.attrs['aria-pressed'] === 'false') c.pressed = el.attrs['aria-pressed'] === 'true';
+          if (shut) c.shut = true;
           controls.push(c);
           ctlOf.set(el, c.i);
         }
@@ -215,8 +219,8 @@ export function readScreen(docs, { specs = [] } = {}) {
       if (/^h[1-6]$/.test(el.tag) || el.attrs.role === 'heading') { const h = clean(wordsOf(el)); if (h) (bar ? barHeadings : headings).push(h); }
       const mine = own(el);
       const item = mine && el.tag !== '#root' ? { i: items.length, kind: isControl(el) ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
-      if (item) items.push(item);
-      el.children.forEach(c => walk(c, aria, bar));
+      if (item) { if (shut) item.shut = true; items.push(item); }
+      el.children.forEach(c => walk(c, aria, bar, shut));
       if (item) { item.text = clean(wordsOf(el).replace(/\n/g, ' ')).slice(0, 2000); item.box = [start, 0, pos, 1]; }
     };
     walk(root);

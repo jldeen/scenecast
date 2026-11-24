@@ -51,9 +51,15 @@ say, and a step that could send, save or change something says `— ask first`.
 | `Writes:` | What the step changes, in plain words. Approving the plan approves these steps, and only these. The demo's reset (`reset.md`) undoes each one. When an app pack knows the write, it ends with ` · <pack>:<write>` (`· m365-copilot:save-skill`); the app hides that part. |
 | `Safe:` | Why a step that looks like a change isn't one, from the app's pack (`· <pack>:<id>`): "Add content to…" only opens a picker; Enter in a search box only filters. The step has no `— ask first` and runs on its own. |
 | `Undo:` | How to undo it, when it isn't the plain opposite. The reset uses it. |
-| `Lands on:` | The screen the step should end on: a captured screen's name, then optionally `· "words on it"`. The capture pass checks it. |
+| `Lands on:` | The screen the step should end on: a captured screen's name, then optionally `· "words on it"`. The capture pass checks it. The words are ones that screen shows and the screen before the step didn't (for `Go to`, the other app's), so they're only there if the step worked. |
 | `Script:` | The talk track's Do line it came from, when the plan words it differently. |
 | `Differs:` | Where the product isn't what the talk track says. Shown once, when the presenter approves. |
+
+`Lands on:` words come from the recording, as the run will read the page: its words in every frame, not what's in a
+closed dialog, and nothing a reload changes (a time, a size). Some steps leave nothing new on the screen to check by:
+closing a panel, pressing Escape, typing into a search box. Then the words are a control's name only that screen has,
+or none, and the review lists the step under **Needs you** ("A run can't check this step"). Copilot's plans get the
+same check after its answer.
 
 ## Details under a line
 

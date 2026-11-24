@@ -128,6 +128,12 @@ test('talk tracks: quotes with Do and Screen under them, Do and Say sections, Ru
   assert.deepEqual(plain.beats[0].lines.map(l => [l.say, l.do]), [['Hello.', ['Click Plugins.']], ['Bye.', []]]);
 });
 
+test('a capture read without a browser: what\'s in a closed dialog is marked shut', () => {
+  const sc = readScreen([{ key: 'main', html: '<h1>Pull request</h1><dialog><h2>Response time details</h2><button>Close</button></dialog><dialog open><p>Saved as draft</p></dialog>' }]);
+  assert.deepEqual(sc.items.map(i => [i.text, !!i.shut]), [['Pull request', false], ['Response time details', true], ['Close', true], ['Saved as draft', false]]);
+  assert.deepEqual(sc.controls.map(c => [c.name, !!c.shut]), [['Close', true]]);
+});
+
 test('a capture read without a browser: controls as the outline names them, words as the screen shows them', () => {
   const sc = readScreen([{ key: 'main', html: '<html><head><style>b{}</style></head><body><header><h1>Catalog</h1></header><h1>Tools</h1><div role="tab">Users<span>Users</span></div><button aria-label="Save: Save skill"><span>Save</span></button><span aria-hidden="true">Certified</span><button style="display:none">Hidden</button><a href="/x">Agents&#x200e;</a><div role="textbox" contenteditable="true" aria-label="Message"></div></body></html>' }, { key: 'f4', html: '<button data-testid="badge">Add endorsement</button>' }]);
   assert.deepEqual(sc.controls.map(c => [c.role, c.name, c.frame || null]), [['tab', 'Users', null], ['button', 'Save: Save skill', null], ['link', 'Agents', null], ['textbox', 'Message', null], ['button', 'Add endorsement', 'f4']]);
