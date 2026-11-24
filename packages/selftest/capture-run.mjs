@@ -67,7 +67,7 @@ function aiProc(args, cwd, env, onEvent = () => {}, limitS = 480) {
   const p = spawn(BIN, ['ai', ...args], { cwd, env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   const events = []; let buf = '', err = '';
   limited(p, `scenecast ai ${args[0]}`, limitS, () => events.length ? JSON.stringify(events[events.length - 1]).slice(0, 300) : lastLine(err));
-  p.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.startsWith('@ai ')) { const e = JSON.parse(l.slice(4)); if (process.env.SCENECAST_AI_TRACE) console.log('  @ai ' + l.slice(4, 300)); events.push(e); onEvent(e); } } });
+  p.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.startsWith('@ai ')) { const e = { ...JSON.parse(l.slice(4)), t: Date.now() }; if (process.env.SCENECAST_AI_TRACE) console.log('  @ai ' + l.slice(4, 300)); events.push(e); onEvent(e); } } });
   p.stderr.on('data', d => { err += d; });
   return new Promise(res => p.on('close', code => res({ code, events, err, done: events.find(e => e.event === 'done'), error: events.find(e => e.event === 'error') })));
 }
@@ -158,6 +158,14 @@ async function newDemo(name, rx, capture, apps = [['tasks', tasks.url], ['admin'
 }
 const count = (log, line) => log.filter(l => l === line).length;
 const readRun = DEMO => JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'run.json'), 'utf8'));
+// A run's time by part, from its own events (each stamped as it came): the reset before, the start (apps, services,
+// start sweeps), the steps (screen sweeps included), saving the recording, the reset after.
+const partsOf = evs => {
+  const at = f => (evs.find(f) || {}).t, rb = at(e => e.event === 'stage' && e.name === 'reset-before'), st = at(e => e.event === 'stage' && e.name === 'start');
+  const b0 = at(e => e.event === 'beat'), sp = at(e => e.event === 'stage' && e.name === 'stop'), ra = at(e => e.event === 'stage' && e.name === 'reset-after'), end = at(e => e.event === 'done');
+  const d = (a, b) => a && b ? +((b - a) / 1000).toFixed(1) : null;
+  return { resetBefore: d(rb, st), start: d(st, b0), steps: d(b0, sp), stop: d(sp, ra), resetAfter: d(ra, end) };
+};
 
 try {
   // ---- The capture browser, the approved plan, nobody there --------------------------------------------------------
@@ -176,6 +184,7 @@ try {
   t0 = Date.now();
   let res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
   times.run = Math.round((Date.now() - t0) / 1000);
+  times.parts = partsOf(res.events);
   let rj = existsSync(join(DEMO, '.out', 'ai', 'run.json')) ? readRun(DEMO) : {};
   check('runs the approved plan to the end, unattended', res.code === 0 && res.done && !res.done.result.stopped && res.done.result.writes === 1, JSON.stringify({ code: res.code, err: res.err.slice(-1500), stopped: rj.stopped, done: res.done }));
   check('the start waited for the app\'s own call to its named service, and it answered', (rj.services || []).some(n => n.service === "Tasks' catalog service" && n.status === 200 && n.app === 'tasks'), JSON.stringify(rj.services));
