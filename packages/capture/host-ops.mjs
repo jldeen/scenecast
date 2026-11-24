@@ -5,7 +5,8 @@
 //                                    to a guarded host, held before it leaves; mode 'watch' only logs
 //   capOpen({ hosts }) → { id }     a planned write's way through, for its one step; capClose({ id })
 //   capGuardOff()
-//   capLog({ since })               what the guard held (method, host, path shape; never a body), from `since`
+//   capLog({ since })               what the guard held (method, host, path shape; never a body), from `since`, and every
+//                                   non-read it let through (passed: method, host, path shape, by: allowed | a planned write)
 //   capEvents({ since })            what happened that a plan can't: a page opening another window, a native dialog
 //                                    (dismissed: a confirm is never accepted), a tab leaving for another host
 //   capShot({ tab, file })          a picture of a tab, for a stop
@@ -67,7 +68,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     async capClose(c) { const close = opens.get(c.id); if (close) { close(); opens.delete(c.id); } return { closed: !!close }; },
     async capGuardOff() { for (const close of opens.values()) close(); opens.clear(); if (guard) await guard.stop(); guard = null; if (base) await base(); return { on: !!base }; },
     // A run's guard, else the one on from the start.
-    async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {} }; },
+    async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {}, passed: g && g.passed ? g.passed() : [] }; },
     async capEvents(c) { return { events: events.slice(c.since || 0), total: events.length }; },
     async capActive(c) {
       const p = await tabOf(c.tab);

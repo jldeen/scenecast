@@ -8,6 +8,8 @@
 //   after-write   later in a beat whose write didn't run (its screens need that write)
 //   drifted       it ran and is on the screen it should be, but the words the plan says it lands on aren't there
 //                 (the product said it differently since; walker.soft: a walk notes it and goes on, a run stops)
+//   unproven      it ran and the words are there, but they were there before the step too, so they prove nothing
+//                 (walker.soft: a walk notes it and goes on; a run stops)
 //   missed        it didn't run, or didn't land where the plan says (why says which)
 //   after-miss    later in a beat after a miss
 import { formatStep } from './plan.mjs';
@@ -44,8 +46,10 @@ export async function walkPlan(plan, walker, { emit = () => {} } = {}) {
           const r = await walker.step(at, s, typed);
           if (s.kind === 'type') typed = s.value || '';
           if (r.screen) at = r.screen;
+          if (r.hit) row.hit = r.hit;
+          if (r.trouble) row.trouble = r.trouble;
           row.screen = sigOf(at);
-          if (!r.landed) { row.status = walker.soft && r.kind === 'elsewhere' ? 'drifted' : 'missed'; row.why = r.why || r.kind || 'not here'; }
+          if (!r.landed) { row.status = walker.soft && r.kind === 'elsewhere' ? 'drifted' : walker.soft && r.kind === 'unproven' ? 'unproven' : 'missed'; row.why = r.why || r.kind || 'not here'; }
         }
         if (!row.status) {
           const l = walker.landed ? await walker.landed(at, s) : landedBySig(at, s);
@@ -90,7 +94,7 @@ export function compareWalks(plan, offline, live) {
     const o = offline.beats[bi], l = live.beats[bi];
     for (const [si] of b.steps.entries()) {
       const os = o.steps[si], ls = l.steps[si];
-      rows.push({ beat: bi + 1, step: si + 1, text: os.text, want: os.want, offline: os.status, live: ls.status, liveWhy: ls.why, offlineWhy: os.why, needs: ls.needs || os.needs || null, bug: os.status === 'reached' && !['reached', 'drifted'].includes(ls.status) });
+      rows.push({ beat: bi + 1, step: si + 1, text: os.text, want: os.want, offline: os.status, live: ls.status, liveWhy: ls.why, offlineWhy: os.why, needs: ls.needs || os.needs || null, bug: os.status === 'reached' && !['reached', 'drifted', 'unproven'].includes(ls.status) });
     }
   }
   return rows;
@@ -98,7 +102,7 @@ export function compareWalks(plan, offline, live) {
 
 export function walkTable(plan, offline, live) {
   const rows = compareWalks(plan, offline, live);
-  const mark = { reached: 'reached', drifted: 'reached, words differ', write: 'write (not run)', 'after-write': 'needs the write', missed: 'missed', 'after-miss': 'after a miss' };
+  const mark = { reached: 'reached', drifted: 'reached, words differ', unproven: 'ran; its words were there before', write: 'write (not run)', 'after-write': 'needs the write', missed: 'missed', 'after-miss': 'after a miss' };
   const lines = [];
   for (const [bi, b] of plan.beats.entries()) {
     lines.push(`\n### Beat ${bi + 1} · ${b.title} (live ${live.beats[bi].secs} s)\n`, '| # | Step | Screen | Offline | Live | Why (live) |', '|---|---|---|---|---|---|');
@@ -106,6 +110,6 @@ export function walkTable(plan, offline, live) {
   }
   const count = (w, k) => w.beats.flatMap(b => b.steps).filter(s => s.status === k).length;
   const screens = w => w.beats.flatMap(b => b.steps).filter(s => s.want);
-  const sum = w => ({ reached: count(w, 'reached'), drifted: count(w, 'drifted'), write: count(w, 'write'), afterWrite: count(w, 'after-write'), missed: count(w, 'missed'), afterMiss: count(w, 'after-miss'), screens: screens(w).length, screensReached: screens(w).filter(s => s.status === 'reached' || s.status === 'drifted').length });
+  const sum = w => ({ reached: count(w, 'reached'), drifted: count(w, 'drifted'), unproven: count(w, 'unproven'), write: count(w, 'write'), afterWrite: count(w, 'after-write'), missed: count(w, 'missed'), afterMiss: count(w, 'after-miss'), screens: screens(w).length, screensReached: screens(w).filter(s => s.status === 'reached' || s.status === 'drifted').length });
   return { rows, text: lines.join('\n'), offline: sum(offline), live: sum(live), bugs: rows.filter(r => r.bug) };
 }

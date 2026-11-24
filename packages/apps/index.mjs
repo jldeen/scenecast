@@ -259,11 +259,14 @@ export function checkPack(p) {
     const hits = (p.writes || []).filter(w => literal ? stepIs(w.on, { kind: 'click', target: literal }) : w.on && w.on.target && !isRe(w.on.target) && like(on.target, w.on.target));
     for (const w of hits) out.push(`${at}: write ${w.id} has the same step; a safe step never writes`);
   }
-  // A guard's allow-list names what's let through: a host (and path), never everything.
-  for (const x of ((p.guard || {}).allow) || []) {
+  // A guard's allow-list names what's let through: a host (and path), never everything; ' when body /pattern/' after it
+  // narrows it to the bodies that only read.
+  for (const e of ((p.guard || {}).allow) || []) {
+    const [x, when] = typeof e === 'string' && e.includes(' when body ') ? e.split(' when body ') : [e, null];
     const re = typeof x === 'string' && /^\/.+\/[a-z]*$/.test(x);
     if (typeof x !== 'string' || !x.trim()) out.push('guard.allow: strings, a host and path prefix or a /pattern/');
     else if (re ? /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(x) : !/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?(\/|$)|^[0-9.]+(:\d+)?(\/|$)/i.test(x)) out.push(`guard.allow "${x}": a host and path prefix ("host.example.com/api/") or a /pattern/ over "METHOD host/path", never everything`);
+    if (when !== null && (!/^\/.+\/[a-z]*$/.test(when) || /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(when))) out.push(`guard.allow "${e}": after "when body", a /pattern/ the body has to match, not every body`);
   }
   for (const [name, a] of Object.entries(p.apis || {})) if (!a.open || !(a.host || a.hostPattern)) out.push(`apis ${name}: open (the page that signs in) and host or hostPattern`);
   const text = JSON.stringify(p, (k, v) => k.startsWith('_') ? undefined : v);

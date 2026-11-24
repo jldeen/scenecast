@@ -75,6 +75,12 @@ test('the read-only guard holds what could write, and only that', () => {
   assert.equal(guardVerdict({ method: 'POST', url: 'https://tenant.example.com/search/query?q=1' }, { ...T, allow: ['tenant.example.com/search/'] }), 'pass');
   assert.equal(guardVerdict({ method: 'POST', url: 'https://tenant.example.com/telemetry' }, { ...T, allow: ['/^POST [^/]+\\/telemetry$/'] }), 'pass');
   assert.equal(guardVerdict({ method: 'PUT', url: 'https://tenant.example.com/telemetry' }, { ...T, allow: ['/^POST [^/]+\\/telemetry$/'] }), 'hold');
+  // A listing that only reads when nothing is typed in it: the body has to say so, and no body seen holds it.
+  const list = { ...T, allow: ['/^POST tenant\\.example\\.com\\/catalog\\/search$/ when body /^\\{"search":"","filter":"[^"]*"\\}$/'] };
+  const url = 'https://tenant.example.com/catalog/search';
+  assert.equal(guardVerdict({ method: 'POST', url, body: '{"search":"","filter":"Type eq \'Model\'"}' }, list), 'pass');
+  assert.equal(guardVerdict({ method: 'POST', url, body: '{"search":"Supply chain","filter":"Type eq \'Model\'"}' }, list), 'hold');
+  assert.equal(guardVerdict({ method: 'POST', url }, list), 'hold');
 });
 
 test('a profile another browser has open is in use; a stale lock is not', { skip: process.platform === 'win32' }, () => {
