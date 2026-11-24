@@ -630,6 +630,23 @@ try {
   times.twins = { off: { run: one.secs, sweeps: one.sweeps }, two: { run: two.secs, sweeps: two.sweeps } };
   console.log('twins: ' + JSON.stringify({ ...times.twins, used: two.log }));
   check('twins: the same screens, steps, zoom levels and hovers as one window, and twins were used where a screen showed alike', !one.r.done?.result?.stopped && !two.r.done?.result?.stopped && dTw.sameSteps && JSON.stringify(Object.keys(one.rec.states).sort()) === JSON.stringify(Object.keys(two.rec.states).sort()) && JSON.stringify(one.zooms) === JSON.stringify(two.zooms) && JSON.stringify(one.hovers) === JSON.stringify(two.hovers) && two.log.some(l => /twins for \S+: [12] of 2/.test(l)), JSON.stringify({ steps: dTw.steps, zooms: [one.zooms, two.zooms], hovers: [one.hovers.length, two.hovers.length, one.hovers.filter(h => !two.hovers.includes(h)).slice(0, 4), two.hovers.filter(h => !one.hovers.includes(h)).slice(0, 4)], log: two.log, stopped: [one.r.done?.result?.stopped, two.r.done?.result?.stopped] }));
+  // 5c · A twin window's storage is its own: a click there that saves a UI preference (localStorage) never reaches the
+  // recorded tab (no storage event), nor the app's real storage.
+  {
+    const SPEC5 = (c => c.apps[0].match || c.apps[0].url)(JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')));
+    const PREFS = `${tasks.url}${tasks.url.includes('?') ? '&' : '?'}prefs=1`;
+    const js = async (tab, code) => { try { return json((await run(['cmd', 'js', JSON.stringify({ tab, code })], { env: E })).out); } catch (e) { return { error: e.message }; } };
+    const STATE = "return await page.evaluate(() => ({ ls: JSON.stringify(Object.entries(localStorage).sort()), compact: document.body.classList.contains('compact'), button: !!document.getElementById('compact') }))";
+    await run(['cmd', 'goto', JSON.stringify({ tab: SPEC5, url: PREFS })], { env: E });
+    const own0 = await js(SPEC5, STATE);
+    const tw = json((await run(['cmd', 'capTwins', JSON.stringify({ app: 'tasks', n: 1, url: PREFS })], { env: E })).out);
+    const clicked = await js('twin:tasks', "await page.click('#compact'); return { clicked: true }");
+    await sleep(1500);
+    const twin1 = await js('twin:tasks', STATE), own1 = await js(SPEC5, STATE);
+    await run(['cmd', 'capTwins', JSON.stringify({ close: true })], { env: E });
+    await run(['cmd', 'goto', JSON.stringify({ tab: SPEC5, url: tasks.url })], { env: E });
+    check('a twin window\'s storage is its own: its click saved a preference there, and neither the recorded tab nor the app\'s real storage changed', tw.n === 1 && clicked.clicked && own0.button && twin1.compact === true && /fx-density/.test(twin1.ls || '') && own1.compact === false && own1.ls === own0.ls && !/fx-density/.test(own1.ls || ''), JSON.stringify({ tw, clicked, own0, twin1, own1 }));
+  }
   await run(['capture', 'stop', '--demo', DEMO], { env: E });
 
   // ---- 6 · The same plan through the recorder extension: the same screens -------------------------------------------
