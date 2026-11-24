@@ -85,13 +85,13 @@ const numbered = t => /\d/.test(String(t).replace(/#\d+\b|\b[a-z]{1,6}-\d{2,}\b/
 // clicks, when it's in a live region (an approval card); words the new screen shows that the one before didn't; a
 // control's state; what a box says; a control only the new screen has; words gone, with words of the page's own still
 // there. A Type step: its own words. typed: what other steps type (never a proof). next: the plan's next step that
-// acts on the page (not a wait or a scroll).
+// acts on the page (not a wait or a scroll). first: proofs to try right after the plan's own, by the same rules.
 // live (reground.mjs): the step's screen as the product shows it today (afters: its reads, once the page was quiet)
 // and the screen before it today (befores). The proof is chosen from today's first read; it must hold on every read
 // and on the recording, and on none of the screens before, the recording's or today's. With live.only, today's alone:
 // the product changed since the recording. live.unstable: words today's reads can't count on.
 // → { lands: { kind, … }, number, differs, why }: lands.kind is null when nothing proves the step, and `why` says so.
-export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null } = {}) {
+export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [] } = {}) {
   const rec = walker.screen(to);
   const recBefore = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
   const reads = live ? (live.afters || []).filter(Boolean) : [], readsBefore = live ? (live.befores || []).filter(Boolean) : [];
@@ -112,7 +112,7 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
     const r = typing(s, from, after, before, walker, live && { reads, befores: readsBefore });
     if (r) return r;
   }
-  if (from === to) return none('it lands where it already was');
+  if (from && from === to) return none('it lands where it already was');
   if (!pageWords(after) && !(after.controls || []).length) return none(`the screen it lands on (${to}) has no words`);
 
   // Today's words alone can't be told from Copilot's (the recording's streams show what it wrote): never a message's.
@@ -144,7 +144,8 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   const controls = [...new Set([hit && hit.el, ...(after.controls || [])].filter(Boolean))].filter(ctlOk);
   const l0 = s.lands || {};
   const own = l0.kind ? Object.fromEntries(Object.entries(l0).filter(([k]) => k !== 'screen')) : l0.text ? { kind: 'words', text: l0.text } : null;
-  const gone = s.kind !== 'app' && from && fromApp === app ? stillFor(after, before, frame, stable) : null;
+  // Words gone: within one app, from the screen before (live, with no recording, the page as it was before the step).
+  const gone = s.kind !== 'app' && ((from && fromApp === app) || (live && live.only && !from && readsBefore.length)) ? stillFor(after, before, frame, stable) : null;
   // A control in a live region proves a step only when the plan's next step clicks it (the same name, and its role
   // when the step gives one): that step needs exactly it. Live-region words never do.
   const nextHit = next && next.kind === 'click' && next.target && walker.control ? walker.control(after, next.target, undefined, to) : null;
@@ -157,6 +158,8 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
     const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))) });
     // The plan's own proof, while it still proves the step.
     if (own && pick(own)) return found(own);
+    // What the caller expects first (liveProof: the step's own control in a new state, the next step's control).
+    for (const f of first) if (pick(f)) return found(f);
     if (nextCtl) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
     for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
     for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
@@ -239,4 +242,52 @@ export function proveLandings(plan, walker, flags = []) {
     if (flag && !flags.some(f => f.kind === flag.kind && f.text === flag.text && f.at === (s.line || null))) flags.push({ ...flag, beat: bi + 1, line: s.line || null, at: s.line || null });
   }
   return flags;
+}
+
+// With no recording behind a step: nothing recorded to compare with (no frame, no other captures), and a control found
+// by its exact name.
+const NONE = { screen: () => null, shown: () => null, flow: { states: {} }, states: [],
+  control: (sc, name) => { const el = ((sc && sc.controls) || []).find(c => !c.shut && pnorm(c.name) === pnorm(name)); return el ? { el, score: 100 } : null; } };
+const sameProof = (a, b) => !!a && !!b && a.kind === b.kind && (a.state || null) === (b.state || null) && textsOf(a).map(pnorm).join('\n') === textsOf(b).map(pnorm).join('\n');
+
+// A step's landing proven on the live page (docs/engine/plan-format.md, "What runs on its own"), with or without a
+// recording: before, the page before the step, and afters, its reads after it once the page is quiet (two, about a
+// second apart), each as the reader reads it. The plan's own proof while it holds there; else what the plan expects
+// (the step's own control in a new state, the next step's control), else the first proof the page gives, by
+// chooseProof's rules. The exclusions apply to all of them, the plan's own words included: never Copilot's words,
+// another step's typing, a time or a live region's words. walker: the recording when there is one (its frame, what
+// Copilot wrote, the words its captures show differently), never its screens. next: the plan's next step that acts.
+// → { lands, strength, why }, strength:
+//   strong  the plan's own proof; the step's own control in its new state (the tab it clicked selected, a menu it
+//           opened, what it typed in its box); or the control the plan's next step needs, there now
+//   weak    the page changed, in a way the plan doesn't name (new words, another control, words gone), or by a number
+//   none    nothing a run can count on changed
+export function liveProof(s, { before = [], afters = [], next = null, typed = [], walker = null } = {}) {
+  const screen = (s.lands && s.lands.screen) || null, reads = afters.filter(Boolean);
+  if (!reads.length) return { lands: { screen, kind: null, text: null }, strength: 'none', why: "the page after it wasn't read" };
+  const states = s.target && s.kind !== 'type' ? Object.keys(STATE).map(state => ({ kind: 'control', control: s.target, state })) : [];
+  const expected = [...states, ...(next && next.target ? [{ kind: 'control', control: next.target, state: null }] : [])];
+  const r = chooseProof(s, null, screen, walker || NONE, { typed, next, first: expected, live: { afters: reads, befores: before.filter(Boolean), only: true } });
+  const l = r.lands, lands = { screen, ...l, text: l.kind === 'words' ? l.text : null };
+  if (!l.kind) return { lands, strength: 'none', why: r.why };
+  const own = s.lands && s.lands.kind ? s.lands : s.lands && s.lands.text ? { kind: 'words', text: s.lands.text } : null;
+  const is = (a, b) => !!a && !!b && pnorm(a) === pnorm(b);
+  const typedOwn = s.kind === 'type' && !!s.value && ((l.kind === 'box' && is(l.says, lead(s.value))) || (l.kind === 'words' && is(l.text, lead(s.value))));
+  const strong = sameProof(l, own) || (!r.number && (typedOwn || expected.some(e => sameProof(l, e))));
+  return { lands, strength: strong ? 'strong' : 'weak', why: strong ? null : r.number ? `${proofWords(l)}, a number that can change` : `${proofWords(l)}: the page changed, in a way the plan doesn't name` };
+}
+
+// Before an unattended run makes a write: whether it goes on (docs/engine/plan-format.md, "What runs on its own").
+// landings: the run's so far, in order, each { app, strength, wrote, step }. The write goes on only when the app's
+// last landing is strong and nothing in that app since its last write (or since the run began) was weak or unproven.
+// Otherwise the run stops before it, keeps a picture and both reads, runs the reset, and lists the step under Needs
+// you: once she's away, a run never waits on her. → { ok, why }
+export function writeGate(landings, app) {
+  const mine = (landings || []).filter(x => x.app === app);
+  if (!mine.length) return { ok: false, why: `nothing in ${app} is proven yet` };
+  const last = mine[mine.length - 1], since = mine.slice(mine.map(x => !!x.wrote).lastIndexOf(true) + 1);
+  const shaky = (since.length ? since : [last]).find(x => x.strength !== 'strong');
+  if (!shaky) return { ok: true, why: null };
+  const what = shaky.step ? `“${shaky.step}”` : 'a step';
+  return { ok: false, why: `${what} ${shaky.strength === 'weak' ? 'only shows the page changed' : "isn't proven"}${shaky === last ? '' : `, since the last write in ${app}`}` };
 }

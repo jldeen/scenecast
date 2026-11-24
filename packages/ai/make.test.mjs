@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan, formatLands, formatStep } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, proveLandings } from './from-script.mjs';
-import { holds } from './landing.mjs';
+import { holds, liveProof, writeGate } from './landing.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
@@ -614,4 +614,35 @@ test('proofs on today\'s product: kept, new, today only, behind a write, not rea
   const old = JSON.parse(JSON.stringify(walk));
   old.beats[0].steps[1].text = 'Click "Shoes"';
   assert.throws(() => regroundPlan(parsePlan(text), { walker, walk: old, reads: walkReads(join(walkDir, 'walk-screens')) }), /the walk was of another plan \(beat 1, step 2/);
+});
+
+test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
+  const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
+  const tabs = (agents, plugins) => [{ role: 'tab', name: 'Agents', selected: agents }, { role: 'tab', name: 'Plugins', selected: plugins }];
+  const page = sc(['Operations', 'Our numbers'], tabs(true, false));
+  const tabbed = sc(['Operations', 'Our numbers', 'Fabrikam Orders'], tabs(false, true));
+  const grade = (s, after, more = {}) => { const r = liveProof(s, { before: [page], afters: [after, after], ...more }); return [formatLands(r.lands), r.strength]; };
+  // Strong: the plan's own proof; with none, the tab it clicked, now selected (before the new words, which are weaker).
+  assert.deepEqual(grade({ kind: 'click', target: 'Plugins', lands: { screen: 'tabbed', kind: 'words', text: 'Fabrikam Orders' } }, tabbed), ['tabbed · "Fabrikam Orders"', 'strong']);
+  assert.deepEqual(grade({ kind: 'click', target: 'Plugins' }, tabbed), ['control "Plugins" selected', 'strong']);
+  // Weak: a panel with new words the plan doesn't name.
+  const panel = sc(['Operations', 'Our numbers', { text: 'Use When', role: 'heading' }], tabs(true, false));
+  assert.deepEqual(grade({ kind: 'click', target: 'Spend policy' }, panel), ['"Use When"', 'weak']);
+  // Strong: what it typed, in its box; the control the next step needs, there now (in a live region too: an approval card).
+  const field = sc(['Checkout'], [{ role: 'textbox', name: 'Promo code', editable: 'field', value: 'SPRING25' }]);
+  assert.deepEqual(grade({ kind: 'type', value: 'SPRING25', target: 'Promo code' }, field, { before: [sc(['Checkout'], [{ role: 'textbox', name: 'Promo code', editable: 'field' }])] }), ['box "Promo code" says "SPRING25"', 'strong']);
+  const card = sc(['Operations', 'Our numbers', { text: 'Save note', live: true }], [...tabs(true, false), { role: 'button', name: 'Save: Save note', live: true }]);
+  assert.deepEqual(grade({ kind: 'press', key: 'Enter' }, card, { next: { kind: 'click', target: 'Save: Save note' } }), ['control "Save: Save note"', 'strong']);
+  // None: only a time, a toast, a message's words, or the plan's own words in a toast; or words that change between the reads.
+  const noise = sc(['Operations', 'Our numbers', { text: '2 min ago', time: true }, { text: 'Message sent', live: true }, { text: 'Fabrikam moved the ship date', article: 3 }], tabs(true, false));
+  assert.deepEqual(grade({ kind: 'press', key: 'Enter', lands: { screen: 'x', kind: 'words', text: 'Message sent' } }, noise), ['x', 'none']);
+  const tip = t => sc(['Operations', 'Our numbers', `Tip of the day: ${t}`], tabs(true, false));
+  assert.equal(liveProof({ kind: 'press', key: 'Escape' }, { before: [page], afters: [tip('pin your agents'), tip('try a shorter prompt')] }).strength, 'none');
+  // Before a write: the app's landings since its last write all strong.
+  const L = (strength, more = {}) => ({ app: 'iq', strength, ...more });
+  assert.deepEqual(writeGate([L('strong'), L('strong')], 'iq'), { ok: true, why: null });
+  assert.deepEqual(writeGate([L('strong'), L('weak', { step: 'Click "Spend policy"' }), L('strong')], 'iq'), { ok: false, why: '“Click "Spend policy"” only shows the page changed, since the last write in iq' });
+  assert.deepEqual(writeGate([L('weak'), L('strong', { wrote: true }), L('strong')], 'iq'), { ok: true, why: null });
+  assert.deepEqual(writeGate([{ app: 'chat', strength: 'none', step: 'Press Escape' }, L('strong')], 'chat'), { ok: false, why: '“Press Escape” isn\'t proven' });
+  assert.deepEqual(writeGate([], 'iq'), { ok: false, why: 'nothing in iq is proven yet' });
 });

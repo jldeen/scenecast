@@ -190,15 +190,36 @@ rectangle; `via <step>` for a point one click or hover away (⌥F takes that ste
 ## Approval, and what runs on its own
 
 Approving a plan approves its exact text: Scenecast keeps the SHA-256 of `plan.md` (`.out/ai/approved.json`), and any
-edit after that needs approving again. A run without a person (the capture pass, `scenecast ai bench --yes plan`)
-keeps to these rules:
+edit after that needs approving again. Its writes are approved with it, ahead of the run. A run without a person (the
+capture pass) never asks mid-run: once she's away, it never waits on her. It keeps to these rules:
 
-- A step with `Writes:` runs only as the plan says it. If the step has to change (another control's name, or a
-  `Differs:` on it), it asks first, or it's skipped.
+- A step with `Writes:` runs only as the plan says it: its control found by its exact name. If the step has to
+  change (another control's name, or a `Differs:` on it), the run stops before it. Only a run with her there may ask.
+- **Before each write**, the landings in its app since its last write are all strong (below), and the page is the
+  app's own (its address is the app pack's, not a sign-in page). Otherwise the run stops before it.
+- **When a run stops before a write**, it keeps a picture and both reads of the page, runs the reset, and lists the
+  step under **Needs you**.
 - After any step in an app misses its `Lands on:`, that app's remaining writes are skipped and logged.
 - A risky step without `Writes:` is skipped, unless it says `Safe:`. Signing in is never part of a plan.
-- Each landing is recorded in `run.json` as `{ step, expected, got: { screen, url, text }, ok }`, matched on the
-  words, since screen names only exist after capture.
+- **A new demo from a script** (no recording yet): its first live pass stops before its first write and keeps the
+  screens it reached, so the next pass has a recording.
+- Each landing is recorded in `run.json` as `{ step, expected, got: { screen, url, text }, ok, strength }`.
+
+### A landing on the live page
+
+A run reads the page before each step and twice after it, once the page is quiet, about a second apart. A proof
+holds on both reads after the step and not on the one before, with the exclusions above, the plan's own words
+included: never Copilot's words, another step's typing, a time, or a live region's words.
+
+| Strength | What proves the step | Example |
+|---|---|---|
+| **Strong** | The plan's own proof; the step's own control in its new state; what it typed, in its box; the control the plan's next step needs, there now. After a write: its app pack's read-only check. | Click "Plugins", then `control "Plugins" selected`. |
+| **Weak** | The page changed, in a way the plan doesn't name (new words, another control, words gone), or only by a number. | A panel opens with words the script never mentions. |
+| **None** | Nothing a run can count on changed. | Escape when nothing was open. |
+
+`packages/ai/landing.mjs`: `liveProof(step, { before, afters, next, typed, walker })` (`{ lands, strength, why }`,
+from the reader's reads of the live page), `writeGate(landings, app)` (`{ ok, why }`, from the run's landings so far,
+each `{ app, strength, wrote, step }`).
 
 ## The reset (`reset.md`)
 
