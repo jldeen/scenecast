@@ -111,6 +111,7 @@ function heldDuring(walk, reads, steps, rowOf, appAt, sites) {
 // An error a page shows: one of these, or anything in an alert.
 const ERROR = /\b(?:couldn['’]?t load|could not load|can['’]?t load|check your connection|try again|something went wrong)\b/i;
 const short = t => (t = String(t).replace(/\s+/g, ' ').trim()).length > 80 ? `${t.slice(0, 77)}…` : t;
+const q = t => `“${cell(short(t))}”`, qs = xs => xs.map(q).join(', ');
 function errorsOn(got, rec) {
   const was = rec ? pageWords(rec) : '', out = [];
   for (const g of got) for (const i of g.items || []) if (!i.shut && i.text && (ERROR.test(i.text) || i.role === 'alert') && !was.includes(pnorm(i.text)) && !out.some(x => pnorm(x) === pnorm(i.text))) out.push(i.text);
@@ -131,11 +132,11 @@ function soundItems(sc, keep) {
 // Innermost only: a box holding words that are missing (or extra) is too.
 const innermost = its => its.filter(x => !its.some(u => u !== x && pnorm(u.text).length < pnorm(x.text).length && pnorm(x.text).includes(pnorm(u.text))));
 const lostFrom = (was, got, keep) => innermost(soundItems(was, keep)).map(i => i.text).filter(t => t.split(/\s+/).length >= 2 && got.every(g => !pageWords(g).includes(pnorm(t))));
-const inList = x => ({ ...(x.list !== undefined ? { list: x.list } : {}), ...(x.row !== undefined ? { row: x.row } : {}) });
-// A row's own control named by everything in it (an option "Fabrikam Orders Daily orders Plugin", a grid row): what's in
-// the row counts, each on its own.
+const inList = x => ({ ...(x.list !== undefined ? { list: x.list } : {}), ...(x.row !== undefined ? { row: x.row } : {}), ...(x.restored ? { restored: true } : {}), ...(x.described ? { described: true } : {}), ...(x.nav ? { nav: true } : {}) });
+// A row's own control named by everything in it (an option "Fabrikam Orders Daily orders Plugin", "AC Avery Chen
+// People", a grid row): what's in the row counts, each on its own.
 const ROWISH = /^(option|row|listitem|treeitem|menuitem|menuitemcheckbox|menuitemradio)$/;
-const whole = (sc, c) => { if (!ROWISH.test(c.role || '')) return false; const l = rowLabel(sc, c); return !!l && pnorm(c.name).length > pnorm(l).length && pnorm(c.name).startsWith(pnorm(l)); };
+const whole = (sc, c) => { if (!ROWISH.test(c.role || '')) return false; const l = rowLabel(sc, c); return !!l && pnorm(c.name).length > pnorm(l).length && pnorm(c.name).includes(pnorm(l)); };
 // What a capture of today's product would lose: the words and controls the recorded screen has that both of today's
 // reads lack, each { kind: 'words' | 'control', text, role, list, row } (list, row: where it is in a list on the
 // recorded screen). A control's own words count once, as the control.
@@ -188,15 +189,35 @@ function listsOf(sc) {
 }
 const rowLabel = (sc, e) => e.list !== undefined && e.row !== undefined ? ((listsOf(sc).get(e.list)) || new Map()).get(e.row) || null : null;
 // The list on another screen that one is: the one sharing the most rows with it, else the one with its name and role.
-// → its rows' labels, or null.
-function sameList(sc, list, other) {
+// → where it starts there, or null.
+function sameListAt(sc, list, other) {
   const want = new Set([...((listsOf(sc).get(list)) || new Map()).values()].map(pnorm));
   let best = null;
-  for (const [, rows] of listsOf(other)) { const n = [...rows.values()].filter(t => want.has(pnorm(t))).length; if (n && (!best || n > best.n)) best = { rows, n }; }
-  if (best) return [...best.rows.values()];
+  for (const [at, rows] of listsOf(other)) { const n = [...rows.values()].filter(t => want.has(pnorm(t))).length; if (n && (!best || n > best.n)) best = { at, n }; }
+  if (best) return best.at;
   const [name, role] = (sc.lists || {})[list] || [];
   const same = name && Object.entries(other.lists || {}).find(([, v]) => v[0] === name && v[1] === role);
-  return same ? [...((listsOf(other).get(+same[0])) || new Map()).values()] : null;
+  return same ? +same[0] : null;
+}
+const sameList = (sc, list, other) => { const at = sameListAt(sc, list, other); return at === null ? null : [...((listsOf(other).get(at)) || new Map()).values()]; };
+// Whether an entry's row is gone from every one of the other screens: none has its name, as words or a control.
+const hasText = (o, n) => (o.items || []).some(i => !i.shut && pnorm(i.text) === n) || (o.controls || []).some(c => !c.shut && pnorm(c.name) === n);
+const rowGone = (sc, e, others) => { const l = rowLabel(sc, e); return !!l && others.every(o => !hasText(o, pnorm(l))); };
+// A list's rows a capture put back (restored), and how it's named in reground.md: its name, else its first rows.
+const restoredRows = (sc, list) => new Set([...(sc.items || []), ...(sc.controls || [])].filter(x => x.list === list && x.restored).map(x => x.row));
+// The names of the rows a capture put back, on any of a screen's captures.
+const restoredNames = caps => new Set(caps.flatMap(c => [...listsOf(c)].flatMap(([list, rows]) => { const back = restoredRows(c, list); return [...rows].filter(([r]) => back.has(r)).map(([, t]) => pnorm(t)); })));
+const listName = (sc, list) => { const n = ((sc.lists || {})[list] || [])[0]; if (n) return `the list ${q(n)}`; const f = [...((listsOf(sc).get(list)) || new Map()).values()].slice(0, 2); return f.length ? `the list starting ${qs(f)}` : 'a list'; };
+// A list that says how many rows it has (aria-rowcount, aria-setsize), here and on each of today's reads, when they
+// differ: a number that changed ("486" → "500").
+function sizesFrom(rec, got) {
+  const out = [];
+  for (const [at, [, , size]] of Object.entries(rec.lists || {})) {
+    if (!size) continue;
+    const now = got.map(g => { const id = sameListAt(rec, +at, g); return id === null ? null : ((g.lists || {})[id] || [])[2] || null; });
+    if (now[0] && now.every(n => n === now[0]) && now[0] !== size) out.push({ kind: 'size', cls: 'number', text: String(size), now: String(now[0]), name: listName(rec, +at) });
+  }
+  return out;
 }
 // Rows of a list that are gone (or new) as one entry per list and class: a row is gone when no screen on the other side
 // (today's reads, for what's missing; the recording's captures, for what's extra) has its label as words or a control,
@@ -207,12 +228,11 @@ function sameList(sc, list, other) {
 // entries that start the same way ("Name: …", three or more) are one: { kind: 'like', cls, prefix, count, texts }.
 function collapse(classed, sc, others) {
   const heads = new Map(), key = e => `${e.list}|${e.row}`;
-  const has = (o, l) => (o.items || []).some(i => !i.shut && pnorm(i.text) === l) || (o.controls || []).some(c => !c.shut && pnorm(c.name) === l);
   const gone = new Map();
   for (const e of classed) {
     const l = rowLabel(sc, e), k = key(e);
     if (!l) continue;
-    if (!gone.has(k)) gone.set(k, others.every(o => !has(o, pnorm(l))));
+    if (!gone.has(k)) gone.set(k, rowGone(sc, e, others));
     if (gone.get(k) && (!heads.has(k) || (pnorm(l) === pnorm(e.text) && pnorm(heads.get(k).text) !== pnorm(l)))) heads.set(k, e);
   }
   const out = [], groups = new Map(), whyOf = es => { const w = [...new Set(es.map(x => x.write).filter(Boolean))], y = [...new Set(es.map(x => x.why).filter(Boolean))]; return { ...(w.length ? { write: w.join('; ') } : {}), ...(y.length ? { why: y.join('; ') } : {}) }; };
@@ -232,8 +252,8 @@ function collapse(classed, sc, others) {
         texts: [...es.filter(e => e.kind === 'words'), ...es.filter(e => e.kind !== 'words')].slice(0, 5).map(e => e.text), ...(nows.length ? { nows } : {}), ...whyOf(es) });
       continue;
     }
-    const all = listsOf(sc).get(h.list) || new Map(), there = others[0] ? sameList(sc, h.list, others[0]) : null, hs = rows.map(r => heads.get(`${h.list}|${r}`));
-    out.push({ kind: 'list', cls: h.cls, name: ((sc.lists || {})[h.list] || [])[0] || null, count: rows.length, total: all.size, entries: es.length,
+    const all = listsOf(sc).get(h.list) || new Map(), there = others[0] ? sameList(sc, h.list, others[0]) : null, hs = rows.map(r => heads.get(`${h.list}|${r}`)), back = restoredRows(sc, h.list);
+    out.push({ kind: 'list', cls: h.cls, name: ((sc.lists || {})[h.list] || [])[0] || null, count: rows.length, total: all.size, ...(back.size ? { inView: all.size - back.size } : {}), entries: es.length,
       rows: rows.map(r => all.get(r)).slice(0, 5), first: [...all.values()].slice(0, 5), other: there ? { total: there.length, first: there.slice(0, 5) } : null, ...whyOf(hs) });
   }
   const like = new Map(), rest = [];
@@ -248,14 +268,18 @@ function collapse(classed, sc, others) {
   return rest;
 }
 // What's missing since the recording, by why (formatReground's classes), in this order:
+//   beyond    in a row the recording's capture scrolled to and put back (restored), when today's reads don't have the
+//             row: a walk doesn't scroll, so it's beyond its view, not missing
+//   varies    someone's presence, or words in the page's own content the recording's captures show differently (a
+//             greeting)
 //   expected  made by a write the walk didn't make: the recording first shows it, in path order, after that write (the
 //             app's last before it), and shows its place without it before the write (the write's own screen, an
 //             earlier screen of the app at the same address, or the app's frame, for something in it); or it's in a
 //             row named by words the recording's writes made (a skill it saved). A name with more after it ("…,
 //             unread") is first shown where its name is.
-//   varies    someone's presence, or words the recording's captures of the screen show differently (a greeting)
+//   varies    words in the app's frame the recording's captures show differently (a title in Recent)
 //   number    the same words today, but for a number ("Plugins: 485" → "Plugins: 529"); each of today's words once,
-//             the one sharing the most of the recorded numbers first
+//             the one sharing the most of the recorded numbers first. So are the rows a list says it has (sizesFrom).
 //   renamed   a control today, of the same role, has the recorded name and more after it ("Credits in use, 99%
 //             remaining"), and the recorded screen has no control by that name
 //   missing   the rest, with what may have broken its app's page (why)
@@ -267,9 +291,13 @@ function missingClasses(entries, { rec, got, app, why, madeBy, varies }) {
   const used = got.map(() => new Set()), had = new Set((rec.controls || []).map(c => pnorm(c.name)));
   const shown = new Set([...(rec.items || []).map(i => pnorm(i.text)), ...had]);
   const one = e => {
+    if (e.restored && rowGone(rec, e, got)) return { ...e, cls: 'beyond', why: 'the recording\u2019s capture scrolled the list to them; a walk doesn\u2019t scroll' };
+    // Someone's presence, or a greeting, before a write: words that vary in the page's own content aren't a write's.
+    // In the app's frame they may be (a chat a write started, its title in Recent).
+    const v = varies(e.text, app);
+    if (v && (presence(e.text) || !e.nav)) return { ...e, cls: 'varies', why: v };
     const w = madeBy(e, app, rec);
     if (w) return { ...e, cls: 'expected', write: w };
-    const v = varies(e.text, app);
     if (v) return { ...e, cls: 'varies', why: v };
     if (/\d/.test(e.text)) {
       const d = digitless(e.text), mine = numbers(e.text), near = t => numbers(t).filter((x, i) => x === mine[i]).length;
@@ -284,7 +312,7 @@ function missingClasses(entries, { rec, got, app, why, madeBy, varies }) {
     }
     return { ...e, cls: 'missing', ...(why ? { why } : {}) };
   };
-  return collapse(entries.map(one), rec, got);
+  return collapse([...entries.map(one), ...sizesFrom(rec, got)], rec, got);
 }
 
 // Words in a place where the recording's captures differ (a greeting that changes on each visit): what a read today
@@ -425,8 +453,11 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
       // What today shows that no capture of the screen in the recording does, apart from today's side of what's
       // renamed or a number that changed, and words in a place that varies between runs.
       const paired = new Set(row.missing.flatMap(e => e.nows || (e.now ? [e.now] : [])).map(pnorm));
-      const caps = walker.captures ? walker.captures(to) : [rec];
-      row.extra = collapse(extraFrom(caps, got, keep(app), t => paired.has(pnorm(t)) || unstable(t)).map(e => ({ ...e, cls: 'extra' })), got[0], caps);
+      // Nor what describes a row the recording has only as one its capture put back: a row's tooltip is in a portal
+      // the capture doesn't copy.
+      const caps = walker.captures ? walker.captures(to) : [rec], back = restoredNames(caps);
+      row.extra = collapse(extraFrom(caps, got, keep(app), t => paired.has(pnorm(t)) || unstable(t)).filter(e => !(e.described && back.has(pnorm(rowLabel(got[0], e) || ''))))
+        .map(e => ({ ...e, cls: 'extra' })), got[0], caps);
     }
     // A step that didn't land as planned while its app's page may be broken keeps its proof: what's missing may not be
     // the product's doing.
@@ -471,15 +502,18 @@ export const regroundCounts = rows => {
 };
 // What's missing (or extra) since the recording, as reground.md lists it: by class, the same entry on several steps once,
 // each { cls, what, now, write, why, entries (what it stands for), at: Map screen → steps }.
-const CLASSES = [['missing', 'Missing: look at these'], ['renamed', 'Renamed'], ['number', 'A number changed'], ['expected', 'Made by a write the walk didn\u2019t make'], ['varies', 'Varies between runs']];
-const q = t => `“${cell(short(t))}”`, qs = xs => xs.map(q).join(', ');
+const CLASSES = [['missing', 'Missing: look at these'], ['renamed', 'Renamed'], ['number', 'A number changed'], ['expected', 'Made by a write the walk didn\u2019t make'], ['varies', 'Varies between runs'],
+  ['beyond', 'Beyond the walk\u2019s view: rows of a list it didn\u2019t scroll']];
 function whatOf(e) {
   if (e.kind === 'control') return `${q(e.text)} (${e.role})`;
+  if (e.kind === 'size') return `The rows ${e.name} says it has: ${q(e.text)}`;
   if (e.kind === 'like') return `${e.count} like “${cell(e.prefix)}: …”, starting ${qs(e.texts)}`;
   if (e.kind === 'list' && e.changed) return `${e.entries} in ${e.count} of ${e.total} rows of ${e.name ? `the list ${q(e.name)}` : 'a list'} that ${e.cls === 'extra' ? 'the recording has too' : 'are still there'}, starting ${qs(e.texts)}`;
   if (e.kind !== 'list') return q(e.text);
   const same = e.rows.length === e.first.length && e.rows.every((r, i) => r === e.first[i]), extra = e.cls === 'extra';
-  return `${e.count}${e.total > e.count ? ` of ${e.total}` : ''} rows of ${e.name ? `the list ${q(e.name)}` : 'a list'}`
+  const list = e.name ? `the list ${q(e.name)}` : 'a list';
+  if (e.cls === 'beyond') return `${e.count} of ${e.total} rows of ${list}, from ${qs(e.rows)}`;
+  return (e.inView ? `${e.count} rows of ${list}, of the ${e.inView} in view (${e.total} with the ones its capture scrolled to)` : `${e.count}${e.total > e.count ? ` of ${e.total}` : ''} rows of ${list}`)
     + (e.count <= 5 ? `: ${qs(e.rows)}` : `${same ? '' : `, from ${qs(e.rows)}`}. ${extra ? 'Today' : 'Recorded'}, it starts ${qs(e.first)}`)
     + (e.other ? `. ${extra ? 'Recorded' : 'Today'}: ${e.other.total} rows${e.other.total ? `, starting ${qs(e.other.first)}` : ''}` : extra ? '. The recording doesn\u2019t have it' : '. Today it isn\u2019t there');
 }
@@ -537,7 +571,7 @@ export function formatReground(rows) {
     const n = missingCounts(rows);
     out.push('## Missing since the recording', '', 'Words, controls and list rows a recorded screen has that both of today\u2019s reads lack. A list\u2019s rows are one line.', '',
       '| | Entries | Lines |', '|---|---|---|', ...CLASSES.map(([k, t]) => `| ${t} | ${n[k].entries} | ${n[k].lines} |`), '');
-    const head = { missing: ['What', 'Why it may be'], renamed: ['Recorded', 'Today'], number: ['Recorded', 'Today'], expected: ['What', 'The write'], varies: ['What', 'Why'] };
+    const head = { missing: ['What', 'Why it may be'], renamed: ['Recorded', 'Today'], number: ['Recorded', 'Today'], expected: ['What', 'The write'], varies: ['What', 'Why'], beyond: ['What', 'Why'] };
     for (const [k, t] of CLASSES) {
       const ls = lines.filter(l => l.cls === k);
       if (!ls.length) continue;

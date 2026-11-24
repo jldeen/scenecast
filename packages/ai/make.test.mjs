@@ -738,6 +738,10 @@ test('what a capture of today\'s product would lose, by why (renamed, a number, 
     // shown where its name is (the cart). Not the order's option itself: it's named by what's in it.
     [['varies', 'Avery Chen, status Available', "someone's presence"], ['expected', 'Cart (1)', ordered], ['expected', 'Fabrikam Trail boots, shipped', ordered], ['missing', 'Order 1001 for Avery Chen', held], ['missing', 'Ready to ship', held]],
   ]);
+  // Words the recording's captures show differently: in the page's own content they vary (a greeting), even after a
+  // write; in the app's frame a write may have made them (a title in Recent).
+  const vary = regroundPlan(parsePlan(text), { walker: { ...walker, unstable: t => /^(Thanks for your order|Cart \(1\))$/.test(t) }, walk, reads, apps: demo.cfg.apps }).rows;
+  assert.deepEqual(miss(vary[3]).filter(([c]) => c !== 'renamed'), [['varies', 'Avery Chen, status Available', "someone's presence"], ['expected', 'Cart (1)', ordered], ['varies', 'Thanks for your order', "the recording's captures of this screen differ there"]]);
   // In a row named by words the recording's writes made: that write's. A row whose name a capture doesn't list (words
   // Copilot wrote) is gone all the same when today's screen doesn't have it, with what's in it.
   const named = regroundPlan(parsePlan(text), { walker: { ...walker, written: t => /^Order 1001|^Contoso Delta$/.test(t) }, walk, reads, apps: demo.cfg.apps }).rows;
@@ -752,7 +756,7 @@ test('what a capture of today\'s product would lose, by why (renamed, a number, 
   assert.deepEqual(rows.filter(r => r.read).map(r => r.extra.map(e => e.kind === 'list' ? `${e.count} of ${e.total} rows: ${e.rows.join(', ')}` : e.text)),
     [[], ['Filter boots', '5 of 7 rows: Contoso Alpine, Fabrikam Mesa, Fabrikam Butte, Contoso Basin, XTR'], ['Deal 1 of 2'], ['No orders yet']]);
   const md = formatReground(rows);
-  assert.deepEqual(missingCounts(rows), { missing: { entries: 16, lines: 8 }, renamed: { entries: 1, lines: 1 }, number: { entries: 4, lines: 3 }, expected: { entries: 3, lines: 3 }, varies: { entries: 1, lines: 1 }, extra: { entries: 8, lines: 4 } });
+  assert.deepEqual(missingCounts(rows), { missing: { entries: 16, lines: 8 }, renamed: { entries: 1, lines: 1 }, number: { entries: 4, lines: 3 }, expected: { entries: 3, lines: 3 }, varies: { entries: 1, lines: 1 }, beyond: { entries: 0, lines: 0 }, extra: { entries: 8, lines: 4 } });
   assert.match(md, /## Extra since the recording\n\n[^\n]*8 in 4 lines[^\n]*\n\n\| What \| Screen \(steps\) \|\n\|---\|---\|\n\| “Filter boots” \(button\) \| catalog \(1-2\) \|\n\| 5 of 7 rows of the list “Boots”: “Contoso Alpine”, “Fabrikam Mesa”, “Fabrikam Butte”, “Contoso Basin”, “XTR”\. Recorded: 8 rows, starting “Fabrikam Trail”/);
   assert.match(md, /\| 2 in 2 of 8 rows of the list “Boots” that are still there, starting “Waterproof leather”, “Wide fit” \|[^\n]*\n\| 3 like “Note: …”, starting “Note: ships in a box”, “Note: free returns”, “Note: two colours” \|/);
   assert.match(md, /\| 6 of 8 rows of the list “Boots”, from “Fabrikam Summit”, “Contoso Ridge”, “Fabrikam Ranger”, “Contoso Peak”, “Fabrikam Canyon”\. Recorded, it starts “Fabrikam Trail”, “Fabrikam Summit”, “Contoso Hiker”, “Contoso Ridge”, “Fabrikam Ranger”\. Today: 7 rows, starting “Contoso Alpine”, “Fabrikam Trail”, “Fabrikam Mesa”, “Contoso Hiker”, “Fabrikam Butte” \| the guard held POST api\.contoso\.test\/catalog\/\*\/items \| catalog \(1-2\) \|/);
@@ -761,6 +765,49 @@ test('what a capture of today\'s product would lose, by why (renamed, a number, 
   assert.equal(rows[3].basis, 'suspect');
   const reloaded = regroundPlan(parsePlan(text), { walker, walk: { ...walk, events: [{ kind: 'loaded', host: 'shop.contoso.test', path: '/', at: at(40) }] }, reads, apps: demo.cfg.apps }).rows;
   assert.deepEqual([reloaded[1].missing.find(e => e.kind === 'list').why, reloaded[3].basis], [held, 'both']);
+});
+
+test('a list that shows only the rows in view: rows the recording scrolled to are beyond the walk\'s view, the rows it says it has a number', () => {
+  // A ledger grid, recorded with the rows its capture scrolled to put back (data-d1-row), each row's tooltip in a portal;
+  // today, the walk reads only the rows in view, in another order, and the grid says it has more.
+  const dir = mkdtempSync(join(tmpdir(), 'sc-virtual-'));
+  const page = body => `<!doctype html><html><head><title>Contoso</title></head><body>${body}</body></html>`;
+  const grid = (count, rows) => `<h2>Ledgers</h2><div role="grid" aria-rowcount="${count}"><div role="row"><span>Name</span><span>Owner</span></div>`
+    + rows.map(([n, back], k) => `<div role="row"${back ? ' data-d1-row=""' : ''}><span aria-describedby="tip-${k}">${n}</span><span>Finance</span></div>`).join('') + '</div>'
+    + rows.filter(([, back]) => !back).map(([n], k) => `<div role="tooltip" id="tip-${k}"><span>Name: ${n}</span><span>Description: ${about[n]}</span></div>`).join('');
+  const about = { 'Contoso Ledger': 'the general ledger', 'Fabrikam Payroll': 'pay runs', 'Contoso Notes': 'shared notes', 'Fabrikam Audit': 'audit trails', 'Contoso Fleet': 'vans and cars', 'Contoso Budget': 'next year' };
+  const recorded = [['Contoso Ledger'], ['Fabrikam Payroll'], ['Contoso Notes'], ...['Contoso Fleet', 'Fabrikam Travel', 'Contoso Assets', 'Fabrikam Grants', 'Contoso Leases'].map(n => [n, true])];
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  for (const [id, body] of Object.entries({ home: '<h1>Contoso</h1><a href="/l">Ledgers</a>', ledgers: grid(9, recorded) })) writeFileSync(join(dir, 'data', 'snaps', id + '.html'), page(body));
+  writeFileSync(join(dir, 'flow.json'), JSON.stringify({ apps: [{ id: 'books', key: 'B' }], beats: [{ active: 'books', states: { books: 'home' } }], path: [], states: { home: { app: 'books', snap: 'home' }, ledgers: { app: 'books', snap: 'ledgers' } } }));
+  const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps: [{ id: 'books', key: 'B', title: 'Contoso books' }] } };
+  const text = '# Books\n\n## Beat 1 · Look\n\n- Go to books\n  Lands on: home · "Contoso"\n- Click "Ledgers"\n  Lands on: ledgers · "Ledgers"\n';
+  // Today's rows in view: one as recorded, one the recording scrolled to, two new; the grid says 12.
+  const today = grid(12, [['Fabrikam Audit'], ['Contoso Ledger'], ['Contoso Fleet'], ['Contoso Budget']].map(([n]) => [n]))
+    + '<ul role="listbox" aria-label="Owners"><li role="option"><span>AC</span><span>Avery Chen</span><span>Finance lead</span></li><li role="option"><span>DH</span><span>Dana Hill</span><span>Auditor</span></li></ul>';
+  const at = sec => new Date(Date.UTC(2026, 10, 24, 9, 0, sec)).toISOString();
+  const two = (t, html) => [0, 1].map(i => ({ at: at(t + i), docs: [{ key: 'main', html: page(html) }] }));
+  const walkDir = join(dir, 'walk');
+  mkdirSync(join(walkDir, 'walk-screens'), { recursive: true });
+  for (const [f, v] of Object.entries({ 'start-books': two(0, '<h1>Contoso</h1><a href="/l">Ledgers</a>'), '1-1': two(10, '<h1>Contoso</h1><a href="/l">Ledgers</a>'), '1-2': two(20, today) })) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
+  const walk = { beats: [{ beat: 1, steps: [{ step: 0, text: 'Go to books', status: 'reached' }, { step: 1, text: 'Click "Ledgers"', status: 'reached' }] }], starts: [{ app: 'books' }] };
+  const { rows } = regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk, reads: walkReads(join(walkDir, 'walk-screens')), apps: demo.cfg.apps });
+  const show = e => [e.cls, e.kind === 'list' ? `${e.count} of ${e.total} rows (${e.entries}): ${e.rows.join(', ')}` : e.text, e.now || null];
+  // 9 rows → 12. Gone from the rows in view: what to look at, with each row's tooltip. The rows the capture scrolled to
+  // that today's rows in view don't have: beyond the walk's view.
+  assert.deepEqual(rows[1].missing.map(show), [
+    ['number', '9', '12'],
+    ['missing', '2 of 9 rows (4): Fabrikam Payroll, Contoso Notes', null],
+    ['beyond', '4 of 9 rows (4): Fabrikam Travel, Contoso Assets, Fabrikam Grants, Contoso Leases', null],
+  ]);
+  // New in view: the two new rows, each with its tooltip, as one line.
+  // Not the tooltip of a row the recording has only as one its capture put back (it couldn't have it). A person's row
+  // is named by their name, not their initials; its option, named by all of it, is what's in it.
+  assert.deepEqual(rows[1].extra.map(show), [['extra', '2 of 5 rows (4): Fabrikam Audit, Contoso Budget', null], ['extra', '2 of 2 rows (6): Avery Chen, Dana Hill', null]]);
+  const md = formatReground(rows);
+  assert.match(md, /\| 2 rows of a list, of the 4 in view \(9 with the ones its capture scrolled to\): “Fabrikam Payroll”, “Contoso Notes”\. Today: 5 rows, starting “Name”, “Fabrikam Audit”/);
+  assert.match(md, /### Beyond the walk’s view: rows of a list it didn’t scroll\n\n\| What \| Why \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| 4 of 9 rows of a list, from “Fabrikam Travel”, “Contoso Assets”, “Fabrikam Grants”, “Contoso Leases” \| the recording’s capture scrolled the list to them; a walk doesn’t scroll \| ledgers \(1-2\) \|/);
+  assert.match(md, /### A number changed\n\n\| Recorded \| Today \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| The rows the list starting “Name”, “Contoso Ledger” says it has: “9” \| “12” \| ledgers \(1-2\) \|/);
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {

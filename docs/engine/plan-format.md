@@ -211,26 +211,34 @@ the step's first input (else the last read before it) to its own last read.
 of today's reads lack, leaving out what a proof never uses (times, keys, messages, Copilot's words, another step's
 typing, live regions). Each goes in the first class that fits:
 
-1. **Made by a write the walk didn't make:** the recording first shows it, in path order, after that write (the app's
+1. **Beyond the walk's view:** in a row the recording's capture scrolled to and put back (`data-d1-row`: a list that
+   shows only the rows in view, which `packages/capture/flows/virtual-list.js` scrolls through), when no read today has
+   the row. A walk doesn't scroll, so these aren't missing. The rows the page showed (no `data-d1-row`) compare with
+   today's rows in view as any others do.
+2. **Varies between runs:** someone's presence, or words in the page's own content that the recording's captures show
+   differently (a greeting), even when the recording first shows them after a write.
+3. **Made by a write the walk didn't make:** the recording first shows it, in path order, after that write (the app's
    last before it): on the write's own screen, at an address the app showed before the write, or in the app's frame.
    So is what's in a row named by words a write made (a skill it saved). A name with more after it ("…, unread") is
-   first shown where its name is.
-2. **Varies between runs:** someone's presence, or words the recording's captures of the screen show differently (a
-   greeting).
-3. **A number changed:** the same words today but for a number ("Plugins: 486" → "Plugins: 529"). Each of today's
-   matches one recorded, the one sharing the most numbers in the same places first.
-4. **Renamed:** a control today, of the same role, has the recorded name and more after it, set off (", 99%
+   first shown where its name is. Words in the app's frame that vary between captures are a write's when it explains
+   them (a chat's title in Recent); else they vary too.
+4. **A number changed:** the same words today but for a number ("Plugins: 486" → "Plugins: 529"). Each of today's
+   matches one recorded, the one sharing the most numbers in the same places first. So do the rows a list says it has
+   (`aria-rowcount`, else `aria-setsize`), when the same list today says another number.
+5. **Renamed:** a control today, of the same role, has the recorded name and more after it, set off (", 99%
    remaining"), and the recorded screen has no control by that name.
-5. **Missing:** the rest, each with what may have broken its app's page (item 4 above). These are the ones to look at.
+6. **Missing:** the rest, each with what may have broken its app's page (item 4 above). These are the ones to look at.
 
 **Extra since the recording:** what both of today's reads have and no capture of the screen in the recording has (its
-own and its variants'), with the same exclusions, less today's side of what's renamed or a number that changed, and
-words in a place that varies between runs. It's what a capture now would show that the recording doesn't: new teams,
+own and its variants'), with the same exclusions, less today's side of what's renamed or a number that changed, words
+in a place that varies between runs, and what describes a row the recording has only as one its capture put back (a
+row's tooltip lives in a portal the capture doesn't copy). It's what a capture now would show that the recording doesn't: new teams,
 test notes, other chats.
 
 In both, a list is what the reader marks as one (a list, listbox, grid, table, tree, tablist, menu, radio group or feed;
 `ul`, `ol`, `table`, `menu`), with its rows (an item, option, row, tree item, tab, menu item, radio or post; `li`,
-`tr`). A row's name is its first words (not someone's initials before their name). Its rows are one line:
+`tr`). A row's name is its first words (not someone's initials before their name). What describes one row's element
+(`aria-describedby`: a tooltip in a portal) is in that row. Its rows are one line:
 
 - Rows gone (no read today has the row's name) or new (no capture has it): how many, the first five, and the list's
   first five on each side. What's in a row goes with it.
