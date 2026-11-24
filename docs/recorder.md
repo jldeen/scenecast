@@ -172,7 +172,11 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 
 It needs the capture browser started holding (`"capture": { "guard": "hold" }`): the guard is on from the
 browser's first request, with the apps' allow-lists, so what the apps send while they load is held too; a run's own
-guard replaces it and it comes back after. Each app starts on its start screen in the recording.
+guard replaces it and it comes back after. Each app starts on its start screen in the recording. An app that opens
+where it was last (Teams) gets its own address in demo.json (`apps[].start`, a link to the demo's first screen); one
+whose start screen no address reaches gets `apps[].startSteps` (read-only plan steps after it opens, e.g.
+`["Click \"Supply Chain Operations\""]` for a Microsoft IQ business plugin). The capture browser denies every app's
+site notifications (never grants them): an app's "turn on notifications" banner isn't in any recording.
 
 `scenecast ai walk --live` walks the plan read-only (`walkLive`): at a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, a write, after a write, or missed (and which write it

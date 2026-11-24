@@ -17,6 +17,7 @@ import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
 import { walkPlan } from './walk.mjs';
 import { undoGroups, checkClaim } from './reset-run.mjs';
+import { startUrls } from './live.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, reviewHtml } from './finish.mjs';
@@ -514,6 +515,14 @@ test('a read-only walk: a write isn\'t run, the rest of its beat waits on it, th
   plan.beats[1].steps = [{ kind: 'app', app: 'chat' }, { kind: 'click', target: 'Save: Save note', lands: { screen: 'chat-saved' } }];
   const m = (await walkPlan(plan, walker)).beats[1].steps;
   assert.deepEqual([m[1].status, m[1].needs], ['missed', 'beat 1\'s write: Press Enter']);
+});
+
+test('where each app starts: its own start address, else the recording\'s start screen, else its address', () => {
+  const demo = demoDir();
+  writeFileSync(join(demo.dir, 'data', 'snaps', 'admin-home.json'), JSON.stringify({ id: 'admin-home', url: 'https://admin.test/#/plugins' }));
+  assert.deepEqual(startUrls(demo), { chat: 'https://chat.test/', admin: 'https://admin.test/#/plugins' });
+  demo.cfg.apps[0].start = 'https://chat.test/l/channel/supply-alerts';
+  assert.equal(startUrls(demo).chat, 'https://chat.test/l/channel/supply-alerts');
 });
 
 test('the reset a capture pass runs: undo groups by what they undo; a check it can\'t read fails', () => {

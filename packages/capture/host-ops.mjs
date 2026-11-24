@@ -11,6 +11,8 @@
 //   capShot({ tab, file })          a picture of a tab, for a stop
 //   capBack({ tab })                the tab's previous page (the walker's way back from an off-plan landing)
 //   capUrl({ tab })                 where a tab is now (one that left the app has lost its mark)
+//   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
+//                                    user is active and the screen unlocked (the capture browser has no person)
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -43,6 +45,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     throw new Error(`no tab for ${spec}`);
   };
   let guard = null, opens = new Map(), n = 0;
+  const active = new Map();
   return {
     async capInfo() { return { capture: true, mode: cb.mode, guarded: !!base }; },
     async capGuard(c) {
@@ -66,6 +69,15 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     // A run's guard, else the one on from the start.
     async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {} }; },
     async capEvents(c) { return { events: events.slice(c.since || 0), total: events.length }; },
+    async capActive(c) {
+      const p = await tabOf(c.tab);
+      const perms = [];
+      for (const origin of c.origins || []) perms.push(await cb.top.send('Browser.setPermission', { permission: { name: 'idle-detection' }, setting: 'granted', origin }).then(() => 'granted', e => e.message));
+      // Its own session, kept: an override lasts as long as the session that set it, reloads included.
+      if (!active.has(p)) active.set(p, await cb.ctx.newCDPSession(p));
+      await active.get(p).send('Emulation.setIdleOverride', { isUserActive: true, isScreenUnlocked: true });
+      return { perms, active: true };
+    },
     async capUrl(c) { const p = await tabOf(c.tab); return { url: p.url(), title: await p.title().catch(() => '') }; },
     async capShot(c) { const p = await tabOf(c.tab); mkdirSync(dirname(c.file), { recursive: true }); writeFileSync(c.file, await p.screenshot()); return { file: c.file }; },
     async capBack(c) { const p = await tabOf(c.tab); await p.goBack({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null); return { url: p.url() }; },

@@ -205,11 +205,14 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
   const shots = join(aiDir(demo), 'walk');
+  const seenAt = {};
   let walk;
   try {
     for (const a of demo.cfg.apps) await w.home(a.id);
     walk = await walkPlan(plan, {
       live: true,
+      // A walk only measures: words that changed are noted and it goes on (a run stops there).
+      soft: true,
       start: app => w.start(app),
       step: (at, s) => w.step(at, s),
       // The plan's own Writes lines, then what the live screen says: its control, the field Enter is pressed in.
@@ -225,10 +228,19 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       stopBeat: app => w.clearTyped(app),
     }, { emit: async e => {
       emit(e);
-      // A picture of each miss, for whoever reads walk.json.
-      if (e.status === 'missed' && e.app) await cmd('capShot', { tab: appTab(demo, w.appOf(e.app) || e.app), file: join(shots, `${e.beat}-${e.step + 1}.png`) }, 60).catch(() => {});
+      // A picture of each miss and each drifted landing, for whoever reads walk.json; for a drifted one, what the
+      // screen says instead (its title, headings and first lines), so a plan's landing words can follow the product.
+      if ((e.status === 'missed' || e.status === 'drifted') && e.app) {
+        const id = w.appOf(e.app) || e.app;
+        await cmd('capShot', { tab: appTab(demo, id), file: join(shots, `${e.beat}-${e.step + 1}.png`) }, 60).catch(() => {});
+        if (e.status === 'drifted') {
+          const o = await w.controls(id).catch(() => ({}));
+          seenAt[`${e.beat}-${e.step}`] = { title: o.title || null, headings: (o.headings || []).slice(0, 6), lines: String(o.text || '').split('\n').map(s => s.trim()).filter(Boolean).slice(0, 12) };
+        }
+      }
     } });
   } finally {
+    for (const b of (walk && walk.beats) || []) for (const s of b.steps) if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
     walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), guard: { hosts: g.hosts, allow: g.allow.length, ...(await guardOff(cmd, g.hosts)) } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });
