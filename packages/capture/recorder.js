@@ -345,7 +345,26 @@ function recSeen(kind, key) { const m = REC.seen[kind] = REC.seen[kind] || {}; r
 //   drags   resize handles, once per kind of screen         zoom    once per kind of screen
 //   list    a list with more rows than it shows (all of them, last: it changes the page)
 // The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen.
-const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, chipWidths: [1366, 1100], ...(a || {}) }; };
+// twins: n windows of the app at the screen's address (the capture browser only, off by default): a screen they show
+// alike (its signature) has its hovers shared out among them and the recorded tab, and its zoom levels, side by side.
+const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, chipWidths: [1366, 1100], twins: 0, ...(a || {}) }; };
+// Twin windows of an app at its screen's address (the host's capTwins: the capture browser only), each told apart
+// from the app's own; only those that show the same screen (its signature, once settled) are used.
+async function recTwinPages(A, st, n) {
+  if (!OPS.capTwins) return [];
+  const pages = await OPS.capTwins({ app: A.id, n, url: A.page.url() }).then(r => (r && r.pages) || [], e => { rlogr('twins: ' + String(e.message || e).slice(0, 120)); return []; });
+  const same = await Promise.all(pages.map(async q => { await recInstall(q).catch(() => {}); await recSettle(q, 900, 12000).catch(() => {}); return (await recSig(q).catch(() => null)) === st.sig; }));
+  const ok = pages.filter((q, i) => same[i]);
+  rlogr(`twins for ${A.state}: ${ok.length} of ${pages.length} show the same screen`);
+  return ok;
+}
+// Shards' results as one (the sweep's log line and counts).
+function recShardsDone(kind, rs) {
+  const sum = k => rs.reduce((t, r) => t + (r[k] || 0), 0);
+  if (kind === 'hovers') return { ...rs[0], n: sum('n'), tried: sum('tried'), shards: rs.length };
+  if (kind === 'zoom') return { state: rs[0].state, zooms: rs.flatMap(r => r.zooms || []), shards: rs.length };
+  return rs[0];
+}
 async function recAuto(A) {
   const o = recAutoOpts(), state = A.state, st = REC.states[state];
   if (!o || !st || st.typedOf || REC.autoDone.has(state)) return;
@@ -355,6 +374,8 @@ async function recAuto(A) {
   const f = await p.mainFrame().evaluate(sel => window.__rkrec ? window.__rkrec.features(sel) : null, REC.opts.groups.button).catch(() => null);
   if (!f) return;
   const kinds = recSeen('kinds', A.id), newKind = !kinds.has(f.kind); kinds.add(f.kind);
+  // Twins load at the screen's address while groups and chips run here.
+  const twP = o.twins && (o.hovers || (o.zoom && newKind)) ? recTwinPages(A, st, o.twins) : null;
   const run = async (kind, c = {}) => {
     // One budget for the whole screen (the presenter waits for it): each kind gets what's left, and zoom, which can't
     // stop part way, only starts with zoomMinS left. On real apps a screen's sweep ran 9 to 13 minutes before this.
@@ -365,7 +386,8 @@ async function recAuto(A) {
     const t1 = Date.now(), s1 = SLEPT.ms;
     let n = null;
     try {
-      const r = await recSide(A, { kind, ...c });
+      // Shards (twin windows): each its own recSide, side by side; their results added up.
+      const r = c.shards ? recShardsDone(kind, await Promise.all(c.shards.map(sh => recSide(A, { kind, ...c, shards: undefined, ...sh })))) : await recSide(A, { kind, ...c });
       const what = r.error ? 'failed: ' + r.error : kind === 'hovers' ? `${r.n} of ${r.tried}${r.skipped ? ` (${r.skipped} seen before)` : ''}${r.skippedKinds ? ` (${r.skippedKinds} of kinds that never show)` : ''}, waits ${c.waitMs} ms` : kind === 'clicks' ? `${(r.clicks || []).length} of ${(r.controls || []).length}` : kind === 'groups' ? `${(r.groups || []).length}` : kind === 'chips' ? (r.rule ? 'found' : 'none') : kind === 'drags' ? `${(r.rules || []).length}` : kind === 'zoom' ? `${(r.zooms || []).length}` : kind === 'list' ? `${r.list && r.list.seen} rows` : 'done';
       n = kind === 'hovers' ? r.n : kind === 'clicks' ? (r.clicks || []).length : kind === 'groups' ? (r.groups || []).length : kind === 'zoom' ? (r.zooms || []).length : kind === 'drags' ? (r.rules || []).length : kind === 'chips' ? (r.rule ? 1 : 0) : null;
       did.push(`${kind}${c.frameRe ? ' (frame)' : ''} ${what}, ${((Date.now() - t1) / 1000).toFixed(1)} s (${((SLEPT.ms - s1) / 1000).toFixed(1)} s fixed waits)`);
@@ -382,14 +404,22 @@ async function recAuto(A) {
   const learned = hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900;
   const skipSels = Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel);
   const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...c });
-  if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
+  const tw = twP ? await twP : [];
+  const hn = tw.length + 1;
+  if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)], ...(tw.length ? { max: o.hoverMax ? Math.ceil(o.hoverMax / hn) : undefined, shards: [A.page, ...tw].map((q, i) => ({ on: i ? q : undefined, page: i ? `${state}~t${i}` : state, shard: [i, hn] })) } : {}) }));
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)] });
   for (const [i, fu] of f.frames.entries()) {
     const frameRe = '^' + fu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (o.hovers) await run('hovers', hv({ frameRe, page: `${state}-frame${i}`, skipKeys: [...recSeen('hovers', A.id + fu)] }));
     if (o.clicks) await run('clicks', { frameRe, page: `${state}-frame${i}`, pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id + fu)] });
   }
-  if (o.zoom && newKind) await run('zoom', { zooms: o.zooms || REC.zooms });
+  if (o.zoom && newKind) {
+    // Zoom levels in runs of neighbours, one run a window; each run starts from the level before it, so "the same
+    // markup as the level below" is decided as it is in one window.
+    const zs = (o.zooms || REC.zooms || []).filter(z => z !== 100), zn = Math.min(hn, zs.length), size = Math.ceil(zs.length / Math.max(zn, 1));
+    if (zn > 1) await run('zoom', { zooms: zs, shards: Array.from({ length: Math.ceil(zs.length / size) }, (x, i) => ({ on: i ? tw[i - 1] : undefined, zooms: zs.slice(i * size, (i + 1) * size), before: i ? zs[i * size - 1] : undefined })) });
+    else await run('zoom', { zooms: o.zooms || REC.zooms });
+  }
   if (o.lists && f.list) await run('list');
   // Last: the drag audit moves panes (and puts them back).
   if (o.drags && newKind && f.handles) await run('drags', { range: 240, step: 40 });
@@ -570,6 +600,7 @@ OPS.recordStop = async () => {
     // The window it was recorded in (the first app's): the replica is compared and laid out at this size, not demo.json's default.
     viewport: (REC.apps.find(a => a.viewport) || {}).viewport || undefined, states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log, timeline: REC.tl };
   await post('/recording', rec);
+  if (OPS.capTwins) await OPS.capTwins({ close: true }).catch(() => {});
   REC.on = false;
   // The recording's done: let go of every tab, so Chrome's debugging bar isn't on the stage when you rehearse or present.
   await CDPX_release();
@@ -703,7 +734,8 @@ async function recChips(A, state, c) {
 // Side paths, from the screen an app is on now. The recorder pauses while they run.
 // One side path on the screen an app is on now (for record side, and the automatic ones while recording).
 async function recSide(A, c) {
-  const state = A.state, p = A.page;
+  // c.on: a twin window showing the same screen (recTwinPages), instead of the recorded tab.
+  const state = A.state, p = c.on || A.page;
   // Clicks, drags, groups and chips drive the page themselves: the recorder steps aside (off); the others only read.
   const drives = /^(clicks|drags|groups|chips)$/.test(c.kind);
   await (drives ? recSetOff(p, true) : recSetBusy(p, true));
@@ -768,6 +800,13 @@ async function recSide(A, c) {
       // The 100% page's markup: a level that matches it needs no capture either.
       let lastDom = await domOf(), prevVw = base.w;
       try {
+        // A run of levels that doesn't start the list (a twin's): its level before first, for its markup and width.
+        if (c.before && c.before !== 100) {
+          const kb = c.before / 100, pzb = (A.viewport && A.viewport.zoom) || 1, vwb = Math.round(base.w / kb), vhb = Math.round(base.h / kb);
+          await s.send('Emulation.setDeviceMetricsOverride', { width: Math.round(vwb * pzb), height: Math.round(vhb * pzb), deviceScaleFactor: base.dpr * kb / pzb, mobile: false });
+          await poll(100); await recSettle(p, 900, 12000);
+          lastDom = await domOf(); prevVw = vwb;
+        }
         for (const z of c.zooms || [110, 125, 150, 175, 200]) {
           if (z === 100) continue;
           // Each zoom is a full snapshot (half a minute on a heavy Power BI page): stop at the screen's budget.

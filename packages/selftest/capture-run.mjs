@@ -448,6 +448,29 @@ try {
   check('and in the reader\'s shape, read twice: the page and its frames, what a box holds, each start screen too, and the plan it walked', rs && typedReads.every(r => r.docs.some(d => d.key === 'main') && r.docs.some(d => d.key === NOTES_HOST)) && rs.controls.some(c => c.name === 'New task' && c.role === 'textbox' && c.value === 'Call Kestrel') && rs.controls.some(c => c.name === 'Pin note' && c.frame === NOTES_HOST) && startReads && startReads.length === 2 && readScreen(startReads[0].docs).text.includes('No tasks yet') && startShot && startShot.app === 'tasks' && String(startShot.url).startsWith(tasks.url) && startShot.title === 'Fixture Tasks' && typedScreen.app === 'tasks' && typedScreen.title === 'Fixture Tasks' && wj.plan && wj.plan.sha256 === createHash('sha256').update(readFileSync(join(DEMO, 'plan.md'))).digest('hex'), JSON.stringify({ plan: wj.plan, startShot: startShot && { app: startShot.app, url: startShot.url, title: startShot.title, status: startShot.status }, reads: typedReads && typedReads.map(r => r.docs.map(d => [d.key, d.html.length])), controls: rs && rs.controls.slice(0, 8), start: !!startReads }));
   const cl = (wj.beats[0] && wj.beats[0].steps[2] && wj.beats[0].steps[2].cleared) || {};
   check('the beat stopped at the write: what it typed for it is cleared, no draft left', cl.cleared === true && cl.in === 'New task', JSON.stringify(wj.beats[0] && wj.beats[0].steps[2]));
+  // 5b · Twins (record.auto.twins): the same plan recorded with its side sweeps (hovers and zoom) in one window, then
+  // shared with 2 twin windows of each app where they show the same screen. The same screens, steps, zoom levels and
+  // hovers either way; the sweep times for the record.
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  const cfgFile = join(DEMO, 'demo.json'), cfg0 = readFileSync(cfgFile, 'utf8');
+  const withTwins = n => { const c = JSON.parse(cfg0); c.zooms = [90, 110, 125, 150]; c.record.auto = { ...c.record.auto, zoom: true, maxS: 120, zoomMinS: 5, twins: n }; writeFileSync(cfgFile, JSON.stringify(c, null, 2)); };
+  const twinRun = async (n, name) => {
+    withTwins(n); freshRaw();
+    const t = Date.now();
+    const r = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const [dir, rec] = keepRaw(name);
+    const hovers = existsSync(join(dir, 'hovers')) ? readdirSync(join(dir, 'hovers')).flatMap(pg => readdirSync(join(dir, 'hovers', pg)).filter(f => f.endsWith('.json')).map(f => { const h = JSON.parse(readFileSync(join(dir, 'hovers', pg, f), 'utf8')); return `${pg.replace(/~t\d+$/, '')} ${h.cand && h.cand.sel}|${h.cand && h.cand.text}`; })).sort() : [];
+    const zooms = ((rec && rec.sides && rec.sides.zoom) || []).map(z => `${z.state} ${z.z} ${z.vw} ${z.pw}`).sort();
+    const tm = (rec && rec.timing) || {};
+    return { r, rec, dir, hovers, zooms, secs: Math.round((Date.now() - t) / 1000), sweeps: +((tm.startSweepSecs || 0) + (tm.screenSweepSecs || 0)).toFixed(1), log: (rec && rec.log || []).filter(l => /twins for/.test(l)) };
+  };
+  const one = await twinRun(0, 'twins-0'), two = await twinRun(2, 'twins-2');
+  writeFileSync(cfgFile, cfg0);
+  const dTw = compareRaw(one.dir, two.dir, one.rec, two.rec);
+  times.twins = { off: { run: one.secs, sweeps: one.sweeps }, two: { run: two.secs, sweeps: two.sweeps } };
+  console.log('twins: ' + JSON.stringify({ ...times.twins, used: two.log }));
+  check('twins: the same screens, steps, zoom levels and hovers as one window, and twins were used where a screen showed alike', !one.r.done?.result?.stopped && !two.r.done?.result?.stopped && dTw.sameSteps && JSON.stringify(Object.keys(one.rec.states).sort()) === JSON.stringify(Object.keys(two.rec.states).sort()) && JSON.stringify(one.zooms) === JSON.stringify(two.zooms) && JSON.stringify(one.hovers) === JSON.stringify(two.hovers) && two.log.some(l => /twins for \S+: [12] of 2/.test(l)), JSON.stringify({ steps: dTw.steps, zooms: [one.zooms, two.zooms], hovers: [one.hovers.length, two.hovers.length, one.hovers.filter(h => !two.hovers.includes(h)).slice(0, 4), two.hovers.filter(h => !one.hovers.includes(h)).slice(0, 4)], log: two.log, stopped: [one.r.done?.result?.stopped, two.r.done?.result?.stopped] }));
   await run(['capture', 'stop', '--demo', DEMO], { env: E });
 
   // ---- 6 · The same plan through the recorder extension: the same screens -------------------------------------------
