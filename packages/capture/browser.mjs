@@ -553,6 +553,17 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     return guarding;
   }
 
+  // Notifications "denied" for these sites, never "granted" (one granted would pop up on her screen): a fresh profile's
+  // "ask" makes an app nag for it (Teams' "Turn on desktop notifications" banner), and no recording had that banner.
+  async function denyNotifications(origins) {
+    const out = [];
+    for (const origin of origins) {
+      const r = await top.send('Browser.setPermission', { permission: { name: 'notifications' }, setting: 'denied', origin }).then(() => 'denied', e => e.message);
+      out.push({ origin, r });
+    }
+    return out;
+  }
+
   // The demo's account, pinned at Entra's sign-in (pinnedAuthorizeUrl): no account picker, whatever else the
   // profile holds. Counts how often it pinned.
   async function pinAccount({ loginHint = null, domainHint = null } = {}) {
@@ -588,7 +599,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     killAll('SIGKILL');
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
-  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, pinAccount, tenantsOf, info, cpu, close, dir };
+  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, pinAccount, denyNotifications, tenantsOf, info, cpu, close, dir };
 }
 
 // The one window that shows on her screen: the capture profile, visible, on the first app that needs a sign-in. She

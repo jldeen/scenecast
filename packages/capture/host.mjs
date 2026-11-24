@@ -72,6 +72,10 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   // with the apps' packs' allow-lists; a run's own guard replaces it, and it comes back after.
   const base = (cfg.capture || {}).guard === 'hold' ? await baseGuard(cb, cfg, log) : null;
   if (base) await base();
+  // No app asks to send notifications (an app's own banner for it isn't in any recording).
+  const origins = await appOrigins(cfg, apps);
+  const denied = await cb.denyNotifications(origins).catch(e => [{ r: e.message }]);
+  log(`capture browser: notifications denied for ${denied.filter(d => d.r === 'denied').length} of ${origins.length} sites`);
   // Each app in a window of its own (made one at a time, loaded side by side); then where each one landed.
   const pages = await Promise.all(apps.map(a => cb.open(a)));
   await Promise.all(pages.map(p => p.waitForLoadState('load', { timeout: 60000 }).catch(() => {})));
@@ -235,4 +239,14 @@ async function signInHeld(held, apps, tv, cfg) {
     if (mine.length) out.push(`${a.id}'s sign-in: ${[...new Set(mine.map(h => `${h.method} ${h.host}${h.path}`))].join(', ')}`);
   }
   return out;
+}
+
+// Every site an app is on: its address and match, and its pack's (an app moves between them).
+async function appOrigins(cfg, apps) {
+  const { packsForDemo } = await import('@stuntdouble/apps/index.mjs');
+  const packs = packsForDemo(cfg), out = new Set();
+  for (const a of apps) for (const u of [a.url, a.match, ...(((packs[a.id] || {}).match) || [])]) {
+    try { const x = new URL(/^[a-z]+:\/\//i.test(u) ? u : `https://${u}`); if (!x.host.includes('*')) out.add(`${x.protocol}//${x.host}`); } catch (e) {}
+  }
+  return [...out];
 }

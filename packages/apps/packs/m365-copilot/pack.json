@@ -369,6 +369,9 @@
   "guard": {
     "allow": [
       "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
-    ]
+    ],
+    "why": {
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review)."
+    }
   }
 }
