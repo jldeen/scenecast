@@ -216,7 +216,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     }
     { const off = await guardOff(cmd, g.hosts, senderApps(demo.cfg, packs)); keepBodiesOut(demo, off.bodies); Object.assign(run.guard, off); }
     if (wRun) run.inputs = wRun.inputs();
-    try { run.events = (await cmd('capEvents', {}, 30)).events.filter(e => e.kind !== 'navigated'); } catch (e) {}
+    try { const appOf = senderApps(demo.cfg, packs); run.events = (await cmd('capEvents', {}, 30)).events.filter(e => e.kind !== 'navigated').map(e => ({ ...e, app: appOf({ tab: e.host }) })); } catch (e) {}
     save();
   }
   return finish();
@@ -426,7 +426,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     keepBodiesOut(demo, off.bodies);
     await netIn(0, 0, null).catch(() => {});
     walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
-    try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
+    try { walk.events = (await cmd('capEvents', {}, 30)).events.map(e => ({ ...e, app: appOfSender({ tab: e.host }) })); } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });
     writeFileSync(join(aiDir(demo), 'walk.json'), JSON.stringify(walk, null, 1));
   }
