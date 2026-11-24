@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { remote } from 'webdriverio';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../../examples/fixture-app/server.mjs';
+import { selftestGuard } from '../../../packages/selftest/guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..', '..');
@@ -35,6 +36,7 @@ for (const port of [RX_PORT, WD_PORT, 47801, 47802]) {
 }
 
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-ui-'));
+await selftestGuard({ tmp, receivers: [RX_PORT], extensions: [RX_PORT], ports: [WD_PORT, 47801, 47802] });
 const LIB = join(tmp, 'Scenecast');
 const EXT = join(tmp, 'extension');
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
@@ -56,6 +58,8 @@ const app = spawn(BIN, [], {
   env: {
     ...process.env,
     TAURI_WEBDRIVER_PORT: String(WD_PORT),
+    // Its home is the test's: a new demo's raw captures (~/.scenecast/<id>/raw) stay in the test's folder.
+    HOME: join(tmp, 'home'), USERPROFILE: join(tmp, 'home'),
     SCENECAST_LIBRARY: LIB,
     SCENECAST_EXTENSION_DIR: EXT,
     SCENECAST_JS: process.env.SCENECAST_JS || join(ROOT, 'packages'),

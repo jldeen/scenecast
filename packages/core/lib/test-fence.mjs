@@ -1,4 +1,4 @@
-// The fence a selftest puts around the engine. While SCENECAST_SELFTEST is set (the test's own folders, by the path
+// The fence a selftest puts around the engine. While SCENECAST_TEST_FENCE is set (the test's own folders, by the path
 // delimiter; packages/selftest/guard.mjs sets it, and everything a test starts inherits it), nothing reaches a
 // presenter's Scenecast:
 //   - the app's receivers, 47621–47630: no command is sent there, no receiver starts there, and no recorder is built
@@ -25,7 +25,7 @@ function real(p) {
   return process.platform === 'win32' ? full.toLowerCase() : full;
 }
 export function fenced(env = process.env) {
-  return env.SCENECAST_SELFTEST ? env.SCENECAST_SELFTEST.split(delimiter).filter(Boolean).map(real) : null;
+  return env.SCENECAST_TEST_FENCE ? env.SCENECAST_TEST_FENCE.split(delimiter).filter(Boolean).map(real) : null;
 }
 // Where the engine makes its own scratch folders (a cold start's clones): the test's own folder in a selftest.
 export const scratchDir = (env = process.env) => (fenced(env) || [])[0] || tmpdir();
