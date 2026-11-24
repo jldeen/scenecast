@@ -13,7 +13,8 @@
 //   capShot({ tab, file })          a picture of a tab, for a stop
 //   capBack({ tab })                the tab's previous page (the walker's way back from an off-plan landing)
 //   capUrl({ tab })                 where a tab is now (one that left the app has lost its mark)
-//   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick })
+//   capAuthWatch({ host | hostPattern, from? } | { off: true })   arm (or disarm) catching the app's own session
+//   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick, armed? })
 //                                   a pack's API check (GET, HEAD: the guard as it is; only pick's number and true/false
 //                                   fields come back) or API undo in the app's own signed-in session (from: the
 //                                   frame's host whose calls it takes the session from, and calls from): its page opened (a read), the
@@ -29,6 +30,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const originOf = u => { try { return new URL(u).origin; } catch (e) { return null; } };
+const hostRe = c => c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 // An API undo's address: path on origin, only when it's a plain path there that a URL parser leaves as it is (no dot
 // segments, backslash, second origin or fragment). Else null.
 export function apiTarget(path, origin) {
@@ -93,14 +95,24 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     // A run's guard, else the one on from the start.
     async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {}, passed: g && g.passed ? g.passed() : [], bodies: g && g.bodies ? g.bodies() : [] }; },
     async capEvents(c) { return { events: events.slice(c.since || 0), total: events.length }; },
+    // Arm catching the app's own session for a pack check after a write (the write's own calls carry it): capApi
+    // with armed then uses it without opening the page again. { off: true } disarms.
+    async capAuthWatch(c) {
+      const g = guard || (base && base.guard);
+      if (!g || !g.watchAuth) return { on: false };
+      if (c.off) { g.watchAuth(null); return { on: false }; }
+      g.watchAuth(hostRe(c), c.from || null);
+      return { on: true };
+    },
     async capApi(c) {
       const g = guard || (base && base.guard);
       if (!g || !g.watchAuth) return { ok: false, why: "no guard to see the app's own calls (API undos run in the capture browser)" };
-      const re = c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
       const p = await tabOf(c.tab);
-      g.watchAuth(re, c.from || null);
+      // armed (capAuthWatch before a write): the session its calls carried, the page left where it is. Else the page
+      // opened (open) and its first signed-in call caught.
+      if (!c.armed) g.watchAuth(hostRe(c), c.from || null);
       try {
-        await p.goto(c.open, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+        if (!c.armed) await p.goto(c.open, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
         for (const t0 = Date.now(); !g.peekAuth() && Date.now() - t0 < (c.waitS || 20) * 1000;) await new Promise(r => setTimeout(r, 250));
         const auth = g.takeAuth();
         if (!auth) return { ok: false, why: `the page made no signed-in call to ${c.hostPattern || c.host}${c.from ? ` from ${c.from}` : ''}` };

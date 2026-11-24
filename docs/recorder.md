@@ -158,7 +158,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
   app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
   for that one step. A write that isn't approved stops the run before it, with a picture.
-- **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json. A pack's `guard.stayHeld` stays held even during a write's step (the app's own background calls to the host the write opens).
+- **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json, each with
+  the tab, the frame and the app it came from (by the request's own target and document, never by when it came: a
+  background tab sends during another app's step), and each passed non-read with the allow entry that let it through. A pack's `guard.stayHeld` stays held even during a write's step (the app's own background calls to the host the write opens).
 - **Writes in frames too** (Microsoft IQ's Power BI frame): exactly one control by that name in the page and its
   frames, the reader agreeing in that frame's markup, the click hit-tested through the frames, and the guard open for
   that step on the app's hosts and its pack's `guard.hosts` (a frame's host goes there; a tenant's in a private pack).
@@ -177,9 +179,17 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 - **Checks every step's proof** (`Lands on:`, [plan-format.md](engine/plan-format.md#what-proves-a-step-lands-on)):
   words on the page, a control by its exact name (in a state), a box's text (its live value), or words gone with
   words that stay. A proof that isn't there stops the run, with a picture.
-- **A step it can't prove** (no proof, or one that was already there before it: for `Go to X`, on the app the plan
-  was on) goes in run.json's `unprovable`. The run goes on only if the next step's control is the one (exactly one by
-  its exact name, of its kind), and a write never follows it: the step before every write has a proven landing.
+- **Proves each landing on the live page** ([plan-format.md](engine/plan-format.md#a-landing-on-the-live-page),
+  `liveProof`): it reads the page before each step (for `Go to X`, the app the plan was on) and twice after it, in
+  the reader's shape, and records the landing in run.json's `landings` as strong, weak or none, with what proved it.
+  After a write, its pack's read-only check (`check.api` with `made`: the status, or the fields, it answers once the
+  write ran) passing is strong; it runs in the app's own session, as the write's own calls carried it.
+- **A step it can't prove** (not strong, and no proof or one that was already there before it) goes in run.json's
+  `unprovable`. The run goes on only if the next step's control is the one (exactly one by its exact name, of its
+  kind), and a write never follows it.
+- **Writes only after strong landings** (`writeGate`): the landings in the write's app since its last write all
+  strong. The run never asks: where it would, it stops before the write, keeps a picture and both reads of the page
+  (`.out/ai/stops/`), runs the reset after, and lists the step in run.json's `needsYou`.
 - **Clicks only what it means.** Before every click, what's at the point (through the frames under it) has to be the
   control itself, not a toast, a banner or a backdrop on top: measured again for up to 2 s, then a read-only step
   is missing and a write stops the run. Each input's record keeps what it hit (`landed`).

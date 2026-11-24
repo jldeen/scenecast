@@ -94,7 +94,10 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
 - `undo.steps`: plan lines (the same plain steps a plan uses), run in the capture browser. `{name}` placeholders are
   what the run made (the skill, the task). `You: …` is a step for a person. `undo: null` with `irreversible: true` or
   a `note` says there is none. `{ "same": "<write id>" }` reuses another write's undo or check.
-- `check`: read-only (`steps` may only look; `checkPack` refuses a check step that could change something).
+- `check`: read-only (`steps` may only look; `checkPack` refuses a check step that could change something). A
+  private pack's `check.api` (GET) can say what it answers once the write ran: `made`, a status (`"200"`) or the
+  number and true/false fields it names (`{ "stage": [1, 2] }`). An unattended run makes that check right after the
+  write, in the app's own session; passing, the write's landing is strong.
 - `effects`: what a run leaves besides its writes (memories, tasks in Recent), each with a check.
 - `safe`: clicks that look like writes but only open a picker or a menu (Microsoft IQ's "Add content to …" opens the
   add picker; "Add to business plugin" is the write). `checkPack` holds each to that: `on` is a click, `what` says it
