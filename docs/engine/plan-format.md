@@ -51,11 +51,43 @@ say, and a step that could send, save or change something says `— ask first`.
 | `Writes:` | What the step changes, in plain words. Approving the plan approves these steps, and only these. The demo's reset (`reset.md`) undoes each one. When an app pack knows the write, it ends with ` · <pack>:<write>` (`· m365-copilot:save-skill`); the app hides that part. |
 | `Safe:` | Why a step that looks like a change isn't one, from the app's pack (`· <pack>:<id>`): "Add content to…" only opens a picker; Enter in a search box only filters. The step has no `— ask first` and runs on its own. |
 | `Undo:` | How to undo it, when it isn't the plain opposite. The reset uses it. |
-| `Lands on:` | The screen the step should end on: a captured screen's name, then optionally `· "words on it"`. The capture pass checks it. The words are ones that screen shows and the screen before the step didn't (for `Go to`, the other app's), so they're only there if the step worked. |
+| `Lands on:` | The screen the step should end on (a captured screen's name), then what proves the step ran there: words on it, a control, a box's text, or words that are gone ([below](#what-proves-a-step-lands-on)). The capture pass checks it. |
 | `Script:` | The talk track's Do line it came from, when the plan words it differently. |
 | `Differs:` | Where the product isn't what the talk track says. Shown once, when the presenter approves. |
 
-`Lands on:` words come from the recording, as the run will read the page: its words in every frame, not what's in a
+## What proves a step (`Lands on:`)
+
+After the screen's name and ` · `, one proof, in plain words. Either part may be left out.
+
+| Form | What a run checks on the page after the step | `step.lands` (parsed) |
+|---|---|---|
+| `"words"` | Its words include them. | `{ screen, kind: 'words', text }` |
+| `control "Name"` | A control with that name is on it: a button, link, tab, option, switch, box. | `{ screen, kind: 'control', text: null, control, state: null }` |
+| `control "Name" selected` | …and it's selected (`aria-selected="true"`). | `{ …, state: 'selected' }` |
+| `control "Name" open` | …and it's expanded (`aria-expanded="true"`). | `{ …, state: 'open' }` |
+| `control "Name" on` | …and it's checked or pressed (`checked`, `aria-checked="true"`, `aria-pressed="true"`). | `{ …, state: 'on' }` |
+| `control "Name" off` | …and it isn't (an unchecked checkbox or radio, `aria-checked="false"`, `aria-pressed="false"`). | `{ …, state: 'off' }` |
+| `box "Name" says "text"` | A box you type in (an input, a text area, an editable area) with that name starts with the text. | `{ screen, kind: 'box', text: null, box, says }` |
+| `gone "words"` | Its words no longer include them: they were on the page before the step. | `{ screen, kind: 'gone', text: null, gone }` |
+| (none) | Nothing: the review lists the step under **Needs you**. | `{ screen, kind: null, text: null }` |
+
+- **The page's words:** what it shows in every frame (`innerText`), not what's in a closed dialog.
+- **A control's name:** its `aria-label`, else its text.
+- **Comparing:** words, names and a box's text are compared lowercased, with quotes (`"“”'‘’`) dropped and runs of
+  spaces as one space. A name is the whole name; a box's text is its start.
+- **Quotes:** a value with a straight quote in it is written in curly quotes (`“He said "go"”`). `text` is only ever
+  the words a run looks for in the page's words.
+
+```markdown
+- Click "Plugins"
+  Lands on: iq-picker-plugins · control "Plugins" selected
+- Type "IQ" in "Search tools by name"
+  Lands on: adm-iq-typed · box "Search tools by name" says "IQ"
+- Click "Close panel"
+  Lands on: iq-landing · gone "Delegation of spend authority"
+```
+
+`Lands on:` proofs come from the recording, as the run will read the page: its words in every frame, not what's in a
 closed dialog, and nothing a reload changes (a time, a size). Some steps leave nothing new on the screen to check by:
 closing a panel, pressing Escape, typing into a search box. Then the words are a control's name only that screen has,
 or none, and the review lists the step under **Needs you** ("A run can't check this step"). Copilot's plans get the
@@ -153,7 +185,8 @@ needs }`: its Undo as a plan). `packages/ai/start.mjs`: `startState(plan, { walk
 ## In code
 
 `packages/ai/plan.mjs`: `parsePlan(text)` gives `{ title, beats: [{ title, steps, say, lines }] }`. Each step is
-`parseStep()`'s, plus the details it has: `writes`, `undo`, `lands: { screen, text }`, `script`, `differs`. `say` is
+`parseStep()`'s, plus the details it has: `writes`, `undo`, `lands` (`parseLands()`: `{ screen, kind, text, … }`,
+[above](#what-proves-a-step-lands-on)), `script`, `differs`. `formatLands()` writes a `lands` back. `say` is
 still the lines' words; `lines` has the same lines with `focus: [{ texts, around, mark, dir, via, on }]`.
 `formatPlan(plan)` writes it back. `writesOf(plan)` lists the approved writes. `packages/ai/make.mjs`: `approve(demo)`
 and `approval(demo)` (whether `plan.md` is still the text that was approved).
