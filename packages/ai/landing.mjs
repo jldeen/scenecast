@@ -81,11 +81,13 @@ function frameOf(walker, app) {
 const numbered = t => /\d/.test(String(t).replace(/#\d+\b|\b[a-z]{1,6}-\d{2,}\b/gi, ''));
 
 // The proof for one step, from the screen before it (`from`; for "Go to X", where the plan was) to the one it lands on
-// (`to`). In this order, words without a number first, then with one (flagged): words the new screen shows that the
-// one before didn't; a control's state; what a box says; a control only the new screen has; words gone, with words of
-// the page's own still there. A Type step: its own words. typed: what other steps type (never a proof).
+// (`to`). In this order, words without a number first, then with one (flagged): the control the plan's next step
+// clicks, when it's in a live region (an approval card); words the new screen shows that the one before didn't; a
+// control's state; what a box says; a control only the new screen has; words gone, with words of the page's own still
+// there. A Type step: its own words. typed: what other steps type (never a proof). next: the plan's next step that
+// acts on the page (not a wait or a scroll).
 // → { lands: { kind, … }, number, differs, why }: lands.kind is null when nothing proves the step, and `why` says so.
-export function chooseProof(s, from, to, walker, { typed = [] } = {}) {
+export function chooseProof(s, from, to, walker, { typed = [], next = null } = {}) {
   const after = walker.screen(to);
   const before = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
   const none = why => ({ lands: { kind: null, text: null }, why });
@@ -132,6 +134,10 @@ export function chooseProof(s, from, to, walker, { typed = [] } = {}) {
   const l0 = s.lands || {};
   const own = l0.kind ? Object.fromEntries(Object.entries(l0).filter(([k]) => k !== 'screen')) : l0.text ? { kind: 'words', text: l0.text } : null;
   const gone = s.kind !== 'app' && from && fromApp === app ? stillFor(after, before, frame, stable) : null;
+  // A control in a live region proves a step only when the plan's next step clicks it (the same name, and its role
+  // when the step gives one): that step needs exactly it. Live-region words never do.
+  const nextHit = next && next.kind === 'click' && next.target && walker.control ? walker.control(after, next.target, undefined, to) : null;
+  const nextCtl = nextHit && nextHit.el && nextHit.el.live && !nextHit.el.shut && !nextHit.el.time && pnorm(nextHit.el.name) === pnorm(next.target) && (!next.role || nextHit.el.role === next.role) ? nextHit.el : null;
 
   for (const digits of [false, true]) {
     // A number in what nearly all the site's screens show (its name: "Microsoft 365") doesn't change from screen to screen.
@@ -140,6 +146,7 @@ export function chooseProof(s, from, to, walker, { typed = [] } = {}) {
     const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))) });
     // The plan's own proof, while it still proves the step.
     if (own && pick(own)) return found(own);
+    if (nextCtl) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
     for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
     for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
     for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });
@@ -200,12 +207,13 @@ export function proveLandings(plan, walker, flags = []) {
   const steps = plan.beats.flatMap((b, bi) => b.steps.map(s => [s, bi]));
   const typedAll = [...(walker.typedTexts ? walker.typedTexts() : []), ...steps.map(([s]) => s.kind === 'type' ? s.value : null).filter(Boolean)];
   let cur = null;
-  for (const [s, bi] of steps) {
+  for (const [k, [s, bi]] of steps.entries()) {
     const to = s.lands && s.lands.screen, from = cur;
     if (!to) continue;
     cur = to;
     if (!walker.screen(to)) continue;
-    const r = chooseProof(s, from, to, walker, { typed: typedAll.filter(v => !(s.kind === 'type' && v === s.value)) });
+    const next = (steps.slice(k + 1).find(([x]) => !/^(wait|scroll)$/.test(x.kind)) || [])[0] || null;
+    const r = chooseProof(s, from, to, walker, { typed: typedAll.filter(v => !(s.kind === 'type' && v === s.value)), next });
     s.lands = { screen: to, ...r.lands, text: r.lands.kind === 'words' ? r.lands.text : null };
     if (r.differs && !s.differs) s.differs = r.differs;
     const flag = !r.lands.kind ? { kind: 'landing', text: `${formatStep(s)}: ${r.why}, so a run can't tell whether it worked` }

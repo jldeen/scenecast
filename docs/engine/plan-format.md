@@ -122,16 +122,18 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
 1. **A Type step:** the start of its own words: in the page's words when the box is an editable area, else
    `box "Name" says "…"`. When the recorded screen has other words in that box, the step says so (`Differs:`): the
    recording can't show it, and a run checks it.
-2. **Any other step:** its plan's proof while that still proves it, else the first of new words (headings, then
-   lines, then labels; the page's own before its frame), a control's state, what a box says, a control only this
-   screen has, and words gone with the page's own words still there.
+2. **Any other step:** its plan's proof while that still proves it, else the first of: the control the plan's next
+   step clicks, when it's in a live region (an approval card: the next step needs exactly it); new words (headings,
+   then lines, then labels; the page's own before its frame); a control's state; what a box says; a control only this
+   screen has; and words gone with the page's own words still there.
 3. **Numbers last.** Words without a number first. A number that only identifies (`#2`, `PO-1001`) or is part of
    what nearly every screen of the site shows (`Microsoft 365 admin center`) doesn't count. Words with a number only
    when nothing else tells the screens apart, and then the review lists the step under **Needs you** ("A number that
    can change").
 4. **Never:** what a reload, the clock or the computer changes (a time or a date, a duration, a size, a long number,
    a shortcut's keys like `⌘⇧B`); what's in a live region (a toast, a status: role `status`, `alert`, `log`,
-   `marquee` or `timer`, `aria-live`, an `output`); what Copilot wrote as the recording ran (its answers, a heading or
+   `marquee` or `timer`, `aria-live`, an `output`), but for the control the next step clicks (above); what Copilot
+   wrote as the recording ran (its answers, a heading or
    a button it named, the names it made up, and what's in a part of the page named by one); what another step types;
    words the screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each
    visit); what's in a closed dialog.

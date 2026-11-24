@@ -306,6 +306,33 @@ test('a landing proves its step: new words, a control\'s state, a control only i
   assert.deepEqual(input.script.beats[0].lines[0].issues, ['The product shows "Save"']);
 });
 
+test('a control in a live region proves a step only when the next step clicks it; its words never do', () => {
+  const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
+  // An approval card arrives in a live region: its heading and its buttons. Nothing else on the page is new.
+  const S = {
+    chat: sc(['Ask anything'], [{ role: 'textbox', name: 'Message', editable: 'content' }]),
+    card: sc(['Ask anything', { text: 'Save note', role: 'heading', live: true }, { text: 'Save', kind: 'control', role: 'button', live: true }],
+      [{ role: 'textbox', name: 'Message', editable: 'content' }, { role: 'button', name: 'Save: Save note', live: true }, { role: 'button', name: 'Cancel: Save note', live: true }]),
+    saved: sc(['Ask anything', 'Your note is saved'], [{ role: 'textbox', name: 'Message', editable: 'content' }]),
+  };
+  const walker = { screen: id => S[id], shown: id => S[id], states: Object.keys(S), flow: { states: Object.fromEntries(Object.keys(S).map(k => [k, { app: 'chat' }])) },
+    control: (scr, name) => { const el = scr.controls.find(c => c.name.toLowerCase() === String(name).toLowerCase()); return el ? { el, score: 100 } : null; } };
+  const plan = (nextTarget, role) => ({ beats: [{ steps: [
+    { kind: 'app', app: 'chat', lands: { screen: 'chat' } },
+    { kind: 'press', key: 'Enter', line: '1.1', lands: { screen: 'card', text: 'Save note' } },
+    { kind: 'wait', line: '1.1' },
+    { kind: 'click', target: nextTarget, ...(role ? { role } : {}), line: '1.2', lands: { screen: 'saved' } }] }] });
+  const clicks = plan('Save: Save note');
+  proveLandings(clicks, walker);
+  assert.equal(formatLands(clicks.beats[0].steps[1].lands), 'card · control "Save: Save note"');
+  // The next step clicks something else, or the same name in another role: the card's controls and words don't count.
+  for (const other of [plan('Ask anything'), plan('Save: Save note', 'link')]) {
+    const flags = proveLandings(other, walker);
+    assert.equal(formatLands(other.beats[0].steps[1].lands), 'card');
+    assert.deepEqual(flags.map(f => [f.kind, f.at]), [['landing', '1.1']]);
+  }
+});
+
 test('typing lands on its own words, never what was recorded in the box: Differs when the recording has others', () => {
   const walker = walkerFromDemo(demoDir());
   const plan = { beats: [{ steps: [
