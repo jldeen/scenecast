@@ -4,10 +4,11 @@
 //
 //   const named = await page.evaluate(`(() => { const controlOf = ${controlOf}; return [...document.querySelectorAll('*')]
 //     .map(el => controlOf(el, { tag: e => e.localName, attr: (e, n) => e.getAttribute(n), text: e => e.innerText,
-//       byId: id => document.getElementById(id) })).filter(c => c.control); })()`);
+//       byId: id => document.getElementById(id), labels: e => [...(e.labels || [])] })).filter(c => c.control); })()`);
 //
 // acc:  tag(el) → its tag, lowercase; attr(el, name) → the attribute's value, or null when it has none;
-//       text(el) → the words it shows (innerText); byId(id) → the first element with that id, or null.
+//       text(el) → the words it shows (innerText); byId(id) → the first element with that id, or null;
+//       labels(el) → the <label> elements tied to it (`for` its id, or around it), in page order.
 // →     { control, role, name }: whether it's a control; its role; its name ('' when it has none, or when it isn't a
 //       control: names are only worked out for controls).
 // The rule in words: docs/engine/plan-format.md, "Controls, their roles and names".
@@ -33,12 +34,14 @@ export function controlOf(el, acc) {
       || attr('tabindex') === '0';
   if (!control) return { control, role, name: '' };
   // Its name: the first of these that isn't empty (cleaned as above): aria-label; the words of the elements aria-labelledby
-  // names; its own words (not for a box you type in); placeholder, data-placeholder, aria-placeholder, title, alt,
-  // value. A name said twice in a row ("Share Share") once; at most 90 characters.
+  // names; the words of its <label>s (an input, select or textarea); its own words (not for a box you type in);
+  // placeholder, data-placeholder, aria-placeholder, title, alt, value. A name said twice in a row ("Share Share")
+  // once; at most 90 characters.
   const words = els => els.map(e => acc.text(e)).join(' ');
   const by = has('aria-labelledby') ? words(attr('aria-labelledby').split(/\s+/).map(id => id && acc.byId(id)).filter(Boolean)) : '';
+  const label = /^(input|select|textarea)$/.test(tag) ? words(acc.labels(el) || []) : '';
   const own = tag === 'input' || tag === 'textarea' || editable ? '' : acc.text(el);
-  const name = [attr('aria-label'), by, own, attr('placeholder'), attr('data-placeholder'), attr('aria-placeholder'), attr('title'), attr('alt'), attr('value')]
+  const name = [attr('aria-label'), by, label, own, attr('placeholder'), attr('data-placeholder'), attr('aria-placeholder'), attr('title'), attr('alt'), attr('value')]
     .map(clean).find(Boolean) || '';
   return { control, role, name: name.replace(/^(.{2,}?) ?\1$/, '$1').slice(0, 90) };
 }

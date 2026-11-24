@@ -128,6 +128,14 @@ test('talk tracks: quotes with Do and Screen under them, Do and Say sections, Ru
   assert.deepEqual(plain.beats[0].lines.map(l => [l.say, l.do]), [['Hello.', ['Click Plugins.']], ['Bye.', []]]);
 });
 
+test('a capture read without a browser: a field\'s <label>, by its for or around it, as the browser ties them', () => {
+  const sc = readScreen([{ key: 'main', html: '<label for="code">Promo code</label><input id="code" placeholder="Enter code">'
+    + '<label><input type="checkbox"> Remember me</label>'
+    + '<label for="d">Not a field</label><div id="d" tabindex="0">Its own words</div>'
+    + '<label for="far">Far field<input placeholder="Inside"></label><input id="far">' }]);
+  assert.deepEqual(sc.controls.map(c => [c.role, c.name]), [['textbox', 'Promo code'], ['checkbox', 'Remember me'], ['div', 'Its own words'], ['textbox', 'Inside'], ['textbox', 'Far field']]);
+});
+
 test('a capture read without a browser: an id names what getElementById finds, the first with it', () => {
   const sc = readScreen([{ key: 'main', html: '<span id="t">Close panel</span><span id="t">Other</span><button aria-labelledby="t">x</button>' }]);
   assert.deepEqual(sc.controls.map(c => [c.role, c.name]), [['button', 'Close panel']]);

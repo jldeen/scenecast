@@ -102,8 +102,10 @@ steps (`Click "Name"`) and proofs (`control "Name"`) name controls by it.
   `submit`, `reset`, `image`), a searchbox (`search`) or else a textbox; an editable area, a textbox; anything else,
   its tag.
 - **Its name** is the first of these that isn't empty: `aria-label`; the words of the elements its `aria-labelledby`
-  names (for each id, the first element with it), joined by a space; its own words (`innerText`; not for an `input`,
-  a `textarea` or an editable area); `placeholder`; `data-placeholder`; `aria-placeholder`; `title`; `alt`; `value`.
+  names (for each id, the first element with it), joined by a space; for an `input`, `select` or `textarea`, the
+  words of its `<label>`s (`el.labels`: a label whose `for` is its id, or around it), joined by a space; its own
+  words (`innerText`; not for an `input`, a `textarea` or an editable area); `placeholder`; `data-placeholder`;
+  `aria-placeholder`; `title`; `alt`; `value`.
   Each is cleaned first: invisible characters (zero-width spaces and joiners, direction marks) dropped, runs of
   spaces as one, ends trimmed. A name said twice in a row (`Share Share`) counts once, and a name is cut at 90
   characters.

@@ -156,12 +156,16 @@ export function readScreen(docs, { specs = [] } = {}) {
     const root = parseHtml(html);
     roots.push({ key: key || 'main', root });
     if (!theme) theme = themeOf(root);
-    // Ids as getElementById finds them: the first with that id.
-    const ids = new Map();
-    const index = el => { if (typeof el === 'string') return; if (el.attrs.id && !ids.has(el.attrs.id)) ids.set(el.attrs.id, el); el.children.forEach(index); };
+    // Ids as getElementById finds them (the first with that id), and each field's <label>s as el.labels gives them:
+    // a label's `for` names its field (when that's a field), else it's the first field inside it.
+    const ids = new Map(), labelEls = [], labels = new Map();
+    const index = el => { if (typeof el === 'string') return; if (el.attrs.id && !ids.has(el.attrs.id)) ids.set(el.attrs.id, el); if (el.tag === 'label') labelEls.push(el); el.children.forEach(index); };
     index(root);
+    const labelable = el => el && typeof el !== 'string' && (/^(button|meter|output|progress|select|textarea)$/.test(el.tag) || (el.tag === 'input' && String(el.attrs.type || '').toLowerCase() !== 'hidden'));
+    const firstIn = el => { for (const c of el.children) { if (labelable(c)) return c; const f = typeof c !== 'string' && firstIn(c); if (f) return f; } return null; };
+    for (const l of labelEls) { const f = 'for' in l.attrs ? ids.get(l.attrs.for) : firstIn(l); if (labelable(f)) (labels.get(f) || labels.set(f, []).get(f)).push(l); }
     const own = el => clean(el.children.filter(c => typeof c === 'string').join(' '));
-    const acc = { tag: el => el.tag, attr: (el, n) => (n in el.attrs ? el.attrs[n] : null), text: el => wordsOf(el), byId: id => ids.get(id) || null };
+    const acc = { tag: el => el.tag, attr: (el, n) => (n in el.attrs ? el.attrs[n] : null), text: el => wordsOf(el), byId: id => ids.get(id) || null, labels: el => labels.get(el) || [] };
     // shut: inside a closed dialog (no open attribute) or a template, so not on the page as it shows (innerText):
     // the item or control is marked, and kept as it was.
     const walk = (el, aria = false, bar = false, shut = false) => {
