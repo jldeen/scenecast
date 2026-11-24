@@ -1015,3 +1015,38 @@ test('a Go to step lands on what its page names itself by, when other pages of i
   proveLandings(p2, one);
   assert.equal(formatLands(p2.beats[0].steps[1].lands), 'pr1 · "Status and details"');
 });
+
+test('a check on another screen: the plan\'s own read-only steps there, never through a write', async () => {
+  const { pathTo } = await import('./reset-run.mjs');
+  const plan = parsePlan(`# Demo
+
+## Beat 1 · One
+
+- Go to chat
+  Lands on: home · "Hi"
+- Click "Plugins"
+  Lands on: plugins · "Added"
+- Go to admin
+  Lands on: tools · "Tools"
+- Go to chat
+- Click "Manage all"
+  Lands on: manage · control "Fabric IQ" on
+- Click "Save" — ask first
+  Writes: saves it · chat-app:save
+  Lands on: saved · "Saved"
+`);
+  assert.deepEqual(pathTo(plan, 'chat', 'manage').map(s => s.target), ['Plugins', 'Manage all']);
+  assert.deepEqual(pathTo(plan, 'chat', 'home'), []);
+  assert.equal(pathTo(plan, 'chat', 'saved'), null, 'only a write gets there');
+  assert.equal(pathTo(plan, 'chat', 'nowhere'), null);
+  assert.deepEqual(pathTo(plan, 'admin', 'tools'), []);
+});
+
+test('an API undo\'s Note gives the steps for when it can\'t, and the approval lists them', async () => {
+  const { fallbackSteps } = await import('./reset-run.mjs');
+  const { resetSteps } = await import('./make.mjs');
+  assert.deepEqual(fallbackSteps('an API call; if it can\'t: Click "More actions for {skill}" › Click "Delete"'), ['Click "More actions for {skill}"', 'Click "Delete"']);
+  assert.deepEqual(fallbackSteps('an API call, nothing else'), []);
+  const list = resetSteps('# Reset: X\n\n## Undo · Chat\n\n- Go to chat\n- Undo with the app pack: chat-app:new-task\n  Undoes: beat 1, Press Enter\n  Note: an API call; if it can\'t: Click "Delete {task}"\n');
+  assert.deepEqual(list.map(x => [x.text, !!x.fallback]), [['Undo with the app pack: chat-app:new-task', false], ['Click "Delete {task}"', true]]);
+});

@@ -12,6 +12,11 @@
 //   capShot({ tab, file })          a picture of a tab, for a stop
 //   capBack({ tab })                the tab's previous page (the walker's way back from an off-plan landing)
 //   capUrl({ tab })                 where a tab is now (one that left the app has lost its mark)
+//   capApi({ tab, open, host | hostPattern, method, path, body })
+//                                   an API undo in the app's own signed-in session: its page opened (a read), the
+//                                   Authorization the page sends to that host caught (in memory, for the one call,
+//                                   never written), then the call from the page, the guard open for that host and that
+//                                   call only → { ok, status, method, host, path } | { ok: false, why }
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
 //                                    user is active and the screen unlocked (the capture browser has no person)
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -70,6 +75,28 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     // A run's guard, else the one on from the start.
     async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {}, passed: g && g.passed ? g.passed() : [] }; },
     async capEvents(c) { return { events: events.slice(c.since || 0), total: events.length }; },
+    async capApi(c) {
+      const g = guard || (base && base.guard);
+      if (!g || !g.watchAuth) return { ok: false, why: "no guard to see the app's own calls (API undos run in the capture browser)" };
+      const re = c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+      const p = await tabOf(c.tab);
+      g.watchAuth(re);
+      try {
+        await p.goto(c.open, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+        for (const t0 = Date.now(); !g.peekAuth() && Date.now() - t0 < (c.waitS || 20) * 1000;) await new Promise(r => setTimeout(r, 250));
+        const auth = g.takeAuth();
+        if (!auth) return { ok: false, why: `the page made no signed-in call to ${c.hostPattern || c.host}` };
+        let close; const opened = new Promise(r => { close = r; });
+        g.pass(() => opened, { hosts: [auth.host] });
+        try {
+          const r = await p.evaluate(async ({ url, method, auth, body }) => {
+            try { const res = await fetch(url, { method, credentials: 'include', headers: { authorization: auth, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: res.status }; } catch (e) { return { error: String((e && e.message) || e) }; }
+          }, { url: auth.origin + c.path, method: c.method, auth: auth.value, body: c.body || null });
+          log(`API undo: ${c.method} ${auth.host}${String(c.path).replace(/[0-9a-f-]{16,}|\d{4,}/gi, '{id}')}: ${r.status || r.error}`);
+          return r.status ? { ok: r.status >= 200 && r.status < 300, status: r.status, method: c.method, host: auth.host, path: c.path } : { ok: false, why: r.error };
+        } finally { close(); }
+      } finally { g.watchAuth(null); }
+    },
     async capActive(c) {
       const p = await tabOf(c.tab);
       const perms = [];

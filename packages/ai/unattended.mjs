@@ -13,7 +13,7 @@
 //   - run.json: every step, each write and what it made (for the undos), the reset, the guard, the stop.
 // The recording is the recorder's own, the same as the extension path's (build, checks and Review work unchanged);
 // its start-screen sweeps run side by side, an app per window.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatStep, stepCount } from './plan.mjs';
 import { recordOpts } from '@stuntdouble/core/lib/demo.mjs';
@@ -228,6 +228,10 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
   const shots = join(aiDir(demo), 'walk');
+  // Every screen it lands on, as it is today (local only, under .out): for re-grounding a plan on the product now.
+  const screensDir = join(aiDir(demo), 'walk-screens');
+  rmSync(screensDir, { recursive: true, force: true });
+  mkdirSync(screensDir, { recursive: true });
   const seenAt = {};
   let walk;
   try {
@@ -253,6 +257,10 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       stopBeat: app => w.clearTyped(app),
     }, { emit: async e => {
       emit(e);
+      if (e.event === 'walk' && ['reached', 'drifted', 'unproven'].includes(e.status) && e.app) {
+        const sn = await w.screenNow(e.app).catch(err => ({ error: err.message }));
+        writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn }, null, 1));
+      }
       // A picture of each miss and each drifted landing, for whoever reads walk.json; for a drifted one, what the
       // screen says instead (its title, headings and first lines), so a plan's landing words can follow the product.
       if ((e.status === 'missed' || e.status === 'drifted' || e.status === 'unproven') && e.app) {

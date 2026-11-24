@@ -14,6 +14,33 @@ import { parseStep, formatStep } from './plan.mjs';
 import { appTab, sleep } from './run.mjs';
 import { norm } from './find.mjs';
 
+// The plan's own read-only steps from an app's start screen to one of its screens (a check on a screen other than the
+// start): from the app's first "Go to", the steps the plan takes in that app (going back to it carries on where it
+// was), up to the first that lands there. null when a write comes first (that screen is what a write made, not
+// somewhere to go) or the plan never lands there.
+export function pathTo(plan, app, screen, appOf = x => x) {
+  let on = null, started = false;
+  const out = [];
+  for (const s of ((plan && plan.beats) || []).flatMap(b => b.steps)) {
+    if (s.kind === 'app') {
+      on = appOf(s.app);
+      if (on === app && !started) { started = true; if (s.lands && s.lands.screen === screen) return []; }
+      continue;
+    }
+    if (!started || on !== app) continue;
+    if (s.writes) return null;
+    out.push(s);
+    if (s.lands && s.lands.screen === screen) return out;
+  }
+  return null;
+}
+
+// A Note's steps for when an API undo can't run ("…; if it can't: Click \"More actions\" › Click \"Delete\""), in order.
+export function fallbackSteps(note) {
+  const m = /if it can['’]t:\s*(.+)$/i.exec(String(note || ''));
+  return m ? m[1].split(/\s*›\s*/).map(x => x.trim()).filter(Boolean) : [];
+}
+
 const quoted = s => [...String(s).matchAll(/["“]([^"“”]+)["”]/g)].map(m => m[1]);
 
 // reset.md's Undo sections, with what each group of steps undoes (reset.mjs writes "Undoes:" under a group's first).
@@ -92,7 +119,8 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   const home = app => walker.home(app);
   const fill = t => String(t).replace(/\{(\w+)\}/g, (m, k) => results[k] || m);
   // One reset step that changes something: approved, its placeholders filled, run as a write.
-  const step = async (part, app, s, approvedText) => {
+  const step = async (part, app, s, approvedText, { note = null } = {}) => {
+    if (s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) return apiUndo(part, app, s, approvedText, note);
     const filled = parseStep(fill(formatStep(s)));
     if (/\{\w+\}/.test(formatStep(filled))) return { ok: false, why: `${formatStep(s)}: the run didn't record what to fill in` };
     if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
@@ -104,12 +132,38 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     did.push(`${app}: ${formatStep(filled)}`);
     return { ok: true };
   };
+  // "Undo with the app pack: <pack>:<write>": the pack's API undo (a private pack's), in the app's own signed-in session,
+  // with what the run made; if it can't, the steps its Note gives, each approved and run as a write.
+  const apiUndo = async (part, app, s, approvedText, note) => {
+    if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
+    const m = /^undo with the app pack:\s*([\w-]+):([\w-]+)\s*$/i.exec(s.text);
+    const fall = async why => {
+      const steps = fallbackSteps(note);
+      if (!steps.length) return { ok: false, why: `${s.text}: ${why}, and its Note gives no steps for when it can't` };
+      for (const t of steps) { const r = await step(part, app, parseStep(t), t); if (!r.ok) return { ...r, why: `${s.text}: ${why}; then ${r.why}` }; }
+      return { ok: true, fallback: why };
+    };
+    if (!m) return fall('it names no pack and write');
+    const { walkerPacks } = await import('./live.mjs');
+    const packs = await walkerPacks();
+    const pack = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(p => p && p.id === m[1]) : null;
+    const pw = pack && (pack.writes || []).find(w => w.id === m[2]);
+    const api = pw && pw.undo && pw.undo.api, at = api && pack.apis && pack.apis[api.use];
+    if (!api || !at) return fall(`the ${m[1]} pack has no API undo for ${m[2]}`);
+    const path = fill(api.path || ''), body = api.body ? JSON.parse(fill(JSON.stringify(api.body))) : null;
+    const left = `${path} ${body ? JSON.stringify(body) : ''}`.match(/\{\w+\}/g);
+    if (left) return fall(`the run didn't record ${[...new Set(left)].join(', ')}`);
+    const r = await cmd('capApi', { tab: appTab(demo, app), open: at.open, host: at.host, hostPattern: at.hostPattern, method: api.method, path, body }, 150).catch(e => ({ ok: false, why: e.message }));
+    if (!r.ok) return fall(r.why || `the API answered ${r.status}`);
+    did.push(`${app}: ${s.text} (${api.method}, ${r.status})`);
+    return { ok: true };
+  };
   const runGroups = async list => {
     const out = [];
     for (const g of list) {
       await home(g.app);
       for (const [i, s] of g.steps.entries()) {
-        const r = await step('undo', g.app, s, formatStep(s));
+        const r = await step('undo', g.app, s, formatStep(s), { note: g.note });
         // Nothing to undo there (its first step's control isn't on the screen): a clean tenant.
         if (!r.ok && r.missing && i === 0) { out.push({ group: g.undoes.join('; '), skipped: r.why }); break; }
         if (!r.ok) { out.push({ group: g.undoes.join('; '), failed: r.why }); return { ok: false, why: r.why, out }; }
@@ -142,13 +196,29 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     const light = await cmd('js', { tab: appTab(demo, app), code: "return await page.evaluate(() => { const c = getComputedStyle(document.body).backgroundColor.match(/\\d+(\\.\\d+)?/g); if (!c) return null; const [r, g, b, a] = c.map(Number); if (a === 0) return null; return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5; })" }, 30).catch(() => null);
     return { words, items: o.items || [], light };
   };
+  // Each check on its app's start screen, or (a check that names one) on the screen it names, reached by the plan's own
+  // read-only steps under the guard, before any of the reset's writes.
+  let plan;
   const checkAll = async () => {
     const out = [];
     for (const c of parsed.checks) {
-      const a = appOfText(c);
-      if (!a) { out.push({ text: c, ok: false, why: 'which app?' }); continue; }
+      const line = typeof c === 'string' ? c : c.text, screen = c && typeof c === 'object' ? c.screen || null : null;
+      const a = appOfText(line);
+      if (!a) { out.push({ text: line, ok: false, why: 'which app?' }); continue; }
       await home(a.app);
-      out.push({ text: c, ...checkClaim(a.rest, await readScreen(a.app)) });
+      if (screen) {
+        if (plan === undefined) { const { readPlan } = await import('./draft.mjs'); plan = readPlan(demo); }
+        const path = pathTo(plan, a.app, screen, x => (walker.appOf && walker.appOf(x)) || x);
+        if (!path) { out.push({ text: line, ok: false, why: `the plan reaches ${screen} only after a write, or never: no read-only way there` }); continue; }
+        let at = { app: a.app }, bad = null;
+        for (const s of path) {
+          const r = await walker.step(at, s).catch(e => ({ landed: false, why: e.message }));
+          if (!r.landed && r.kind !== 'unproven') { bad = `${formatStep(s)}: ${r.why}`; break; }
+          at = r.screen || at;
+        }
+        if (bad) { out.push({ text: line, ok: false, why: `on the way to ${screen}: ${bad}` }); continue; }
+      }
+      out.push({ text: line, ...(screen ? { screen } : {}), ...checkClaim(a.rest, await readScreen(a.app)) });
     }
     return out;
   };

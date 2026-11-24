@@ -162,14 +162,17 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       }
       return out;` }, 60); };
   const inPage = async (id, name, kind) => {
-    const sel = selFor(kind);
     const items = await pageControls(id, kind).catch(() => null);
     // By its name only (nameFits): a name that only contains it, a small part of it or a few shared words found the
     // wrong control in a frame.
     const el = Array.isArray(items) ? findItem(items, name, kind) : null;
     if (!el || !nameFits(el.name, name)) return null;
-    // Where a person would click it: brought into view first (IQ scrolls inside its frame, so a wheel on the page
-    // doesn't), then measured again.
+    return intoView(id, el, kind);
+  };
+  // Where a person would click it: brought into view first (IQ scrolls inside its frame, so a wheel on the page
+  // doesn't), then measured again. null when it can't be.
+  async function intoView(id, el, kind) {
+    const sel = selFor(kind);
     const at = await cmd('js', { tab: tab(id), code: `
       const f = page.frames()[${el.fi}]; if (!f) return null;
       const main = f === page.mainFrame();
@@ -185,8 +188,23 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     if (!at || at.x < 0 || at.y < 0 || at.x > at.vw || at.y > at.vh) return null;
     if (at.x !== el.x || at.y !== el.y) await sleep(400);
     return { ...el, x: at.x, y: at.y };
-  };
+  }
   const focusedField = o => (o.items || []).find(it => it.focused && (it.editable || /textbox|searchbox|combobox/.test(it.role))) || null;
+  // The controls in the page and its frames with exactly that name (and that role and frame, when given), one per place.
+  async function exactControls(id, name, { role = null, frame = null, kind } = {}) {
+    const items = await pageControls(id, kind).catch(() => null) || [];
+    const seen = new Set();
+    return items.filter(it => !it.disabled && norm(it.name) === norm(name) && (!role || it.role === role) && (!frame || (it.fh || 'page') === frame))
+      .filter(it => { const k = `${it.fh || 'page'}|${Math.round(it.x / 4)},${Math.round(it.y / 4)}`; return seen.has(k) ? false : (seen.add(k), true); })
+      .map(it => ({ ...it, fh: it.fh || 'page' }));
+  }
+  // One exact control, brought into view (a write's).
+  async function exactInView(id, name, opts = {}) {
+    const same = await exactControls(id, name, opts);
+    if (same.length !== 1) return { same };
+    const el = await intoView(id, same[0], opts.kind);
+    return { same, el };
+  }
   // What a click at x, y on the page would land on: down through the frames under it, the control there.
   const hitAt = (id, x, y) => cmd('js', { tab: tab(id), code: `
     const HIT = ${JSON.stringify(HIT)};
@@ -207,14 +225,14 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
   // not whatever's on top of it (a toast, a banner, a dialog's backdrop, a sticky header after a scroll). Measured
   // again for up to 2 s; still covered, it isn't clicked.
   const sameControl = (h, el) => h && (h.frame || 'page') === (el.fh || 'page') && (h.chain || []).some(c => c.role === el.role && (norm(c.name) === norm(el.name) || nameFits(c.name, el.name)));
-  async function uncovered(id, el, want, kind) {
+  async function uncovered(id, el, want, kind, relocate = null) {
     let h = null;
     for (const t0 = Date.now(); ;) {
       h = await hitAt(id, el.x, el.y).catch(() => null);
       if (sameControl(h, el)) { const t = h.chain.find(c => c.role === el.role && (norm(c.name) === norm(el.name) || nameFits(c.name, el.name))); return { ok: true, el, hit: { on: t.name, role: t.role, frame: h.frame, ...(t !== h.chain[0] ? { at: { on: h.name, role: h.role } } : {}) } }; }
       if (Date.now() - t0 > 2000) break;
       await sleep(250);
-      const again = want ? (await locate(id, want, kind)).el : null;
+      const again = relocate ? await relocate() : want ? (await locate(id, want, kind)).el : null;
       if (again) el = again;
     }
     const by = !h ? 'nothing it can see' : h.none ? `a ${h.role}` : `"${h.name}" (${h.role})`;
@@ -248,7 +266,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
   const refuse = (step, w) => { throw Object.assign(new Error(`a walker doesn't write: ${formatStep(step)}: ${w.why}`), { code: 'WRITE', write: w }); };
 
   let lastField = null;
-  async function act(id, step, { write = false } = {}) {
+  async function act(id, step, { write = false, el: given = null } = {}) {
     switch (step.kind) {
       case 'app': { await cmd('front', { tab: tab(id) }, 30); await quiet(id, 500, 6000); return { did: 'switched' }; }
       case 'wait': await settle(id, 300); if (!recording) await quiet(id, 1500, 180000); return { did: 'waited' };
@@ -261,13 +279,15 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       case 'manual': return { needsYou: true, why: `"${formatStep(step)}" is the presenter's to do` };
       case 'free': return { needsYou: true, why: `"${step.text}" isn't a step it can do on its own` };
       case 'click': case 'hover': {
-        const { el, o } = await locate(id, step.target);
+        const { el, o } = given ? { el: given, o: await controls(id) } : await locate(id, step.target);
         if (!el) return { missing: true, why: `no "${step.target}" on this screen` };
         const hit = hitOf(el, step);
         if (step.kind === 'hover') { await send(id, 'hover', { x: el.x, y: el.y }, 30, hit); await settle(id, 30); return { did: 'hovered', on: el.name, hit }; }
         const w = writeOf(step, el, null, o.url);
         if (w && !write) refuse(step, w);
-        const u = await uncovered(id, el, step.target);
+        // A write's control is measured again exactly (its name, role and frame), never by a near name.
+        const again = given ? async () => (await exactInView(id, given.name, { role: given.role, frame: given.fh || 'page' })).el || null : null;
+        const u = await uncovered(id, el, step.target, undefined, again);
         if (!u.ok) return { missing: true, why: u.why, hit: { ...hit, covered: u.hit } };
         const before = await actions();
         await send(id, 'click', { x: u.el.x, y: u.el.y }, 60, { ...hit, landed: u.hit });
@@ -416,11 +436,15 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
   // the app's own hosts, the step done, the guard closed. What it made (the page's address and title, ids in the
   // address) goes in its result, for the undo.
   async function write(id, step, { hosts = null } = {}) {
+    let target = null;
     if (step.kind === 'click') {
-      const o = await controls(id);
-      const same = (o.items || []).filter(it => !it.disabled && norm(it.name) === norm(step.target));
+      // Exactly one control by that name in the page and its frames (a write in IQ's Power BI frame too), the reader
+      // agreeing about it in its own frame's markup.
+      const { same, el } = await exactInView(id, step.target);
       if (same.length !== 1) return { missing: true, why: same.length ? `${same.length} controls called "${step.target}": a write needs exactly one` : `no "${step.target}" on this screen` };
-      const ra = await readerAgrees(id, step.target, same[0].role);
+      if (!el) return { missing: true, why: `"${step.target}" can't be brought into view` };
+      target = el;
+      const ra = await readerAgrees(id, step.target, target.role, target.fh || 'page');
       if (!ra.ok) return { missing: true, why: `${ra.why}: a write runs only where the reader and the page name its control alike` };
     }
     if (step.kind === 'press' && step.key === 'Enter') {
@@ -434,7 +458,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     let id1 = null;
     try { id1 = (await cmd('capOpen', { hosts: hosts || [...hostsOf(id)] }, 30)).id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }
     let r;
-    try { r = await act(id, step, { write: true }); } finally { await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
+    try { r = await act(id, step, { write: true, el: target }); } finally { await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
     if (r.missing || r.needsYou) return r;
     const after = await controls(id).catch(() => ({}));
     const ids = (() => { try { return new URL(after.url).pathname.split('/').filter(x => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(x) || /^\d{4,}$/.test(x) || /^[A-Za-z0-9_-]{20,}$/.test(x) && /\d/.test(x)); } catch (e) { return []; } })();
@@ -571,5 +595,14 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     if (did.length) { const o = await controls(id).catch(() => ({})); await send(id, 'hover', { x: (o.vw || 1600) - 3, y: (o.vh || 900) - 3 }, 30, { for: 'the pointer off the start step' }).catch(() => {}); await quiet(id, 500, 5000); }
     return did;
   }
-  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, uniqueControl, startCheck, proofOf, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
+  // A screen as it is now, for re-grounding a plan on today's product: its words in every frame, and every control in
+  // the page and its frames (name, role, frame, state, what a box holds).
+  async function screenNow(app) {
+    const id = appOf(app) || app;
+    const o = await controls(id).catch(() => ({}));
+    const items = await pageControls(id).catch(() => []) || [];
+    return { app: id, url: o.url || null, title: o.title || null, words: String(await words(id)).split('\n').map(x => x.trim()).filter(Boolean),
+      controls: items.map(it => ({ name: it.name, role: it.role, frame: it.fh || 'page', ...(it.selected != null ? { selected: it.selected === 'true' } : {}), ...(it.expanded != null ? { open: it.expanded === 'true' } : {}), ...(it.checked != null ? { on: it.checked === 'true' } : it.pressed != null ? { on: it.pressed === 'true' } : {}), ...(it.value != null ? { value: it.value } : {}), ...(it.disabled ? { disabled: true } : {}) })) };
+  }
+  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, uniqueControl, startCheck, proofOf, screenNow, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
 }
