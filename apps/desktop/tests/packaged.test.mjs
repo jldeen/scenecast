@@ -20,6 +20,7 @@ import { homedir, tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../../examples/fixture-app/server.mjs';
+import { appPortsGuard } from '../../../packages/selftest/guard.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const MAC = process.platform === 'darwin', WIN = process.platform === 'win32';
@@ -28,6 +29,8 @@ const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + nam
 const installer = resolve(process.argv[2] || '');
 if (!existsSync(installer)) { console.log(`usage: packaged.test.mjs <installer> (${installer} isn't there)`); process.exit(2); }
 if (!process.env.CI && !process.env.SCENECAST_PACKAGED_OK) { console.log('packaged.test.mjs replaces Documents/Scenecast/Recorder Extension and needs port 47621: it runs on CI, or set SCENECAST_PACKAGED_OK=1'); process.exit(2); }
+// The app's ports are the app's: nothing may be on them, and no Scenecast of a presenter's may be running.
+await appPortsGuard({ ports: [47801, 47802] });
 // The real path: macOS's temp folder is under /var, a symlink, and the updater won't run an app from there.
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'scenecast-packaged-')));
 const OPENED = join(tmp, 'opened.txt');

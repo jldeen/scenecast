@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../../examples/fixture-app/server.mjs';
+import { selftestGuard } from '../../../packages/selftest/guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DESKTOP = resolve(here, '..'), REPO = resolve(DESKTOP, '..', '..');
@@ -32,6 +33,7 @@ async function waitFor(what, fn, ms = 60000, every = 500) {
 }
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'scenecast-auditaur-')));
+await selftestGuard({ tmp, receivers: [PORT], extensions: [PORT] });
 const HOME = join(tmp, 'home'), LIB = join(tmp, 'library'), EXT = join(tmp, 'Recorder Extension'), HOOK = join(tmp, 'hook'), UDD = join(tmp, 'chrome');
 for (const d of [HOME, LIB, HOOK]) mkdirSync(d, { recursive: true });
 let n = 0;
