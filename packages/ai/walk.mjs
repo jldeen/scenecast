@@ -8,8 +8,9 @@
 //   after-write   later in a beat whose write didn't run (its screens need that write)
 //   drifted       it ran and is on the screen it should be, but the words the plan says it lands on aren't there
 //                 (the product said it differently since; walker.soft: a walk notes it and goes on, a run stops)
-//   unproven      it ran and the words are there, but they were there before the step too, so they prove nothing
-//                 (walker.soft: a walk notes it and goes on; a run stops)
+//   unproven      it ran, but nothing proves where it landed: the plan gives it no proof, or its words were there
+//                 before the step too (walker.soft: a walk notes it and goes on; a run goes on only by its next
+//                 control, and never into a write)
 //   missed        it didn't run, or didn't land where the plan says (why says which)
 //   after-miss    later in a beat after a miss
 import { formatStep } from './plan.mjs';
@@ -41,8 +42,11 @@ export async function walkPlan(plan, walker, { emit = () => {} } = {}) {
           if (walker.stopBeat) row.cleared = await walker.stopBeat(app);
           continue;
         }
-        if (s.kind === 'app') { app = s.app; at = (!walker.live && where[app]) || await walker.start(s.app); row.screen = sigOf(at); }
+        // Offline, "Go to X" goes back to where X was left; live, it's a step like any other, so its landing is checked
+        // (against the screen the plan was on, the other app's).
+        if (s.kind === 'app' && !walker.live) { app = s.app; at = where[app] || await walker.start(s.app); row.screen = sigOf(at); }
         else {
+          if (s.kind === 'app') app = s.app;
           const r = await walker.step(at, s, typed);
           if (s.kind === 'type') typed = s.value || '';
           if (r.screen) at = r.screen;
@@ -102,7 +106,7 @@ export function compareWalks(plan, offline, live) {
 
 export function walkTable(plan, offline, live) {
   const rows = compareWalks(plan, offline, live);
-  const mark = { reached: 'reached', drifted: 'reached, words differ', unproven: 'ran; its words were there before', write: 'write (not run)', 'after-write': 'needs the write', missed: 'missed', 'after-miss': 'after a miss' };
+  const mark = { reached: 'reached', drifted: 'reached, words differ', unproven: 'ran, unproven', write: 'write (not run)', 'after-write': 'needs the write', missed: 'missed', 'after-miss': 'after a miss' };
   const lines = [];
   for (const [bi, b] of plan.beats.entries()) {
     lines.push(`\n### Beat ${bi + 1} · ${b.title} (live ${live.beats[bi].secs} s)\n`, '| # | Step | Screen | Offline | Live | Why (live) |', '|---|---|---|---|---|---|');
