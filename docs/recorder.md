@@ -160,13 +160,18 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   for that one step. A write that isn't approved stops the run before it, with a picture.
 - **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json.
 - **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
-  leaving the app's hosts, a sign-in page (never signed in: Sign in again), what a step lands on not showing, a
-  control that isn't there, a step only a person can do.
+  leaving the app's hosts, a sign-in page (never signed in: Sign in again; the guard holding an app's sign-in says
+  so, with the request), what a step lands on not showing, a control that isn't there, a step only a person can do.
+- **Fails closed on a landing it can't prove.** Words a click, hover or press lands on that were on the screen
+  before it prove nothing ("unproven"): the run stops there, before the next step, a write above all. Typing and
+  scrolling stay on the screen they started on.
 - **The reset before and after.** The demo's `preflight.reset`/`resetFix`, else reset.md: before, the check, then the
   undos and the set-first steps, then the check again (it fails closed: nothing is recorded when the tenant isn't
   as the demo starts); after, the undos of what ran, the start set again, the check.
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
-  the time per beat, the reset, what the guard held and every host reached outside the apps', the stop.
+  the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
+  write), every host reached outside the apps', every input sent (`inputs`: what it was for, the control's name, its
+  frame, and whether it's the one the step names), the stop.
 - The recording is the recorder's own (build, checks and Review work unchanged); its start sweeps run side by
   side, an app per window.
 
@@ -179,8 +184,14 @@ whose start screen no address reaches gets `apps[].startSteps` (read-only plan s
 site notifications (never grants them): an app's "turn on notifications" banner isn't in any recording.
 
 `scenecast ai walk --live` walks the plan read-only (`walkLive`): at a write it skips the rest of that beat and goes
-on with the next; walk.json says, for each step, reached, a write, after a write, or missed (and which write it
-needed). `ai walk` without `--live` walks the recording's screens instead (`walkerFromDemo`), for comparison.
+on with the next; walk.json says, for each step, reached, drifted (its words changed), unproven (its words were there
+before), a write, after a write, or missed (and which write it needed), with what each click hit (`hit`), any error
+the app showed (`trouble`), every input (`inputs`) and the guard's held and passed requests. `ai walk` without
+`--live` walks the recording's screens instead (`walkerFromDemo`), for comparison.
+
+A control the walker can't see on the page's outline (it lists only what's on screen) is looked for in the whole
+page and its frames by name (`nameFits`: equal, starting with it, or most of it), then brought into view before
+it's clicked: Microsoft IQ draws in Power BI frames and scrolls inside them.
 
 `scenecast capture start|stop|status|sign-in|run` (preflight runs `start`). The host's state is `.out/capture.json`
 and its log `.out/capture.log`. `demo.json`:

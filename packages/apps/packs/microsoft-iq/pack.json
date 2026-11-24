@@ -186,10 +186,12 @@
   ],
   "guard": {
     "allow": [
-      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/",
+      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/"
     ],
     "why": {
-      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review)."
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review).",
+      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/": "IQ's add picker lists the Azure AI Search services for its Foundry IQ tab; Azure Resource Graph only reads, by design; held, the Foundry IQ tab says \"could not be loaded\" (Nov 23 review)."
     }
   }
 }
