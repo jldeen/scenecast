@@ -77,6 +77,28 @@ function frameOf(walker, app) {
   for (const [t, k] of Object.entries(onPages)) if (k >= pages.size * 0.5) frame.add(t);
   return (m[app] = frame);
 }
+// The site's pages, to tell a screen's page from the others: each address on its host (as the frame's), with all its
+// screens' words and control names. → { own: its address, pages: Map(address → { words: [text], controls: Set }) }
+const sites = new WeakMap();
+function siteOf(walker, to) {
+  let m = sites.get(walker);
+  if (!m) sites.set(walker, m = new Map());
+  const url = id => (walker.view && (walker.view(id) || {}).url) || null, host = hostOf(url(to));
+  if (!host) return null;
+  if (!m.has(host)) {
+    const pages = new Map();
+    for (const id of walker.states) {
+      const sc = hostOf(url(id)) === host && walker.screen(id);
+      if (!sc) continue;
+      const k = String(url(id)).split('#')[0], p = pages.get(k) || { words: [], controls: new Set() };
+      p.words.push(pageWords(sc));
+      for (const c of sc.controls || []) if (!c.shut) p.controls.add(pnorm(c.name));
+      pages.set(k, p);
+    }
+    m.set(host, pages);
+  }
+  return { own: String(url(to)).split('#')[0], pages: m.get(host) };
+}
 // A number that can change: not one in a name that only identifies (#2, PO-1001).
 const numbered = t => /\d/.test(String(t).replace(/#\d+\b|\b[a-z]{1,6}-\d{2,}\b/gi, ''));
 // A skip link ("Skip to main content"): the app's chrome, on every one of its pages, not what the page says.
@@ -176,24 +198,48 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   // Words only inside a message come last, after every other proof (late), and say so (message).
   const goneBefore = readsBefore[0] || before[0];
   const msgOf = l => l.kind === 'words' ? inMessage(after, l.text) : l.kind === 'gone' ? inMessage(after, l.still) || inMessage(goneBefore, l.gone) : false;
-  for (const late of [false, true]) for (const digits of [false, true]) {
-    // A number in what nearly all the site's screens show (its name: "Microsoft 365") doesn't change from screen to screen.
+  const r = (() => {
+    for (const late of [false, true]) for (const digits of [false, true]) {
+      // A number in what nearly all the site's screens show (its name: "Microsoft 365") doesn't change from screen to screen.
+      const fine = t => stable(t) && (digits || !numbered(t) || frame.always.has(pnorm(t)));
+      const pick = l => msgOf(l) === late && textsOf(l).every(fine) && fromSound(l) && proves(l);
+      const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))), message: late });
+      // The plan's own proof, while it still proves the step.
+      if (own && pick(own)) return found(own);
+      // What the caller expects first (liveProof: the step's own control in a new state, the next step's control).
+      for (const f of first) if (pick(f)) return found(f);
+      if (nextCtl && !late) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
+      for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
+      for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
+      for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });
+      for (const mine of [true, false]) for (const c of controls) if ((!mine || !(frame.has(pnorm(c.name)) || c.nav)) && pick({ kind: 'control', control: c.name, state: null })) return found({ kind: 'control', control: c.name, state: null });
+      const still = late ? gone : stillEarly;
+      if (still) for (const x of goneFrom(goneBefore, after)) if (pick({ kind: 'gone', gone: x, still })) return found({ kind: 'gone', gone: x, still });
+    }
+    return none(`nothing on ${to} tells it from the screen before`);
+  })();
+  return s.kind === 'app' && r.lands.kind ? whichPage(r, { walker, to, ranked, stable, frame, fromSound, proves, msgOf }) : r;
+}
+
+// A Go to step lands on one page of its site: when other pages show its proof too ("Status and details" is on every
+// pull request's page), words its page names itself by (in its title: the pull request's) that none of them show come
+// first, in the same order, when there are some.
+const wordsOf = t => new Set(pnorm(t).split(/[^a-z0-9]+/).filter(Boolean));
+function whichPage(r, { walker, to, ranked, stable, frame, fromSound, proves, msgOf }) {
+  const site = siteOf(walker, to), title = (walker.screen(to) || {}).title;
+  if (!site || site.pages.size < 2 || !title) return r;
+  const shows = (p, l) => l.kind === 'words' ? p.words.some(w => w.includes(pnorm(l.text))) : l.kind === 'control' ? p.controls.has(pnorm(l.control)) : false;
+  const also = [...site.pages].filter(([k, p]) => k !== site.own && shows(p, r.lands)).map(([, p]) => p);
+  if (!also.length) return r;
+  const named = wordsOf(title), names = t => { const w = wordsOf(t); return w.size > 0 && [...w].every(x => named.has(x)); };
+  for (const digits of r.number ? [false, true] : [false]) {
     const fine = t => stable(t) && (digits || !numbered(t) || frame.always.has(pnorm(t)));
-    const pick = l => msgOf(l) === late && textsOf(l).every(fine) && fromSound(l) && proves(l);
-    const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))), message: late });
-    // The plan's own proof, while it still proves the step.
-    if (own && pick(own)) return found(own);
-    // What the caller expects first (liveProof: the step's own control in a new state, the next step's control).
-    for (const f of first) if (pick(f)) return found(f);
-    if (nextCtl && !late) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
-    for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
-    for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
-    for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });
-    for (const mine of [true, false]) for (const c of controls) if ((!mine || !(frame.has(pnorm(c.name)) || c.nav)) && pick({ kind: 'control', control: c.name, state: null })) return found({ kind: 'control', control: c.name, state: null });
-    const still = late ? gone : stillEarly;
-    if (still) for (const x of goneFrom(goneBefore, after)) if (pick({ kind: 'gone', gone: x, still })) return found({ kind: 'gone', gone: x, still });
+    for (const t of ranked) {
+      const l = { kind: 'words', text: t };
+      if (names(t) && fine(t) && !msgOf(l) && fromSound(l) && proves(l) && !also.some(p => shows(p, l))) return { lands: l, number: numbered(t) && !frame.always.has(pnorm(t)), message: false };
+    }
   }
-  return none(`nothing on ${to} tells it from the screen before`);
+  return r;
 }
 
 // Typing: the start of its own words, in the page's words when it's an editable area (they show there), else as what

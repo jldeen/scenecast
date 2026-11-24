@@ -739,3 +739,30 @@ test('words only inside a message prove a step last, and say so, unless it\'s a 
   assert.deepEqual(proveLandings(plan('sends a prompt'), walker, [], { checked }).map(f => [f.kind, f.at]), [['message', '1.2'], ['message', '1.3']]);
   assert.deepEqual(needsYou({ planReview: { flags }, plan: { beats: [] } }).map(n => n.kind), ['Words in a message']);
 });
+
+test('a Go to step lands on what its page names itself by, when other pages of its site show its proof too', () => {
+  const sc = (title, items) => ({ title, headings: [], controls: [], items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
+  // Every pull request's page has "Status and details"; each names itself by its title, and the list shows the titles.
+  const S = {
+    chat: sc('Chat', ['Ask anything']),
+    pr1: sc('Fix the cart total by Avery Chen · Pull Request #1 · contoso/shop', ['Merge info', { text: 'Status and details', role: 'heading' }, 'Fix the cart total - #1']),
+    pr2: sc('Speed up checkout by Avery Chen · Pull Request #2 · contoso/shop', [{ text: 'Status and details', role: 'heading' }, 'Speed up checkout - #2']),
+    list: sc('Pull requests · contoso/shop', ['Open pull requests', 'Fix the cart total', 'Speed up checkout']),
+  };
+  const url = { chat: 'https://chat.contoso.test/', pr1: 'https://code.contoso.test/contoso/shop/pull/1', pr2: 'https://code.contoso.test/contoso/shop/pull/2', list: 'https://code.contoso.test/contoso/shop/pulls' };
+  const walker = { screen: id => S[id], shown: id => S[id], view: id => ({ url: url[id] }), states: Object.keys(S),
+    flow: { states: { chat: { app: 'chat' }, pr1: { app: 'pr1' }, pr2: { app: 'pr2' }, list: { app: 'pulls' } } } };
+  const plan = { beats: [{ steps: [
+    { kind: 'app', app: 'chat', lands: { screen: 'chat' } },
+    { kind: 'app', app: 'pr1', line: '1.1', lands: { screen: 'pr1', kind: 'words', text: 'Status and details' } },
+    { kind: 'app', app: 'pr2', line: '1.2', lands: { screen: 'pr2' } },
+    { kind: 'app', app: 'pulls', line: '1.3', lands: { screen: 'list' } }] }] };
+  proveLandings(plan, walker);
+  // Not the words only it shows ("Merge info"): what it's called. The list's own words show on no other page: kept.
+  assert.deepEqual(plan.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['pr1 · "Fix the cart total - #1"', 'pr2 · "Speed up checkout - #2"', 'list · "Open pull requests"']);
+  // One page with panels over it (one address): nothing to tell apart.
+  const one = { ...walker, view: id => ({ url: id === 'chat' ? url.chat : 'https://code.contoso.test/app' }) };
+  const p2 = { beats: [{ steps: [{ kind: 'app', app: 'chat', lands: { screen: 'chat' } }, { kind: 'app', app: 'pr1', lands: { screen: 'pr1', kind: 'words', text: 'Status and details' } }] }] };
+  proveLandings(p2, one);
+  assert.equal(formatLands(p2.beats[0].steps[1].lands), 'pr1 · "Status and details"');
+});
