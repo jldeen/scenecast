@@ -99,8 +99,13 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   // The tenant, before anything is captured: another tenant (a wrong account picked silently), or one it can't
   // see where the demo names one, and the browser closes. An app's sign-in library can take a few seconds.
   const byApp = () => Object.fromEntries(apps.map((a, i) => [a.id, pages[i]]).filter(([id]) => !signIn.includes(id)));
+  // Each app's sign-in given time to settle (capture.signInSettleS, 60 s by default): M365 Copilot's can take a while
+  // after its own landing. Another tenant refuses at once; none seen in time still refuses (fail closed).
   let tv = tenantVerdict(await cb.tenantsOf(byApp()), want);
-  for (let i = 0; i < 10 && !tv.ok && !tv.other; i++) { await sleep(2000); tv = tenantVerdict(await cb.tenantsOf(byApp()), want); }
+  const settleS = +((cfg.capture && cfg.capture.signInSettleS) || 60), t0 = Date.now();
+  if (!tv.ok && !tv.other) log(`capture browser: waiting up to ${settleS} s for ${(tv.unseen || []).join(', ') || 'the apps'}' sign-in to settle`);
+  while (!tv.ok && !tv.other && Date.now() - t0 < settleS * 1000) { await sleep(2000); tv = tenantVerdict(await cb.tenantsOf(byApp()), want); }
+  if (tv.ok && Date.now() - t0 > 2500) log(`capture browser: sign-in settled after ${Math.round((Date.now() - t0) / 1000)} s`);
   if (!tv.ok) {
     log(`capture browser: refusing to capture: ${tv.why}`);
     if (base) log(`capture browser: the guard held while the apps loaded: ${base.held().join('; ') || 'nothing'}`);

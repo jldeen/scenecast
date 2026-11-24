@@ -13,6 +13,7 @@ import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
+import { fallbackSteps, undoGroups } from './reset-run.mjs';
 import { readTalkTrack, talkTrackText } from '@scenecast/script/talk.mjs';
 import { aiDir } from './run.mjs';
 
@@ -88,6 +89,10 @@ export function writeList(demo) {
 export function resetSteps(resetText) {
   const r = parseReset(resetText), out = [];
   r.undo.beats.forEach((b, bi) => b.steps.forEach((s, si) => { if (s.kind !== 'app') out.push({ part: 'undo', app: b.title, n: bi, step: si, text: formatStep(s) }); }));
+  // An API undo's Note can give steps for when it can't run: they're listed too, so they run only as approved.
+  for (const g of undoGroups(resetText)) for (const s of g.steps) if (s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) {
+    for (const t of fallbackSteps(g.note)) out.push({ part: 'undo', app: g.title, of: s.text, text: t, fallback: true });
+  }
   r.set.forEach((x, i) => out.push({ part: 'set', n: i, text: x.what, set: x.set || null }));
   return out;
 }
