@@ -309,8 +309,9 @@ these rules:
 
 ### A landing on the live page
 
-A run reads the page before each step and twice after it, once the page is quiet, about a second apart. A proof
-holds on both reads after the step and not on the one before, with the exclusions above, the plan's own words
+A run reads the page before each step (the last step's read after, when nothing ran between) and after it, once the
+page is quiet: once when that read proves the step strongly, else twice, about a second apart. A proof holds on
+every read after the step and not on the one before, with the exclusions above, the plan's own words
 included: never Copilot's words, another step's typing, a time, or a live region's words.
 
 | Strength | What proves the step | Example |

@@ -193,8 +193,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   words on the page, a control by its exact name (in a state), a box's text (its live value), or words gone with
   words that stay. A proof that isn't there stops the run, with a picture.
 - **Proves each landing on the live page** ([plan-format.md](engine/plan-format.md#a-landing-on-the-live-page),
-  `liveProof`): it reads the page before each step (for `Go to X`, the app the plan was on) and twice after it, in
-  the reader's shape, and records the landing in run.json's `landings` as strong, weak or none, with what proved it.
+  `liveProof`): it reads the page before each step (for `Go to X`, the app the plan was on; the last step's read
+  after, when nothing ran between) and after it, once when that read proves it strongly, else twice, in the reader's
+  shape (run.json `reads` counts them), and records the landing in run.json's `landings` as strong, weak or none, with what proved it.
   After a write, its pack's read-only check (`check.api` with `made`: the status, or the fields, it answers once the
   write ran) passing is strong; it runs in the app's own session, as the write's own calls carried it.
 - **A step it can't prove** (not strong, and no proof or one that was already there before it) goes in run.json's
