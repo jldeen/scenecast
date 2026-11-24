@@ -342,14 +342,17 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     saved[k] = { key, screen: sc }; dirty = true;
     return sc;
   };
+  const variantOf = v => { const m = /^v\d+-(.+)$/.exec(v) || /^tog-(.+)-[a-z]+$/.exec(v) || /^(.+)-(?:more|open)$/.exec(v); return m && S[m[1]] ? m[1] : null; };
+  // Every capture the recording has of a screen: its own, then its variants'.
+  const captures = sig => [screen(sig), ...(flow.variants || []).filter(v => variantOf(v) === sig).map(snapScreen)].filter(Boolean);
   const unstableSet = () => {
     if (shaky) return shaky;
     const set = [], pairs = [];
     for (const v of flow.variants || []) {
-      const m = /^v\d+-(.+)$/.exec(v) || /^tog-(.+)-[a-z]+$/.exec(v) || /^(.+)-(?:more|open)$/.exec(v);
-      if (!m || !S[m[1]]) continue;
-      const a = screen(m[1]), b = snapScreen(v);
-      if (a && b) pairs.push([a, b, S[m[1]].app]);
+      const id = variantOf(v);
+      if (!id) continue;
+      const a = screen(id), b = snapScreen(v);
+      if (a && b) pairs.push([a, b, S[id].app]);
     }
     for (const [a, b, app] of pairs) {
       const d = inPlace(a, b);
@@ -383,5 +386,5 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     if (s.kind === 'type' && (s.differs || (l.kind === 'box' && !sc.controls.some(c => isBox(c) && c.value)))) return { ok: true, why: `the recording has other words typed here${s.differs ? `: ${s.differs}` : ''}` };
     return holds(sc, l) ? { ok: true, why: null } : { ok: false, why: `${proofWords(l)} isn't on ${sig}` };
   }
-  return { flow, apps, start, screen, view, shown, opened, step, recorded, landed, written, writtenItem, unstable, typedTexts, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
+  return { flow, apps, start, screen, captures, view, shown, opened, step, recorded, landed, written, writtenItem, unstable, typedTexts, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
 }

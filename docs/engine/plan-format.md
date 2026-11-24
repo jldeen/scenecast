@@ -181,13 +181,14 @@ those reads:
    - **An app lost words while nothing ran in it:** what its last read showed and its next one, after a Go to,
      doesn't.
 
-   A page that's broken stays broken to the end of the walk: a walk can't tell a reload from a route change.
+   A page that's broken stays broken until it loads again (a new document of the app's, in the walk's `events`: `{
+   kind: 'loaded', app?, host, at }`; a route change isn't one), else to the end of the walk.
 5. **Not checked today:** a step behind a write the walk didn't make (or that needs one: a step it missed for want of
    one, the steps after that miss in its beat), one it missed, or one it didn't get to keeps its recorded proof,
    marked.
 
-It writes `.out/ai/reground.md` (each proof before and after, and why; the steps that need you; and, screen by screen,
-what's **missing since the recording**: the words and controls the recorded screen has that both of today's reads lack),
+It writes `.out/ai/reground.md` (each proof before and after, and why; the steps that need you; what's missing and
+what's extra since the recording, [below](#whats-missing-and-whats-extra); the steps not checked today),
 `reground.json` and `plan.reground.md`. `plan.md` stays as it is. Its new proofs go in with `--adopt` (built after stage
 F, [below](#approval-and-what-runs-on-its-own)); until then, adopting `plan.reground.md` means approving it again. A
 walk is of one plan: re-grounding another is refused. `--plan <file>` names the plan the walk walked when it isn't the
@@ -203,6 +204,41 @@ value, a checked box and open shadow roots are in the markup. A step whose scree
 `<beat>-<step>.json`'s words and controls) is listed as not reached. What the guard held while a step ran is
 `<beat>-<step>.json`'s `held` (`[{ method, host, path }]`) when the walk gives it; otherwise it's the held requests from
 the step's first input (else the last read before it) to its own last read.
+
+### What's missing, and what's extra
+
+**Missing since the recording:** on each screen the walk read, the words and controls the recorded screen has that both
+of today's reads lack, leaving out what a proof never uses (times, keys, messages, Copilot's words, another step's
+typing, live regions). Each goes in the first class that fits:
+
+1. **Made by a write the walk didn't make:** the recording first shows it, in path order, after that write (the app's
+   last before it): on the write's own screen, at an address the app showed before the write, or in the app's frame.
+   So is what's in a row named by words a write made (a skill it saved). A name with more after it ("…, unread") is
+   first shown where its name is.
+2. **Varies between runs:** someone's presence, or words the recording's captures of the screen show differently (a
+   greeting).
+3. **A number changed:** the same words today but for a number ("Plugins: 486" → "Plugins: 529"). Each of today's
+   matches one recorded, the one sharing the most numbers in the same places first.
+4. **Renamed:** a control today, of the same role, has the recorded name and more after it, set off (", 99%
+   remaining"), and the recorded screen has no control by that name.
+5. **Missing:** the rest, each with what may have broken its app's page (item 4 above). These are the ones to look at.
+
+**Extra since the recording:** what both of today's reads have and no capture of the screen in the recording has (its
+own and its variants'), with the same exclusions, less today's side of what's renamed or a number that changed, and
+words in a place that varies between runs. It's what a capture now would show that the recording doesn't: new teams,
+test notes, other chats.
+
+In both, a list is what the reader marks as one (a list, listbox, grid, table, tree, tablist, menu, radio group or feed;
+`ul`, `ol`, `table`, `menu`), with its rows (an item, option, row, tree item, tab, menu item, radio or post; `li`,
+`tr`). A row's name is its first words (not someone's initials before their name). Its rows are one line:
+
+- Rows gone (no read today has the row's name) or new (no capture has it): how many, the first five, and the list's
+  first five on each side. What's in a row goes with it.
+- What's gone from, or new in, rows that are still there: another line.
+- Entries that start the same way ("Name: …", three or more): another line.
+
+A row's own control, named by everything in it, counts as what's in it. The same line on several steps is listed once,
+with its screens and steps.
 
 ## Details under a line
 
@@ -349,8 +385,11 @@ and `approval(demo)` (whether `plan.md` is still the text that was approved). `p
 (`true`, `false`, or `null` for none). `packages/ai/walker.mjs`: `landed(at, step)` (`{ ok, why }`: on the screen its
 `Lands on` names, with its proof holding there), `written(text)`, `unstable(text, app)`.
 `packages/ai/reground.mjs`: `regroundPlan(plan, { walker, walk, reads })` (`{ plan, rows }`, a row per step with its
-proof before and after and its `basis`: `both`, `today`, `none`, `suspect`, `write`, `missed` or `unreached`),
-`walkReads(dir)`, `formatReground(rows)`, `regroundCounts(rows)`, `heldKind(request)`.
+proof before and after and its `basis`: `both`, `today`, `none`, `suspect`, `write`, `missed` or `unreached`; `missing`
+and `extra`, each entry with its class `cls`), `walkReads(dir)`, `formatReground(rows)`, `regroundCounts(rows)`,
+`missingCounts(rows)`, `heldKind(request)`. `walker.captures(id)`: every capture the recording has of a screen. The
+reader (`packages/script/html.mjs`) marks each item and control with the `list` and `row` it's in (`lists[at]` is the
+list's name and role).
 
 ## Changes
 

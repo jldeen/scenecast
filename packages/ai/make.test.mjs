@@ -18,7 +18,7 @@ import { approve, approval } from './make.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, reviewHtml } from './finish.mjs';
-import { regroundPlan, walkReads, formatReground, reground } from './reground.mjs';
+import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
 import { checkFocusJson } from '@stuntdouble/core/lib/overrides.mjs';
@@ -611,9 +611,12 @@ test('proofs on today\'s product: kept, new, today only, behind a write, missed;
     ['Click "Sale"', 'sale · "Spring sale"', 'missed', 'no “Sale” on this screen'],
   ]);
   assert.equal(formatLands(plan.beats[1].steps[0].lands), 'home · "Shop the catalog"');
-  // What a capture of today's product would lose: words and controls the recorded screen has, and both reads lack.
-  assert.deepEqual([rows[1].missing, rows[2].missing], [{ words: ['Spring catalog'], controls: [] }, { words: ['Fabrikam Boots details'], controls: ['Sale'] }]);
-  assert.match(formatReground(rows), /## Missing since the recording[\s\S]*\| 1 \| Click "Fabrikam Boots" \| item \| “Fabrikam Boots details” \| “Sale” \|/);
+  // What a capture of today's product would lose: words and controls the recorded screen has, and both reads lack. The
+  // greeting the recording's captures show differently varies between runs.
+  const miss = r => (r.missing || []).map(e => [e.cls, e.kind, e.text]);
+  assert.deepEqual([miss(rows[1]), miss(rows[2]), miss(rows[6])], [[['missing', 'words', 'Spring catalog']], [['missing', 'control', 'Sale'], ['missing', 'words', 'Fabrikam Boots details']],
+    [['missing', 'control', 'Catalog'], ['varies', 'words', 'Hi, what are you shopping for?']]]);
+  assert.match(formatReground(rows), /## Missing since the recording[\s\S]*\| Missing: look at these \| 4 \| 4 \|[\s\S]*\| Varies between runs \| 1 \| 1 \|[\s\S]*### Missing: look at these\n\n\| What \| Why it may be \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| “Catalog” \(link\) \| {2}\| home \(1-1, 2-1\) \|\n\| “Spring catalog” \| {2}\| catalog \(1-2\) \|\n\| “Sale” \(link\) \| {2}\| item \(1-3\); item-typed \(1-4\) \|/);
   const greeting = regroundPlan(parsePlan(text), { walker: { ...walker, unstable: null }, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[6];
   assert.equal(greeting.now, 'home · "Good to see you again"');
   assert.match(formatReground(rows), /\| Kept: it holds today and in the recording \| 2 \|\n\| New: it holds today and in the recording \| 2 \|\n\| Today's product only: it changed since the recording \| 1 \|/);
@@ -674,6 +677,90 @@ test('proofs on today\'s product: kept, new, today only, behind a write, missed;
   const l = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
   assert.deepEqual(l.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
   assert.equal(l[2].why, 'shop lost words while nothing ran in it, since its start screen: “Free returns on boots”; check the app before adopting');
+});
+
+test('what a capture of today\'s product would lose, by why (renamed, a number, made by a write the walk didn\'t make, varies, missing), and show that the recording doesn\'t; a list\'s rows as one line', () => {
+  // A shop, recorded with a write (an order); a read-only walk of it today, after the shop changed a little.
+  const dir = mkdtempSync(join(tmpdir(), 'sc-missing-'));
+  const page = body => `<!doctype html><html><head><title>Contoso</title></head><body>${body}</body></html>`;
+  const head = (status, cart = 'Cart') => `<header><a href="/">Contoso home</a><button aria-label="Avery Chen, status ${status}">AC</button><a href="/cart">${cart}</a></header>`;
+  const boots = (names, more = {}, before = {}) => `<ul aria-label="Boots">${names.map(n => `<li>${before[n] ? `<span>${before[n]}</span>` : ''}<a href="/b">${n}</a>${[].concat(more[n] || []).map(t => `<span>${t}</span>`).join('')}</li>`).join('')}</ul>`;
+  const snaps = {
+    home: `${head('Available')}<h2>Welcome back</h2><a href="/catalog">Catalog</a><button>Rewards</button><p>Deal 1 of 3</p><p>Deal 3 of 3</p>`,
+    catalog: `${head('Available')}<h2>Spring catalog</h2><p>Showing 24 boots</p><p>Free shipping on Fabrikam Trail</p><p>Note: ships in a box</p><p>Note: free returns</p><p>Note: two colours</p><button>Filter</button>${boots(['Fabrikam Trail', 'Fabrikam Summit', 'Contoso Hiker', 'Contoso Ridge', 'Fabrikam Ranger', 'Contoso Peak', 'Fabrikam Canyon', 'Contoso Delta'], { 'Fabrikam Trail': ['Waterproof leather', '3 pairs left'], 'Contoso Hiker': ['Wide fit', '5 pairs left'], 'Contoso Delta': 'Last pair' })}<button>Add to cart</button>`,
+    cart: `${head('Available', 'Cart (1)')}<h2>Your cart</h2><p>Fabrikam Trail boots</p>`,
+    // Home again, after the order: at the same address as before it.
+    'home-after': `${head('Available', 'Cart (1)')}<h2>Welcome back</h2><p>Thanks for your order</p><a href="/catalog">Catalog</a><button>Rewards</button>`,
+    // An address the shop hadn't shown before the order.
+    orders: `${head('Available', 'Cart (1)')}<h2>Your orders</h2><ul role="listbox" aria-label="Orders"><li role="option"><span>Order 1001 for Avery Chen</span><span>Ready to ship</span></li></ul><a href="/t">Fabrikam Trail boots, shipped</a>`,
+  };
+  const url = { home: '/', catalog: '/catalog', cart: '/cart', 'home-after': '/', orders: '/orders' };
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  for (const [id, body] of Object.entries(snaps)) {
+    writeFileSync(join(dir, 'data', 'snaps', id + '.html'), page(body));
+    writeFileSync(join(dir, 'data', 'snaps', id + '.json'), JSON.stringify({ url: `https://shop.contoso.test${url[id]}` }));
+  }
+  writeFileSync(join(dir, 'flow.json'), JSON.stringify({ apps: [{ id: 'shop', key: 'S' }], beats: [{ active: 'shop', states: { shop: 'home' } }], path: [], states: Object.fromEntries(Object.keys(snaps).map(id => [id, { app: 'shop', snap: id }])) }));
+  const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps: [{ id: 'shop', key: 'S', title: 'Contoso shop', url: 'https://shop.contoso.test/' }] } };
+  const text = '# Boots\n\n## Beat 1 · Shop\n\n- Go to shop\n  Lands on: home · "Welcome back"\n- Click "Catalog"\n  Lands on: catalog · "Spring catalog"\n'
+    + '- Click "Add to cart" — ask first\n  Writes: orders the boots\n  Lands on: cart · "Your cart"\n\n## Beat 2 · Home again\n\n- Click "Contoso home"\n  Lands on: home-after · "Thanks for your order"\n'
+    + '- Click "Orders"\n  Lands on: orders · "Your orders"\n';
+  // Today: someone else's presence, a button with more words, other counts, another filter, other boots, no orders.
+  const home = `${head('Away')}<h2>Welcome back</h2><a href="/catalog">Catalog</a><button>Rewards, 120 points</button><p>Deal 1 of 2</p>`;
+  // Initials before a name aren't its row's name; a name in capitals is.
+  const catalog = `${head('Away')}<h2>Spring catalog</h2><p>Showing 31 boots</p><button>Filter boots</button>${boots(['Contoso Alpine', 'Fabrikam Trail', 'Fabrikam Mesa', 'Contoso Hiker', 'Fabrikam Butte', 'Contoso Basin', 'XTR'], { XTR: 'Trail runner', 'Fabrikam Trail': '2 pairs left', 'Contoso Hiker': '4 pairs left' }, { 'Fabrikam Mesa': 'FM' })}<button>Add to cart</button>`;
+  const at = sec => new Date(Date.UTC(2026, 10, 24, 8, 0, sec)).toISOString();
+  const two = (t, html) => [0, 1].map(i => ({ at: at(t + i), docs: [{ key: 'main', html: page(html) }] }));
+  const walkDir = join(dir, 'walk');
+  mkdirSync(join(walkDir, 'walk-screens'), { recursive: true });
+  const orders = `${head('Away')}<h2>Your orders</h2><p>No orders yet</p>`;
+  for (const [f, v] of Object.entries({ 'start-shop': two(0, home), '1-1': two(10, home), '1-2': two(20, catalog), '2-1': two(50, home), '2-2': two(60, orders) })) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
+  // The guard held the catalog's items while the walk was on it.
+  const walk = { beats: [{ beat: 1, steps: [{ step: 0, text: 'Go to shop', status: 'reached' }, { step: 1, text: 'Click "Catalog"', status: 'reached' }, { step: 2, text: 'Click "Add to cart"', status: 'write', why: 'orders the boots' }] },
+    { beat: 2, steps: [{ step: 0, text: 'Click "Contoso home"', status: 'drifted' }, { step: 1, text: 'Click "Orders"', status: 'reached' }] }],
+  starts: [{ app: 'shop' }], inputs: [{ at: at(14), for: 'Click "Catalog"' }], guard: { held: [{ method: 'POST', host: 'api.contoso.test', path: '/catalog/2026/items', at: at(15) }] } };
+  const walker = walkerFromDemo(demo), reads = walkReads(join(walkDir, 'walk-screens'));
+  const { rows } = regroundPlan(parsePlan(text), { walker, walk, reads, apps: demo.cfg.apps });
+  const miss = r => r.missing.map(e => [e.cls, e.kind === 'list' ? `${e.changed ? 'in ' : ''}${e.count} of ${e.total} rows` : e.kind === 'like' ? `${e.count} like ${e.prefix}` : e.text, e.now || (e.nows && e.nows.join(', ')) || e.write || e.why || null]);
+  const held = 'the guard held POST api.contoso.test/catalog/*/items';
+  const ordered = 'Click "Add to cart" (step 1-3)';
+  assert.deepEqual(rows.filter(r => r.read).map(miss), [
+    // Each of today's numbers explains one recorded: "Deal 3 of 3" isn't "Deal 1 of 2".
+    [['varies', 'Avery Chen, status Available', "someone's presence"], ['renamed', 'Rewards', 'Rewards, 120 points'], ['number', 'Deal 1 of 3', 'Deal 1 of 2'], ['missing', 'Deal 3 of 3', null]],
+    // Not "Filter boots": a name with more words isn't the same control unless they're set off ("Rewards, …"). Words
+    // holding others still there are missing all the same. Rows gone are one line; what's gone from rows still there
+    // is another; words that start the same way ("Note: …") another.
+    [['varies', 'Avery Chen, status Available', "someone's presence"], ['missing', 'Filter', held], ['number', 'Showing 24 boots', 'Showing 31 boots'], ['missing', 'Free shipping on Fabrikam Trail', held],
+      ['missing', '6 of 8 rows', held], ['missing', 'in 2 of 8 rows', held], ['number', 'in 2 of 8 rows', '2 pairs left, 4 pairs left'], ['missing', '3 like Note', held]],
+    // What the order made: on its own screen first (the cart), or on a screen at an address the app showed before it.
+    [['varies', 'Avery Chen, status Available', "someone's presence"], ['expected', 'Cart (1)', ordered], ['renamed', 'Rewards', 'Rewards, 120 points'], ['expected', 'Thanks for your order', ordered]],
+    // At a new address: what isn't the order's as far as the recording shows, but a name with more after it is first
+    // shown where its name is (the cart). Not the order's option itself: it's named by what's in it.
+    [['varies', 'Avery Chen, status Available', "someone's presence"], ['expected', 'Cart (1)', ordered], ['expected', 'Fabrikam Trail boots, shipped', ordered], ['missing', 'Order 1001 for Avery Chen', held], ['missing', 'Ready to ship', held]],
+  ]);
+  // In a row named by words the recording's writes made: that write's. A row whose name a capture doesn't list (words
+  // Copilot wrote) is gone all the same when today's screen doesn't have it, with what's in it.
+  const named = regroundPlan(parsePlan(text), { walker: { ...walker, written: t => /^Order 1001|^Contoso Delta$/.test(t) }, walk, reads, apps: demo.cfg.apps }).rows;
+  assert.deepEqual(miss(named[4]).slice(2), [['expected', 'Fabrikam Trail boots, shipped', ordered], ['expected', 'Ready to ship', ordered]]);
+  assert.deepEqual(named[1].missing.filter(e => e.kind === 'list' && !e.changed).map(e => [e.count, e.entries, e.rows.length]), [[6, 6, 5]]);
+  // A list's rows: how many, its first five as recorded, and today's first five.
+  const boots6 = rows[1].missing.find(e => e.kind === 'list' && !e.changed);
+  assert.deepEqual([boots6.name, boots6.rows, boots6.first.slice(0, 2), boots6.other], ['Boots', ['Fabrikam Summit', 'Contoso Ridge', 'Fabrikam Ranger', 'Contoso Peak', 'Fabrikam Canyon'], ['Fabrikam Trail', 'Fabrikam Summit'],
+    { total: 7, first: ['Contoso Alpine', 'Fabrikam Trail', 'Fabrikam Mesa', 'Contoso Hiker', 'Fabrikam Butte'] }]);
+  // What today shows that the recording doesn't, apart from what's renamed or a number that changed, and someone's
+  // presence: the new boots as one line.
+  assert.deepEqual(rows.filter(r => r.read).map(r => r.extra.map(e => e.kind === 'list' ? `${e.count} of ${e.total} rows: ${e.rows.join(', ')}` : e.text)),
+    [[], ['Filter boots', '5 of 7 rows: Contoso Alpine, Fabrikam Mesa, Fabrikam Butte, Contoso Basin, XTR'], ['Deal 1 of 2'], ['No orders yet']]);
+  const md = formatReground(rows);
+  assert.deepEqual(missingCounts(rows), { missing: { entries: 16, lines: 8 }, renamed: { entries: 1, lines: 1 }, number: { entries: 4, lines: 3 }, expected: { entries: 3, lines: 3 }, varies: { entries: 1, lines: 1 }, extra: { entries: 8, lines: 4 } });
+  assert.match(md, /## Extra since the recording\n\n[^\n]*8 in 4 lines[^\n]*\n\n\| What \| Screen \(steps\) \|\n\|---\|---\|\n\| “Filter boots” \(button\) \| catalog \(1-2\) \|\n\| 5 of 7 rows of the list “Boots”: “Contoso Alpine”, “Fabrikam Mesa”, “Fabrikam Butte”, “Contoso Basin”, “XTR”\. Recorded: 8 rows, starting “Fabrikam Trail”/);
+  assert.match(md, /\| 2 in 2 of 8 rows of the list “Boots” that are still there, starting “Waterproof leather”, “Wide fit” \|[^\n]*\n\| 3 like “Note: …”, starting “Note: ships in a box”, “Note: free returns”, “Note: two colours” \|/);
+  assert.match(md, /\| 6 of 8 rows of the list “Boots”, from “Fabrikam Summit”, “Contoso Ridge”, “Fabrikam Ranger”, “Contoso Peak”, “Fabrikam Canyon”\. Recorded, it starts “Fabrikam Trail”, “Fabrikam Summit”, “Contoso Hiker”, “Contoso Ridge”, “Fabrikam Ranger”\. Today: 7 rows, starting “Contoso Alpine”, “Fabrikam Trail”, “Fabrikam Mesa”, “Contoso Hiker”, “Fabrikam Butte” \| the guard held POST api\.contoso\.test\/catalog\/\*\/items \| catalog \(1-2\) \|/);
+  assert.match(md, /### Renamed\n\n\| Recorded \| Today \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| “Rewards” \(button\) \| “Rewards, 120 points” \| home \(1-1\); home-after \(2-1\) \|/);
+  // The page loaded again after what the guard held: nothing may be broken from then on.
+  assert.equal(rows[3].basis, 'suspect');
+  const reloaded = regroundPlan(parsePlan(text), { walker, walk: { ...walk, events: [{ kind: 'loaded', host: 'shop.contoso.test', path: '/', at: at(40) }] }, reads, apps: demo.cfg.apps }).rows;
+  assert.deepEqual([reloaded[1].missing.find(e => e.kind === 'list').why, reloaded[3].basis], [held, 'both']);
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
