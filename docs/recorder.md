@@ -91,7 +91,9 @@ recorded tab. A screen they show alike (its signature) has its hovers shared out
 (each window every n-th control, as a hover page of its own, `<screen>~t<i>`), and its zoom levels in runs of
 neighbours, one run a window, each starting from the level before it. Any other screen, and clicks, groups, chips,
 lists and drags, are swept in the recorded tab as before. The windows are marked `twin:<app>`, so no lookup takes
-them for the app's own, and close once the recording is saved.
+them for the app's own, and close once the recording is saved. A twin's storage writes stay in that window
+(`twin-storage.js`: localStorage and cookies in a shadow, IndexedDB and Cache API writes made harmless,
+BroadcastChannel silent), so a click there that saves UI state never reaches the recorded tab.
 
 ### Checkpoint and resume
 
