@@ -200,7 +200,7 @@ try {
   // Reads per step: the read before is the last step's read after when nothing ran between; a second read after only
   // where the first didn't prove the landing strongly.
   times.reads = rj.reads;
-  check('a step\'s read before reuses the last step\'s read after when nothing ran between, and a strong landing is read once', rj.reads && rj.reads.before.reused >= 2 && rj.reads.after.one >= 2 && rj.reads.after.one + rj.reads.after.two === (rj.landings || []).length, JSON.stringify({ reads: rj.reads, landings: (rj.landings || []).map(l => [l.step, l.strength]) }));
+  check('a step\'s read before reuses the last step\'s read after when nothing ran between and its signature is the same (a page that changed gets a new read), and a strong landing is read once', rj.reads && rj.reads.before.reused >= 2 && rj.reads.before.changed !== undefined && rj.reads.after.one >= 2 && rj.reads.after.one + rj.reads.after.two === (rj.landings || []).length, JSON.stringify({ reads: rj.reads, landings: (rj.landings || []).map(l => [l.step, l.strength]) }));
   check('the reset before: the leftover task deleted, Sync turned off, then checked', rj.reset && rj.reset.before && rj.reset.before.ok && rj.reset.before.did.join('|') === 'tasks: Click "Delete Call Kestrel"|tasks: Click "Sync"', JSON.stringify(rj.reset && rj.reset.before));
   const w = (rj.writes || [])[0] || {};
   check('the approved write ran, and run.json keeps what it made (for the undo)', w.write === 'new-task' && w.result && w.result.ids.length === 1 && /^\d{6}$/.test(w.result.ids[0]) && w.result.typed === 'Call Kestrel', JSON.stringify(w));
