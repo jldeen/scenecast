@@ -22,8 +22,9 @@ if [ -n "${S_KEY:-}" ]; then
   gh release list -R "$REPO" -L 100 --json tagName,createdAt -q '.[] | select(.tagName | startswith("ci-update-")) | "\(.tagName) \(.createdAt)"' |
     while read -r tag at; do
       t=$(node -e 'console.log(Math.floor(Date.parse(process.argv[1]) / 1000))' "$at")
-      [ "$t" -lt "$cutoff" ] && { echo "deleting leftover feed $tag ($at)"; gh release delete "$tag" -R "$REPO" --yes --cleanup-tag || true; }
-    done
+      # (an if, not &&: under set -e a recent feed, another job's, would end the script)
+      if [ "$t" -lt "$cutoff" ]; then echo "deleting leftover feed $tag ($at)"; gh release delete "$tag" -R "$REPO" --yes --cleanup-tag || true; fi
+    done || true
 fi
 pushd apps/desktop >/dev/null
 if [ -n "${S_KEY:-}" ]; then
