@@ -162,9 +162,18 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 - **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
   leaving the app's hosts, a sign-in page (never signed in: Sign in again; the guard holding an app's sign-in says
   so, with the request), what a step lands on not showing, a control that isn't there, a step only a person can do.
-- **Fails closed on a landing it can't prove.** Words a click, hover or press lands on that were on the screen
-  before it prove nothing ("unproven"): the run stops there, before the next step, a write above all. Typing and
-  scrolling stay on the screen they started on.
+- **Checks every step's proof** (`Lands on:`, [plan-format.md](engine/plan-format.md#what-proves-a-step-lands-on)):
+  words on the page, a control by its exact name (in a state), a box's text (its live value), or words gone with
+  words that stay. A proof that isn't there stops the run, with a picture.
+- **A step it can't prove** (no proof, or one that was already there before it: for `Go to X`, on the app the plan
+  was on) goes in run.json's `unprovable`. The run goes on only if the next step's control is the one (exactly one by
+  its exact name, of its kind), and a write never follows it: the step before every write has a proven landing.
+- **Clicks only what it means.** Before every click, what's at the point (through the frames under it) has to be the
+  control itself, not a toast, a banner or a backdrop on top: measured again for up to 2 s, then a read-only step
+  is missing and a write stops the run. Each input's record keeps what it hit (`landed`).
+- **Names controls the reader's way** (`controlOf`, `packages/script/naming.mjs`), so a plan's step finds the control
+  the reader named on the recorded screen. Until the two are shown alike (`packages/selftest/name-parity.mjs`), a
+  write also needs the reader, reading the screen's markup as it is then, to find its control the same way.
 - **The reset before and after.** The demo's `preflight.reset`/`resetFix`, else reset.md: before, the check, then the
   undos and the set-first steps, then the check again (it fails closed: nothing is recorded when the tenant isn't
   as the demo starts); after, the undos of what ran, the start set again, the check.
@@ -177,10 +186,12 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 
 It needs the capture browser started holding (`"capture": { "guard": "hold" }`): the guard is on from the
 browser's first request, with the apps' allow-lists, so what the apps send while they load is held too; a run's own
-guard replaces it and it comes back after. Each app starts on its start screen in the recording. An app that opens
-where it was last (Teams) gets its own address in demo.json (`apps[].start`, a link to the demo's first screen); one
-whose start screen no address reaches gets `apps[].startSteps` (read-only plan steps after it opens, e.g.
-`["Click \"Supply Chain Operations\""]` for a Microsoft IQ business plugin). The capture browser denies every app's
+guard replaces it and it comes back after. Each app starts on its start screen in the recording, checked against it
+(the words its first `Go to` lands on) before the recording starts. `apps[].start` in demo.json says how: an address
+(Teams opens where it was last: a link to the demo's first screen), plan steps for a start screen no address
+reaches (`["Click \"Supply Chain Operations\""]` for a Microsoft IQ business plugin), or both. They're navigation
+only (a click, a hover, a scroll, a wait), under the guard; anything else is refused. `startSteps` is the older
+name. The capture browser denies every app's
 site notifications (never grants them): an app's "turn on notifications" banner isn't in any recording.
 
 `scenecast ai walk --live` walks the plan read-only (`walkLive`): at a write it skips the rest of that beat and goes
