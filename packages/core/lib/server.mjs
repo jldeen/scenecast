@@ -12,7 +12,8 @@ const answers = async url => { try { return (await fetch(url + '__replica/status
 export async function replicaServer(demo, url = null) {
   if (url && await answers(url)) return { url, stop: () => {} };
   const port = url ? +new URL(url).port : await freePort();
-  const p = spawn(process.execPath, [__at('player/serve.mjs'), '--demo', demo.dir, '--port', String(port), '--no-editor'], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1' } });
+  // It goes with what started it (a check), even when that crashes before stop().
+  const p = spawn(process.execPath, [__at('player/serve.mjs'), '--demo', demo.dir, '--port', String(port), '--no-editor'], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1', REPLICA_EXIT_WITH_PARENT: '1' } });
   const u = `http://127.0.0.1:${port}/`;
   for (let i = 0; i < 150 && !(await answers(u)); i++) await sleep(100);
   if (!(await answers(u))) { p.kill(); throw new Error('the replica server did not start'); }

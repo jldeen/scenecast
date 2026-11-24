@@ -39,8 +39,9 @@ const EDGE = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 const plain = (s, win) => keyLabel(String(s), win ? 'Win32' : 'MacIntel').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, '$1$2').replace(/\s+/g, ' ').trim();
 
 const srv = await replicaServer(demo, arg(args, '--url'));
-const browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+let browser = null;
 try {
+  browser = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
   const flow = (await compileFlow(demo)).flow;
   // ---- script ↔ notes ------------------------------------------------------------------------------------------------
   const sp = resolve(demo.dir, notes.script || 'presenter/script.md');
@@ -232,7 +233,8 @@ try {
 } catch (e) {
   if (!items.some(i => i.status === 'fail')) add('notes-check', false, 'the check itself failed: ' + String(e && e.stack || e).slice(0, 600));
 } finally {
-  await browser.close(); srv.stop();
+  srv.stop();
+  if (browser) await browser.close().catch(() => {});
 }
 const fails = items.filter(i => i.status === 'fail');
 mkdirSync(demo.out, { recursive: true });
