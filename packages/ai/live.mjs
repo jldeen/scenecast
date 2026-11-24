@@ -24,7 +24,7 @@ import { findItem, nameFits, composer, searchBox, norm } from './find.mjs';
 import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
-import { controlOf } from '@scenecast/script/naming.mjs';
+import { CONTROL_NAME_SRC } from '@stuntdouble/capture/page-naming.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 
 // The words of an app showing an error instead of what it should.
@@ -45,17 +45,17 @@ const isAddress = x => /^https?:\/\//i.test(String(x || '').trim());
 // An app's start steps: apps[].start as a list (an address and/or plan steps), then the older startSteps.
 export const startSteps = a => [...(Array.isArray(a && a.start) ? a.start.filter(x => !isAddress(x)) : []), ...((a && a.startSteps) || [])];
 const startAddress = a => Array.isArray(a.start) ? a.start.find(isAddress) || null : isAddress(a.start) ? a.start : null;
-// A control's role and name in a page, by the reader's own rule (controlOf, naming.mjs), so a plan's step finds the
-// same control live as the reader named on the recorded screen.
-const NAMING = `const controlOf = ${controlOf};
-const NAMING_ACC = { tag: e => e.localName, attr: (e, n) => e.getAttribute(n), text: e => e.innerText || '', byId: id => document.getElementById(id) };
-const domControl = e => controlOf(e, NAMING_ACC);`;
-// What's at a point in one frame: the nearest control at or around it (by the same rule), else the element itself.
+// A control's role and name in a page, by the reader's own rule (controlOf, @stuntdouble/core/lib/control-name.mjs), so
+// a plan's step finds the same control live as the reader named on the recorded screen.
+const NAMING = CONTROL_NAME_SRC;
+// What's at a point in one frame: the controls at it and around it, innermost first (by the same rule), else the
+// element itself. A click there lands on the target when the target is one of them (the point is on it or inside it).
 const HIT = `(() => { ${NAMING}
   const e = document.elementFromPoint(__X__, __Y__);
   if (!e) return null;
-  for (let c = e; c; c = c.parentElement) { const d = domControl(c); if (d.control) return { name: d.name, role: d.role }; }
-  return { name: '', role: e.localName, none: true };
+  const chain = [];
+  for (let c = e; c && chain.length < 12; c = c.parentElement) { const d = domControl(c); if (d.control) chain.push({ name: d.name, role: d.role }); }
+  return chain.length ? { ...chain[0], chain } : { name: '', role: e.localName, none: true, chain };
 })()`;
 // Every control in one frame, on screen or not: its name and role the reader's way (controlOf), its state, and
 // what a box holds now (an input's or a text area's value, an editable area's words: never the value attribute,
@@ -206,12 +206,12 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
   // Before a click: what's at the point has to be the control it means (the same role and name, in the same frame),
   // not whatever's on top of it (a toast, a banner, a dialog's backdrop, a sticky header after a scroll). Measured
   // again for up to 2 s; still covered, it isn't clicked.
-  const sameControl = (h, el) => h && !h.none && h.role === el.role && (norm(h.name) === norm(el.name) || nameFits(h.name, el.name)) && (h.frame || 'page') === (el.fh || 'page');
+  const sameControl = (h, el) => h && (h.frame || 'page') === (el.fh || 'page') && (h.chain || []).some(c => c.role === el.role && (norm(c.name) === norm(el.name) || nameFits(c.name, el.name)));
   async function uncovered(id, el, want, kind) {
     let h = null;
     for (const t0 = Date.now(); ;) {
       h = await hitAt(id, el.x, el.y).catch(() => null);
-      if (sameControl(h, el)) return { ok: true, el, hit: { on: h.name, role: h.role, frame: h.frame } };
+      if (sameControl(h, el)) { const t = h.chain.find(c => c.role === el.role && (norm(c.name) === norm(el.name) || nameFits(c.name, el.name))); return { ok: true, el, hit: { on: t.name, role: t.role, frame: h.frame, ...(t !== h.chain[0] ? { at: { on: h.name, role: h.role } } : {}) } }; }
       if (Date.now() - t0 > 2000) break;
       await sleep(250);
       const again = want ? (await locate(id, want, kind)).el : null;
