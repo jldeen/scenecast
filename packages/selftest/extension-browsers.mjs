@@ -10,17 +10,20 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { selftestGuard } from './guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const want = process.argv.slice(2).length ? process.argv.slice(2) : ['chrome', 'msedge'];
 const RXP = '47693';
+const tmp = mkdtempSync(join(tmpdir(), 'scenecast-ext-browsers-'));
+await selftestGuard({ tmp, receivers: [+RXP], extensions: [+RXP] });
 const page = '<!doctype html><title>Ext</title><style>@font-face{font-family:F;src:url(/f.woff2)}h1{font-family:F}</style><h1>extension capture</h1>';
 const site = createServer((q, s) => { if (q.url === '/f.woff2') { s.writeHead(200, { 'content-type': 'font/woff2' }); return s.end('wOF2fake'); } s.writeHead(200, { 'content-type': 'text/html' }); s.end(page); }).listen(47704, '127.0.0.1');
 const fails = [], ran = [];
 const check = (name, ok, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok || !d ? '' : ': ' + d)); if (!ok) fails.push(name); };
 for (const channel of want) {
-  const raw = mkdtempSync(join(tmpdir(), 'scext-'));
+  const raw = mkdtempSync(join(tmp, 'scext-'));
   spawnSync(process.execPath, [join(here, '../capture/build.mjs'), '--extension', join(raw, 'ext'), '--port', RXP], { stdio: 'ignore' });
   let ctx;
   try { ctx = await chromium.launchPersistentContext(join(raw, 'profile'), { channel, headless: true, ignoreDefaultArgs: ['--disable-extensions'], args: ['--enable-unsafe-extension-debugging', '--silent-debugger-extension-api'] }); }

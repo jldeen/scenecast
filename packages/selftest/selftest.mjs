@@ -23,6 +23,7 @@ import { loadDemo } from '@stuntdouble/core/lib/demo.mjs';
 import { flowParts } from '@stuntdouble/core/lib/buildkey.mjs';
 import { scriptAndEditor } from './script-focus.mjs';
 import { presenterWalk } from './presenter-walk.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -35,6 +36,7 @@ const MODE = process.argv.includes('--agent') || process.env.SCENECAST_RECORDER 
   : process.argv.includes('--capture') || process.env.SCENECAST_RECORDER === 'capture' ? 'capture' : 'extension';
 const RX_PORT = 47691, REPLICA_PORT = 4699;
 const tmp = mkdtempSync(join(tmpdir(), 'replica-selftest-'));
+await selftestGuard({ tmp, receivers: [RX_PORT], extensions: [RX_PORT] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];
 const times = {};

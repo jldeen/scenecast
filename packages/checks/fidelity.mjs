@@ -16,11 +16,12 @@ import { chromium } from 'playwright-core';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmSync, statSync, copyFileSync, mkdtempSync, constants } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { cpus, tmpdir } from 'node:os';
+import { cpus } from 'node:os';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadDemo, bundleFlow, arg } from '@stuntdouble/core/lib/demo.mjs';
+import { scratchDir } from '@stuntdouble/core/lib/test-fence.mjs';
 import { scan } from './secrets.mjs';
 import { comparePngs, luminance } from './compare.mjs';
 
@@ -249,7 +250,7 @@ try {
     if (QUICK || !want('cold-start')) return;
     if (!check || !check.shots || !check.shots[0]) return add('cold-start', 'Cold start, three fresh clones', 'fail', 'no two-run result to compare with');
     const N = +arg(args, '--cold', 3), files = cloneFiles(demo.dir);
-    const root = mkdtempSync(join(tmpdir(), 'replica-cold-'));
+    const root = mkdtempSync(join(scratchDir(), 'replica-cold-'));
     const bad = [], secs = [];
     try {
       const reps = await Promise.all(Array.from({ length: N }, async (_, i) => {

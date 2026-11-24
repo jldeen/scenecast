@@ -5,8 +5,10 @@ import { createHash } from 'node:crypto';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { selftestGuard } from './guard.mjs';
 
 const temp = mkdtempSync(join(tmpdir(), 'scenecast-assets-'));
+await selftestGuard({ tmp: temp });
 const demo = join(temp, 'fixture'), raw = join(temp, 'raw');
 const binary = process.env.SCENECAST_BIN ? resolve(process.env.SCENECAST_BIN) : resolve('target/debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
 // STUNTDOUBLE_PACKS empty: built-in app packs only, never a private pack on this computer.
