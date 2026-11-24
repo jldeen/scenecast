@@ -162,9 +162,10 @@ those reads:
    marked.
 
 It writes `.out/ai/reground.md` (each proof before and after, and why, and the steps nothing proves today, under
-**Needs you**), `reground.json` and `plan.reground.md`. `plan.md` stays as it is: its approval is its exact text, so
-adopting the new one means approving it again. A walk is of one plan: re-grounding another is refused. `--plan
-<file>` names the plan the walk walked when it isn't the demo's `plan.md` now.
+**Needs you**), `reground.json` and `plan.reground.md`. `plan.md` stays as it is. Its new proofs go in with `--adopt`
+(built after stage F, [below](#approval-and-what-runs-on-its-own)); until then, adopting `plan.reground.md` means
+approving it again. A walk is of one plan: re-grounding another is refused. `--plan <file>` names the plan the walk
+walked when it isn't the demo's `plan.md` now.
 
 The walk's files, in `.out/ai` (or `--walk <dir>`), as the live walk writes them: `walk.json` (a row per step:
 `{ step, text, status, why }`) and, in `walk-screens/`, `<beat>-<step>.reads.json.gz` (both counted from 1) and
@@ -195,8 +196,22 @@ rectangle; `via <step>` for a point one click or hover away (⌥F takes that ste
 ## Approval, and what runs on its own
 
 Approving a plan approves its exact text: Scenecast keeps the SHA-256 of `plan.md` (`.out/ai/approved.json`), and any
-edit after that needs approving again. Its writes are approved with it, ahead of the run. A run without a person (the
-capture pass) never asks mid-run: once she's away, it never waits on her. It keeps to these rules:
+edit after that needs approving again. Its writes are approved with it, ahead of the run.
+
+**How each step is proven is the rules' part, not hers** (the rule, built after stage F: stage F's first approval
+comes after its re-ground):
+
+- The approval binds `plan.md` without its `Lands on:` and `Differs:` lines, and `reset.md`, exactly: its steps,
+  their typed words, its `Writes:` lines and the reset. Any edit to those needs approving again.
+- Proof lines change only through `scenecast ai reground --adopt`. It refuses if any other line differs, and it
+  records the new proofs' hash and the walk they came from.
+- A run refuses proof lines that match neither the approved ones nor an adopted re-ground, and `run.json` records
+  which set it ran.
+- Why: she can't judge proofs by eye. The rules choose them, and a run stops before any write that a weaker proof
+  can't support (below).
+
+A run without a person (the capture pass) never asks mid-run: once she's away, it never waits on her. It keeps to
+these rules:
 
 - A step with `Writes:` runs only as the plan says it: its control found by its exact name. If the step has to
   change (another control's name, or a `Differs:` on it), the run stops before it. Only a run with her there may ask.

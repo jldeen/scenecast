@@ -157,8 +157,8 @@ export function formatReground(rows) {
 }
 
 // from: the folder holding walk.json and walk-screens/ (a walk's own: .out/ai). plan: the plan the walk walked, when
-// it isn't the demo's plan.md now. plan.md stays as it is: its approval is its exact text, so adopting
-// plan.reground.md means approving it again.
+// it isn't the demo's plan.md now. plan.md stays as it is: until --adopt (after stage F: plan-format.md, "Approval"),
+// adopting plan.reground.md means approving it again.
 export function reground(demo, { from = null, plan: planFile = null } = {}) {
   const dir = from || aiDir(demo), wf = join(dir, 'walk.json'), pf = planFile || join(demo.dir, PLAN);
   if (!existsSync(pf)) throw new Error(planFile ? `${planFile}: there\u2019s no such file` : 'make the plan first');
