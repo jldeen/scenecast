@@ -151,7 +151,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
         const text = formatStep(at.s);
         before.set(c.after.step, { beat: at.beat, text, n: at.of.filter(x => formatStep(x) === text).length > 1 ? at.si + 1 : null, items: [] });
       }
-      before.get(c.after.step).items.push({ app: c.app, text: startText({ ...c, value: c.to }), how, seen: `beat ${c.after.beat}, ${c.after.screen}` });
+      before.get(c.after.step).items.push({ app: c.app, kind: c.kind, subject: c.subject, value: c.to, text: startText({ ...c, value: c.to }), how, seen: `beat ${c.after.beat}, ${c.after.screen}` });
     }
     out.before = [...before.values()];
     const groups = new Map();

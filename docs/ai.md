@@ -49,11 +49,12 @@ Without Copilot, the plan comes from your Do lines alone.
 
 Afterwards Scenecast writes `reset.md`: each change undone, the state your demo starts in (what's switched on or off,
 the mode picked, the theme, as your first screens show it) set first, and a checklist that only looks. If a later
-screen shows something switched that no step of your plan switches, it says which step to add. Once the demo is
-built, the finish: your script for the presenter guide with its Do lines in presenter keys, ⌥1–⌥9 on your beats, the
-focus points, and one page to look at (`.out/review/index.html`): every screen, the timings (how long each beat takes
-to say against the time your script gives it), and anything that needs you. One walkthrough works the same way
-(`scenecast ai plan --walkthrough recording.json`).
+screen shows something switched that no step of your plan switches (your script says it's already on), the capture
+switches it off camera just before that step, when it knows how, and the review lists it under **Set off camera**;
+otherwise it says which step to add. Once the demo is built, the finish: your script for the presenter guide with its
+Do lines in presenter keys, ⌥1–⌥9 on your beats, the focus points, and one page to look at (`.out/review/index.html`):
+every screen, the timings (how long each beat takes to say against the time your script gives it), and anything that
+needs you. One walkthrough works the same way (`scenecast ai plan --walkthrough recording.json`).
 
 ## GitHub Copilot, through your own sign-in
 

@@ -114,6 +114,12 @@ const readJson = f => { try { return JSON.parse(readFileSync(f, 'utf8')); } catc
 // information, not for her to do.
 const INFO = new Set(['restored']);
 export const addedFromRecording = planReview => ((planReview && planReview.flags) || []).filter(f => INFO.has(f.kind)).map(f => ({ where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text }));
+// What the capture sets off camera just before a step, because her script says it's already so (reset.md's Set
+// before): for information, in place of a step to add.
+export const setOffCamera = reset => ((reset && reset.before) || []).flatMap(b => b.items.map(i => ({
+  where: `beat ${b.beat}`,
+  text: `${i.kind === 'choice' ? `Picks "${i.value}" (${i.subject})` : `Switches "${i.subject}" ${i.value}`} in ${reset.appTitle ? reset.appTitle(i.app) : i.app}, just before ${b.text}${b.n ? ` (step ${b.n})` : ''}`,
+})));
 export function needsYou({ planReview, reset, plan, fidelity, points }) {
   const out = [];
   const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step", number: 'A number that can change', message: 'Words in a message' };
@@ -124,7 +130,7 @@ export function needsYou({ planReview, reset, plan, fidelity, points }) {
   if (points && !points.length) out.push({ kind: 'No focus point', where: '', text: 'The plan has no focus points yet: build the demo, then finish again.' });
   return out;
 }
-export function reviewHtml({ title, beats, timings, needs, added = [], stats }) {
+export function reviewHtml({ title, beats, timings, needs, added = [], offCamera = [], stats }) {
   const card = s => `<figure><div class="img">${s.img ? `<img loading="lazy" src="${esc(s.img)}" alt="">` : '<span>No picture</span>'}</div><figcaption><b>${esc(s.step)}</b>${s.words ? `<span>${esc(s.words)}</span>` : ''}</figcaption></figure>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}: review</title><style>
 body{margin:0;padding:24px 28px;font:14px/1.45 -apple-system,"Segoe UI",system-ui,sans-serif;color:#1b1b1b;background:#fff}
@@ -135,6 +141,7 @@ figcaption{font-size:12px;margin-top:4px}figcaption span{display:block;color:#66
 <h1>${esc(title)}</h1><div class="sum">${stats.map(([k, v]) => `<b>${esc(v)}</b> ${esc(k)}`).join(' · ')}</div>
 <h2>Needs you</h2>${needs.length ? `<ul class="needs">${needs.map(n => `<li><span class="k">${esc(n.kind)}</span><span class="w">${esc(n.where)}</span>${esc(n.text)}</li>`).join('')}</ul>` : '<p class="ok">Nothing. It\u2019s ready to present.</p>'}
 ${added.length ? `<h2>Added from your recording</h2><p class="sum">Steps your script leaves out, done as you recorded them. Nothing to do.</p><ul class="needs">${added.map(a => `<li><span class="w">${esc(a.where)}</span>${esc(a.text)}</li>`).join('')}</ul>` : ''}
+${offCamera.length ? `<h2>Set off camera</h2><p class="sum">Your script has these already set when you get there. The capture sets each one off camera, just before that step, and the cleanup puts it back. Nothing to do.</p><ul class="needs">${offCamera.map(a => `<li><span class="w">${esc(a.where)}</span>${esc(a.text)}</li>`).join('')}</ul>` : ''}
 <h2>Timings</h2><table>${timings.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>Every screen</h2>${beats.map(b => `<div class="beat">Beat ${b.n} · ${esc(b.title)}</div><div class="sheet">${b.shots.map(card).join('')}</div>`).join('')}
 </body></html>`;
@@ -186,11 +193,11 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], o
   if (fidelity) timings.push(['Checks', `${fidelity.secs} s · ${fidelity.items.filter(i => i.status === 'pass').length} of ${fidelity.items.length} pass`]);
   timings.push(...beatTimings(plan, slots));
   const points = (readFocusJson(demo.dir).points || []).filter(p => p.source === 'plan');
-  const needs = needsYou({ planReview, reset, plan, fidelity, points }), added = addedFromRecording(planReview);
+  const needs = needsYou({ planReview, reset, plan, fidelity, points }), added = addedFromRecording(planReview), offCamera = setOffCamera(reset);
   const writes = plan.beats.flatMap(b => b.steps).filter(s => s.writes).length;
-  const html = reviewHtml({ title: `${demo.cfg.title || plan.title}: review`, beats, timings, needs, added, stats: [['beats', plan.beats.length], ['screens', beats.reduce((n, b) => n + b.shots.length, 0)], ['writes', writes], ['focus points', points.length], ['things for you', needs.length]] });
+  const html = reviewHtml({ title: `${demo.cfg.title || plan.title}: review`, beats, timings, needs, added, offCamera, stats: [['beats', plan.beats.length], ['screens', beats.reduce((n, b) => n + b.shots.length, 0)], ['writes', writes], ['focus points', points.length], ['things for you', needs.length]] });
   writeFileSync(join(out, 'index.html'), html);
-  return { file: join(out, 'index.html'), needs, added };
+  return { file: join(out, 'index.html'), needs, added, offCamera };
 }
 
 export async function finish({ demo, packs, emit = () => {} }) {

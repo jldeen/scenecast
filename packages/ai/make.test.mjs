@@ -17,7 +17,7 @@ import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
-import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, reviewHtml } from './finish.mjs';
+import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, reviewHtml } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
@@ -468,11 +468,16 @@ test('the start state: what the first screens show is set first and checked; a c
   assert.deepEqual(parseReset(formatReset(r)).set, [{ what: 'admin: "Sync" is off', set: '"Enable Sync" · admin:sync', opens: 'https://admin.test/sync', seen: 'beat 2, admin-home' }]);
   // A step its beat has twice is named by its number.
   assert.deepEqual(parseReset(formatReset({ ...r, before: [{ ...r.before[0], text: 'Scroll down', n: 4 }] })).before.map(b => [b.beat, b.text, b.n]), [[2, 'Scroll down', 4]]);
+  // The review lists it under Set off camera, in place of a step to add.
+  assert.deepEqual(setOffCamera(r), [{ where: 'beat 2', text: 'Switches "Sync" on in Admin center, just before Click "Certified"' }]);
+  assert.ok(!needsYou({ reset: r, plan }).some(n => n.kind === 'A step is missing'));
+  assert.match(reviewHtml({ title: 'T', beats: [], timings: [], needs: [], offCamera: setOffCamera(r), stats: [] }), /<h2>Set off camera<\/h2>.*beat 2<\/span>Switches &quot;Sync&quot; on in Admin center, just before Click &quot;Certified&quot;/s);
   // When the pack has no write for that switch, a run can't show it: the plan needs that step.
   const other = resetFor(plan, { walker, packs: { forApp: { admin: { id: 'admin', writes: [{ id: 'seat', on: { kind: 'click', target: 'Add one seat' } }] } }, writeFor } });
   assert.deepEqual([other.before, other.set], [[], []]);
   assert.match(other.needs.find(n => n.kind === 'start').text, /^"Sync" is off before Click "Certified" and on after it.*Add Click "Enable Sync" after it$/);
   assert.doesNotMatch(formatReset(other), /## Set before/);
+  assert.deepEqual([setOffCamera(other), needsYou({ reset: other, plan }).filter(n => n.kind === 'A step is missing').length], [[], 1]);
   // A check names the screen it's read on when the reset knows it; the capture pass gets there by the plan.
   const checks = parseReset(formatReset(r)).checks;
   assert.match(formatReset(r), /^- admin on admin-home: "Sync" is off$/m);
