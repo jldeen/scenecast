@@ -32,6 +32,7 @@
 //                                    address never takes it for the app's own tab; its events say side: mark
 //   capTwins({ app, n, url } | { close: true })   in this process only (the recorder's side sweeps, record.auto.twins):
 //                                    n windows of the app kept for the recording, each sent to url and loaded, marked
+//                                    (its storage writes kept in the window: twin-storage.js),
 //                                    twin:<app> (never taken for the app's own tab); → { n, urls } (and .pages, the
 //                                    windows themselves, in this process). close: all of them
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
@@ -79,6 +80,9 @@ const LEAVE_SCAN = words => {
   return words.some(w => w && hay.includes(w));
 };
 const unEntity = h => String(h || '').replace(/<[^>]*>/g, ' ').replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).replace(/&#x([0-9a-f]+);/gi, (m, x) => String.fromCodePoint(parseInt(x, 16))).replace(/&(amp|lt|gt|quot|apos|nbsp|#39);/g, (m, k) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" })[k]);
+
+// A twin window's own storage (twin-storage.js): its writes stay in that window, never the profile's shared store.
+const TWIN_STORAGE = readFileSync(new URL('./twin-storage.js', import.meta.url), 'utf8');
 
 const originOf = u => { try { return new URL(u).origin; } catch (e) { return null; } };
 const hostRe = c => c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
@@ -329,7 +333,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       const mark = `twin:${c.app}`, put = p => p.evaluate(k => { try { sessionStorage.setItem('d1tab', k); } catch (e) {} }, mark).catch(() => {});
       const pool = (twins.get(c.app) || []).filter(p => !p.isClosed());
       twins.set(c.app, pool);
-      while (pool.length < c.n) { const p = await cb.open('about:blank'); sideOf.set(p, mark); p.on('framenavigated', f => { if (f === p.mainFrame()) put(p); }); pool.push(p); }
+      while (pool.length < c.n) { const p = await cb.open('about:blank'); await p.addInitScript({ content: TWIN_STORAGE }); sideOf.set(p, mark); p.on('framenavigated', f => { if (f === p.mainFrame()) put(p); }); pool.push(p); }
       const use = pool.slice(0, c.n);
       await Promise.all(use.map(async p => { await p.goto(c.url, { waitUntil: 'load', timeout: 60000 }).catch(e => log(`twin ${c.app}: ${String(e.message).split('\n')[0]}`)); await put(p); }));
       // The pages only for the recorder in this process; through the receiver, what they are.

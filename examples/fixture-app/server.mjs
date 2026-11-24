@@ -369,6 +369,16 @@ post('/api/telemetry', { at: location.pathname }).catch(() => {});
 fetch('/api/catalog?from=load').catch(() => {});
 let lookup = null;
 $('box').addEventListener('input', () => { clearTimeout(lookup); lookup = setTimeout(() => fetch('/api/catalog?from=type').catch(() => {}), 300); });
+// ?prefs=1: a Compact view button that saves a UI preference in localStorage, and the page following it in every tab
+// (storage events), as real apps do: what a twin window's click must never reach in the recorded tab.
+if (new URLSearchParams(location.search).has('prefs')) {
+  const apply = v => document.body.classList.toggle('compact', v === 'compact');
+  const b = document.createElement('button'); b.id = 'compact'; b.textContent = 'Compact view';
+  b.addEventListener('click', () => { localStorage.setItem('fx-density', 'compact'); apply('compact'); });
+  document.querySelector('.bar').appendChild(b);
+  addEventListener('storage', e => { if (e.key === 'fx-density') apply(e.newValue); });
+  apply(localStorage.getItem('fx-density'));
+}
 load();
 if ($('sug')) {
   fetch('/api/suggested').then(r => r.json()).then(j => {
