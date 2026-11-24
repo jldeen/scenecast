@@ -215,6 +215,7 @@ refuses (M365 Copilot's can take a while after its own landing); another tenant 
 title; its words in every frame; every control's name, role, frame, state and what a box holds), with
 `<name>.reads.json.gz` beside it: the screen in the reader's shape (`[{ at, docs: [{ key, html }] }]`, read twice
 about a second apart, the recorder's serialization), local only, to re-ground a plan on the product as it is today.
+walk.json names the plan it walked by its sha256 (`plan`): a re-ground refuses a walk of another plan.
 A demo's `capture.keepBodies` (in its local demo.json) keeps the bodies of the held requests it names in
 `.out/ai/held-bodies.json`, for a person reviewing an allow entry. At a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, drifted (its words changed), unproven (its words were there

@@ -95,7 +95,7 @@ async function main() {
     }
     case 'walk': {
       const d = demo();
-      if (args.includes('--live')) { const { walkLive } = await import('./unattended.mjs'); const w = await walkLive({ demo: d, emit }); return { secs: w.secs, beats: w.beats.map(b => ({ beat: b.beat, secs: b.secs, steps: b.steps.map(s => s.status) })), held: (w.guard.held || []).length }; }
+      if (args.includes('--live')) { const { walkLive } = await import('./unattended.mjs'); const w = await walkLive({ demo: d, emit }); return { secs: w.secs, beats: w.beats.map(b => ({ beat: b.beat, secs: b.secs, steps: b.steps.map(s => s.status) })), held: (w.guard.held || []).length, heldWhileDrifted: w.heldWhileDrifted || [] }; }
       const { walkerFromDemo } = await import('./walker.mjs'), { walkPlan } = await import('./walk.mjs'), { readPlan } = await import('./draft.mjs');
       const walker = walkerFromDemo(d);
       if (!walker) throw new Error('build the demo first: an offline walk needs its screens');

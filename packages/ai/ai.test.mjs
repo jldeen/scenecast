@@ -12,6 +12,7 @@ import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
+import { heldWhileDrifted } from './walk.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -208,4 +209,22 @@ test("a Check line reads the same from either parser: a string, or { app, screen
   assert.equal(checkLine('tasks: no "Call Kestrel"'), 'tasks: no "Call Kestrel"');
   assert.equal(checkLine({ app: 'tasks', screen: 'tasks-home', text: 'no "Call Kestrel"' }), 'tasks: no "Call Kestrel"');
   assert.equal(checkLine({ app: null, screen: null, text: 'no app here' }), 'no app here');
+});
+
+test("what the guard held only while a landing drifted or missed: off telemetry, never in a step outside", () => {
+  const H = (path, host = 'api.example.com', n = 1) => ({ method: 'POST', host, path, n });
+  const walk = { beats: [
+    { beat: 1, steps: [{ step: 0, status: 'reached', held: [H('/refresh')] }, { step: 1, status: 'reached', held: [] }] },
+    { beat: 2, steps: [
+      { step: 0, status: 'reached', held: [H('/search')] },
+      { step: 1, status: 'drifted', held: [H('/titles/query', 'titles.example.com', 2), H('/v2/track', 'eastus.in.applicationinsights.azure.com'), H('/refresh')] },
+      { step: 2, status: 'reached', held: [] },
+      { step: 3, status: 'missed', held: [H('/titles/query', 'titles.example.com')] },
+      { step: 4, status: 'reached', held: [H('/late')] },
+    ] },
+  ] };
+  assert.deepEqual(heldWhileDrifted(walk), [
+    { kind: 'POST api.example.com/search', n: 1, steps: ['2-1'] },
+    { kind: 'POST titles.example.com/titles/query', n: 3, steps: ['2-2', '2-4'] },
+  ]);
 });
