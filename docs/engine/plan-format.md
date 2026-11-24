@@ -71,7 +71,8 @@ After the screen's name and ` · `, one proof, in plain words. Either part may b
 | `gone "words", still "words"` | Its words no longer include the first, and still include the second. The first were on the page before the step; the second, on it before and after, are the page's own (its heading, or a line that doesn't change between runs): it's the same page with something taken away, not a blank page, an error or somewhere else. | `{ screen, kind: 'gone', text: null, gone, still }` |
 | (none) | Nothing: the review lists the step under **Needs you**. | `{ screen, kind: null, text: null }` |
 
-- **The page's words:** what it shows in every frame (`innerText`), not what's in a closed dialog.
+- **The page's words:** what it shows in every frame (`innerText`), not what's in a closed dialog or a tooltip, and not
+  a row a capture put back (below).
 - **A control:** as below, the same rule the reader uses on a recorded page.
 - **Comparing:** words, names and a box's text are compared lowercased, with quotes (`"“”'‘’`) and invisible
   characters dropped and runs of spaces as one space. A name is the whole name; a box's text is its start.
@@ -145,7 +146,9 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
    control the next step clicks (above); what Copilot wrote as the recording ran (its answers, a heading or a button
    it named, the names it made up, and what's in a part of the page named by one); what another step types; words the
    screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each visit); what's
-   in a closed dialog.
+   in a closed dialog; what's in a tooltip (role `tooltip`: on the screen only while hovered); a row a capture put
+   back (`data-d1-row`: a list that shows only the rows in view, which the capture scrolled through), before the step
+   or after it, since a live page shows it only once it's scrolled to.
 7. **`still`:** the page's own words: not in a nav, an aside or its header, not a skip link ("Skip to main content"),
    not what half the site's pages show, a heading first, no number, on the screen before and after.
 8. **Nothing proves it:** the review lists the step under **Needs you** ("A run can't check this step").
@@ -235,15 +238,14 @@ typing, live regions). Each goes in the first class that fits:
 6. **Missing:** the rest, each with what may have broken its app's page (item 4 above). These are the ones to look at.
 
 **Extra since the recording:** what both of today's reads have and no capture of the screen in the recording has (its
-own and its variants'), with the same exclusions, less today's side of what's renamed or a number that changed, words
-in a place that varies between runs, and what describes a row the recording has only as one its capture put back (a
-row's tooltip lives in a portal the capture doesn't copy). It's what a capture now would show that the recording doesn't: new teams,
-test notes, other chats.
+own and its variants'), with the same exclusions, less today's side of what's renamed or a number that changed, and
+words in a place that varies between runs. It's what a capture now would show that the recording doesn't: new teams,
+test notes, other chats. Neither list has a tooltip's words: they aren't on the screen until hovered.
 
 In both, a list is what the reader marks as one (a list, listbox, grid, table, tree, tablist, menu, radio group or feed;
 `ul`, `ol`, `table`, `menu`), with its rows (an item, option, row, tree item, tab, menu item, radio or post; `li`,
 `tr`). A row's name is its first words (not someone's initials before their name). What describes one row's element
-(`aria-describedby`: a tooltip in a portal) is in that row. Its rows are one line:
+(`aria-describedby`) is in that row. Its rows are one line:
 
 - Rows gone (no read today has the row's name) or new (no capture has it): how many, the first five, and the list's
   first five on each side. What's in a row goes with it.

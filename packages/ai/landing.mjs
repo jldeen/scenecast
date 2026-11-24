@@ -5,8 +5,12 @@ import { formatStep } from './plan.mjs';
 
 // Compared the way a run compares: lowercased, quotes and invisible characters out, spaces as one.
 export const pnorm = s => String(s == null ? '' : s).toLowerCase().replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/["“”'‘’]/g, '').replace(/\s+/g, ' ').trim();
-// A screen's words as a run reads the page (innerText, every frame): not what's in a closed dialog, not a text area's.
-const shows = sc => ((sc && sc.items) || []).filter(i => !i.shut && i.tag !== 'textarea');
+// Not on the screen as a run reads it (innerText): in a closed dialog or a template, in a tooltip (shown only while its
+// control is hovered), or in a row a capture put back (a list that shows only the rows in view: a live page doesn't
+// have it until it's scrolled to). Never a proof, before a step or after it.
+export const unseen = x => !!(x && (x.shut || x.tip || x.restored));
+// A screen's words as a run reads the page (innerText, every frame): not what's unseen, not a text area's.
+const shows = sc => ((sc && sc.items) || []).filter(i => !unseen(i) && i.tag !== 'textarea');
 const read = new WeakMap();
 export const pageWords = sc => { if (!sc) return ''; if (!read.has(sc)) read.set(sc, pnorm(shows(sc).map(i => i.text).join('\n'))); return read.get(sc); };
 const STATE = { selected: c => c.selected === true, open: c => c.expanded === true, on: c => c.on === true || c.pressed === true, off: c => c.on === false || c.pressed === false };
@@ -18,7 +22,7 @@ export const isBox = c => !!c.editable || /^(textbox|searchbox|combobox)$/.test(
 export function holds(sc, l) {
   if (!sc || !l || !l.kind) return null;
   const words = pageWords(sc), has = t => !!pnorm(t) && words.includes(pnorm(t));
-  const named = n => (sc.controls || []).filter(c => !c.shut && pnorm(c.name) === pnorm(n));
+  const named = n => (sc.controls || []).filter(c => !unseen(c) && pnorm(c.name) === pnorm(n));
   if (l.kind === 'words') return has(l.text);
   if (l.kind === 'control') return named(l.control).some(c => !l.state || (STATE[l.state] || (() => false))(c));
   if (l.kind === 'box') return named(l.box).some(c => isBox(c) && pnorm(c.value).startsWith(pnorm(l.says)));
@@ -95,7 +99,7 @@ function siteOf(walker, to) {
       if (!sc) continue;
       const k = String(url(id)).split('#')[0], p = pages.get(k) || { words: [], controls: new Set() };
       p.words.push(pageWords(sc));
-      for (const c of sc.controls || []) if (!c.shut) p.controls.add(pnorm(c.name));
+      for (const c of sc.controls || []) if (!unseen(c)) p.controls.add(pnorm(c.name));
       pages.set(k, p);
     }
     m.set(host, pages);
@@ -160,14 +164,14 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   if (!pageWords(after) && !(after.controls || []).length) return none(`the screen it lands on (${to}) has no words`);
 
   // Today's words alone can't be told from Copilot's (the recording's streams show what it wrote): never a message's.
-  const usableOn = sc => i => !i.shut && !i.live && !i.time && i.tag !== 'textarea' && !(walker.writtenItem && walker.writtenItem(i, sc)) && !(live && live.only && i.article !== undefined);
+  const usableOn = sc => i => !unseen(i) && !i.live && !i.time && i.tag !== 'textarea' && !(walker.writtenItem && walker.writtenItem(i, sc)) && !(live && live.only && i.article !== undefined);
   const usable = usableOn(after);
   const all = shows(after), items = all.filter(usable);
   // What a proof reads must come from words a run can count on, not only from a toast, a time or Copilot's words.
   const sound = sc => pnorm(shows(sc).filter(usableOn(sc)).map(i => i.text).join('\n'));
   const soundAfters = afters.map(sound);
   const soundBefores = (live ? [live.only ? null : recBefore[0], readsBefore[0]] : [before[0]]).filter(Boolean).map(sound);
-  const soundCtl = (sc, n) => (sc.controls || []).some(c => !c.shut && !c.live && !c.time && pnorm(c.name) === pnorm(n));
+  const soundCtl = (sc, n) => (sc.controls || []).some(c => !unseen(c) && !c.live && !c.time && pnorm(c.name) === pnorm(n));
   const fromSound = l => l.kind === 'words' ? soundAfters.every(w => w.includes(pnorm(l.text)))
     : l.kind === 'control' || l.kind === 'box' ? afters.every(sc => soundCtl(sc, l.kind === 'box' ? l.box : l.control))
     : l.kind === 'gone' ? soundAfters.every(w => w.includes(pnorm(l.still))) && soundBefores.length > 0 && soundBefores.every(w => w.includes(pnorm(l.gone))) : false;
@@ -183,7 +187,7 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
     ...[...lines, ...labels].filter(t => t.length >= 70).map(t => lead(t)).filter(t => count(t) >= 3),
     ...[...heads, ...lines, ...labels].filter(t => count(t) === 1 && t.length >= 4),
   ];
-  const ctlOk = c => !c.shut && !c.live && !c.time && c.name && c.name.length < 70;
+  const ctlOk = c => !unseen(c) && !c.live && !c.time && c.name && c.name.length < 70;
   const hit = s.target && walker.control ? walker.control(after, s.target) : null;
   const controls = [...new Set([hit && hit.el, ...(after.controls || [])].filter(Boolean))].filter(ctlOk);
   const l0 = s.lands || {};
@@ -196,7 +200,7 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   // A control in a live region proves a step only when the plan's next step clicks it (the same name, and its role
   // when the step gives one): that step needs exactly it. Live-region words never do.
   const nextHit = next && next.kind === 'click' && next.target && walker.control ? walker.control(after, next.target, undefined, to) : null;
-  const nextCtl = nextHit && nextHit.el && nextHit.el.live && !nextHit.el.shut && !nextHit.el.time && pnorm(nextHit.el.name) === pnorm(next.target) && (!next.role || nextHit.el.role === next.role) ? nextHit.el : null;
+  const nextCtl = nextHit && nextHit.el && nextHit.el.live && !unseen(nextHit.el) && !nextHit.el.time && pnorm(nextHit.el.name) === pnorm(next.target) && (!next.role || nextHit.el.role === next.role) ? nextHit.el : null;
 
   // Words only inside a message come last, after every other proof (late), and say so (message).
   const goneBefore = readsBefore[0] || before[0];
@@ -257,7 +261,7 @@ function typing(s, from, after, before, walker, live = null) {
   let lands = field && field.editable === 'content' && !seen ? { kind: 'words', text: own } : field && field.name ? { kind: 'box', box: field.name, says: own } : null;
   if (live) {
     const shown = l => !!l && live.reads.every(sc => holds(sc, l) === true) && live.befores.every(b => holds(b, l) === false);
-    if (!shown(lands)) { const c = (after.controls || []).find(x => isBox(x) && !x.shut && x.name && pnorm(x.value).startsWith(pnorm(own))); lands = c ? { kind: 'box', box: c.name, says: own } : null; }
+    if (!shown(lands)) { const c = (after.controls || []).find(x => isBox(x) && !unseen(x) && x.name && pnorm(x.value).startsWith(pnorm(own))); lands = c ? { kind: 'box', box: c.name, says: own } : null; }
     if (!shown(lands)) lands = !seen && shown({ kind: 'words', text: own }) ? { kind: 'words', text: own } : null;
     return lands ? { lands, number: false, differs: null } : null;
   }
@@ -325,7 +329,7 @@ export function proveLandings(plan, walker, flags = [], { checked = null } = {})
 // With no recording behind a step: nothing recorded to compare with (no frame, no other captures), and a control found
 // by its exact name.
 const NONE = { screen: () => null, shown: () => null, flow: { states: {} }, states: [],
-  control: (sc, name) => { const el = ((sc && sc.controls) || []).find(c => !c.shut && pnorm(c.name) === pnorm(name)); return el ? { el, score: 100 } : null; } };
+  control: (sc, name) => { const el = ((sc && sc.controls) || []).find(c => !unseen(c) && pnorm(c.name) === pnorm(name)); return el ? { el, score: 100 } : null; } };
 const sameProof = (a, b) => !!a && !!b && a.kind === b.kind && (a.state || null) === (b.state || null) && textsOf(a).map(pnorm).join('\n') === textsOf(b).map(pnorm).join('\n');
 
 // A step's landing proven on the live page (docs/engine/plan-format.md, "What runs on its own"), with or without a

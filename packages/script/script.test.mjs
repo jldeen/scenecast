@@ -167,6 +167,7 @@ test('a capture read without a browser: where words are (its frame, a live regio
   const g = t => grid.items.find(i => i.text === t) || {}, open = grid.controls.find(c => c.name === 'Open');
   assert.deepEqual(Object.values(grid.lists).map(l => l[2]), [40, 7]);
   assert.deepEqual([g('Name: Contoso Ledger').row, g('Owner: Avery Chen').row], [g('Contoso Ledger').row, undefined]);
+  assert.deepEqual([g('Name: Contoso Ledger').tip, g('Contoso Ledger').tip], [true, undefined]);
   assert.deepEqual([g('Contoso Ledger').restored, g('Fabrikam Payroll').restored, open.restored, open.row === g('Fabrikam Payroll').row], [undefined, true, true, true]);
 });
 

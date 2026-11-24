@@ -110,13 +110,19 @@ function heldDuring(walk, reads, steps, rowOf, appAt, sites) {
   }
   return { held, windows };
 }
+// Off the page, for what a capture shows: in a closed dialog or a template, or in a tooltip (shown only while hovered).
+// A row a capture put back isn't: the replica shows it (proofs never use it: landing.mjs unseen()).
+const offPage = x => !!(x.shut || x.tip);
+// A capture's words, as offPage leaves them.
+const capRead = new WeakMap();
+const capWords = sc => { if (!capRead.has(sc)) capRead.set(sc, pnorm((sc.items || []).filter(i => !offPage(i) && i.tag !== 'textarea').map(i => i.text).join('\n'))); return capRead.get(sc); };
 // An error a page shows: one of these, or anything in an alert.
 const ERROR = /\b(?:could(?:n['’]?t| not) (?:be )?load(?:ed)?|can['’]?t (?:be )?load(?:ed)?|(?:failed|unable) to load|check your connection|try again|something went wrong)\b/i;
 const short = t => (t = String(t).replace(/\s+/g, ' ').trim()).length > 80 ? `${t.slice(0, 77)}…` : t;
 const q = t => `“${cell(short(t))}”`, qs = xs => xs.map(q).join(', ');
 function errorsOn(got, rec) {
   const was = rec ? pageWords(rec) : '', out = [];
-  for (const g of got) for (const i of g.items || []) if (!i.shut && i.text && (ERROR.test(i.text) || i.role === 'alert') && !was.includes(pnorm(i.text)) && !out.some(x => pnorm(x) === pnorm(i.text))) out.push(i.text);
+  for (const g of got) for (const i of g.items || []) if (!offPage(i) && i.text && (ERROR.test(i.text) || i.role === 'alert') && !was.includes(pnorm(i.text)) && !out.some(x => pnorm(x) === pnorm(i.text))) out.push(i.text);
   return out.filter(t => !out.some(u => u !== t && pnorm(u).length < pnorm(t).length && pnorm(t).includes(pnorm(u))));
 }
 // A screen's items a run can count on, as the proofs' (not in a closed dialog, a live region, a time, a message or a
@@ -125,7 +131,7 @@ function soundItems(sc, keep) {
   const its = [], seen = new Set();
   for (const i of sc.items || []) {
     const n = pnorm(i.text);
-    if (!n || i.shut || i.live || i.time || i.tag === 'textarea' || i.article !== undefined || seen.has(n) || !keep(i.text, i, sc)) continue;
+    if (!n || offPage(i) || i.live || i.time || i.tag === 'textarea' || i.article !== undefined || seen.has(n) || !keep(i.text, i, sc)) continue;
     seen.add(n);
     its.push(i);
   }
@@ -134,7 +140,7 @@ function soundItems(sc, keep) {
 // Innermost only: a box holding words that are missing (or extra) is too.
 const innermost = its => its.filter(x => !its.some(u => u !== x && pnorm(u.text).length < pnorm(x.text).length && pnorm(x.text).includes(pnorm(u.text))));
 const lostFrom = (was, got, keep) => innermost(soundItems(was, keep)).map(i => i.text).filter(t => t.split(/\s+/).length >= 2 && got.every(g => !pageWords(g).includes(pnorm(t))));
-const inList = x => ({ ...(x.list !== undefined ? { list: x.list } : {}), ...(x.row !== undefined ? { row: x.row } : {}), ...(x.restored ? { restored: true } : {}), ...(x.described ? { described: true } : {}), ...(x.nav ? { nav: true } : {}) });
+const inList = x => ({ ...(x.list !== undefined ? { list: x.list } : {}), ...(x.row !== undefined ? { row: x.row } : {}), ...(x.restored ? { restored: true } : {}), ...(x.nav ? { nav: true } : {}) });
 // A row's own control named by everything in it (an option "Fabrikam Orders Daily orders Plugin", "AC Avery Chen
 // People", a grid row): what's in the row counts, each on its own.
 const ROWISH = /^(option|row|listitem|treeitem|menuitem|menuitemcheckbox|menuitemradio)$/;
@@ -143,11 +149,11 @@ const whole = (sc, c) => { if (!ROWISH.test(c.role || '')) return false; const l
 // reads lack, each { kind: 'words' | 'control', text, role, list, row } (list, row: where it is in a list on the
 // recorded screen). A control's own words count once, as the control.
 function missingFrom(rec, got, keep) {
-  const names = got.map(g => new Set((g.controls || []).filter(c => !c.shut).map(c => pnorm(c.name))));
+  const names = got.map(g => new Set((g.controls || []).filter(c => !offPage(c)).map(c => pnorm(c.name))));
   const out = [], seen = new Set();
   for (const c of rec.controls || []) {
     const n = pnorm(c.name);
-    if (!n || c.shut || c.live || c.time || c.name.length >= 80 || seen.has(n) || !keep(c.name) || names.some(x => x.has(n)) || whole(rec, c)) continue;
+    if (!n || offPage(c) || c.live || c.time || c.name.length >= 80 || seen.has(n) || !keep(c.name) || names.some(x => x.has(n)) || whole(rec, c)) continue;
     seen.add(n);
     out.push({ kind: 'control', text: c.name, role: c.role, ...inList(c) });
   }
@@ -158,13 +164,13 @@ function missingFrom(rec, got, keep) {
 // reads have that none of the recording's captures of the screen show, as words or as a control (caps), as
 // missingFrom's (list, row: on today's first read). skip: what's accounted for already.
 function extraFrom(caps, got, keep, skip) {
-  const words = caps.map(pageWords), named = caps.map(c => new Set((c.controls || []).map(x => pnorm(x.name))));
+  const words = caps.map(capWords), named = caps.map(c => new Set((c.controls || []).filter(x => !offPage(x)).map(x => pnorm(x.name))));
   const recorded = n => named.some(x => x.has(n)) || words.some(w => w.includes(n));
-  const names = got.map(g => new Set((g.controls || []).filter(c => !c.shut).map(c => pnorm(c.name))));
+  const names = got.map(g => new Set((g.controls || []).filter(c => !offPage(c)).map(c => pnorm(c.name))));
   const out = [], seen = new Set();
   for (const c of got[0].controls || []) {
     const n = pnorm(c.name);
-    if (!n || c.shut || c.live || c.time || c.name.length >= 80 || seen.has(n) || !keep(c.name) || skip(c.name) || recorded(n) || !names.every(x => x.has(n)) || whole(got[0], c)) continue;
+    if (!n || offPage(c) || c.live || c.time || c.name.length >= 80 || seen.has(n) || !keep(c.name) || skip(c.name) || recorded(n) || !names.every(x => x.has(n)) || whole(got[0], c)) continue;
     seen.add(n);
     out.push({ kind: 'control', text: c.name, role: c.role, ...inList(c) });
   }
@@ -178,13 +184,13 @@ const initialsOf = t => { const w = String(t).split(/\s+/).filter(x => /^\p{L}/u
 function listsOf(sc) {
   if (listed.has(sc)) return listed.get(sc);
   const m = new Map(), put = (l, r, t) => { if (!m.has(l)) m.set(l, new Map()); const rows = m.get(l); if (!rows.has(r)) rows.set(r, t); };
-  const its = (sc.items || []).filter(i => i.list !== undefined && i.row !== undefined && !i.shut && /\p{L}{2}/u.test(i.text));
+  const its = (sc.items || []).filter(i => i.list !== undefined && i.row !== undefined && !offPage(i) && /\p{L}{2}/u.test(i.text));
   for (const [k, i] of its.entries()) {
     const t = i.text.trim(), next = its[k + 1];
     if (/^[A-Z]{2,3}$/.test(t) && next && next.row === i.row && initialsOf(next.text).includes(t)) continue;
     put(i.list, i.row, i.text);
   }
-  for (const c of sc.controls || []) if (c.list !== undefined && c.row !== undefined && !c.shut && c.name) put(c.list, c.row, c.name);
+  for (const c of sc.controls || []) if (c.list !== undefined && c.row !== undefined && !offPage(c) && c.name) put(c.list, c.row, c.name);
   for (const [l, rows] of m) m.set(l, new Map([...rows].sort((a, b) => a[0] - b[0])));
   listed.set(sc, m);
   return m;
@@ -203,12 +209,10 @@ function sameListAt(sc, list, other) {
 }
 const sameList = (sc, list, other) => { const at = sameListAt(sc, list, other); return at === null ? null : [...((listsOf(other).get(at)) || new Map()).values()]; };
 // Whether an entry's row is gone from every one of the other screens: none has its name, as words or a control.
-const hasText = (o, n) => (o.items || []).some(i => !i.shut && pnorm(i.text) === n) || (o.controls || []).some(c => !c.shut && pnorm(c.name) === n);
+const hasText = (o, n) => (o.items || []).some(i => !offPage(i) && pnorm(i.text) === n) || (o.controls || []).some(c => !offPage(c) && pnorm(c.name) === n);
 const rowGone = (sc, e, others) => { const l = rowLabel(sc, e); return !!l && others.every(o => !hasText(o, pnorm(l))); };
 // A list's rows a capture put back (restored), and how it's named in reground.md: its name, else its first rows.
 const restoredRows = (sc, list) => new Set([...(sc.items || []), ...(sc.controls || [])].filter(x => x.list === list && x.restored).map(x => x.row));
-// The names of the rows a capture put back, on any of a screen's captures.
-const restoredNames = caps => new Set(caps.flatMap(c => [...listsOf(c)].flatMap(([list, rows]) => { const back = restoredRows(c, list); return [...rows].filter(([r]) => back.has(r)).map(([, t]) => pnorm(t)); })));
 const listName = (sc, list) => { const n = ((sc.lists || {})[list] || [])[0]; if (n) return `the list ${q(n)}`; const f = [...((listsOf(sc).get(list)) || new Map()).values()].slice(0, 2); return f.length ? `the list starting ${qs(f)}` : 'a list'; };
 // A list that says how many rows it has (aria-rowcount, aria-setsize), here and on each of today's reads, when they
 // differ: a number that changed ("486" → "500").
@@ -303,13 +307,13 @@ function missingClasses(entries, { rec, got, app, why, madeBy, varies }) {
     if (v) return { ...e, cls: 'varies', why: v };
     if (/\d/.test(e.text)) {
       const d = digitless(e.text), mine = numbers(e.text), near = t => numbers(t).filter((x, i) => x === mine[i]).length;
-      const now = got.map((g, k) => (e.kind === 'control' ? (g.controls || []).filter(c => !c.shut && c.role === e.role).map(c => c.name) : (g.items || []).filter(i => !i.shut).map(i => i.text))
+      const now = got.map((g, k) => (e.kind === 'control' ? (g.controls || []).filter(c => !offPage(c) && c.role === e.role).map(c => c.name) : (g.items || []).filter(i => !offPage(i)).map(i => i.text))
         .filter(t => digitless(t) === d && !used[k].has(pnorm(t)) && !shown.has(pnorm(t))).map((t, i) => ({ t, i, n: near(t) })).sort((a, b) => b.n - a.n || a.i - b.i)[0]);
       if (now.every(Boolean)) { now.forEach((m, k) => used[k].add(pnorm(m.t))); return { ...e, cls: 'number', now: now[0].t }; }
     }
     if (e.kind === 'control') {
       const n = pnorm(e.text);
-      const now = got.map(g => (g.controls || []).find(c => !c.shut && c.role === e.role && pnorm(c.name).startsWith(n) && MORE.test(pnorm(c.name).slice(n.length)) && !had.has(pnorm(c.name))));
+      const now = got.map(g => (g.controls || []).find(c => !offPage(c) && c.role === e.role && pnorm(c.name).startsWith(n) && MORE.test(pnorm(c.name).slice(n.length)) && !had.has(pnorm(c.name))));
       if (now.every(Boolean)) return { ...e, cls: 'renamed', now: now[0].name };
     }
     return { ...e, cls: 'missing', ...(why ? { why } : {}) };
@@ -404,8 +408,8 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
       write: !!s.writes && !(r && RAN.has(r.status)), what: `${formatStep(s)} (step ${bi + 1}-${si + 1})` };
   });
   const seenOn = new WeakMap();
-  const seen = sc => { if (!seenOn.has(sc)) seenOn.set(sc, { words: new Set((sc.items || []).filter(i => !i.shut).map(i => pnorm(i.text))), names: new Set((sc.controls || []).filter(c => !c.shut).map(c => pnorm(c.name))),
-    nav: new Set([...(sc.items || []).filter(i => i.nav && !i.shut).map(i => pnorm(i.text)), ...(sc.controls || []).filter(c => c.nav && !c.shut).map(c => pnorm(c.name))]) }); return seenOn.get(sc); };
+  const seen = sc => { if (!seenOn.has(sc)) seenOn.set(sc, { words: new Set((sc.items || []).filter(i => !offPage(i)).map(i => pnorm(i.text))), names: new Set((sc.controls || []).filter(c => !offPage(c)).map(c => pnorm(c.name))),
+    nav: new Set([...(sc.items || []).filter(i => i.nav && !offPage(i)).map(i => pnorm(i.text)), ...(sc.controls || []).filter(c => c.nav && !offPage(c)).map(c => pnorm(c.name))]) }); return seenOn.get(sc); };
   const shows = (sc, e) => !!sc && seen(sc)[e.kind === 'control' ? 'names' : 'words'].has(pnorm(e.text));
   const madeBy = (e, app, sc) => {
     const m = /^(.+?)(?:\s*[,;|·]\s|\s+[-–—]\s|\s+\()/.exec(e.text), base = m && m[1].trim().split(/\s+/).length >= 3 ? pnorm(m[1]) : null;
@@ -469,11 +473,8 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
       // What today shows that no capture of the screen in the recording does, apart from today's side of what's
       // renamed or a number that changed, and words in a place that varies between runs.
       const paired = new Set(row.missing.flatMap(e => e.nows || (e.now ? [e.now] : [])).map(pnorm));
-      // Nor what describes a row the recording has only as one its capture put back: a row's tooltip is in a portal
-      // the capture doesn't copy.
-      const caps = walker.captures ? walker.captures(to) : [rec], back = restoredNames(caps);
-      row.extra = collapse(extraFrom(caps, got, keep(app), t => paired.has(pnorm(t)) || unstable(t)).filter(e => !(e.described && back.has(pnorm(rowLabel(got[0], e) || ''))))
-        .map(e => ({ ...e, cls: 'extra' })), got[0], caps);
+      const caps = walker.captures ? walker.captures(to) : [rec];
+      row.extra = collapse(extraFrom(caps, got, keep(app), t => paired.has(pnorm(t)) || unstable(t)).map(e => ({ ...e, cls: 'extra' })), got[0], caps);
     }
     // A step that didn't land as planned while its app's page may be broken keeps its proof: what's missing may not be
     // the product's doing.

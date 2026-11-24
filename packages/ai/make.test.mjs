@@ -839,17 +839,16 @@ test('a list that shows only the rows in view: rows the recording scrolled to ar
   const walk = { beats: [{ beat: 1, steps: [{ step: 0, text: 'Go to books', status: 'reached' }, { step: 1, text: 'Click "Ledgers"', status: 'reached' }] }], starts: [{ app: 'books' }] };
   const { rows } = regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk, reads: walkReads(join(walkDir, 'walk-screens')), apps: demo.cfg.apps });
   const show = e => [e.cls, e.kind === 'list' ? `${e.count} of ${e.total} rows (${e.entries}): ${e.rows.join(', ')}` : e.text, e.now || null];
-  // 9 rows → 12. Gone from the rows in view: what to look at, with each row's tooltip. The rows the capture scrolled to
-  // that today's rows in view don't have: beyond the walk's view.
+  // 9 rows → 12. Gone from the rows in view: what to look at. The rows the capture scrolled to that today's rows in
+  // view don't have: beyond the walk's view. Tooltips aren't on the screen until hovered: never listed.
   assert.deepEqual(rows[1].missing.map(show), [
     ['number', '9', '12'],
-    ['missing', '2 of 9 rows (4): Fabrikam Payroll, Contoso Notes', null],
+    ['missing', '2 of 9 rows (2): Fabrikam Payroll, Contoso Notes', null],
     ['beyond', '4 of 9 rows (4): Fabrikam Travel, Contoso Assets, Fabrikam Grants, Contoso Leases', null],
   ]);
-  // New in view: the two new rows, each with its tooltip, as one line.
-  // Not the tooltip of a row the recording has only as one its capture put back (it couldn't have it). A person's row
-  // is named by their name, not their initials; its option, named by all of it, is what's in it.
-  assert.deepEqual(rows[1].extra.map(show), [['extra', '2 of 5 rows (4): Fabrikam Audit, Contoso Budget', null], ['extra', '2 of 2 rows (6): Avery Chen, Dana Hill', null]]);
+  // New in view: the two new rows as one line. A person's row is named by their name, not their initials; its option,
+  // named by all of it, is what's in it.
+  assert.deepEqual(rows[1].extra.map(show), [['extra', '2 of 5 rows (2): Fabrikam Audit, Contoso Budget', null], ['extra', '2 of 2 rows (6): Avery Chen, Dana Hill', null]]);
   const md = formatReground(rows);
   assert.match(md, /\| 2 rows of a list, of the 4 in view \(9 with the ones its capture scrolled to\): “Fabrikam Payroll”, “Contoso Notes”\. Today: 5 rows, starting “Name”, “Fabrikam Audit”/);
   assert.match(md, /### Beyond the walk’s view: rows of a list it didn’t scroll\n\n\| What \| Why \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| 4 of 9 rows of a list, from “Fabrikam Travel”, “Contoso Assets”, “Fabrikam Grants”, “Contoso Leases” \| the recording’s capture scrolled the list to them; a walk doesn’t scroll \| ledgers \(1-2\) \|/);
@@ -918,6 +917,21 @@ test('words only inside a message prove a step last, and say so, unless it\'s a 
   // The same send, which no pack checks: it says so too.
   assert.deepEqual(proveLandings(plan('sends a prompt'), walker, [], { checked }).map(f => [f.kind, f.at]), [['message', '1.2'], ['message', '1.3']]);
   assert.deepEqual(needsYou({ planReview: { flags }, plan: { beats: [] } }).map(n => n.kind), ['Words in a message']);
+});
+
+test('a tooltip, or a row a capture put back, never proves a step: neither is on the screen a run reads', () => {
+  const sc = items => ({ headings: [], controls: [], items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
+  // A tools list that shows only the rows in view (the capture put back the rest); a search shows one of those rows,
+  // with its tooltip.
+  const S = {
+    tools: sc(['Tools', 'Contoso Ledger', { text: 'Fabrikam Payroll', restored: true }, { text: 'Name: Contoso Ledger', tip: true }]),
+    found: sc(['Tools', 'Fabrikam Payroll', { text: 'Name: Fabrikam Payroll', tip: true }]),
+  };
+  const walker = { screen: id => S[id], shown: id => S[id], states: Object.keys(S), flow: { states: { tools: { app: 'admin' }, found: { app: 'admin' } } } };
+  const p = { beats: [{ steps: [{ kind: 'app', app: 'admin', lands: { screen: 'tools' } }, { kind: 'press', key: 'Enter', line: '1.1', lands: { screen: 'found' } }] }] };
+  proveLandings(p, walker, []);
+  assert.equal(formatLands(p.beats[0].steps[1].lands), 'found · "Fabrikam Payroll"');
+  assert.deepEqual([holds(S.tools, { kind: 'words', text: 'Fabrikam Payroll' }), holds(S.found, { kind: 'words', text: 'Name: Fabrikam Payroll' })], [false, false]);
 });
 
 test('a Go to step lands on what its page names itself by, when other pages of its site show its proof too', () => {
