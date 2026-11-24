@@ -211,8 +211,12 @@ A capture start waits up to `capture.signInSettleS` (60 s) for each app's sign-i
 refuses (M365 Copilot's can take a while after its own landing); another tenant refuses at once.
 
 `scenecast ai walk --live` walks the plan read-only (`walkLive`). Every screen it lands on goes in
-`.out/ai/walk-screens/<beat>-<step>.json` (its words in every frame; every control's name, role, frame, state and what
-a box holds), local only, to re-ground a plan on the product as it is today. at a write it skips the rest of that beat and goes
+`.out/ai/walk-screens/<beat>-<step>.json`, and each app's start screen in `start-<app>.json` (its app, address and
+title; its words in every frame; every control's name, role, frame, state and what a box holds), with
+`<name>.reads.json.gz` beside it: the screen in the reader's shape (`[{ at, docs: [{ key, html }] }]`, read twice
+about a second apart, the recorder's serialization), local only, to re-ground a plan on the product as it is today.
+A demo's `capture.keepBodies` (in its local demo.json) keeps the bodies of the held requests it names in
+`.out/ai/held-bodies.json`, for a person reviewing an allow entry. At a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, drifted (its words changed), unproven (its words were there
 before), a write, after a write, or missed (and which write it needed), with what each click hit (`hit`), any error
 the app showed (`trouble`), every input (`inputs`) and the guard's held and passed requests. `ai walk` without
