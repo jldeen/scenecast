@@ -90,6 +90,7 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHel
   ],
   guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}), ...(stayHeld ? { stayHeld } : {}) },
   apis: { tasks: { open: `http://${HOST}/`, host: HOST }, notes: { open: `http://${HOST}/`, host: NOTES_HOST, from: NOTES_HOST } },
+  services: [{ name: "Tasks' catalog service", match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/catalog$/`, start: true, waitS: 20 }],
 }, null, 1));
 writePack();
 
@@ -170,6 +171,7 @@ try {
   times.run = Math.round((Date.now() - t0) / 1000);
   let rj = existsSync(join(DEMO, '.out', 'ai', 'run.json')) ? readRun(DEMO) : {};
   check('runs the approved plan to the end, unattended', res.code === 0 && res.done && !res.done.result.stopped && res.done.result.writes === 1, JSON.stringify({ code: res.code, err: res.err.slice(-1500), stopped: rj.stopped, done: res.done }));
+  check('the start waited for the app\'s own call to its named service, and it answered', (rj.services || []).some(n => n.service === "Tasks' catalog service" && n.status === 200 && n.app === 'tasks'), JSON.stringify(rj.services));
   const L = rj.landings || [], wroteAt = L.findIndex(l => l.wrote);
   check('each landing proven on the live page, with its strength; the write only after strong ones', L.length >= 4 && L.every(l => ['strong', 'weak', 'none'].includes(l.strength) && l.got) && wroteAt === 2 && L.slice(0, wroteAt).every(l => l.strength === 'strong') && (rj.needsYou || []).length === 0, JSON.stringify(L.map(l => [l.step, l.strength, l.basis, l.got && l.got.text, l.why])));
   check('the reset before: the leftover task deleted, Sync turned off, then checked', rj.reset && rj.reset.before && rj.reset.before.ok && rj.reset.before.did.join('|') === 'tasks: Click "Delete Call Kestrel"|tasks: Click "Sync"', JSON.stringify(rj.reset && rj.reset.before));
@@ -286,6 +288,22 @@ try {
   writePack();
   writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
   writeFileSync(join(DEMO, 'reset.md'), RESET);
+
+  // 1f · A service the app needs: failing as the app starts, nothing is captured ("try again later"); failing during a
+  // beat (the lookup as you type), the run stops before that beat's write, lists it for her, and the reset after runs.
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.catalog('fail');
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  check('a named service failing as its app starts: no capture, "try again later"', rj.stopped && rj.stopped.kind === 'service' && rj.stopped.why === "Tasks' catalog service is failing (500). Try again later." && !rj.summary && count(tasks.log, 'POST /api/tasks') === 0 && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: rj.stopped, summary: rj.summary, after: rj.reset.after && rj.reset.after.ok }));
+  tasks.catalog('fail-on-type');
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  check('a named service failing during a beat: the run stops before its write, lists it for her, and the reset after runs', rj.stopped && rj.stopped.kind === 'service' && /^Press Enter/.test(rj.stopped.why) && /Tasks' catalog service answered 500 during this beat/.test(rj.stopped.why) && (rj.needsYou || []).some(n => n.text === 'Press Enter') && count(tasks.log, 'POST /api/tasks') === 0 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ stopped: rj.stopped, needsYou: rj.needsYou, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  tasks.catalog('ok');
 
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
   // tenant check, and still refuses when it never does.

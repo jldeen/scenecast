@@ -12,8 +12,8 @@ import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
-import { heldWhileDrifted } from './walk.mjs';
-import { senderApps } from './unattended.mjs';
+import { heldWhileDrifted, stepNets } from './walk.mjs';
+import { senderApps, serviceAnswer } from './unattended.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -238,4 +238,20 @@ test("the app a request came from: its tab's host, else its frame's, by each app
   assert.equal(appOf({ tab: 'chat.example.com:443', frame: 'cdn.example.com' }), 'chat');
   assert.equal(appOf({ tab: null, frame: 'x.frames.example.org' }), 'iq');
   assert.equal(appOf({ tab: 'other.example.com', frame: null }), null);
+});
+
+test("a step's failed requests run to the next step's first input; the last step's to the walk's end", () => {
+  const T = s => `2026-11-24T18:5${s}Z`;
+  const steps = [{ from: T('0:00'), app: 'iq' }, { from: T('0:10'), app: 'iq' }, { from: T('0:30'), app: 'chat' }];
+  const net = [{ at: T('0:05'), app: 'iq', status: 404 }, { at: T('0:25'), app: 'iq', status: 500 }, { at: T('0:31'), app: 'iq', status: 500 }, { at: T('0:40'), app: null, failed: 'x' }, { at: T('0:50'), app: 'chat', status: 503 }];
+  assert.deepEqual(stepNets(steps, net, T('0:45')).map(l => l.map(n => n.status || n.failed)), [[404], [500], ['x']]);
+});
+
+test("a pack-named service's latest answer: 2xx is up; a 500 or a failed request means try later", () => {
+  const N = "Contoso's catalog";
+  assert.equal(serviceAnswer([], N), null);
+  assert.equal(serviceAnswer([{ service: 'other', status: 500 }], N), null);
+  assert.deepEqual(serviceAnswer([{ service: N, status: 500 }, { service: N, status: 200 }], N).ok, true);
+  assert.equal(serviceAnswer([{ service: N, status: 200 }, { service: N, status: 503 }], N).why, "Contoso's catalog is failing (503). Try again later.");
+  assert.equal(serviceAnswer([{ service: N, failed: 'net::ERR_FAILED' }], N).why, "Contoso's catalog is failing (net::ERR_FAILED). Try again later.");
 });

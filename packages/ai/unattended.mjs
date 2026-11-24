@@ -29,6 +29,18 @@ import { walkerFromDemo } from './walker.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i;
+const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+
+// A pack-named service's answers (capNet, tagged service), the latest one judged: 2xx is up; anything else (500, a
+// failed request) means try later. → null (no answer yet) | { ok, status, why }
+export function serviceAnswer(answers, name) {
+  const mine = (answers || []).filter(n => n.service === name);
+  if (!mine.length) return null;
+  const last = mine[mine.length - 1], status = last.status || last.failed || 'no answer';
+  const ok = typeof last.status === 'number' && last.status >= 200 && last.status < 300;
+  return { ok, status, at: last.at, why: ok ? null : `${name} is failing (${status}). Try again later.` };
+}
+const serviceFailing = n => !!n.service && (n.failed || (typeof n.status === 'number' && n.status >= 500));
 
 // The capture browser, holding every request that isn't a read from its first one (capture.guard "hold"): what the
 // apps send while they load, before a run turns its own guard on, is held too.
@@ -60,6 +72,21 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   // The guard, from the first request to the last.
   const g = await guardOn(demo, cmd, packs);
   run.guard = { hosts: g.hosts, allow: g.allow.length };
+  // The apps' pack-named services, every answer watched (run.services): one failing at the start means no capture;
+  // during a beat, the run stops before that beat's next write.
+  const svcs = packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : [];
+  await cmd('capNet', { on: true, watch: svcs.map(({ name, match }) => ({ name, match })) }, 30).catch(() => {});
+  run.services = [];
+  let netSeen = ((await cmd('capNet', {}, 30).catch(() => ({}))).total) || 0;
+  const serviceNews = async () => {
+    const r = await cmd('capNet', { since: netSeen }, 30).catch(() => null);
+    if (!r) return [];
+    netSeen = r.total;
+    const got = (r.net || []).filter(n => n.service);
+    run.services.push(...got);
+    return got;
+  };
+  const homeAt = {};
   let recording = false, wRun = null;
   const ran = [], results = {};
   try { main: {
@@ -74,11 +101,25 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // start screen checked. One that isn't stops the run before anything is recorded.
     { const h = liveWalker({ demo, cmd, packs, log });
       for (const id of appIds) {
+        await serviceNews();
+        homeAt[id] = { t: Date.now(), n: run.services.length };
         const did = await h.home(id);
         const bad = did.find(d => d.why);
         const sc = bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await h.startCheck(id, plan);
         run.starts.push({ app: id, did, ...sc });
         if (!sc.ok) { run.stopped = { kind: 'start', why: `${id}: ${sc.why}`, app: id, picture: await shot(id, `start-${id}`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
+      }
+      // Each start service: the page's own call to it, after its app's start, must answer 2xx (waitS for it to come).
+      for (const sv of svcs.filter(x => x.start && homeAt[x.app])) {
+        let v = null;
+        for (;;) {
+          await serviceNews();
+          v = serviceAnswer(run.services.slice(homeAt[sv.app].n), sv.name);
+          if (v || Date.now() - homeAt[sv.app].t > sv.waitS * 1000) break;
+          await sleepMs(1000);
+        }
+        if (!v) v = { ok: false, why: `${sv.name} didn't answer in ${sv.waitS} s. Try again later.` };
+        if (!v.ok) { run.stopped = { kind: 'service', why: v.why, service: sv.name, status: v.status || null, app: sv.app, picture: await shot(sv.app, `start-${sv.app}-service`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
       } }
     const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
@@ -121,7 +162,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     };
     const lastDid = {};
     let doubt = null;
+    const failingIn = {};
     const doStep = async (bi, si, step, at, prev) => {
+      for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
       const pre = await w.landsBefore(app, step, prev);
       // The page before it: for a Go to, the screen before it in plan order (the app it leaves); none before the first.
       const before = bi === 0 && si === 0 ? [] : await w.reads(step.kind === 'app' ? prev : app, { n: 1 }).catch(() => []);
@@ -143,6 +186,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         // Its app's pack knows it (the plan names the pack's write; the pack's own match finds it on this page).
         const known = await packKnows(packs, w, app, step, wr);
         if (!known.ok) return { kind: 'unknown-write', why: known.why, beforeWrite: true };
+        for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
+        const down = failingIn[bi];
+        if (down) return { kind: 'service', why: `${down.service} answered ${down.status || down.failed} during this beat: its write waits until the service works. Try again later.`, beforeWrite: true };
         const gate = writeGate(run.landings, app);
         if (!gate.ok) return { kind: 'gate', why: `${gate.why}: a write runs on its own only after strong landings in its app`, beforeWrite: true };
         const pc = packCheck(known);
@@ -305,7 +351,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const plan = viaPlan || readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('make the plan first');
   packs = packs === undefined ? await walkerPacks() : packs;
-  const { walkPlan, heldWhileDrifted } = await import('./walk.mjs');
+  const { walkPlan, heldWhileDrifted, stepNets } = await import('./walk.mjs');
   const g = await guardOn(demo, cmd, packs);
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
@@ -329,17 +375,16 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const stepAt = {};
   let lastEnd = Date.now(), heldSince = 0;
   const appOfSender = senderApps(demo.cfg, packs);
-  await cmd('capNet', { on: true }, 30).catch(() => {});
+  await cmd('capNet', { on: true, watch: (packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : []).map(({ name, match }) => ({ name, match })) }, 30).catch(() => {});
   let netSince = ((await cmd('capNet', {}, 30).catch(() => ({}))).total) || 0;
   const netAll = [];
-  // Failed requests (not the guard's) and answers ≥ 400 in a step's window, from its own app (or none named).
-  const netIn = async (from, to, app) => {
+  // Failed requests (not the guard's) and answers ≥ 400 so far, each with its app; given to the steps at the end
+  // (stepNets: from a step's first input to the next one's).
+  const netMore = async () => {
     const r = await cmd('capNet', { since: netSince }, 30).catch(() => null);
-    if (!r) return [];
+    if (!r) return;
     netSince = r.total;
-    const named = (r.net || []).map(x => ({ ...x, app: appOfSender(x) }));
-    netAll.push(...named);
-    return named.filter(x => { const t = Date.parse(x.at); return t >= from && t <= to && (!x.app || !app || x.app === app); }).map(({ at, ...x }) => ({ at, ...x }));
+    netAll.push(...(r.net || []).map(x => ({ ...x, app: appOfSender(x) })));
   };
   const heldIn = async (from, to, app) => {
     const l = await cmd('capLog', { since: heldSince }, 30).catch(() => null);
@@ -398,9 +443,10 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
           await keepReads(`${e.beat}-${e.step + 1}`, e.app);
         }
         const stepApp = e.app ? w.appOf(e.app) || e.app : null;
-        const to = Date.now(), held = await heldIn(from, to, stepApp), net = await netIn(from, to, stepApp);
-        stepAt[`${e.beat}-${e.step}`] = { from: new Date(from).toISOString(), to: new Date(to).toISOString(), held, net };
-        if (sn) writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn, held, net }, null, 1));
+        const to = Date.now(), held = await heldIn(from, to, stepApp);
+        await netMore();
+        stepAt[`${e.beat}-${e.step}`] = { from: new Date(from).toISOString(), to: new Date(to).toISOString(), held, app: stepApp };
+        if (sn) writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn, held }, null, 1));
         lastEnd = to;
       }
       // A picture of each miss and each drifted landing, for whoever reads walk.json; for a drifted one, what the
@@ -415,16 +461,19 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       }
     } });
   } finally {
+    await netMore().catch(() => {});
+    const walked = [];
     for (const b of (walk && walk.beats) || []) for (const s of b.steps) {
       if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
       const at = stepAt[`${b.beat}-${s.step}`];
-      if (at) Object.assign(s, { window: { from: at.from, to: at.to }, held: at.held, ...(at.net && at.net.length ? { net: at.net } : {}) });
+      if (at) { Object.assign(s, { app: at.app, window: { from: at.from, to: at.to }, held: at.held }); walked.push(s); }
     }
+    const nets = stepNets(walked.map(s => ({ from: s.window.from, app: s.app })), netAll, new Date().toISOString());
+    walked.forEach((s, i) => { if (nets[i].length) s.net = nets[i]; });
     if (walk) walk.heldWhileDrifted = heldWhileDrifted(walk);
     if (walk) walk.starts = seenAt.starts || [];
     const off = await guardOff(cmd, g.hosts, appOfSender);
     keepBodiesOut(demo, off.bodies);
-    await netIn(0, 0, null).catch(() => {});
     walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events.map(e => ({ ...e, app: appOfSender({ tab: e.host }) })); } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });

@@ -309,7 +309,8 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 // what the server keeps, so a test can see what reached it.
 //   tasks http://127.0.0.1:47821/  a task list (each with "Delete <name>"), a "New task" box that adds one on Enter
 //         (the page moves to /task/<id>), a Sync switch, Refresh (it posts, asks for a count the server doesn't have:
-//         a 404, then says "Up to date: <n> tasks"),
+//         a 404, then says "Up to date: <n> tasks"), and a catalog service it calls as it loads and as you type
+//         (GET /api/catalog; catalog(mode) makes it answer 500),
 //         Archive all, and Help on another host (localhost). Every load posts /api/telemetry. The page gets a session
 //         (GET /api/session) and sends it as Authorization; deleting a task without it is refused (401), so an undo by
 //         the API has to use the page's own session. ?signin=<ms>&tid=<tenant id>: the page keeps a sign-in library's
@@ -360,6 +361,10 @@ $('sync').addEventListener('click', async () => { await post('/api/sync', { on: 
 $('refresh').addEventListener('click', async () => { await post('/api/refresh').catch(() => {}); fetch('/api/fresh-count').catch(() => {}); await load(); const n = $('list').children.length; $('fresh').textContent = 'Up to date: ' + n + (n === 1 ? ' task' : ' tasks'); });
 $('archive').addEventListener('click', async () => { await post('/api/archive').catch(() => {}); await load(); });
 post('/api/telemetry', { at: location.pathname }).catch(() => {});
+// Its catalog service, as it loads and as you type (a lookup, 300 ms after the last key).
+fetch('/api/catalog?from=load').catch(() => {});
+let lookup = null;
+$('box').addEventListener('input', () => { clearTimeout(lookup); lookup = setTimeout(() => fetch('/api/catalog?from=type').catch(() => {}), 300); });
 load();
 { const q = new URLSearchParams(location.search), ms = q.get('signin'), tid = q.get('tid');
   if (ms && ms !== 'never' && tid) setTimeout(() => localStorage.setItem('00000000-0000-0000-0000-0000000000aa.' + tid + '-login.windows.net-idtoken-fixture-' + tid + '---', '1'), +ms); }
@@ -379,7 +384,7 @@ load();
 </script></body></html>`;
 
 export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
-  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [] };
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok' };
   const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
   const log = [];
   const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
@@ -393,6 +398,11 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
     if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
     if (q.method === 'GET' && path === '/api/tasks') return send(s, 200, 'application/json', JSON.stringify(view()));
+    if (q.method === 'GET' && path === '/api/catalog') {
+      const from = new URLSearchParams(q.url.split('?')[1] || '').get('from');
+      const down = st.catalog === 'fail' || (st.catalog === 'fail-on-type' && from === 'type');
+      return send(s, down ? 500 : 200, 'application/json', down ? '{"error":"catalog unavailable"}' : '{"items":[]}');
+    }
     if (q.method === 'POST' && path === '/api/tasks') { const b = await body(q); const t = { id: st.next++, name: String(b.name || '').slice(0, 200) }; st.tasks.push(t); return send(s, 200, 'application/json', JSON.stringify(t)); }
     const del = /^\/api\/tasks\/(\d+)$/.exec(path);
     if (q.method === 'DELETE' && del) {
@@ -431,6 +441,8 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     // The notes panel posts /api/seen every 150 ms while it's open, and Unpin takes 1.5 s: the app's own non-reads to
     // a host while an API undo's call to it is open.
     notePing: on => { st.ping = !!on; st.seen = []; st.unpins = []; },
+    // Its catalog service: 'ok', 'fail' (500 always) or 'fail-on-type' (500 for the lookup as you type).
+    catalog: mode => { st.catalog = mode; },
     close: () => { server.close(); notes.close(); },
   };
 }
