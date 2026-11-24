@@ -122,5 +122,10 @@
     "spike E presets m365-admin.json",
     "spike A live captures Nov 20 (themes, literal pairs, scores)",
     "demo1-reset SKILL.md (Tools search filters after Enter)"
-  ]
+  ],
+  "guard": {
+    "allow": [
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
+    ]
+  }
 }

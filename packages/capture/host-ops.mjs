@@ -14,7 +14,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-export function hostOps(cb, { log = () => {} } = {}) {
+export function hostOps(cb, { log = () => {}, base = null } = {}) {
   const events = [];
   const at = () => new Date().toISOString();
   const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } };
@@ -44,7 +44,7 @@ export function hostOps(cb, { log = () => {} } = {}) {
   };
   let guard = null, opens = new Map(), n = 0;
   return {
-    async capInfo() { return { capture: true, mode: cb.mode }; },
+    async capInfo() { return { capture: true, mode: cb.mode, guarded: !!base }; },
     async capGuard(c) {
       if (guard) await guard.stop();
       guard = await cb.guard({ hosts: c.hosts || null, allow: c.allow || [], mode: c.mode || 'hold', local: !!c.local });
@@ -62,8 +62,9 @@ export function hostOps(cb, { log = () => {} } = {}) {
       return { id };
     },
     async capClose(c) { const close = opens.get(c.id); if (close) { close(); opens.delete(c.id); } return { closed: !!close }; },
-    async capGuardOff() { for (const close of opens.values()) close(); opens.clear(); if (guard) await guard.stop(); guard = null; return { on: false }; },
-    async capLog(c) { const held = guard ? guard.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: guard ? guard.counts() : {} }; },
+    async capGuardOff() { for (const close of opens.values()) close(); opens.clear(); if (guard) await guard.stop(); guard = null; if (base) await base(); return { on: !!base }; },
+    // A run's guard, else the one on from the start.
+    async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {} }; },
     async capEvents(c) { return { events: events.slice(c.since || 0), total: events.length }; },
     async capUrl(c) { const p = await tabOf(c.tab); return { url: p.url(), title: await p.title().catch(() => '') }; },
     async capShot(c) { const p = await tabOf(c.tab); mkdirSync(dirname(c.file), { recursive: true }); writeFileSync(c.file, await p.screenshot()); return { file: c.file }; },

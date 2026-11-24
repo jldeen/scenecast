@@ -68,6 +68,10 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   if (!cb) return say({ pid: process.pid, phase: 'failed', error: `the capture browser didn't start (${o.channel}, profile ${o.profile})` });
   if (o.pin) await cb.pinAccount(o.pin);
   const apps = (cfg.apps || []).filter(a => a.url);
+  // capture.guard "hold": the read-only guard from the browser's first request (an unattended run's or a walk's),
+  // with the apps' packs' allow-lists; a run's own guard replaces it, and it comes back after.
+  const base = (cfg.capture || {}).guard === 'hold' ? await baseGuard(cb, cfg, log) : null;
+  if (base) await base();
   // Each app in a window of its own (made one at a time, loaded side by side); then where each one landed.
   const pages = await Promise.all(apps.map(a => cb.open(a)));
   await Promise.all(pages.map(p => p.waitForLoadState('load', { timeout: 60000 }).catch(() => {})));
@@ -83,6 +87,10 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
     landed = await Promise.all(apps.map((a, i) => look(i)));
   }
   const signIn = landed.filter(l => l.at !== 'app').map(l => l.id);
+  // Each app's window carries its app's mark on every site it goes to (the recorder and the driver find a tab by it,
+  // then by address): M365 Copilot moves to copilot.cloud.microsoft, and sessionStorage's mark is per site.
+  const markAs = (p, m) => p.evaluate(k => { try { sessionStorage.setItem('d1tab', k); } catch (e) {} }, m).catch(() => {});
+  apps.forEach((a, i) => { const p = pages[i], m = a.match || a.url; markAs(p, m); p.on('framenavigated', f => { if (f === p.mainFrame()) markAs(p, m); }); });
   if (signIn.length) log(`capture browser: ${signIn.join(', ')} ${signIn.length > 1 ? 'need' : 'needs'} a sign-in: stunt capture sign-in`);
   // The tenant, before anything is captured: another tenant (a wrong account picked silently), or one it can't
   // see where the demo names one, and the browser closes. An app's sign-in library can take a few seconds.
@@ -91,8 +99,13 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
   for (let i = 0; i < 10 && !tv.ok && !tv.other; i++) { await sleep(2000); tv = tenantVerdict(await cb.tenantsOf(byApp()), want); }
   if (!tv.ok) {
     log(`capture browser: refusing to capture: ${tv.why}`);
+    if (base) log(`capture browser: the guard held while the apps loaded: ${base.held().join('; ') || 'nothing'}`);
+    // The guard's doing, not a sign-in that ran out: say which of an app's own requests it held (only a real sign-in
+    // page asks her to sign in again).
+    const heldSignIn = base ? await signInHeld(base.guard ? base.guard.held() : [], apps, tv, cfg).catch(() => []) : [];
     await cb.close();
-    return say({ pid: process.pid, phase: 'refused', at: new Date().toISOString(), profile: o.profile, error: `refusing to capture: ${tv.why}. Sign in again with the demo tenant's account (stunt capture sign-in)` });
+    const error = heldSignIn.length ? `refusing to capture: the guard held ${heldSignIn.join('; ')}. Its pack's guard.allow needs that request (stunt capture: the guard)` : `refusing to capture: ${tv.why}. Sign in again with the demo tenant's account (stunt capture sign-in)`;
+    return say({ pid: process.pid, phase: 'refused', at: new Date().toISOString(), profile: o.profile, error });
   }
   // And while it runs: a page signed in to another tenant stops it at once (nothing more is captured).
   if (want) setInterval(async () => {
@@ -104,7 +117,8 @@ export async function run(demo, { log = s => console.error(`${new Date().toISOSt
       await cb.close(); process.exit(3);
     }
   }, 20000).unref();
-  const started = pages.length ? await startRecorder(pages[0], port, hostOps(cb, { log })).catch(e => String(e.message || e)) : 'no apps';
+  if (base) log(`capture browser: the guard held while the apps loaded: ${base.held().join('; ') || 'nothing'}`);
+  const started = pages.length ? await startRecorder(pages[0], port, hostOps(cb, { log, base })).catch(e => String(e.message || e)) : 'no apps';
   const info = await cb.info();
   return say({ pid: process.pid, phase: started === 'agent started' ? 'recording-ready' : 'failed', at: new Date().toISOString(), profile: o.profile,
     mode: info.mode, fellBack: info.fellBack, startMs: info.startMs, cdp: info.port, browserPid: info.pid, tenant: tv.all.length ? tv.all : null, apps: landed.map(l => ({ id: l.id, at: l.at })), ...(signIn.length ? { signIn } : {}),
@@ -195,4 +209,30 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const { loadDemo } = await import('@stuntdouble/core/lib/demo.mjs');
   const code = await main(process.argv.slice(2), loadDemo);
   if (typeof code === 'number') process.exit(code);
+}
+
+async function baseGuard(cb, cfg, log) {
+  const { guardFor } = await import('@stuntdouble/apps/index.mjs');
+  const g = guardFor(cfg);
+  const local = g.hosts.some(h => /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i.test(h));
+  const on = async () => { on.guard = await cb.guard({ hosts: null, allow: g.allow, mode: 'hold', local }); log(`guard on from the start (hold): every web host; ${g.allow.length} allowed`); };
+  // What it held (method, host, path; never a body), for the log: what an app couldn't do while it loaded.
+  on.held = () => { const n = {}; for (const h of on.guard ? on.guard.held() : []) { const k = `${h.method} ${h.host}${h.path}`; n[k] = (n[k] || 0) + 1; } return Object.entries(n).map(([k, c]) => `${k}${c > 1 ? ` ×${c}` : ''}`); };
+  return on;
+}
+
+// The apps the tenant check couldn't read, and what the guard held on their own hosts (their address, their match,
+// their pack's) while they loaded: "copilot's sign-in: POST m365.cloud.microsoft/landingv2".
+async function signInHeld(held, apps, tv, cfg) {
+  const { packsForDemo } = await import('@stuntdouble/apps/index.mjs');
+  const packs = packsForDemo(cfg);
+  const hostOf = u => { try { return new URL(/^[a-z]+:\/\//i.test(u) ? u : `https://${u}`).host; } catch (e) { return null; } };
+  const out = [];
+  for (const a of apps) {
+    if (!new RegExp(`\\b${a.id}\\b`).test(tv.why || '')) continue;
+    const hosts = [a.url, a.match, ...(((packs[a.id] || {}).match) || [])].map(hostOf).filter(h => h && !h.includes('*'));
+    const mine = held.filter(h => h.host && hosts.some(x => h.host === x || h.host.endsWith('.' + x)));
+    if (mine.length) out.push(`${a.id}'s sign-in: ${[...new Set(mine.map(h => `${h.method} ${h.host}${h.path}`))].join(', ')}`);
+  }
+  return out;
 }
