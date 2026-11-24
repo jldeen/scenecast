@@ -89,11 +89,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   const appIds = (demo.cfg.apps || []).map(a => a.id);
   const appOfText = t => { const m = /^([\w-]+)\s*:\s*(.*)$/.exec(t); return m && appIds.includes(m[1]) ? { app: m[1], rest: m[2] } : null; };
   const did = [];
-  const home = async app => {
-    const a = demo.cfg.apps.find(x => x.id === app);
-    await cmd('goto', { tab: appTab(demo, app), url: a.url }, 60).catch(() => {});
-    await walker.quiet(app, 800, 15000);
-  };
+  const home = app => walker.home(app);
   const fill = t => String(t).replace(/\{(\w+)\}/g, (m, k) => results[k] || m);
   // One reset step that changes something: approved, its placeholders filled, run as a write.
   const step = async (part, app, s, approvedText) => {

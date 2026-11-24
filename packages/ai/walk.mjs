@@ -33,6 +33,8 @@ export async function walkPlan(plan, walker, { emit = () => {} } = {}) {
           row.status = 'write'; row.why = s.writes ? s.writes.replace(/ · [\w-]+:[\w-]+$/, '') : w;
           unrun.push({ beat: bi + 1, step: si, text: row.text, app });
           after = { kind: 'after-write', why: `needs beat ${bi + 1}'s write: ${row.text}` };
+          // The beat stops here: what it typed for this write goes (no draft left behind).
+          if (walker.stopBeat) row.cleared = await walker.stopBeat(app);
           continue;
         }
         if (s.kind === 'app') { app = s.app; at = (!walker.live && where[app]) || await walker.start(s.app); row.screen = sigOf(at); }
@@ -49,7 +51,7 @@ export async function walkPlan(plan, walker, { emit = () => {} } = {}) {
           if (!l.ok) row.why = l.why;
         }
       } catch (e) {
-        if (e.code === 'WRITE') { row.status = 'write'; row.why = e.message; unrun.push({ beat: bi + 1, step: si, text: row.text, app }); after = { kind: 'after-write', why: `needs beat ${bi + 1}'s write: ${row.text}` }; continue; }
+        if (e.code === 'WRITE') { row.status = 'write'; row.why = e.message; unrun.push({ beat: bi + 1, step: si, text: row.text, app }); after = { kind: 'after-write', why: `needs beat ${bi + 1}'s write: ${row.text}` }; if (walker.stopBeat) row.cleared = await walker.stopBeat(app); continue; }
         row.status = 'missed'; row.why = e.message;
       }
       if (app && at) where[app] = at;
@@ -60,7 +62,8 @@ export async function walkPlan(plan, walker, { emit = () => {} } = {}) {
         if (w) row.needs = `beat ${w.beat}'s write: ${w.text}`;
         after = { kind: 'after-miss', why: `after the miss at step ${si + 1}` };
       }
-      emit({ event: 'walk', beat: bi + 1, step: si, status: row.status, screen: row.screen });
+      if (after && walker.stopBeat) row.cleared = await walker.stopBeat(app);
+      await emit({ event: 'walk', beat: bi + 1, step: si, status: row.status, screen: row.screen, app });
     }
     out.beats.push({ beat: bi + 1, title: beat.title, secs: +((Date.now() - tb) / 1000).toFixed(1), steps });
   }

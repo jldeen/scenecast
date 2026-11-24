@@ -183,5 +183,10 @@
     "spike E presets microsoft-iq.json (auto, frames.skip)",
     "scenecast recorder: powerbi-access-token stripped at capture",
     "demo1-reset SKILL.md and dist (add, certify, checks; product behavior only)"
-  ]
+  ],
+  "guard": {
+    "allow": [
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
+    ]
+  }
 }
