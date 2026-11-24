@@ -539,10 +539,12 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   let guarding = null;
   async function guard({ hosts = null, allow = [], mode: gm = 'hold', local = false } = {}) {
     if (guarding) await guarding.stop();
-    const st = { open: [], counts: {}, held: [], passed: [] };
+    const st = { open: [], counts: {}, held: [], passed: [], authFor: null, auth: null };
     const passing = u => st.open.some(o => !o || o.some(h => hostIs(u.host, h)));
-    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData }, url) => {
+    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData, headers }, url) => {
       let u = null; try { u = new URL(url); } catch (x) {}
+      // An API undo's session: the Authorization the page itself sends to that host, kept in memory for the one call.
+      if (st.authFor && u && st.authFor.test(u.host)) { const a = headers && (headers.Authorization || headers.authorization); if (a) st.auth = { origin: u.origin, host: u.host, value: a }; }
       let v = guardVerdict({ method, url, body: postData }, { hosts, allow, local }), by = v === 'pass' ? 'allowed' : null;
       if (v === 'hold' && u && passing(u)) { v = 'pass'; by = 'a planned write'; }
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
@@ -559,6 +561,10 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       counts: () => ({ ...st.counts }),
       held: () => st.held.slice(),
       passed: () => st.passed.slice(),
+      // Arm (a host pattern) or disarm (null) catching an API's session; take() hands it over once and forgets it.
+      watchAuth(re) { st.authFor = re; st.auth = null; },
+      takeAuth() { const a = st.auth; st.auth = null; st.authFor = null; return a; },
+      peekAuth() { return !!st.auth; },
       async stop() { await remove(); guarding = null; },
     };
     return guarding;
