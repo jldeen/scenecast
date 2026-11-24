@@ -8,7 +8,7 @@
 //   regroundPlan(plan, { walker, walk, reads }) → { plan, rows }   the plan with its new proofs; a row per step
 //   walkReads(dir)                                  a walk's saved screens, read by the recording's reader
 //   formatReground(rows)                            the proofs before and after, for whoever adopts them
-//   reground(demo, { from })                        .out/ai/reground.md and .json, and plan.reground.md
+//   reground(demo, { from, plan })                  .out/ai/reground.md and .json, and plan.reground.md
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readScreen } from '@scenecast/script/html.mjs';
@@ -23,18 +23,21 @@ const RAN = new Set(['reached', 'drifted', 'unproven']);
 
 // The screens a walk saved: walk-screens/<beat>-<step>.json (both from 1) and start-<app>.json, each
 // { reads: [[{ key, html }, …], …] }: a read is the page's documents (its own, then each frame's) as the capture
-// serializer writes them. → step(beat, step) / start(app): the reads as the reader reads them, or null.
+// serializer writes them. → step(beat, step) / start(app): the reads as the reader reads them, or null; why(beat,
+// step): why there are none.
 export function walkReads(dir) {
-  const memo = new Map();
+  const memo = new Map(), whys = new Map();
   const load = f => {
     if (!memo.has(f)) {
-      let got = null;
-      try { got = (JSON.parse(readFileSync(join(dir, f), 'utf8')).reads || []).filter(d => Array.isArray(d) && d.length).map(d => readScreen(d)); } catch (e) {}
+      let got = null, j = null;
+      try { j = JSON.parse(readFileSync(join(dir, f), 'utf8')); } catch (e) {}
+      try { got = ((j && j.reads) || []).filter(d => Array.isArray(d) && d.length).map(d => readScreen(d)); } catch (e) { whys.set(f, `the reader couldn't read its screen (${e.message})`); }
+      if (j && !(got && got.length) && !whys.has(f)) whys.set(f, 'the walk saved its screen without the page\u2019s markup');
       memo.set(f, got && got.length ? got : null);
     }
     return memo.get(f);
   };
-  return { step: (beat, step) => load(`${beat}-${step}.json`), start: app => load(`start-${app}.json`) };
+  return { step: (beat, step) => load(`${beat}-${step}.json`), start: app => load(`start-${app}.json`), why: (beat, step) => whys.get(`${beat}-${step}.json`) || null };
 }
 
 // Words in a place where the recording's captures differ (a greeting that changes on each visit): what a read today
@@ -86,7 +89,7 @@ export function regroundPlan(plan0, { walker, walk, reads }) {
     rows.push(row);
     if (!got) {
       Object.assign(row, { now: row.was, changed: false, basis: status === 'write' || status === 'after-write' ? 'write' : 'unreached',
-        why: ran ? 'the walk saved no screen for it' : status === 'write' ? `a write: ${r0.why}` : (r0 && r0.why) || "the walk didn't get here" });
+        why: ran ? (reads.why && reads.why(bi + 1, si + 1)) || 'the walk saved no screen for it' : status === 'write' ? `a write: ${r0.why}` : (r0 && r0.why) || "the walk didn't get here" });
       continue;
     }
     const next = (steps.slice(k + 1).find(({ s: x }) => !/^(wait|scroll)$/.test(x.kind)) || {}).s || null;
@@ -126,10 +129,16 @@ export function formatReground(rows) {
     `| ${BASIS.none} (Needs you) | ${n(r => r.basis === 'none')} |`,
     `| ${BASIS.write}: the recording's proof stays | ${n(r => r.basis === 'write')} |`,
     `| ${BASIS.unreached}: the recording's proof stays | ${n(r => r.basis === 'unreached')} |`, ''];
-  const changed = rows.filter(r => r.changed || r.basis === 'today' || r.basis === 'none');
+  const changed = rows.filter(r => r.basis !== 'none' && (r.changed || r.basis === 'today'));
   if (changed.length) {
     out.push('## What changed', '', '| Beat | Step | Was | Now | Why |', '|---|---|---|---|---|');
     for (const r of changed) out.push(`| ${r.beat} | ${cell(r.text)} | ${cell(r.was)} | ${cell(r.now)}${r.basis === 'today' ? ' (today only)' : ''}${r.number ? ' (a number)' : ''} | ${cell(r.why)} |`);
+    out.push('');
+  }
+  const unproven = rows.filter(r => r.basis === 'none');
+  if (unproven.length) {
+    out.push('## Needs you', '', 'Nothing on today\u2019s screen tells these steps apart from the one before, so a run can\u2019t check them.', '', '| Beat | Step | Was | Why |', '|---|---|---|---|');
+    for (const r of unproven) out.push(`| ${r.beat} | ${cell(r.text)} | ${cell(r.was)} | ${cell(r.why)} |`);
     out.push('');
   }
   const kept = rows.filter(r => r.basis === 'write' || r.basis === 'unreached');
@@ -141,11 +150,12 @@ export function formatReground(rows) {
   return out.join('\n');
 }
 
-// from: the folder holding walk.json and walk-screens/ (a walk's own: .out/ai). plan.md stays as it is: its approval
-// is its exact text, so adopting plan.reground.md means approving it again.
-export function reground(demo, { from = null } = {}) {
-  const dir = from || aiDir(demo), wf = join(dir, 'walk.json'), pf = join(demo.dir, PLAN);
-  if (!existsSync(pf)) throw new Error('make the plan first');
+// from: the folder holding walk.json and walk-screens/ (a walk's own: .out/ai). plan: the plan the walk walked, when
+// it isn't the demo's plan.md now. plan.md stays as it is: its approval is its exact text, so adopting
+// plan.reground.md means approving it again.
+export function reground(demo, { from = null, plan: planFile = null } = {}) {
+  const dir = from || aiDir(demo), wf = join(dir, 'walk.json'), pf = planFile || join(demo.dir, PLAN);
+  if (!existsSync(pf)) throw new Error(planFile ? `${planFile}: there\u2019s no such file` : 'make the plan first');
   if (!existsSync(wf)) throw new Error("there's no walk to ground the plan on: walk it in the capture browser first");
   const walker = walkerFromDemo(demo);
   if (!walker) throw new Error("there's no recording to compare today's screens with");
@@ -153,7 +163,7 @@ export function reground(demo, { from = null } = {}) {
   walker.save();
   mkdirSync(aiDir(demo), { recursive: true });
   writeFileSync(join(aiDir(demo), 'reground.md'), formatReground(rows));
-  writeFileSync(join(aiDir(demo), 'reground.json'), JSON.stringify({ at: new Date().toISOString(), walk: wf, rows }, null, 1) + '\n');
+  writeFileSync(join(aiDir(demo), 'reground.json'), JSON.stringify({ at: new Date().toISOString(), walk: wf, plan: pf, rows }, null, 1) + '\n');
   writeFileSync(join(aiDir(demo), 'plan.reground.md'), formatPlan(plan));
   const n = f => rows.filter(f).length;
   return { steps: rows.length, kept: n(r => r.basis === 'both' && !r.changed), changed: n(r => r.basis === 'both' && r.changed), today: n(r => r.basis === 'today'),

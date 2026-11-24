@@ -614,6 +614,15 @@ test('proofs on today\'s product: kept, new, today only, behind a write, not rea
   const old = JSON.parse(JSON.stringify(walk));
   old.beats[0].steps[1].text = 'Click "Shoes"';
   assert.throws(() => regroundPlan(parsePlan(text), { walker, walk: old, reads: walkReads(join(walkDir, 'walk-screens')) }), /the walk was of another plan \(beat 1, step 2/);
+  // The plan has moved on since the walk (a step added): the plan it walked, named.
+  writeFileSync(join(walkDir, 'walked.md'), text);
+  writeFileSync(join(dir, 'plan.md'), text.replace('- Click "Catalog"\n', '- Click "Menu"\n  Lands on: home\n- Click "Catalog"\n'));
+  assert.throws(() => reground(demo, { from: walkDir }), /the walk was of another plan \(beat 1, step 2 was “Click "Catalog"”, now “Click "Menu"”\)/);
+  assert.equal(reground(demo, { from: walkDir, plan: join(walkDir, 'walked.md') }).kept, 2);
+  // A screen saved without its markup (only its words and controls) isn't read: the step says why.
+  writeFileSync(join(walkDir, 'walk-screens', '1-2.json'), JSON.stringify({ beat: 1, step: 2, words: ['Contoso Outfitters'], controls: [] }));
+  const bare = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[1];
+  assert.deepEqual([bare.basis, bare.now, bare.why], ['unreached', 'catalog · "Spring catalog"', 'the walk saved its screen without the page\u2019s markup']);
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {

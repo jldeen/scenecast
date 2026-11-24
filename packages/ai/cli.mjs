@@ -6,8 +6,9 @@
 //   ai plan    --demo <dir> --walkthrough <recording.json> [--script <file>]   the same from one walkthrough
 //   ai approve --demo <dir>     approve plan.md as it is now (its writes included; any edit needs approving again)
 //   ai reset   --demo <dir>     reset.md: the plan's writes undone, and a read-only checklist
-//   ai reground --demo <dir> [--walk <dir>]   the plan's proofs again, on the screens a live walk read today
-//                               (walk.json and walk-screens/): reground.md, and plan.reground.md (plan.md stays)
+//   ai reground --demo <dir> [--walk <dir>] [--plan <file>]   the plan's proofs again, on the screens a live walk
+//                               read today (walk.json and walk-screens/; --plan: the plan it walked, if not plan.md):
+//                               reground.md, and plan.reground.md (plan.md stays)
 //   ai finish  --demo <dir>     after the build: her script for the guide, the beat keys, focus points, the review
 //   ai record  --demo <dir>     Record for me: run the approved plan in the browser while recording; then the script
 //   ai script  --demo <dir>     the talk track (script.md) from what was recorded
@@ -68,7 +69,7 @@ async function main() {
     }
     case 'approve': { const { approve } = await import('./make.mjs'); return approve(demo()); }
     case 'reset': { const { writeReset } = await import('./make.mjs'); const r = await writeReset(demo()); return { undo: r.reset.undo.length, checks: r.reset.checks.length, needs: r.reset.needs, file: 'reset.md' }; }
-    case 'reground': { const { reground } = await import('./reground.mjs'); return reground(demo(), { from: arg(args, '--walk', null) }); }
+    case 'reground': { const { reground } = await import('./reground.mjs'); return reground(demo(), { from: arg(args, '--walk', null), plan: arg(args, '--plan', null) }); }
     case 'finish': { const { finish } = await import('./finish.mjs'); return finish({ demo: demo(), emit }); }
     case 'record': {
       const d = demo();

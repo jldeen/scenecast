@@ -161,13 +161,16 @@ those reads:
 4. **Not reached:** a step behind a write the walk didn't make, or one it didn't get to, keeps its recorded proof,
    marked.
 
-It writes `.out/ai/reground.md` (each proof before and after, and why), `reground.json` and `plan.reground.md`.
-`plan.md` stays as it is: its approval is its exact text, so adopting the new one means approving it again.
+It writes `.out/ai/reground.md` (each proof before and after, and why, and the steps nothing proves today, under
+**Needs you**), `reground.json` and `plan.reground.md`. `plan.md` stays as it is: its approval is its exact text, so
+adopting the new one means approving it again. A walk is of one plan: re-grounding another is refused. `--plan
+<file>` names the plan the walk walked when it isn't the demo's `plan.md` now.
 
 The walk's files, in `.out/ai` (or `--walk <dir>`): `walk.json` (a row per step: `{ step, text, status, why }`),
 `walk-screens/<beat>-<step>.json` (both counted from 1) and `walk-screens/start-<app>.json`, each
 `{ reads: [[{ key, html }, …], …] }`. A read is the page's documents, its own (`key: "main"`) and then each frame's, as
-the capture serializer writes them, so a box's value, a checked box and open shadow roots are in the markup.
+the capture serializer writes them, so a box's value, a checked box and open shadow roots are in the markup. A step
+whose screen was saved without them is listed as not reached.
 
 ## Details under a line
 
