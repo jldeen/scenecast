@@ -311,11 +311,18 @@ try {
   const SB = tag => RESET.replace('## Check', `## Set before beat 2, Click "Refresh"\n\n- tasks: "Sync" is on\n  Set: "Sync" · ${tag}\n  Opens: ${tasks.url}\n  Seen: beat 2, tasks\n\n## Check`);
   // The task write's pack check makes its landing strong: what's set off camera is a write, and the write gate applies.
   writePack({ taskCheck: true });
-  writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), SB('fixture-tasks:sync'));
+  // Only one run's screens in the raw folder (the receiver keeps its folders, its blobs and its address index).
+  const freshRaw = () => { for (const d of ['snaps', 'shots', 'streams']) for (const f of existsSync(join(tmp, 'run-raw', d)) ? readdirSync(join(tmp, 'run-raw', d)) : []) rmSync(join(tmp, 'run-raw', d, f), { recursive: true, force: true }); rmSync(join(tmp, 'run-raw', 'recording.json'), { force: true }); };
+  const keepRaw = name => { const d = join(tmp, name); rmSync(d, { recursive: true, force: true }); if (existsSync(join(tmp, 'run-raw'))) cpSync(join(tmp, 'run-raw'), d, { recursive: true }); return [d, existsSync(join(d, 'recording.json')) ? JSON.parse(readFileSync(join(d, 'recording.json'), 'utf8')) : null]; };
+  // The same plan without it first, here, for the recording to be compared with.
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
-  // Only this run's screens in the raw folder (the receiver keeps its folders, its blobs and its address index).
-  for (const d of ['snaps', 'shots', 'streams']) for (const f of existsSync(join(tmp, 'run-raw', d)) ? readdirSync(join(tmp, 'run-raw', d)) : []) rmSync(join(tmp, 'run-raw', d, f), { recursive: true, force: true });
-  rmSync(join(tmp, 'run-raw', 'recording.json'), { force: true });
+  freshRaw();
+  await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  const [baseRaw, recBase] = keepRaw('sb-base-raw');
+  writeFileSync(join(DEMO, 'reset.md'), SB('fixture-tasks:sync'));
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  freshRaw();
   const apSB = JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'approved.json'), 'utf8'));
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
@@ -324,17 +331,16 @@ try {
   const sbLoads = (rj.events || []).filter(e => e.kind === 'loaded' && inSB(e));
   check('Set before: approved with the writes, set off camera just before its step once the gate passed (the write before it strong by its pack check), and that step\'s screen shows it', rj.landings.some(l => l.wrote && l.strength === 'strong' && l.basis === 'pack check') && (apSB.reset || []).some(x => x.part === 'before' && x.text === 'tasks: "Sync" is on' && /off camera, before Click "Refresh"/.test(x.label)) && !rj.stopped && sbr.ok && sbr.items.length === 1 && sbr.items[0].ok && !sbr.items[0].already && sbr.seen.length === 1 && sbr.seen[0].ok && rj.writes.length === 1 && count(tasks.log, 'POST /api/sync') === 2 && tasks.state().sync === false && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: rj.stopped, wrote: rj.landings.filter(l => l.wrote), setBefore: rj.setBefore, writes: rj.writes.length, log: tasks.log.filter(l => !l.startsWith('GET')), after: rj.reset.after && rj.reset.after.why }));
   check('and it ran in a tab of its own: the recorded tab didn\'t load anything meanwhile', sbLoads.length > 0 && sbLoads.every(e => e.side === 'set-before:tasks'), JSON.stringify(sbLoads));
-  // Nothing from the side tab in the recording: the same screens, steps and snapshots as the main run of this plan
+  // Nothing from the side tab in the recording: the same screens, steps and snapshots as this plan's run without it
   // (Sync's state aside, which Set before is there to change), nothing captured while it ran, and no side mark.
-  const sbRaw = join(tmp, 'sb-raw');
-  rmSync(sbRaw, { recursive: true, force: true });
-  if (existsSync(join(tmp, 'run-raw'))) cpSync(join(tmp, 'run-raw'), sbRaw, { recursive: true });
-  const recSB = existsSync(join(sbRaw, 'recording.json')) ? JSON.parse(readFileSync(join(sbRaw, 'recording.json'), 'utf8')) : null;
+  const [sbRaw, recSB] = keepRaw('sb-raw');
   const syncAside = t => t.replace(/aria-checked=\\"(true|false)\\"/g, 'aria-checked=\\"?\\"').replace(/Sync is (on|off)/g, 'Sync is ?');
-  const dSB = compareRaw(join(tmp, 'raw-unattended'), sbRaw, recA, recSB, syncAside);
+  // Screens by name (a screen's signature has Sync's state in it), steps, and each snapshot, Sync's state aside.
+  const dSB = compareRaw(baseRaw, sbRaw, recBase, recSB, syncAside);
+  const sameScreens = recBase && recSB && JSON.stringify(Object.keys(recBase.states).sort()) === JSON.stringify(Object.keys(recSB.states).sort());
   const t0SB = recSB ? Date.parse(recSB.recordedAt) : NaN, during = ((recSB && recSB.timeline) || []).filter(e => inSB({ at: new Date(t0SB + e.at).toISOString() }));
   const allRaw = d => readdirSync(d, { recursive: true }).filter(f => /\.json$/.test(String(f))).map(f => readFileSync(join(d, String(f)), 'utf8')).join('\n');
-  check('and the recording has nothing from the side tab: the same screens, steps and snapshots as without it, nothing captured while it ran, no side mark', recSB && dSB.ok && during.length === 0 && !allRaw(sbRaw).includes('set-before:'), JSON.stringify({ diff: dSB, during: during.slice(0, 5), window: [sbr.from, sbr.to] }));
+  check('and the recording has nothing from the side tab: the same screens, steps and snapshots as without it, nothing captured while it ran, no side mark', sameScreens && dSB.sameSteps && !dSB.onlyA.length && !dSB.onlyB.length && !dSB.differ.length && during.length === 0 && !allRaw(sbRaw).includes('set-before:'), JSON.stringify({ diff: dSB, during: during.slice(0, 5), window: [sbr.from, sbr.to] }));
   // Two tabs of one app at the same address: a lookup by the app's tab finds its own by its mark, never the other.
   const SPEC = (c => c.apps[0].match || c.apps[0].url)(JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8')));
   const MARK_JS = "return { mark: await page.evaluate(() => sessionStorage.getItem('d1tab')) }";
@@ -346,7 +352,7 @@ try {
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
-  const sbErr = res.error ? (res.error.message || res.error.text || JSON.stringify(res.error)) : res.err;
+  const sbErr = res.error ? (res.error.error || res.error.message || res.error.text || JSON.stringify(res.error)) : res.err;
   check('a Set before line whose pack lacks its write: the run refuses before anything runs', res.code !== 0 && /Set before beat 2, Click "Refresh": tasks: "Sync" is on: the fixture-tasks pack has no "sync-all" write/.test(sbErr) && !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry'), JSON.stringify({ code: res.code, error: sbErr, log: tasks.log.filter(l => !l.startsWith('GET')) }));
   writePack();
   writeFileSync(join(DEMO, 'reset.md'), RESET);
@@ -509,6 +515,7 @@ function compareRaw(dirA, dirB, a, b, also = t => t) {
     states: [Object.keys(a.states).length, Object.keys(b.states).length], sameSigs: JSON.stringify(sigs(a)) === JSON.stringify(sigs(b)),
     steps: [steps(a), steps(b)], sameSteps: steps(a) === steps(b),
     snaps: [snapsA.length, snapsB.length], onlyA: snapsA.filter(f => !snapsB.includes(f)).slice(0, 8), onlyB: snapsB.filter(f => !snapsA.includes(f)).slice(0, 8), differ: differ.slice(0, 8),
+    first: differ.length ? (() => { const x = read(dirA, differ[0]), y = read(dirB, differ[0]); let i = 0; while (i < x.length && x[i] === y[i]) i++; return [x.slice(Math.max(0, i - 80), i + 120), y.slice(Math.max(0, i - 80), i + 120)]; })() : undefined,
     shots: [files(join(dirA, 'shots')).length, files(join(dirB, 'shots')).length],
   };
   out.ok = out.sameSigs && out.sameSteps && !out.onlyA.length && !out.onlyB.length && !differ.length;
