@@ -13,6 +13,7 @@ import { walkerFromDemo, specName } from './walker.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { cleanTarget } from './from-script.mjs';
 import { readFocusJson, readEditorOverrides, writeJsonAtomic, checkFocusJson, FOCUS_JSON, EDITOR_JSON } from '@stuntdouble/core/lib/overrides.mjs';
+import { proofWords } from './landing.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');
@@ -111,7 +112,7 @@ export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
 const readJson = f => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { return null; } };
 export function needsYou({ planReview, reset, plan, fidelity, points }) {
   const out = [];
-  const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step" };
+  const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step", number: 'A number that can change' };
   for (const f of (planReview && planReview.flags) || []) out.push({ kind: KIND[f.kind] || 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
   for (const n of (reset && reset.needs) || []) out.push({ kind: n.kind === 'start' ? 'A step is missing' : 'Reset', where: `beat ${n.beat}`, text: n.text });
   plan.beats.forEach((b, bi) => (b.lines || []).forEach((l, li) => { if (!(l.focus || []).some(f => f.on)) out.push({ kind: 'No focus point', where: `line ${bi + 1}.${li + 1}`, text: `Nothing on its screens backs “${l.text.slice(0, 80)}${l.text.length > 80 ? '…' : ''}”. Add one in the editor if it needs one.` }); }));
@@ -166,7 +167,8 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], o
     for (const f of [join(demo.raw || '', 'shots', snap + '.png'), join(demo.dir, 'presenter', 'shots', snap + '.png')]) if (existsSync(f)) { copyFileSync(f, join(out, 'shots', snap + '.png')); return `shots/${snap}.png`; }
     return null;
   };
-  const beats = plan.beats.map((b, i) => ({ n: i + 1, title: b.title, shots: b.steps.filter(s => s.lands && s.lands.screen).map(s => ({ step: formatStep(s), words: s.lands.text || '', img: shotOf(s.lands.screen) })) }));
+  // Under each step, what a run checks it by (plan-format.md, "What proves a step").
+  const beats = plan.beats.map((b, i) => ({ n: i + 1, title: b.title, shots: b.steps.filter(s => s.lands && s.lands.screen).map(s => ({ step: formatStep(s), words: s.lands.kind ? `Checks ${proofWords(s.lands)}` : 'Nothing a run can check', img: shotOf(s.lands.screen) })) }));
   const fidelity = readJson(join(demo.out, 'fidelity.json')), bench = readJson(join(demo.out, 'bench.json'));
   const rec = readJson(join(demo.dir, 'recording.json')) || readJson(join(demo.raw || '', 'recording.json'));
   const timings = [];

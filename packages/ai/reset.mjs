@@ -107,7 +107,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
       const later = writes.filter(w => w.app === a && w.to).map(w => walker.shown(w.to) || walker.screen(w.to)).filter(Boolean);
       const gone = start.items.map(i => clean(i.text)).filter(t => t.length > 3 && t.length < 50 && t.split(' ').length <= 6 && /\d|[A-Z]/.test(t))
         .filter(t => later.some(sc => !norm(sc.text).includes(norm(t))) && later.some(sc => numberSwap(t, sc.text)));
-      for (const t of [...new Set(gone)].slice(0, 3)) out.checks.push({ app: a, text: `shows "${t}"`, from: 'its start screen' });
+      for (const t of [...new Set(gone)].slice(0, 3)) out.checks.push({ app: a, screen: walker.start(a), text: `shows "${t}"`, from: 'its start screen' });
     }
   }
   // The state the demo starts in (start.mjs), as its first screens show it: set first, then checked. What the
@@ -121,7 +121,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
       const how = setterOf(f, packOf(f.app), packs && packs.writeFor);
       const text = startText(f);
       if (how) out.set.push({ app: f.app, text, how, seen: `beat ${f.seen.beat}, ${f.seen.screen}` });
-      out.checks.push({ app: f.app, text, from: `start: beat ${f.seen.beat}, ${f.seen.screen}` });
+      out.checks.push({ app: f.app, screen: f.seen.screen, text, from: `start: beat ${f.seen.beat}, ${f.seen.screen}` });
     }
     const first = {};
     plan.beats.forEach(b => b.steps.forEach(s => { if (s.kind === 'app' && s.lands && s.lands.screen && !first[s.app]) first[s.app] = s.lands.screen; }));
@@ -130,9 +130,10 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
       if (!sc) continue;
       const said = plan.beats.flatMap(b => (b.lines || []).flatMap(l => (l.focus || []).filter(f => f.on === sig && f.texts.length === 1).map(f => f.texts[0])));
       const appTitle = norm(((walker.apps || []).find(a => a.id === app) || {}).title || app);
-      const shown = [...new Set(said)].filter(t => t.split(' ').length <= 6 && t.length <= 48 && !/^(show|see|view|open|add|go|back|more)\b/i.test(t) && !norm(t).includes(appTitle))
+      // Not words its captures show differently (a greeting that changes on each visit): a run can't count on them.
+      const shown = [...new Set(said)].filter(t => t.split(' ').length <= 6 && t.length <= 48 && !/^(show|see|view|open|add|go|back|more)\b/i.test(t) && !norm(t).includes(appTitle) && !(walker.unstable && walker.unstable(t, app)))
         .filter(t => { const it = sc.items.find(i => norm(i.text) === norm(t)); return it && !/^(heading|tab|menuitem|switch|checkbox|radio|textbox|searchbox|combobox)$/.test(it.role); });
-      for (const t of shown.slice(0, 3)) out.checks.push({ app, text: `shows "${t}"`, from: 'what the demo points at on its first screen' });
+      for (const t of shown.slice(0, 3)) out.checks.push({ app, screen: sig, text: `shows "${t}"`, from: 'what the demo points at on its first screen' });
     }
     const groups = new Map();
     for (const c of st.changes) { const k = `${c.app}|${c.before.screen}|${c.after.screen}|${c.from}|${c.to}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
@@ -239,7 +240,7 @@ export function formatReset(r) {
   }
   if (r.checks.length) {
     out.push('## Check', '', '<!-- Read-only: each line is something the screen shows. -->', '');
-    for (const c of r.checks) out.push(`- ${c.app}: ${c.text}`, `  From: ${c.from}`);
+    for (const c of r.checks) out.push(`- ${c.app}${c.screen ? ` on ${c.screen}` : ''}: ${c.text}`, `  From: ${c.from}`);
     out.push('');
   }
   if (r.needs.length) {
@@ -250,7 +251,9 @@ export function formatReset(r) {
   return out.join('\n');
 }
 
-// reset.md read back: its Undo steps as a plan the capture pass runs, what to set first, its checks, what needs her.
+// reset.md read back: its Undo steps as a plan the capture pass runs, what to set first, its checks (each with the
+// screen it's read on, when the line names it: the capture pass gets there by the plan's read-only steps), what needs
+// her.
 export function parseReset(text) {
   const parts = String(text).split(/^(?=## )/m);
   const undo = parsePlan(parts.filter(p => /^## Undo · /.test(p)).map(p => p.replace(/^## Undo · /, '## ')).join('\n'));
@@ -263,5 +266,15 @@ export function parseReset(text) {
     for (const l of rest) { const m = /^\s+(Set|Opens|Seen):\s*(.*)$/.exec(l); if (m) d[m[1].toLowerCase()] = m[2].trim(); }
     set.push(d);
   }
-  return { undo, set, checks: lines('Check'), needs: lines('Needs you') };
+  // Check: "- chat on chat-home: "Notes" is picked (Chat | Notes)" and its From, as { app, screen, text, from }
+  // (screen null when the line doesn't name one).
+  const checks = [];
+  const cp = parts.find(x => /^## Check\b/.test(x));
+  if (cp) for (const block of cp.split(/^(?=- )/m).slice(1)) {
+    const [head, ...rest] = block.split('\n');
+    const m = /^- ([^\s:]+)(?: on ([^\s:]+))?: (.*)$/.exec(head.trim());
+    const from = rest.map(l => /^\s+From:\s*(.*)$/.exec(l)).find(Boolean);
+    checks.push(m ? { app: m[1], screen: m[2] || null, text: m[3].trim(), from: from ? from[1].trim() : null } : { app: null, screen: null, text: head.slice(2).trim(), from: from ? from[1].trim() : null });
+  }
+  return { undo, set, checks, needs: lines('Needs you') };
 }

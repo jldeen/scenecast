@@ -7,9 +7,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { formatPlan, parsePlan } from './plan.mjs';
+import { formatPlan, parsePlan, formatLands } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
-import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, landingFor, proveLandings } from './from-script.mjs';
+import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, proveLandings } from './from-script.mjs';
+import { holds } from './landing.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
@@ -251,33 +252,84 @@ test('a list framed the way she shows one: its heading and first step; a section
   assert.deepEqual(sectionsOf({ items: [h(1, 'Comments', 'h2'), item(2, 'Write a reply', { role: 'button' }), item(3, 'Skip comments', { role: 'button' }), h(4, 'Footer', 'h2'), item(5, 'Manage cookies', { role: 'button' })] }), []);
 });
 
-test('a landing proves its step: words its screen shows that the one before didn\'t, else a control, else Needs you', () => {
-  const screen = (headings, items, controls = []) => ({ headings, controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', box: [i, 0, i + 1, 1], ...(typeof it === 'string' ? { text: it } : it) })), text: [...headings, ...items.map(it => it.text || it)].join('\n') });
-  const page = screen(['Operations'], ['Operations', 'Foundry IQ · Knowledge base', 'Add content'], [{ role: 'button', name: 'Add content' }]);
-  // The picker shows "Foundry IQ" (the page had it, inside a longer line), a time that a reload changes, a closed
-  // dialog's heading, and its own tab.
-  const picker = screen(['Operations', 'Foundry IQ'], ['Operations', 'Foundry IQ · Knowledge base', 'Add content', '2 min ago', { text: 'Response time details', shut: true }, { text: 'Web IQ', kind: 'control', role: 'tab' }], [{ role: 'button', name: 'Add content' }, { role: 'tab', name: 'Web IQ' }]);
-  const badge = screen(['Operations'], ['Operations', 'Foundry IQ · Knowledge base', 'Add content'], [{ role: 'button', name: 'Add content' }, { role: 'button', name: 'Endorsement: Certified' }]);
-  assert.deepEqual(landingFor([page], picker), { text: 'Web IQ' });
-  // Closing it only takes words away; a badge only its label tells apart.
-  assert.deepEqual(landingFor([picker], page), { text: null });
-  assert.deepEqual(landingFor([page], badge), { text: 'Endorsement: Certified', control: 'button' });
-  // A plan, in order: each landing against the screen before its step. The first has nothing before it.
-  const S = { page, picker, badge };
-  const walker = { screen: id => S[id], shown: id => S[id], states: Object.keys(S), flow: { states: { page: { app: 'iq' }, picker: { app: 'iq' }, badge: { app: 'iq' } } } };
-  const plan = { beats: [{ steps: [{ kind: 'app', app: 'iq', lands: { screen: 'page', text: 'Operations' } },
-    { kind: 'click', target: 'Add content', line: '1.1', lands: { screen: 'picker', text: 'Foundry IQ' } },
-    { kind: 'press', key: 'Escape', line: '1.2', lands: { screen: 'page', text: 'Operations' } },
-    { kind: 'click', target: 'Certified', line: '1.3', lands: { screen: 'badge', text: 'Operations' } }] }] };
+test('a landing proves its step: new words, a control\'s state, a control only it has, words gone with the page\'s own still there; numbers last', () => {
+  // Screens as the reader reads them: items (with the reader's marks) and controls.
+  const sc = (items, controls = [], headings = []) => ({ headings, controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
+  const S = {
+    page: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: true }, { role: 'tab', name: 'Plugins', selected: false }]),
+    // Words a run can't count on, all new here: a time, a toast, a date, a shortcut's keys, what Copilot wrote, a
+    // greeting that changes on each visit, a closed dialog's heading. Then its own new tab.
+    picker: sc(['Operations', 'Our numbers', '17 curated here', 'Add content', { text: '2 min ago', time: true }, { text: 'Message sent', live: true }, 'Commented on Nov 17, 2026', 'Show panel ⌘⇧B',
+      'Fabrikam moved the ship date', 'Hi, how can I help?', { text: 'Response time details', shut: true }, 'Web IQ'], [{ role: 'tab', name: 'Web IQ' }]),
+    tabbed: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: false }, { role: 'tab', name: 'Plugins', selected: true }]),
+    badge: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: true }, { role: 'button', name: 'Endorsement: Certified' }]),
+    panel: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content', { text: 'Use When', role: 'heading', nav: true }, { text: 'Spend policy', nav: true }], [{ role: 'tab', name: 'Agents', selected: true }, { role: 'tab', name: 'Plugins', selected: false }]),
+    added: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '18 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: true }]),
+  };
+  // One page with panels over it (one address): no frame to tell its own words from.
+  const walker = { screen: id => S[id], shown: id => S[id], view: () => ({ url: 'https://iq.example.com/home' }), states: Object.keys(S), flow: { states: Object.fromEntries(Object.keys(S).map(k => [k, { app: 'iq' }])) },
+    written: t => /fabrikam moved/i.test(t), unstable: t => /how can i help/i.test(t) };
+  const plan = { beats: [{ steps: [
+    { kind: 'app', app: 'iq', lands: { screen: 'page', text: 'Our numbers' } },
+    { kind: 'click', target: 'Add content', line: '1.1', lands: { screen: 'picker', text: 'Operations' } },
+    { kind: 'press', key: 'Escape', line: '1.2', lands: { screen: 'page' } },
+    { kind: 'click', target: 'Plugins', line: '1.3', lands: { screen: 'tabbed' } },
+    { kind: 'click', target: 'Agents', line: '1.4', lands: { screen: 'page' } },
+    { kind: 'click', target: 'Certified', line: '1.5', lands: { screen: 'badge', text: 'Operations' } },
+    { kind: 'click', target: 'Spend policy', line: '1.6', lands: { screen: 'panel' } },
+    { kind: 'click', target: 'Close panel', line: '1.7', lands: { screen: 'page' } },
+    { kind: 'click', target: 'Add to business plugin', line: '1.8', lands: { screen: 'added' } },
+    { kind: 'click', target: 'Refresh', line: '1.9', lands: { screen: 'added' } }] }] };
   const flags = proveLandings(plan, walker);
-  assert.deepEqual(plan.beats[0].steps.map(s => [s.lands.screen, s.lands.text]), [['page', 'Operations'], ['picker', 'Web IQ'], ['page', null], ['badge', 'Endorsement: Certified']]);
-  assert.deepEqual(flags.map(f => [f.kind, f.at]), [['landing', '1.2'], ['landing', '1.3']]);
-  assert.match(flags[0].text, /^Press Escape: everything page shows was on the screen before it/);
-  assert.match(flags[1].text, /looks for its "Endorsement: Certified" button instead$/);
+  assert.deepEqual(plan.beats[0].steps.map(s => formatLands(s.lands)), [
+    'page · "Our numbers"',
+    'picker · "Web IQ"',
+    'page · control "Agents" selected',
+    'tabbed · control "Plugins" selected',
+    'page · control "Agents" selected',
+    'badge · control "Endorsement: Certified"',
+    'panel · "Use When"',
+    'page · gone "Use When", still "Our numbers"',
+    'added · "18 curated here"',
+    'added',
+  ]);
+  assert.deepEqual(flags.map(f => [f.kind, f.at]), [['number', '1.8'], ['landing', '1.9']]);
+  assert.match(flags[0].text, /a run checks it by “18 curated here”, a number that can change$/);
+  assert.match(flags[1].text, /^Click "Refresh": it lands where it already was, so a run can't tell whether it worked$/);
+  // Each holds on its own screen and not on the one before; gone needs its still.
+  assert.equal(holds(S.page, { kind: 'gone', gone: 'Use When', still: 'Our numbers' }), true);
+  assert.equal(holds(S.panel, { kind: 'gone', gone: 'Use When', still: 'Our numbers' }), false);
+  assert.equal(holds({ items: [], controls: [] }, { kind: 'gone', gone: 'Use When', still: 'Our numbers' }), false);
   // The review lists them; Copilot isn't asked about them (they're not her script's to fix).
-  assert.deepEqual(needsYou({ planReview: { flags }, plan: { beats: [] } }).map(n => [n.kind, n.where]), [["A run can't check this step", 'line 1.2'], ["A run can't check this step", 'line 1.3']]);
-  const input = scriptPlanInput(parseTalkTrack(PROSE, 'p.md'), null, { draft: { plan: { beats: [] }, flags: [{ kind: 'landing', at: '1.1', text: 'x' }, { kind: 'differs', at: '1.1', text: 'The product shows "Save"' }] } });
+  assert.deepEqual(needsYou({ planReview: { flags }, plan: { beats: [] } }).map(n => [n.kind, n.where]), [['A number that can change', 'line 1.8'], ["A run can't check this step", 'line 1.9']]);
+  const input = scriptPlanInput(parseTalkTrack(PROSE, 'p.md'), null, { draft: { plan: { beats: [] }, flags: [{ kind: 'landing', at: '1.1', text: 'x' }, { kind: 'number', at: '1.1', text: 'y' }, { kind: 'differs', at: '1.1', text: 'The product shows "Save"' }] } });
   assert.deepEqual(input.script.beats[0].lines[0].issues, ['The product shows "Save"']);
+});
+
+test('typing lands on its own words, never what was recorded in the box: Differs when the recording has others', () => {
+  const walker = walkerFromDemo(demoDir());
+  const plan = { beats: [{ steps: [
+    { kind: 'app', app: 'chat', lands: { screen: 'chat-home' } },
+    { kind: 'type', value: "What's changed on PO-1?", target: 'Message', line: '1.1', lands: { screen: 'chat-typed', text: 'New chat' } },
+    { kind: 'click', target: 'New chat', line: '1.2', lands: { screen: 'chat-home' } },
+    { kind: 'type', value: 'Turn this into a note I can reuse.', target: 'Message', line: '1.3', lands: { screen: 'chat-typed', text: "What's changed on PO-1?" } }] }] };
+  proveLandings(plan, walker);
+  const [, same, , other] = plan.beats[0].steps;
+  assert.deepEqual([same.lands, same.differs], [{ screen: 'chat-typed', kind: 'words', text: "What's changed on PO-1?" }, undefined]);
+  assert.deepEqual([other.lands, other.differs], [{ screen: 'chat-typed', kind: 'words', text: 'Turn this into a note I can reuse.' }, 'the recording has “What\'s changed on PO-1?” typed here']);
+  // Offline, the walker checks a step the same way; what the recording can't show, it says so.
+  assert.deepEqual(walker.landed('chat-typed', same), { ok: true, why: null });
+  assert.equal(walker.landed('chat-typed', other).ok, true);
+  assert.match(walker.landed('chat-typed', other).why, /^the recording has other words typed here/);
+  assert.deepEqual(walker.landed('chat-home', same), { ok: false, why: "“What's changed on PO-1?” isn't on chat-home" });
+  // A box whose words aren't in the page's (an input): what it says.
+  const field = { controls: [{ role: 'textbox', name: 'Promo code', editable: 'field', value: 'SPRING25' }], items: [{ text: 'Checkout' }], headings: [] };
+  const empty = { controls: [{ role: 'textbox', name: 'Promo code', editable: 'field' }], items: [{ text: 'Checkout' }], headings: [] };
+  const w2 = { screen: id => ({ empty, field })[id], shown: id => ({ empty, field })[id], states: ['empty', 'field'], flow: { states: { empty: { app: 'shop' }, field: { app: 'shop' } } },
+    recorded: () => ({ control: empty.controls[0] }) };
+  const p2 = { beats: [{ steps: [{ kind: 'app', app: 'shop', lands: { screen: 'empty' } }, { kind: 'type', value: 'SPRING25', target: 'Promo code', lands: { screen: 'field' } }] }] };
+  proveLandings(p2, w2);
+  assert.equal(formatLands(p2.beats[0].steps[1].lands), 'field · box "Promo code" says "SPRING25"');
 });
 
 test('a walker never writes; offline, the recording says where a write went', () => {
@@ -326,6 +378,26 @@ test('the start state: what the first screens show is set first and checked; a c
   // On before the certify and on after it, with no step between that switches it: the plan needs that step.
   assert.match(r.needs.find(n => n.kind === 'start').text, /^"Sync" is off before Click "Certified" and on after it.*Add Click "Enable Sync" after it$/);
   assert.deepEqual(parseReset(formatReset(r)).set, [{ what: 'admin: "Sync" is off', set: '"Enable Sync" · admin:sync', opens: 'https://admin.test/sync', seen: 'beat 2, admin-home' }]);
+  // A check names the screen it's read on when the reset knows it; the capture pass gets there by the plan.
+  const checks = parseReset(formatReset(r)).checks;
+  assert.match(formatReset(r), /^- admin on admin-home: "Sync" is off$/m);
+  assert.deepEqual(checks.find(c => c.text === '"Sync" is off'), { app: 'admin', screen: 'admin-home', text: '"Sync" is off', from: 'start: beat 2, admin-home' });
+  assert.deepEqual(checks.find(c => c.text === 'no endorsement'), { app: 'admin', screen: null, text: 'no endorsement', from: 'beat 2' });
+});
+
+test('words a screen\'s captures show differently (a greeting each visit) never prove a step', () => {
+  const demo = demoDir();
+  const flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8'));
+  writeFileSync(join(demo.dir, 'flow.json'), JSON.stringify({ ...flow, variants: ['tog-chat-home-collapsed', 'v200-admin-home'] }));
+  writeFileSync(join(demo.dir, 'data', 'snaps', 'tog-chat-home-collapsed.html'), readFileSync(join(demo.dir, 'data', 'snaps', 'chat-home.html'), 'utf8').replace('<h1>New chat</h1>', '<h1>Ask me anything</h1>'));
+  writeFileSync(join(demo.dir, 'data', 'snaps', 'v200-admin-home.html'), readFileSync(join(demo.dir, 'data', 'snaps', 'admin-home.html'), 'utf8').replace('17 curated here', '19 curated here'));
+  const walker = walkerFromDemo(demo);
+  assert.deepEqual(['New chat', 'Ask me anything', 'Plugin admin', '17 curated here'].map(t => walker.unstable(t, t === 'Plugin admin' || /curated/.test(t) ? 'admin' : 'chat')), [true, true, false, false]);
+  // Only in its app: another app's words that read the same aren't touched.
+  assert.equal(walker.unstable('New chat', 'admin'), false);
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'admin', lands: { screen: 'admin-home' } }, { kind: 'app', app: 'chat', lands: { screen: 'chat-home', text: 'New chat' } }] }] };
+  proveLandings(plan, walker);
+  assert.notEqual(plan.beats[0].steps[1].lands.text, 'New chat');
 });
 
 test('the approval is the plan\'s exact text: an edit needs approving again', () => {
@@ -346,7 +418,7 @@ test('a walkthrough makes the same kind of plan: steps, landings, writes, a beat
   const plan = planFromRecording(rec, { walker, flags });
   assert.deepEqual(plan.beats.map(b => b.steps.map(s => s.text)), [['Go to chat', `Type "What's changed on PO-1?"`, 'Press Enter', 'Wait for the answer'], ['Click "Save: Save note"'], ['Go to admin', 'Click "Certified"']]);
   // Its landings prove each step too: what was typed shows in the chat box, and nothing needs her.
-  assert.deepEqual([plan.beats[0].steps[1].lands, flags], [{ screen: 'chat-typed', text: "What's changed on PO-1?" }, []]);
+  assert.deepEqual([plan.beats[0].steps[1].lands, flags], [{ screen: 'chat-typed', kind: 'words', text: "What's changed on PO-1?" }, []]);
   // A click recorded by its test id is named from the screen; the prompt is the first one sent.
   assert.deepEqual(plan.beats.flatMap(b => b.steps).filter(s => s.writes).map(s => s.writes.split(' (')[0]), ['sends prompt 1 in Chat app', 'saves "Save note"', 'endorses it: "Certified"']);
 });

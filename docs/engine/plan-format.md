@@ -80,11 +80,11 @@ After the screen's name and ` · `, one proof, in plain words. Either part may b
 
 ```markdown
 - Click "Plugins"
-  Lands on: iq-picker-plugins · control "Plugins" selected
+  Lands on: picker-plugins · control "Plugins" selected
 - Type "IQ" in "Search tools by name"
-  Lands on: adm-iq-typed · box "Search tools by name" says "IQ"
+  Lands on: tools-typed · box "Search tools by name" says "IQ"
 - Click "Close panel"
-  Lands on: iq-landing · gone "Use When", still "Supply Chain Operations"
+  Lands on: landing · gone "Use When", still "Our numbers"
 ```
 
 ### Controls, their roles and names
@@ -105,18 +105,42 @@ steps (`Click "Name"`) and proofs (`control "Name"`) name controls by it.
   names (for each id, the first element with it), joined by a space; for an `input`, `select` or `textarea`, the
   words of its `<label>`s (`el.labels`: a label whose `for` is its id, or around it), joined by a space; its own
   words (`innerText`; not for an `input`, a `textarea` or an editable area); `placeholder`; `data-placeholder`;
-  `aria-placeholder`; `title`; `alt`; `value`.
+  `aria-placeholder`; `title`; `alt`; for an `input` of type `button`, `submit` or `reset`, its `value` (never what's
+  typed in a box).
   Each is cleaned first: invisible characters (zero-width spaces and joiners, direction marks) dropped, runs of
   spaces as one, ends trimmed. A name said twice in a row (`Share Share`) counts once, and a name is cut at 90
   characters.
 - **Not counted:** what's hidden (`hidden`, `display: none`, `visibility: hidden`) and what's inside
   `aria-hidden="true"` or `inert`. A control in a closed `<dialog>` is read but never a proof.
 
-`Lands on:` proofs come from the recording, as the run will read the page: its words in every frame, not what's in a
-closed dialog, and nothing a reload changes (a time, a size). Some steps leave nothing new on the screen to check by:
-closing a panel, pressing Escape, typing into a search box. Then the words are a control's name only that screen has,
-or none, and the review lists the step under **Needs you** ("A run can't check this step"). Copilot's plans get the
-same check after its answer.
+### How Scenecast chooses a proof
+
+From the recording, the way a run will read the page, for each step against the screen the plan was on before it (for
+`Go to …`, the other app's). Every proof holds on the screen the step lands on and not on the one before. Rules-only
+plans, Copilot's (after its answer is grounded) and walkthroughs all get the same pass.
+
+1. **A Type step:** the start of its own words: in the page's words when the box is an editable area, else
+   `box "Name" says "…"`. When the recorded screen has other words in that box, the step says so (`Differs:`): the
+   recording can't show it, and a run checks it.
+2. **Any other step:** its plan's proof while that still proves it, else the first of new words (headings, then
+   lines, then labels; the page's own before its frame), a control's state, what a box says, a control only this
+   screen has, and words gone with the page's own words still there.
+3. **Numbers last.** Words without a number first. A number that only identifies (`#2`, `PO-1001`) or is part of
+   what nearly every screen of the site shows (`Microsoft 365 admin center`) doesn't count. Words with a number only
+   when nothing else tells the screens apart, and then the review lists the step under **Needs you** ("A number that
+   can change").
+4. **Never:** what a reload, the clock or the computer changes (a time or a date, a duration, a size, a long number,
+   a shortcut's keys like `⌘⇧B`); what's in a live region (a toast, a status: role `status`, `alert`, `log`,
+   `marquee` or `timer`, `aria-live`, an `output`); what Copilot wrote as the recording ran (its answers, a heading or
+   a button it named, the names it made up, and what's in a part of the page named by one); what another step types;
+   words the screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each
+   visit); what's in a closed dialog.
+5. **`still`:** the page's own words: not in a nav, an aside or its header, not what half the site's pages show, a
+   heading first, no number, on the screen before and after.
+6. **Nothing proves it:** the review lists the step under **Needs you** ("A run can't check this step").
+
+The site's frame is what half its pages show or more: a site is the app's host, a page an address with all its
+screens. The offline walker checks a step the same way (`walker.landed(at, step)`).
 
 ## Details under a line
 
@@ -176,7 +200,7 @@ capture pass runs it before and after a run: Undo, then Set first, then Check.
 
 - chat: Added doesn't list the skill
   From: beat 2
-- chat: "Notes" is picked (Chat | Notes)
+- chat on chat-home: "Notes" is picked (Chat | Notes)
   From: start: beat 1, chat-home
 
 ## Needs you
@@ -197,7 +221,10 @@ capture pass runs it before and after a run: Undo, then Set first, then Check.
   The capture pass sets each one that isn't already, then checks it.
 - **Check**: read-only. Each line is something the screen shows, and none of them clicks anything that changes. With
   the writes' checks come the start state's (`From: start: …`): the settings above, versions ("is version 1.4.9"),
-  what a list of switches holds, the theme each app renders in, and what the demo points at on an app's first screen.
+  what a list of switches holds, the theme each app renders in, and what the demo points at on an app's first screen
+  (not words its captures show differently, like a greeting that changes on each visit). `<app> on <screen>:` names
+  the screen a check is read on, when Scenecast knows it (where a start state was seen, an app's first screen); the
+  capture pass gets there by the plan's read-only steps. Without it, the check reads the app as the run finds it.
 - **Needs you**: what the reset can't do on its own (an undo by hand, or one nobody has tried yet), and a state that a
   later screen shows changed with no step of the plan between: a run can't show it until the plan has that step.
 
@@ -205,7 +232,8 @@ Names come from the captures (the task's title, the skill's name). Copilot can n
 so the capture pass fills in what its own run made.
 
 `packages/ai/reset.mjs`: `resetFor(plan, { walker, packs })`, `formatReset(r)`, `parseReset(text)` (`{ undo, set, checks,
-needs }`: its Undo as a plan). `packages/ai/start.mjs`: `startState(plan, { walker, packs })` (`{ facts, changes }`).
+needs }`: its Undo as a plan; each check `{ app, screen, text, from }`, `screen` null when the line has none).
+`packages/ai/start.mjs`: `startState(plan, { walker, packs })` (`{ facts, changes }`).
 
 ## In code
 
@@ -214,7 +242,10 @@ needs }`: its Undo as a plan). `packages/ai/start.mjs`: `startState(plan, { walk
 [above](#what-proves-a-step-lands-on)), `script`, `differs`. `formatLands()` writes a `lands` back. `say` is
 still the lines' words; `lines` has the same lines with `focus: [{ texts, around, mark, dir, via, on }]`.
 `formatPlan(plan)` writes it back. `writesOf(plan)` lists the approved writes. `packages/ai/make.mjs`: `approve(demo)`
-and `approval(demo)` (whether `plan.md` is still the text that was approved).
+and `approval(demo)` (whether `plan.md` is still the text that was approved). `packages/ai/landing.mjs`:
+`proveLandings(plan, walker, flags)` chooses each step's proof (`chooseProof()`), `holds(screen, lands)` checks one on
+a screen the reader read (`true`, `false`, or `null` for none). `packages/ai/walker.mjs`: `landed(at, step)` (`{ ok,
+why }`), `written(text)`, `unstable(text, app)`.
 
 ## Changes
 

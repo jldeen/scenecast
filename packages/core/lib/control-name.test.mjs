@@ -18,6 +18,7 @@ test('one rule for what\'s a control, its role and its name, the same after a tr
     [el('div', { contenteditable: 'false' }, 'Not editable'), { control: false, role: 'div', name: '' }],
     [el('input', { type: 'hidden', value: 'x' }), { control: false, role: 'textbox', name: '' }],
     [el('input', { type: 'Submit', value: 'Go' }), { control: true, role: 'button', name: 'Go' }],
+    [el('input', { value: 'what was typed' }), { control: true, role: 'textbox', name: '' }],
     [el('div', { role: 'row', tabindex: '-1' }, 'Row'), { control: true, role: 'row', name: 'Row' }],
     [el('div', {}, 'Just words'), { control: false, role: 'div', name: '' }],
     // A field's <label>s, after aria-label and aria-labelledby, before what's in it and its placeholder.
