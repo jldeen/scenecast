@@ -241,8 +241,9 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
   const shots = join(aiDir(demo), 'walk');
   // Every screen it lands on, and each app's start screen, as it is today (local only, under .out): for re-grounding a
-  // plan on the product now. <name>.json: its words and controls; <name>.reads.json.gz: the screen in the reader's
-  // shape, read twice about a second apart ([{ at, docs: [{ key, html }] }, …]).
+  // plan on the product now. <beat>-<step>.json and start-<app>.json: its app, address, title, words and controls;
+  // <name>.reads.json.gz: the screen in the reader's shape, read twice about a second apart
+  // ([{ at, docs: [{ key, html }] }, …]).
   const screensDir = join(aiDir(demo), 'walk-screens');
   rmSync(screensDir, { recursive: true, force: true });
   mkdirSync(screensDir, { recursive: true });
@@ -256,7 +257,10 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     const starts = [];
     for (const a of demo.cfg.apps) {
       const did = await w.home(a.id); const bad = did.find(d => d.why);
-      starts.push({ app: a.id, did, ...(bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await w.startCheck(a.id, plan)) });
+      const sc = bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await w.startCheck(a.id, plan);
+      starts.push({ app: a.id, did, ...sc });
+      const sn = await w.screenNow(a.id).catch(err => ({ error: err.message }));
+      writeFileSync(join(screensDir, `start-${a.id}.json`), JSON.stringify({ start: a.id, status: sc.ok === false ? 'failed' : 'reached', ...(sc.why ? { why: sc.why } : {}), ...sn }, null, 1));
       await keepReads(`start-${a.id}`, a.id);
     }
     seenAt.starts = starts;

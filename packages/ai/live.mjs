@@ -469,7 +469,9 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
   // reading this screen's markup as it is now (each frame's), finds its control as the page does: one control by that
   // exact name, of the same role, in the same frame.
   async function readerAgrees(id, name, role, frame = 'page') {
-    const docs = await cmd('js', { tab: tab(id), code: "const out = []; for (const f of page.frames()) { const main = f === page.mainFrame(); let key = 'main'; if (!main) { try { key = new URL(f.url()).host; } catch (e) { key = 'a frame'; } } out.push({ key, html: await f.content().catch(() => '') }); } return out;" }, 60).catch(() => null);
+    // The page as the reader reads a recorded screen: the recorder's serialization (open shadow roots, popover and
+    // dialog state, form state), the one way a live page is read.
+    const docs = await cmd('js', { tab: tab(id), code: READ_DOCS_SRC }, 90).catch(() => null);
     if (!Array.isArray(docs)) return { ok: false, why: "it couldn't read the screen's markup" };
     let rs; try { rs = readScreen(docs); } catch (e) { return { ok: false, why: `the reader couldn't read the screen (${e.message})` }; }
     const same = (rs.controls || []).filter(c => norm(c.name) === norm(name));
