@@ -79,14 +79,14 @@ export function formatFocus(f) {
 //   control "Name"                           { screen, kind: 'control', text: null, control, state: null }
 //   control "Name" selected|open|on|off      { screen, kind: 'control', text: null, control, state }
 //   box "Name" says "text"                   { screen, kind: 'box', text: null, box, says }
-//   gone "words"                             { screen, kind: 'gone', text: null, gone }
+//   gone "words", still "words"              { screen, kind: 'gone', text: null, gone, still }
 //   (nothing)                                { screen, kind: null, text: null }
 // `text` is only ever the words a run looks for in the page's text.
 const PROOF = {
   words: new RegExp(`^${Q}$`),
   control: new RegExp(`^control\\s+${Q}(?:\\s+(selected|open|on|off))?$`, 'i'),
   box: new RegExp(`^box\\s+${Q}\\s+says\\s+${Q}$`, 'i'),
-  gone: new RegExp(`^gone\\s+${Q}$`, 'i'),
+  gone: new RegExp(`^gone\\s+${Q}(?:\\s*,\\s*still\\s+${Q})?$`, 'i'),
 };
 const isProof = t => Object.values(PROOF).some(re => re.test(t));
 export function parseLands(v) {
@@ -97,7 +97,7 @@ export function parseLands(v) {
   if ((m = PROOF.words.exec(p))) return { screen, kind: 'words', text: q(m, 1) };
   if ((m = PROOF.control.exec(p))) return { screen, kind: 'control', text: null, control: q(m, 1), state: m[4] ? m[4].toLowerCase() : null };
   if ((m = PROOF.box.exec(p))) return { screen, kind: 'box', text: null, box: q(m, 1), says: q(m, 4) };
-  if ((m = PROOF.gone.exec(p))) return { screen, kind: 'gone', text: null, gone: q(m, 1) };
+  if ((m = PROOF.gone.exec(p))) return { screen, kind: 'gone', text: null, gone: q(m, 1), still: q(m, 4) ?? null };
   // Anything else with words in quotes: those words.
   const t = quotes(parts.join(' '))[0] || null;
   return { screen, kind: t ? 'words' : null, text: t };
@@ -109,7 +109,7 @@ export function formatLands(l) {
   const proof = kind === 'words' && l.text ? qt(l.text)
     : kind === 'control' && l.control ? `control ${qt(l.control)}${l.state ? ` ${l.state}` : ''}`
     : kind === 'box' && l.box ? `box ${qt(l.box)} says ${qt(l.says || '')}`
-    : kind === 'gone' && l.gone ? `gone ${qt(l.gone)}` : null;
+    : kind === 'gone' && l.gone ? `gone ${qt(l.gone)}${l.still ? `, still ${qt(l.still)}` : ''}` : null;
   return [l.screen, proof].filter(Boolean).join(' · ');
 }
 function addDetail(at, key, value) {

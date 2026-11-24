@@ -35,7 +35,8 @@ test('what proves a step: words, a control (and its state), a box\'s text, words
     'picker · control "Plugins" selected': { screen: 'picker', kind: 'control', text: null, control: 'Plugins', state: 'selected' },
     'menu · control "More" open': { screen: 'menu', kind: 'control', text: null, control: 'More', state: 'open' },
     'search-typed · box "Search tools by name" says "IQ"': { screen: 'search-typed', kind: 'box', text: null, box: 'Search tools by name', says: 'IQ' },
-    'landing · gone "Delegation of spend authority"': { screen: 'landing', kind: 'gone', text: null, gone: 'Delegation of spend authority' },
+    'landing · gone "Delegation of spend authority", still "Supply Chain Operations"': { screen: 'landing', kind: 'gone', text: null, gone: 'Delegation of spend authority', still: 'Supply Chain Operations' },
+    'landing · gone "Spend policy"': { screen: 'landing', kind: 'gone', text: null, gone: 'Spend policy', still: null },
     'landing · "Fabric IQ · Semantic model"': { screen: 'landing', kind: 'words', text: 'Fabric IQ · Semantic model' },
     'chat-saved': { screen: 'chat-saved', kind: null, text: null },
     '"words only"': { screen: null, kind: 'words', text: 'words only' },
@@ -46,7 +47,7 @@ test('what proves a step: words, a control (and its state), a box\'s text, words
     assert.equal(formatLands(parseLands(text)), text);
   }
   // In a plan, under a step, as any other detail.
-  const plan = '# D\n\n## Beat 1 · B\n\n- Click "Plugins"\n  Lands on: picker · control "Plugins" selected\n- Press Escape\n  Lands on: landing · gone "Plugins"\n';
+  const plan = '# D\n\n## Beat 1 · B\n\n- Click "Plugins"\n  Lands on: picker · control "Plugins" selected\n- Press Escape\n  Lands on: landing · gone "Plugins", still "Operations"\n';
   assert.equal(formatPlan(parsePlan(plan)), plan);
   assert.deepEqual(parsePlan(plan).beats[0].steps.map(s => s.lands.kind), ['control', 'gone']);
 });
