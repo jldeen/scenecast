@@ -33,11 +33,16 @@ jobs:
           offpublic=$(echo "$files" | xargs -r grep -nE '("resolved"|resolved|tarball)[": =]+"?https?://' \
             | grep -vE 'https://(registry\.npmjs\.org|registry\.yarnpkg\.com|pypi\.org|files\.pythonhosted\.org|codeload\.github\.com|github\.com)/' || true)
           if [ -n "$internal$offpublic" ]; then echo "Committed lockfiles must install from the public registry:"; printf '%s\n%s\n' "$internal" "$offpublic" | head -40; exit 1; fi
-      # Pre-release ("daily") ring hosts stay in private app packs, out of this public repository.
+      # Pre-release ring hosts (daily, msit, dogfood, edog, teamsdf, ppe) stay in private app packs, out of this public
+      # repository. Finds host names on Microsoft, Office, Power BI and windows.net domains, dots escaped or not (packs
+      # hold them as regexes), then flags those with a ring marker starting a label or after a dash. Words in prose
+      # aren't host names, so they pass.
       - name: No pre-release ring hosts
         if: runner.os == 'Linux'
         run: |
-          hits=$(git grep -nIE 'daily\.[a-z0-9-]+\.(microsoft\.com|office\.com|cloud\.microsoft)' -- . ':!.github/workflows/ci.yml' || true)
+          host='[a-z0-9-]+(\\*\.[a-z0-9-]+)*\\*\.(microsoft\\*\.com|office\\*\.(com|net)|office365\\*\.com|cloud\\*\.microsoft|powerbi\\*\.com|windows\\*\.net|microsoftonline\\*\.com|sharepoint\\*\.com|live\\*\.com)'
+          hits=$(git grep -noiIE "$host" -- . ':!.github/workflows/ci.yml' | tr -d '\\' \
+            | awk -F: 'tolower($NF) ~ /(^|[.-])(daily|msit|dogfood|edog|teamsdf|ppe)/' || true)
           if [ -n "$hits" ]; then echo "Pre-release ring hosts in the repository:"; echo "$hits" | head -20; exit 1; fi
       - name: Check formatting
         run: |
