@@ -237,7 +237,8 @@ the requests that failed other than by the guard or answered 400 or more, with e
 error shows up. `suspect` lists the steps whose app's page may have been broken today, not by the product, by the
 re-ground's own rule (`regroundPlan` in `packages/ai/reground.mjs`: a held request no pack has reviewed, an answer of
 500 or more for that app, an error the recording doesn't show, or words lost while nothing ran), until the page loads
-again; it compares with the recording, so a demo without one says why instead (`none`).
+again. It compares with the recording, so it covers the steps whose proof names a recorded screen, and a demo
+without a recording says why instead (`none`).
 A demo's `capture.keepBodies` (in its local demo.json) keeps the bodies of the held requests it names in
 `.out/ai/held-bodies.json`, for a person reviewing an allow entry. At a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, drifted (its words changed), unproven (its words were there
