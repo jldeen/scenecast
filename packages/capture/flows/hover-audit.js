@@ -6,6 +6,7 @@
 //         neutral?: [[x, y]], waitMs?, maxS?, snapId?, skipKeys?: [key], max? }
 // skipKeys: controls already audited on another screen of the app ("sel|text"), not hovered again; out.keys are the
 // ones this run hovered. max: at most this many controls.
+// shard: [i, n] this window takes every n-th candidate from the i-th (twin windows of the same screen, side by side).
 const p = ARGS.p || await H.pageFor(ARGS.tab);
 await p.bringToFront();
 let f = p.mainFrame();
@@ -67,7 +68,7 @@ for (let step = 0; step <= steps; step++) {
     ? await ev(only => only.map(m => { const els = [...document.querySelectorAll(m.sel)].filter(e => { const t = (e.innerText || '').replace(/\s+/g, ' ').trim(); return (m.text === undefined || t === m.text) && (m.textStarts === undefined || t.startsWith(m.textStarts)); }); const e = els[m.nth || 0]; if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(r.width / 2, 40)), y: Math.round(r.y + r.height / 2), id: -1, sel: m.sel, text: m.text || m.textStarts || '' }; }).filter(Boolean), ARGS.only)
     : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel });
   const skip = new Set(ARGS.skipKeys || []), skipSels = new Set(ARGS.skipSels || []);
-  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && !skipSels.has(c.sel));
+  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && !skipSels.has(c.sel)).filter((c, k) => !ARGS.shard || k % ARGS.shard[1] === ARGS.shard[0]);
   out.skippedKinds = (out.skippedKinds || 0) + cands.filter(c => skipSels.has(c.sel)).length;
   out.skipped = (out.skipped || 0) + cands.length - todo.length;
   out.steps.push(todo.length);

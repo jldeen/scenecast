@@ -36,6 +36,10 @@
 //   capTab({ open, mark } | { close: mark })   a tab of its own for a moment, in the same signed-in browser under the
 //                                    same guard (Set before: a state set off camera), marked so a lookup by an app's
 //                                    address never takes it for the app's own tab; its events say side: mark
+//   capTwins({ app, n, url } | { close: true })   in this process only (the recorder's side sweeps, record.auto.twins):
+//                                    n windows of the app kept for the recording, each sent to url and loaded, marked
+//                                    twin:<app> (never taken for the app's own tab); → { n, urls } (and .pages, the
+//                                    windows themselves, in this process). close: all of them
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
 //                                    user is active and the screen unlocked (the capture browser has no person)
 //   capLeaveOut({ rules, words, check, shots })   reset.md's Leave out, from here on, in every tab, frame and worker:
@@ -133,7 +137,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   const events = [];
   const at = () => new Date().toISOString();
   const hostOf = u => { try { return new URL(u).host; } catch (e) { return ''; } };
-  const watched = new WeakSet(), sides = new Map(), sideOf = new WeakMap();
+  const watched = new WeakSet(), sides = new Map(), sideOf = new WeakMap(), twins = new Map();
   // A side tab's events (capTab) say so: they're not the app's own tab.
   const push = (p, e) => events.push(sideOf.has(p) ? { ...e, side: sideOf.get(p) } : e);
   const watch = p => {
@@ -418,6 +422,17 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       }
       if (!own) return { on: false, reads: [], total: 0, stopped: null, waiting: null };
       return { on: true, reads: own.reads.slice(c.since || 0), total: own.reads.length, stopped: own.stopped, waiting: own.waiting };
+    },
+    async capTwins(c) {
+      if (c.close) { for (const [, pool] of twins) for (const p of pool) if (!p.isClosed()) await p.close().catch(() => {}); twins.clear(); return { closed: true }; }
+      const mark = `twin:${c.app}`, put = p => p.evaluate(k => { try { sessionStorage.setItem('d1tab', k); } catch (e) {} }, mark).catch(() => {});
+      const pool = (twins.get(c.app) || []).filter(p => !p.isClosed());
+      twins.set(c.app, pool);
+      while (pool.length < c.n) { const p = await cb.open('about:blank'); sideOf.set(p, mark); p.on('framenavigated', f => { if (f === p.mainFrame()) put(p); }); pool.push(p); }
+      const use = pool.slice(0, c.n);
+      await Promise.all(use.map(async p => { await p.goto(c.url, { waitUntil: 'load', timeout: 60000 }).catch(e => log(`twin ${c.app}: ${String(e.message).split('\n')[0]}`)); await put(p); }));
+      // The pages only for the recorder in this process; through the receiver, what they are.
+      return Object.defineProperty({ app: c.app, n: use.length, urls: use.map(p => p.url()) }, 'pages', { value: use, enumerable: false });
     },
     async capTab(c) {
       if (c.close) { const p = sides.get(c.close); sides.delete(c.close); if (p && !p.isClosed()) await p.close().catch(() => {}); return { closed: !!p }; }
