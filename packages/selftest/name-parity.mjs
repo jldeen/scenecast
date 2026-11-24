@@ -1,7 +1,7 @@
 // Names and roles, the reader's against the page's. For every control on every recorded screen of a built replica, the
 // name and role the reader gives it (packages/script/html.mjs: what plans name steps by) and the ones the page code
-// gives it on the served screen (controlOf, naming.mjs, in the page with a page's accessors: what the live walker
-// uses). They have to be the same, or a plan's step could find a different control live, and a write would click it.
+// gives it on the served screen (controlOf in the page, page-naming.mjs: what the live outline and walker use). They
+// have to be the same, or a plan's step could find a different control live, and a write would click it.
 // It also lists the controls the live walker's search skips because they have no size on the page.
 // Offline: the replica's own server, headless Chromium, every request off this machine refused.
 //   node packages/selftest/name-parity.mjs <built demo> [--port 47801] [--out <report.json>]
@@ -11,20 +11,19 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
 import { at } from '@stuntdouble/core/lib/at.mjs';
-import { controlOf } from '@scenecast/script/naming.mjs';
+import { CONTROL_NAME_SRC } from '@stuntdouble/capture/page-naming.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 
 // The reader's walk, in the page: the same elements in the same order (not hidden by an attribute or an inline style,
 // not in an svg; inside aria-hidden or inert, not a control), each named the shared way.
-const PAGE_WALK = `(() => { const controlOf = ${controlOf};
-  const ACC = { tag: e => e.localName, attr: (e, n) => e.getAttribute(n), text: e => e.innerText || '', byId: id => document.getElementById(id) };
+const PAGE_WALK = `(() => { ${CONTROL_NAME_SRC}
   const hiddenEl = e => e.hasAttribute('hidden') || /display\\s*:\\s*none|visibility\\s*:\\s*hidden/i.test(e.getAttribute('style') || '') || e.localName === 'svg' || e.localName === 'head';
   const out = [];
   const walk = (e, aria) => {
     for (const c of e.children) {
       if (hiddenEl(c)) continue;
       const a = aria || c.getAttribute('aria-hidden') === 'true' || c.hasAttribute('inert');
-      if (!a) { const d = controlOf(c, ACC); if (d.control && (d.name || /textbox|searchbox|combobox/.test(d.role))) { const r = c.getBoundingClientRect(); out.push({ role: d.role, name: d.name, zero: !r.width || !r.height }); } }
+      if (!a) { const d = domControl(c); if (d.control && (d.name || /textbox|searchbox|combobox/.test(d.role))) { const r = c.getBoundingClientRect(); out.push({ role: d.role, name: d.name, zero: !r.width || !r.height }); } }
       walk(c, a);
     }
   };
