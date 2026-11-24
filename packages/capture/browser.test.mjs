@@ -79,7 +79,7 @@ test('the read-only guard holds what could write, and only that', () => {
   const list = { ...T, allow: ['/^POST tenant\\.example\\.com\\/catalog\\/search$/ when body /^\\{"search":"","filter":"[^"]*"\\}$/'] };
   const url = 'https://tenant.example.com/catalog/search';
   assert.equal(guardVerdict({ method: 'POST', url, body: '{"search":"","filter":"Type eq \'Model\'"}' }, list), 'pass');
-  assert.equal(guardVerdict({ method: 'POST', url, body: '{"search":"Supply chain","filter":"Type eq \'Model\'"}' }, list), 'hold');
+  assert.equal(guardVerdict({ method: 'POST', url, body: '{"search":"Fabrikam orders","filter":"Type eq \'Model\'"}' }, list), 'hold');
   assert.equal(guardVerdict({ method: 'POST', url }, list), 'hold');
 });
 
@@ -197,25 +197,46 @@ test('the allow entry that let a request through', () => {
 
 test("IQ's picker suggestions: its own scenario, nothing typed (public) or exactly the demo's search (private)", () => {
   const PUB = '/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{"Scenario":\\{"Name":"MicrosoftIQ\\.Web\\.Copilot_Peek"(?![\\s\\S]*"(?:Display)?QueryString"\\s*:\\s*"(?!"))/';
-  const PRIV = '/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{"Scenario":\\{"Name":"MicrosoftIQ\\.Web\\.Copilot_Peek"(?![\\s\\S]*"(?:Display)?QueryString"\\s*:\\s*"(?!"|Supply chain"))/';
+  const PRIV = '/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{"Scenario":\\{"Name":"MicrosoftIQ\\.Web\\.Copilot_Peek"(?![\\s\\S]*"(?:Display)?QueryString"\\s*:\\s*"(?!"|Fabrikam orders"))/';
   const url = 'https://substrate.office.com/search/api/v1/suggestions';
   const v = (allow, body) => guardVerdict({ method: 'POST', url, body }, { allow: [allow] });
   const peek = reqs => JSON.stringify({ Scenario: { Name: 'MicrosoftIQ.Web.Copilot_Peek', Dimensions: [] }, EntityRequests: reqs, TimeZone: 'UTC', LogicalId: 'x', Cvid: 'y' });
   const q = (t, s) => ({ EntityType: t, Query: { QueryString: s } });
-  const empty = peek([q('People', ''), q('Chat', ''), q('TeamsChannel', '')]), typed = peek([q('People', 'Supply chain'), q('File', 'Supply chain')]);
+  const empty = peek([q('People', ''), q('Chat', ''), q('TeamsChannel', '')]), typed = peek([q('People', 'Fabrikam orders'), q('File', 'Fabrikam orders')]);
   for (const a of [PUB, PRIV]) assert.equal(v(a, empty), 'pass');
   assert.equal(v(PRIV, typed), 'pass');
   assert.equal(v(PUB, typed), 'hold');
   const held = [
-    peek([q('People', 'Supply chains')]),
+    peek([q('People', 'Fabrikam orderss')]),
     peek([q('People', ''), q('File', 'x')]),
     JSON.stringify(JSON.parse(empty), null, 1).replace('"Name":', '"Name": '),
     peek([q('People', '')]).replace('"QueryString":""', '"QueryString": "x"'),
     peek([{ EntityType: 'People', Query: { QueryString: '', DisplayQueryString: 'x' } }]),
-    peek([q('People', 'Supply chain\\" or x')]),
+    peek([q('People', 'Fabrikam orders\\" or x')]),
     JSON.stringify({ Scenario: { Name: 'peoplecache' }, EntityRequests: [q('People', '')] }),
     null,
   ];
   for (const b of held) for (const a of [PUB, PRIV]) assert.equal(v(a, b), 'hold', String(b));
   assert.equal(v(PUB, peek([{ EntityType: 'People', Query: { QueryString: null } }])), 'pass');
+});
+
+test("Copilot's server functions pass by the action key's own value, and only its reads; list_plugins only", () => {
+  const FN = '/^POST copilot\\.cloud\\.microsoft\\/_serverFn\\/[0-9a-f]{64}$/ when body /^\\{"t":\\{"t":10,"i":0,"p":\\{"k":\\["data"\\],"v":\\[\\{"t":10,"i":1,"p":\\{"k":\\[(?:"action"(?:,"[A-Za-z]+")*\\],"v":\\[\\{"t":1,"s":"(?:GetUserPinnedApps|GetAppLauncherCoreApps|GetCurrentTheme|RefreshNavPane|RefreshNeptuneEntitlements)"\\}|"enableCache","source","action"\\],"v":\\[\\{"t":2,"s":\\d\\},\\{"t":1,"s":"[A-Za-z]+"\\},\\{"t":1,"s":"GetTasksFlyout"\\}|"filterThreadType","cursor","action"\\],"v":\\[\\{"t":1,"s":"[a-z|]+"\\},\\{"t":(?:1|2),"s":(?:\\d|"[^"]*")\\},\\{"t":1,"s":"GetUnifiedTasks"\\})/';
+  const EL = '/^POST substrate\\.office\\.com\\/m365Copilot\\/EventListener\\/Client$/ when body /^\\{"ConversationId":"[^"]*","clientData":\\{"Verb":"list_plugins","Data":\\{[^{}]*\\},"MessageId":"[^"]*","VisualElementId":"[^"]*"\\}\\}$/';
+  const fnUrl = 'https://copilot.cloud.microsoft/_serverFn/' + 'a'.repeat(64), elUrl = 'https://substrate.office.com/m365Copilot/EventListener/Client';
+  const v = (url, allow, body) => guardVerdict({ method: 'POST', url, body }, { allow: [allow] });
+  const S = x => ({ t: 1, s: x }), N = x => ({ t: 2, s: x }), obj = (k, vals) => ({ t: 10, i: 2, p: { k, v: vals }, o: 0 });
+  const ser = (k, vals) => JSON.stringify({ t: { t: 10, i: 0, p: { k: ['data'], v: [{ t: 10, i: 1, p: { k, v: vals }, o: 0 }] }, o: 0 }, f: 127, m: [] });
+  for (const b of [ser(['action'], [S('GetCurrentTheme')]), ser(['action'], [S('RefreshNeptuneEntitlements')]),
+    ser(['action', 'skipNotebooks', 'state'], [S('RefreshNavPane'), N(3), obj(['accountInfo'], [S('someone')])]),
+    ser(['enableCache', 'source', 'action'], [N(1), S('refreshNav'), S('GetTasksFlyout')]),
+    ser(['filterThreadType', 'cursor', 'action'], [S('taskchat|coworkchat'), N(1), S('GetUnifiedTasks')]),
+    ser(['filterThreadType', 'cursor', 'action'], [S('taskchat'), S('next-page'), S('GetUnifiedTasks')])]) assert.equal(v(fnUrl, FN, b), 'pass', b);
+  for (const b of [ser(['action'], [S('DeleteConversation')]), ser(['action', 'state'], [S('PinChat'), obj(['x'], [S('GetCurrentTheme')])]),
+    ser(['action', 'enableCache', 'source'], [S('GetTasksFlyout'), N(1), S('refreshNav')]), null]) assert.equal(v(fnUrl, FN, b), 'hold', String(b));
+  assert.equal(v('https://copilot.cloud.microsoft/_serverFn/abc', FN, ser(['action'], [S('GetCurrentTheme')])), 'hold');
+  const el = (verb, data, conv = '') => JSON.stringify({ ConversationId: conv, clientData: { Verb: verb, Data: data, MessageId: '', VisualElementId: '' } });
+  assert.equal(v(elUrl, EL, el('list_plugins', { skipFunctions: true, skipUnacquired: true })), 'pass');
+  assert.equal(v(elUrl, EL, el('list_plugins', { skipFunctions: true }, 'c1')), 'pass');
+  for (const b of [el('toggle_plugin', { id: 'p' }), el('list_plugins', { nested: { x: 1 } }), null]) assert.equal(v(elUrl, EL, b), 'hold', String(b));
 });
