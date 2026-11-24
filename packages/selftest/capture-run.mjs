@@ -189,6 +189,10 @@ try {
   check('the start waited for the app\'s own call to its named service, and it answered', (rj.services || []).some(n => n.service === "Tasks' catalog service" && n.status === 200 && n.app === 'tasks'), JSON.stringify(rj.services));
   const L = rj.landings || [], wroteAt = L.findIndex(l => l.wrote);
   check('each landing proven on the live page, with its strength; the write only after strong ones', L.length >= 4 && L.every(l => ['strong', 'weak', 'none'].includes(l.strength) && l.got) && wroteAt === 2 && L.slice(0, wroteAt).every(l => l.strength === 'strong') && (rj.needsYou || []).length === 0, JSON.stringify(L.map(l => [l.step, l.strength, l.basis, l.got && l.got.text, l.why])));
+  // One read per screen for all its lines, and Set first read before it sets: before, the check, Set first's page,
+  // Sync's own read as it's set, the check again; after, Set first's page and the check (Sync is already off).
+  times.reset = { before: [rj.reset.before && rj.reset.before.secs, rj.reset.before && rj.reset.before.reads], after: [rj.reset.after && rj.reset.after.secs, rj.reset.after && rj.reset.after.reads] };
+  check('the reset reads each screen once for all its lines, and sets only what isn\'t so', rj.reset.before && rj.reset.before.reads === 4 && rj.reset.after && rj.reset.after.reads === 2, JSON.stringify(times.reset));
   check('the reset before: the leftover task deleted, Sync turned off, then checked', rj.reset && rj.reset.before && rj.reset.before.ok && rj.reset.before.did.join('|') === 'tasks: Click "Delete Call Kestrel"|tasks: Click "Sync"', JSON.stringify(rj.reset && rj.reset.before));
   const w = (rj.writes || [])[0] || {};
   check('the approved write ran, and run.json keeps what it made (for the undo)', w.write === 'new-task' && w.result && w.result.ids.length === 1 && /^\d{6}$/.test(w.result.ids[0]) && w.result.typed === 'Call Kestrel', JSON.stringify(w));
