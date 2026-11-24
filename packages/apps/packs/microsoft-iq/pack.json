@@ -187,11 +187,13 @@
   "guard": {
     "allow": [
       "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/",
-      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/"
+      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/",
+      "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{\"Scenario\":\\{\"Name\":\"MicrosoftIQ\\.Web\\.Copilot_Peek\"(?![\\s\\S]*\"(?:Display)?QueryString\"\\s*:\\s*\"(?!\"))/"
     ],
     "why": {
       "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review).",
-      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/": "IQ's add picker lists the Azure AI Search services for its Foundry IQ tab; Azure Resource Graph only reads, by design; held, the Foundry IQ tab says \"could not be loaded\" (Nov 23 review)."
+      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/": "IQ's add picker lists the Azure AI Search services for its Foundry IQ tab; Azure Resource Graph only reads, by design; held, the Foundry IQ tab says \"could not be loaded\" (Nov 23 review).",
+      "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{\"Scenario\":\\{\"Name\":\"MicrosoftIQ\\.Web\\.Copilot_Peek\"(?![\\s\\S]*\"(?:Display)?QueryString\"\\s*:\\s*\"(?!\"))/": "IQ's add picker (and its Copilot peek) lists the account's people, chats, channels, files, sites, messages and meetings with it, with nothing typed: a listing only reads. Only IQ's scenario and empty queries pass (a typed search stays held). Held, the picker has no People, Chats or Channels (Nov 24 checks)."
     }
   }
 }

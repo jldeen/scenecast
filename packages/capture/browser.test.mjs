@@ -194,3 +194,28 @@ test('the allow entry that let a request through', () => {
   assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":""}' }, allow), allow[1]);
   assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":"x"}' }, allow), null);
 });
+
+test("IQ's picker suggestions: its own scenario, nothing typed (public) or exactly the demo's search (private)", () => {
+  const PUB = '/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{"Scenario":\\{"Name":"MicrosoftIQ\\.Web\\.Copilot_Peek"(?![\\s\\S]*"(?:Display)?QueryString"\\s*:\\s*"(?!"))/';
+  const PRIV = '/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{"Scenario":\\{"Name":"MicrosoftIQ\\.Web\\.Copilot_Peek"(?![\\s\\S]*"(?:Display)?QueryString"\\s*:\\s*"(?!"|Supply chain"))/';
+  const url = 'https://substrate.office.com/search/api/v1/suggestions';
+  const v = (allow, body) => guardVerdict({ method: 'POST', url, body }, { allow: [allow] });
+  const peek = reqs => JSON.stringify({ Scenario: { Name: 'MicrosoftIQ.Web.Copilot_Peek', Dimensions: [] }, EntityRequests: reqs, TimeZone: 'UTC', LogicalId: 'x', Cvid: 'y' });
+  const q = (t, s) => ({ EntityType: t, Query: { QueryString: s } });
+  const empty = peek([q('People', ''), q('Chat', ''), q('TeamsChannel', '')]), typed = peek([q('People', 'Supply chain'), q('File', 'Supply chain')]);
+  for (const a of [PUB, PRIV]) assert.equal(v(a, empty), 'pass');
+  assert.equal(v(PRIV, typed), 'pass');
+  assert.equal(v(PUB, typed), 'hold');
+  const held = [
+    peek([q('People', 'Supply chains')]),
+    peek([q('People', ''), q('File', 'x')]),
+    JSON.stringify(JSON.parse(empty), null, 1).replace('"Name":', '"Name": '),
+    peek([q('People', '')]).replace('"QueryString":""', '"QueryString": "x"'),
+    peek([{ EntityType: 'People', Query: { QueryString: '', DisplayQueryString: 'x' } }]),
+    peek([q('People', 'Supply chain\\" or x')]),
+    JSON.stringify({ Scenario: { Name: 'peoplecache' }, EntityRequests: [q('People', '')] }),
+    null,
+  ];
+  for (const b of held) for (const a of [PUB, PRIV]) assert.equal(v(a, b), 'hold', String(b));
+  assert.equal(v(PUB, peek([{ EntityType: 'People', Query: { QueryString: null } }])), 'pass');
+});
