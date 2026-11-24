@@ -255,8 +255,9 @@ test('a list framed the way she shows one: its heading and first step; a section
 });
 
 test('a landing proves its step: new words, a control\'s state, a control only it has, words gone with the page\'s own still there; numbers last', () => {
-  // Screens as the reader reads them: items (with the reader's marks) and controls.
-  const sc = (items, controls = [], headings = []) => ({ headings, controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
+  // Screens as the reader reads them: items (with the reader's marks) and controls. Each starts with a skip link, the
+  // app's chrome: it never proves a step, and never shows the page is still there.
+  const sc = (items, controls = [], headings = []) => ({ headings, controls, items: [{ text: 'Skip to main content', role: 'link', tag: 'a' }, ...items].map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
   const S = {
     page: sc(['Operations', { text: 'Operations', nav: true }, 'Our numbers', '17 curated here', 'Add content'], [{ role: 'tab', name: 'Agents', selected: true }, { role: 'tab', name: 'Plugins', selected: false }]),
     // Words a run can't count on, all new here: a time, a toast, a date, a shortcut's keys, what Copilot wrote, a

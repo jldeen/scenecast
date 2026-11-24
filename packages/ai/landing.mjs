@@ -79,6 +79,8 @@ function frameOf(walker, app) {
 }
 // A number that can change: not one in a name that only identifies (#2, PO-1001).
 const numbered = t => /\d/.test(String(t).replace(/#\d+\b|\b[a-z]{1,6}-\d{2,}\b/gi, ''));
+// A skip link ("Skip to main content"): the app's chrome, on every one of its pages, not what the page says.
+const SKIP = /^skip (?:to|navigation|nav)\b/i;
 // Words that show only inside a message (an article: a chat message, a post, a comment), where a run can't tell the
 // app's words from what Copilot wrote (a review comment's heading): every innermost item holding them is in one.
 const within = (b, a) => !!(a.box && b.box) && a.box[0] < b.box[0] && b.box[2] <= a.box[2];
@@ -148,7 +150,7 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   const lines = items.filter(i => i.kind === 'text').map(i => i.text), labels = items.filter(i => i.kind !== 'text').map(i => i.text);
   const heads = (after.headings || []).filter(h => !bad.has(pnorm(h)));
   // The page's own words before its frame's: what most of the app's screens show, or only its nav, header or aside.
-  const framed = t => { const n = pnorm(t), at = all.filter(i => pnorm(i.text) === n); return frame.has(n) || (at.length > 0 && at.every(i => i.nav)); };
+  const framed = t => { const n = pnorm(t), at = all.filter(i => pnorm(i.text) === n); return frame.has(n) || SKIP.test(t) || (at.length > 0 && at.every(i => i.nav)); };
   const ranked = [
     ...heads.filter(t => count(t) >= 2 && t.length < 70),
     ...lines.filter(t => count(t) >= 2 && t.length < 70),
@@ -222,12 +224,12 @@ function typing(s, from, after, before, walker, live = null) {
 }
 
 // Words that show the page is still the one it was, with only something closed: the page's own (not its frame: a nav,
-// an aside, its header), a heading first, no number, on the screen before and after, and not also in its frame (a
-// sidebar that lists the page by the same name proves only that it's still the app).
+// an aside, its header, a skip link), a heading first, no number, on the screen before and after, and not also in its
+// frame (a sidebar that lists the page by the same name proves only that it's still the app).
 function stillFor(after, before, frame, stable) {
   const nav = pnorm(shows(after).filter(i => i.nav).map(i => i.text).join('\n'));
   const own = shows(after).filter(i => !i.nav && !i.live && !i.time);
-  const ok = t => { const n = pnorm(t); return n.length >= 4 && t.length < 60 && !numbered(t) && stable(t) && !frame.has(n) && !nav.includes(n) && before.every(b => pageWords(b).includes(n)); };
+  const ok = t => { const n = pnorm(t); return n.length >= 4 && t.length < 60 && !numbered(t) && !SKIP.test(t) && stable(t) && !frame.has(n) && !nav.includes(n) && before.every(b => pageWords(b).includes(n)); };
   const heads = own.filter(i => i.role === 'heading').map(i => i.text);
   const short = own.filter(i => count(i.text) >= 2 && count(i.text) <= 4).map(i => i.text);
   const longer = own.filter(i => count(i.text) >= 2 && count(i.text) <= 8).map(i => i.text);

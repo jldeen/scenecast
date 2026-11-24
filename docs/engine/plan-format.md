@@ -142,8 +142,8 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
    a button it named, the names it made up, and what's in a part of the page named by one); what another step types;
    words the screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each
    visit); what's in a closed dialog.
-6. **`still`:** the page's own words: not in a nav, an aside or its header, not what half the site's pages show, a
-   heading first, no number, on the screen before and after.
+6. **`still`:** the page's own words: not in a nav, an aside or its header, not a skip link ("Skip to main content"),
+   not what half the site's pages show, a heading first, no number, on the screen before and after.
 7. **Nothing proves it:** the review lists the step under **Needs you** ("A run can't check this step").
 
 The site's frame is what half its pages show or more: a site is the app's host, a page an address with all its
