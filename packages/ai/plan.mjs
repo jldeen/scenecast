@@ -47,7 +47,8 @@ function splitDots(s) {
   out.push(cur.trim());
   return out.filter(Boolean);
 }
-const quotes = s => [...String(s).matchAll(/["“]([^"“”]+)["”]/g)].map(m => m[1]);
+// Words in quotes: “…” may hold straight quotes (a quote inside a quote), as Lands on's may.
+const quotes = s => [...String(s).matchAll(/“([^”]+)”|"([^"]+)"|["“]([^"“”]+)["”]/g)].map(m => m[1] ?? m[2] ?? m[3]);
 
 // A Focus detail: '"words"', '"a", "b"' or 'the card around "words"', then " · arrow sw", " · via Click "x"",
 // " · on <screen>".
@@ -66,7 +67,7 @@ export function parseFocus(spec) {
   return f;
 }
 export function formatFocus(f) {
-  const list = (f.texts || []).map(t => `"${t}"`).join(', ');
+  const list = (f.texts || []).map(qt).join(', ');
   let s = f.around && list ? `the ${f.around} around ${list}` : list || f.what || '';
   if (f.mark === 'arrow') s += ` · arrow${f.dir ? ' ' + f.dir : ''}`;
   if (f.via) s += ` · via ${formatStep(f.via)}`;

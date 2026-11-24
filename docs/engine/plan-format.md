@@ -154,6 +154,8 @@ screens. The offline walker checks a step the same way (`walker.landed(at, step)
 | `"a", "b"` | The box around all of them. |
 | `the card around "words"` | The card, row, list or section holding those words (`card`, `row`, `list`, `item`, `section`, `button`, `pane`). |
 
+Words that hold a straight quote go in curly ones: `“Under our agreement, "the supplier pays."”`.
+
 Then, each after ` · `: `arrow` (with `n`, `s`, `e`, `w`, `ne`, `nw`, `se` or `sw`, where its tail goes) instead of a
 rectangle; `via <step>` for a point one click or hover away (⌥F takes that step first, as `via` in
 [flow-format.md](flow-format.md#focus-points-focusmjs)); `on <screen>` when the line's screen is known.
