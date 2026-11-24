@@ -313,8 +313,9 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         (GET /api/session) and sends it as Authorization; deleting a task without it is refused (401), so an undo by
 //         the API has to use the page's own session. ?signin=<ms>&tid=<tenant id>: the page keeps a sign-in library's
 //         account key for that tenant (MSAL's shape) after that many ms (never: none), for the capture start's wait.
-//   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own: "Pin note" and "Unpin
-//         note" post to it, for a write inside a frame.
+//   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
+//         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
+//         API undo that has to go from that frame.
 const tasksPage = (port, notesPort) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
@@ -367,15 +368,18 @@ const notesPage = () => `<!doctype html><html lang="en"><head><meta charset="utf
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:8px;color:#1f2328} button{font:inherit;padding:4px 10px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;cursor:pointer}
 </style></head><body><span id="state" role="status"></span> <button aria-label="Pin note" id="pin">Pin note</button> <button aria-label="Unpin note" id="unpin">Unpin note</button>
 <script>
-const show = st => { document.getElementById('state').textContent = st.pinned ? 'Note is pinned' : 'Nothing pinned'; };
-const load = () => fetch('/api/note').then(r => r.json()).then(show);
-for (const [id, path] of [['pin', '/api/pin'], ['unpin', '/api/unpin']]) document.getElementById(id).addEventListener('click', async () => { await fetch(path, { method: 'POST' }).catch(() => {}); await load(); });
+let AUTH = '', pinging = false;
+const session = fetch('/api/session').then(r => r.json()).then(j => { AUTH = 'Bearer ' + j.token; }).catch(() => {});
+const call = (path, method) => session.then(() => fetch(path, { method: method || 'GET', headers: { authorization: AUTH } }));
+const show = st => { document.getElementById('state').textContent = st.pinned ? 'Note is pinned' : 'Nothing pinned'; if (st.ping && !pinging) { pinging = true; setInterval(() => call('/api/seen', 'POST').catch(() => {}), 150); } };
+const load = () => call('/api/note').then(r => r.json()).then(show);
+for (const [id, path] of [['pin', '/api/pin'], ['unpin', '/api/unpin']]) document.getElementById(id).addEventListener('click', async () => { await call(path, 'POST').catch(() => {}); await load(); });
 load();
 </script></body></html>`;
 
 export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
-  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false };
-  const token = Math.random().toString(36).slice(2);
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [] };
+  const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
   const log = [];
   const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
   const send = (s, code, type, out) => { s.writeHead(code, { 'content-type': type }); s.end(out); };
@@ -404,15 +408,28 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     const path = q.url.split('?')[0];
     if (path !== '/favicon.ico') log.push(`${q.method} notes${path}`);
     if (q.method === 'GET' && path === '/') return send(s, 200, 'text/html; charset=utf-8', notesPage());
-    if (q.method === 'GET' && path === '/api/note') return send(s, 200, 'application/json', JSON.stringify({ pinned: st.pinned }));
-    if (q.method === 'POST' && (path === '/api/pin' || path === '/api/unpin')) { await body(q); st.pinned = path === '/api/pin'; return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token: notesToken }));
+    if (/^\/api\/(note|pin|unpin|seen)$/.test(path) && q.headers.authorization !== `Bearer ${notesToken}`) { log[log.length - 1] += ' 401'; return send(s, 401, 'application/json', '{"error":"no session"}'); }
+    if (q.method === 'GET' && path === '/api/note') return send(s, 200, 'application/json', JSON.stringify({ pinned: st.pinned, ping: st.ping }));
+    if (q.method === 'POST' && path === '/api/seen') { await body(q); st.seen.push(Date.now()); return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && (path === '/api/pin' || path === '/api/unpin')) {
+      await body(q);
+      const t0 = Date.now();
+      if (st.ping && path === '/api/unpin') await new Promise(r => setTimeout(r, 1500));
+      st.pinned = path === '/api/pin';
+      if (path === '/api/unpin') st.unpins.push([t0, Date.now()]);
+      return send(s, 200, 'application/json', '{}');
+    }
     send(s, 404, 'text/plain', 'not found');
   }).listen(notesPort, '127.0.0.1');
   return {
     url: `http://127.0.0.1:${port}/`, help: `http://localhost:${port}/help`, notes: `127.0.0.1:${notesPort}`, log,
-    state: () => ({ ...view(), refreshes: st.refreshes, archives: st.archives, pinned: st.pinned }),
+    state: () => ({ ...view(), refreshes: st.refreshes, archives: st.archives, pinned: st.pinned, seen: st.seen.slice(), unpins: st.unpins.slice() }),
     // What an earlier run could have left: a task, Sync on, a pinned note.
     seed: ({ tasks = [], sync = false, next, pinned = false } = {}) => { if (next) st.next = next; st.tasks = tasks.map(name => ({ id: st.next++, name })); st.sync = sync; st.pinned = pinned; },
+    // The notes panel posts /api/seen every 150 ms while it's open, and Unpin takes 1.5 s: the app's own non-reads to
+    // a host while an API undo's call to it is open.
+    notePing: on => { st.ping = !!on; st.seen = []; st.unpins = []; },
     close: () => { server.close(); notes.close(); },
   };
 }

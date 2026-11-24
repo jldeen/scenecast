@@ -23,7 +23,7 @@
 //   cb.twins(app | url, n, opts) → Page[]          n windows of one app at once, for side sweeps in parallel
 //   cb.probe(page) → { raf, timer250, fonts, dark, hidden, size, screen, dpr }
 //   cb.signedIn(apps) → { apps: [{ id, at: 'app' | 'signin' | 'blocked', host, secs }], cookies }
-//   cb.guard({ hosts, allow, mode }) → { pass(fn, { hosts }), counts(), held(), stop() }
+//   cb.guard({ hosts, allow, mode }) → { pass(fn, { hosts, method?, url? }), counts(), held(), stop() }
 //   cb.pinAccount({ loginHint, domainHint }) → { pinned(), stop() }   no account picker at Entra's sign-in
 //   cb.tenantsOf({ id: page }) → { id: [tenant ids] }                 what each page is signed in to
 //   cb.info(), cb.cpu(), cb.close()
@@ -114,6 +114,18 @@ export const cookieExpiries = cookies => cookies.filter(c => AUTH_COOKIE.test(c.
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?$/i;
 const hostIs = (host, h) => { const bare = host.replace(/:\d+$/, ''); return host === h || bare === h || bare.endsWith('.' + h); };
+// What a planned write or an API undo opened, for one request: its hosts, and when given its method and exact address
+// (an API undo opens that one call, not its host). Never every host.
+export function openFor(open, u, method) {
+  return (open || []).some(o => Array.isArray(o.hosts) && o.hosts.some(h => hostIs(u.host, h)) && (!o.method || o.method === String(method).toUpperCase()) && (!o.url || o.url === u.href));
+}
+// The origin of the page or frame that sent a request: its Origin, else its Referer's (a same-origin GET has no Origin).
+export function senderOrigin(headers) {
+  const get = k => headers && (headers[k] || headers[k.toLowerCase()]);
+  const o = get('Origin');
+  if (o && o !== 'null') return o;
+  try { return new URL(get('Referer')).origin; } catch (e) { return null; }
+}
 export function guardVerdict({ method, url, body = null }, { hosts = null, allow = [], local = false } = {}) {
   const m = String(method || 'GET').toUpperCase();
   if (READS.has(m)) return 'pass';
@@ -540,13 +552,15 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   async function guard({ hosts = null, allow = [], mode: gm = 'hold', local = false } = {}) {
     if (guarding) await guarding.stop();
     const st = { open: [], counts: {}, held: [], passed: [], authFor: null, auth: null };
-    const passing = u => st.open.some(o => !o || o.some(h => hostIs(u.host, h)));
+    // What's open: a planned write's hosts, or one call (its method and exact address). Never every host.
+    const passing = (u, method) => openFor(st.open, u, method);
     const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData, headers }, url) => {
       let u = null; try { u = new URL(url); } catch (x) {}
-      // An API undo's session: the Authorization the page itself sends to that host, kept in memory for the one call.
-      if (st.authFor && u && st.authFor.test(u.host)) { const a = headers && (headers.Authorization || headers.authorization); if (a) st.auth = { origin: u.origin, host: u.host, value: a }; }
+      // An API undo's session: the Authorization the page itself sends to that host, kept in memory for the one call,
+      // and which page or frame sent it (the call goes from there: the API's CORS rules allow the app's own frame).
+      if (st.authFor && u && st.authFor.test(u.host)) { const a = headers && (headers.Authorization || headers.authorization); if (a) st.auth = { origin: u.origin, host: u.host, value: a, from: senderOrigin(headers) }; }
       let v = guardVerdict({ method, url, body: postData }, { hosts, allow, local }), by = v === 'pass' ? 'allowed' : null;
-      if (v === 'hold' && u && passing(u)) { v = 'pass'; by = 'a planned write'; }
+      if (v === 'hold' && u && passing(u, method)) { v = 'pass'; by = 'a planned write'; }
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
       st.counts[k] = (st.counts[k] || 0) + 1;
       if (v === 'hold') st.held.push({ method, host: u && u.host, path: u ? pathShape(u.pathname) : '', at: new Date().toISOString(), held: gm === 'hold' });
@@ -557,7 +571,13 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       return null;
     } });
     guarding = {
-      async pass(fn, { hosts: only = null } = {}) { const o = only; st.open.push(o); try { return await fn(); } finally { st.open.splice(st.open.indexOf(o), 1); } },
+      // Open for fn's while: those hosts (a planned write), or with method and url, that one call only. No hosts: refused.
+      async pass(fn, { hosts = null, method = null, url = null } = {}) {
+        if (!Array.isArray(hosts) || !hosts.length) throw new Error('the guard opens only for named hosts');
+        const o = { hosts, method: method ? String(method).toUpperCase() : null, url };
+        st.open.push(o);
+        try { return await fn(); } finally { st.open.splice(st.open.indexOf(o), 1); }
+      },
       counts: () => ({ ...st.counts }),
       held: () => st.held.slice(),
       passed: () => st.passed.slice(),

@@ -3,7 +3,8 @@
 //   capInfo()                       { capture: true, mode }
 //   capGuard({ hosts, allow, mode }) the read-only guard on (browser.mjs guard): every request that isn't a read,
 //                                    to a guarded host, held before it leaves; mode 'watch' only logs
-//   capOpen({ hosts }) → { id }     a planned write's way through, for its one step; capClose({ id })
+//   capOpen({ hosts }) → { id }     a planned write's way through, for its one step, on those hosts (none: refused,
+//                                    { id: null, refused }); capClose({ id })
 //   capGuardOff()
 //   capLog({ since })               what the guard held (method, host, path shape; never a body), from `since`, and every
 //                                   non-read it let through (passed: method, host, path shape, by: allowed | a planned write)
@@ -15,12 +16,25 @@
 //   capApi({ tab, open, host | hostPattern, method, path, body })
 //                                   an API undo in the app's own signed-in session: its page opened (a read), the
 //                                   Authorization the page sends to that host caught (in memory, for the one call,
-//                                   never written), then the call from the page, the guard open for that host and that
-//                                   call only → { ok, status, method, host, path } | { ok: false, why }
+//                                   never written), then the call from the page or frame that made the app's own
+//                                   call, the guard open for that call only (its method and exact address). path:
+//                                   already filled and encoded; one that leaves the origin or that the address would
+//                                   change (dot segments, a backslash) is refused
+//                                   → { ok, status, method, host, path, from } | { ok: false, why }
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
 //                                    user is active and the screen unlocked (the capture browser has no person)
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+const originOf = u => { try { return new URL(u).origin; } catch (e) { return null; } };
+// An API undo's address: path on origin, only when it's a plain path there that a URL parser leaves as it is (no dot
+// segments, backslash, second origin or fragment). Else null.
+export function apiTarget(path, origin) {
+  const s = String(path || '');
+  if (!/^\//.test(s)) return null;
+  let t; try { t = new URL(s, origin); } catch (e) { return null; }
+  return t.origin === origin && t.pathname + t.search === s && !t.hash ? t : null;
+}
 
 export function hostOps(cb, { log = () => {}, base = null } = {}) {
   const events = [];
@@ -62,12 +76,13 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     },
     async capOpen(c) {
       if (!guard) return { id: null };
+      if (!Array.isArray(c.hosts) || !c.hosts.length) return { id: null, refused: 'a write opens the guard only on named hosts' };
       const id = `w${++n}`;
       let close;
       const opened = new Promise(r => { close = r; });
       opens.set(id, close);
-      guard.pass(() => opened, { hosts: c.hosts || null });
-      log(`guard open for one write (${id}): ${(c.hosts || ['every host']).join(', ')}`);
+      guard.pass(() => opened, { hosts: c.hosts });
+      log(`guard open for one write (${id}): ${c.hosts.join(', ')}`);
       return { id };
     },
     async capClose(c) { const close = opens.get(c.id); if (close) { close(); opens.delete(c.id); } return { closed: !!close }; },
@@ -86,14 +101,24 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
         for (const t0 = Date.now(); !g.peekAuth() && Date.now() - t0 < (c.waitS || 20) * 1000;) await new Promise(r => setTimeout(r, 250));
         const auth = g.takeAuth();
         if (!auth) return { ok: false, why: `the page made no signed-in call to ${c.hostPattern || c.host}` };
+        // The address: the path on the origin the session came from, exactly as given (nothing a URL parser would
+        // change, nowhere else).
+        const target = apiTarget(c.path, auth.origin);
+        if (!target) return { ok: false, why: `"${c.path}" isn't a plain path on ${auth.host}` };
+        const method = String(c.method || '').toUpperCase();
+        if (!/^(DELETE|PATCH|POST|PUT)$/.test(method)) return { ok: false, why: `an API undo is DELETE, PATCH, POST or PUT, not "${c.method}"` };
+        // From the page or frame that made the app's own call, as the app does (the API's CORS rules allow that one;
+        // IQ's API answers its Power BI frame, not the portal around it), with the browser's own credentials mode.
+        const frame = (auth.from && p.frames().find(f => originOf(f.url()) === auth.from)) || p.mainFrame();
         let close; const opened = new Promise(r => { close = r; });
-        g.pass(() => opened, { hosts: [auth.host] });
+        g.pass(() => opened, { hosts: [auth.host], method, url: target.href });
         try {
-          const r = await p.evaluate(async ({ url, method, auth, body }) => {
-            try { const res = await fetch(url, { method, credentials: 'include', headers: { authorization: auth, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: res.status }; } catch (e) { return { error: String((e && e.message) || e) }; }
-          }, { url: auth.origin + c.path, method: c.method, auth: auth.value, body: c.body || null });
-          log(`API undo: ${c.method} ${auth.host}${String(c.path).replace(/[0-9a-f-]{16,}|\d{4,}/gi, '{id}')}: ${r.status || r.error}`);
-          return r.status ? { ok: r.status >= 200 && r.status < 300, status: r.status, method: c.method, host: auth.host, path: c.path } : { ok: false, why: r.error };
+          const r = await frame.evaluate(async ({ url, method, auth, body }) => {
+            try { const res = await fetch(url, { method, headers: { authorization: auth, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: res.status }; } catch (e) { return { error: String((e && e.message) || e) }; }
+          }, { url: target.href, method, auth: auth.value, body: c.body || null });
+          const from = hostOf(frame.url());
+          log(`API undo: ${c.method} ${auth.host}${String(c.path).replace(/[0-9a-f-]{16,}|\d{4,}/gi, '{id}')} from ${from}: ${r.status || r.error}`);
+          return r.status ? { ok: r.status >= 200 && r.status < 300, status: r.status, method, host: auth.host, path: c.path, from } : { ok: false, why: r.error, from };
         } finally { close(); }
       } finally { g.watchAuth(null); }
     },
