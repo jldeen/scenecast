@@ -15,7 +15,9 @@
 // about). An app pack's `writes` (packages/apps, when it lands) can give a write its exact undo; without one, the undo
 // is the plain opposite, in words. Writes that can't be undone (a deletion, a sent message to someone else) are listed
 // under "Needs you". A state her script says is already so when a later screen shows it ("they're already on"), with
-// no step that makes it, is set off camera just before that step (Set before), when the app pack can set it.
+// no step that makes it, is set off camera just before that step (Set before), when the app pack can set it. What she
+// leaves out of the replica (Leave out: an app's own data the capture browser filters before the page draws it) is
+// hers: made again, reset.md keeps it word for word.
 import { formatStep, parsePlan } from './plan.mjs';
 import { startState, setterOf } from './start.mjs';
 
@@ -136,7 +138,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
       const appTitle = norm(((walker.apps || []).find(a => a.id === app) || {}).title || app);
       // Not words its captures show differently (a greeting that changes on each visit): a run can't count on them.
       const shown = [...new Set(said)].filter(t => t.split(' ').length <= 6 && t.length <= 48 && !/^(show|see|view|open|add|go|back|more)\b/i.test(t) && !norm(t).includes(appTitle) && !(walker.unstable && walker.unstable(t, app)))
-        .filter(t => { const it = sc.items.find(i => norm(i.text) === norm(t)); return it && !/^(heading|tab|menuitem|switch|checkbox|radio|textbox|searchbox|combobox)$/.test(it.role); });
+        .filter(t => { const it = sc.items.find(i => norm(i.text) === norm(t)); return it && !it.left && !/^(heading|tab|menuitem|switch|checkbox|radio|textbox|searchbox|combobox)$/.test(it.role); });
       for (const t of shown.slice(0, 3)) out.checks.push({ app, screen: sig, text: `shows "${t}"`, from: 'what the demo points at on its first screen' });
     }
     // Her script says it's already so ("they're already on"): the capture pass sets it just before the step whose
@@ -266,6 +268,7 @@ export function formatReset(r) {
     for (const s of b.items) setLines(s);
     out.push('');
   });
+  if (r.leaveOutText) out.push(r.leaveOutText, '');
   if (r.checks.length) {
     out.push('## Check', '', '<!-- Read-only: each line is something the screen shows. -->', '');
     for (const c of r.checks) out.push(`- ${c.app}${c.screen ? ` on ${c.screen}` : ''}: ${c.text}`, `  From: ${c.from}`);
@@ -279,10 +282,18 @@ export function formatReset(r) {
   return out.join('\n');
 }
 
+// Her Leave out section as she (or the tool that drafts it) wrote it, from its heading to the next: reset.md made again
+// keeps it word for word (formatReset, r.leaveOutText). null when there's none.
+export function leaveOutSection(text) {
+  const p = String(text || '').split(/^(?=## )/m).find(x => /^## Leave out[ \t]*$/m.test(x.split('\n')[0]));
+  return p ? p.replace(/\s+$/, '') : null;
+}
+
 // reset.md read back: its Undo steps as a plan the capture pass runs, what to set first, what to set before a step
-// (each { beat, text: the step's words, n: its number in the beat when the beat has those words twice, items }), its
-// checks (each with the screen it's read on, when the line names it: the capture pass gets there by the plan's
-// read-only steps), what needs her.
+// (each { beat, text: the step's words, n: its number in the beat when the beat has those words twice, items }), what
+// she leaves out of the replica (each { app, what, values: the words in quotes, for the app pack's filter, from: that
+// filter, shows: the words the screens show it by, its Shows line's, else values }), its checks (each with the screen
+// it's read on, when the line names it: the capture pass gets there by the plan's read-only steps), what needs her.
 export function parseReset(text) {
   const parts = String(text).split(/^(?=## )/m);
   const undo = parsePlan(parts.filter(p => /^## Undo · /.test(p)).map(p => p.replace(/^## Undo · /, '## ')).join('\n'));
@@ -300,6 +311,18 @@ export function parseReset(text) {
     const m = /^## Set before beat (\d+), (.+?)(?: \(step (\d+)\))?[ \t]*$/.exec(p.split('\n')[0]);
     if (m) before.push({ beat: +m[1], text: m[2], n: m[3] ? +m[3] : null, items: items(p) });
   }
+  // Leave out: "- teams: the team "Contoso Beta"", its From, and Shows when the screens show it in other words (a
+  // mail's sender by name, not by address): those are what's left out of each screen (values otherwise).
+  const leaveOut = [];
+  const lp = leaveOutSection(text);
+  const quoted = t => [...String(t).matchAll(/["“]([^"“”]+)["”]/g)].map(x => x[1].trim()).filter(Boolean);
+  if (lp) for (const block of lp.split(/^(?=- )/m).slice(1)) {
+    const [head, ...rest] = block.split('\n');
+    const m = /^- ([^\s:]+): (.+)$/.exec(head.trim()), what = m ? m[2].trim() : head.slice(2).trim();
+    const detail = k => rest.map(l => new RegExp(`^\\s+${k}:\\s*(.*)$`).exec(l)).find(Boolean);
+    const from = detail('From'), shows = detail('Shows'), values = quoted(what);
+    leaveOut.push({ app: m ? m[1] : null, what, values, from: from ? from[1].trim() : null, shows: shows ? quoted(shows[1]) : values });
+  }
   // Check: "- chat on chat-home: "Notes" is picked (Chat | Notes)" and its From, as { app, screen, text, from }
   // (screen null when the line doesn't name one).
   const checks = [];
@@ -310,5 +333,5 @@ export function parseReset(text) {
     const from = rest.map(l => /^\s+From:\s*(.*)$/.exec(l)).find(Boolean);
     checks.push(m ? { app: m[1], screen: m[2] || null, text: m[3].trim(), from: from ? from[1].trim() : null } : { app: null, screen: null, text: head.slice(2).trim(), from: from ? from[1].trim() : null });
   }
-  return { undo, set, before, checks, needs: lines('Needs you') };
+  return { undo, set, before, leaveOut, checks, needs: lines('Needs you') };
 }

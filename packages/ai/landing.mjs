@@ -7,8 +7,25 @@ import { formatStep } from './plan.mjs';
 export const pnorm = s => String(s == null ? '' : s).toLowerCase().replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/["“”'‘’]/g, '').replace(/\s+/g, ' ').trim();
 // Not on the screen as a run reads it (innerText): in a closed dialog or a template, in a tooltip (shown only while its
 // control is hovered), or in a row a capture put back (a list that shows only the rows in view: a live page doesn't
-// have it until it's scrolled to). Never a proof, before a step or after it.
-export const unseen = x => !!(x && (x.shut || x.tip || x.restored));
+// have it until it's scrolled to). Nor what she leaves out of the replica (left: reset.md's Leave out, which the capture
+// browser filters before the page draws it). Never a proof, before a step or after it.
+export const unseen = x => !!(x && (x.shut || x.tip || x.restored || x.left));
+// What her Leave out takes from a screen (reset.md: a line's words in quotes, for its app): a list's row that has them
+// in its words or in a control named for one thing (under 80 characters: not a tree's "Teams and channels …", named by
+// everything under it), and all that's in the row; outside a list, the words or the control themselves. → a copy with
+// those marked left, or the screen itself when there's none.
+export function leftOut(sc, values) {
+  if (!sc || !(values || []).length) return sc;
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const res = values.map(pnorm).filter(Boolean).map(v => new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc(v)}(?:$|[^\\p{L}\\p{N}])`, 'u'));
+  const hit = t => !!t && res.some(re => re.test(pnorm(t)));
+  const rows = new Set(), lone = new Set(), at = x => `${x.list}|${x.row}`;
+  for (const i of sc.items || []) if (hit(i.text)) (i.row !== undefined ? rows.add(at(i)) : lone.add(i));
+  for (const c of sc.controls || []) if (c.name && c.name.length < 80 && hit(c.name)) (c.row !== undefined ? rows.add(at(c)) : lone.add(c));
+  if (!rows.size && !lone.size) return sc;
+  const left = x => lone.has(x) || (x.row !== undefined && rows.has(at(x)));
+  return { ...sc, items: (sc.items || []).map(i => left(i) ? { ...i, left: true } : i), controls: (sc.controls || []).map(c => left(c) ? { ...c, left: true } : c) };
+}
 // A screen's words as a run reads the page (innerText, every frame): not what's unseen, not a text area's.
 const shows = sc => ((sc && sc.items) || []).filter(i => !unseen(i) && i.tag !== 'textarea');
 const read = new WeakMap();

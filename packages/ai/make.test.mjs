@@ -11,16 +11,16 @@ import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan, formatLands, formatStep } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, proveLandings, packChecked } from './from-script.mjs';
-import { holds, liveProof, writeGate } from './landing.mjs';
+import { holds, liveProof, writeGate, leftOut } from './landing.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
-import { approve, approval } from './make.mjs';
+import { approve, approval, writeReset } from './make.mjs';
 import { walkPlan } from './walk.mjs';
 import { undoGroups, checkClaim } from './reset-run.mjs';
 import { startUrls } from './live.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
-import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, reviewHtml } from './finish.mjs';
+import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
@@ -837,7 +837,7 @@ test('what a capture of today\'s product would lose, by why (renamed, a number, 
   assert.deepEqual(rows.filter(r => r.read).map(r => r.extra.map(e => e.kind === 'list' ? `${e.count} of ${e.total} rows: ${e.rows.join(', ')}` : e.text)),
     [[], ['Filter boots', '5 of 7 rows: Contoso Alpine, Fabrikam Mesa, Fabrikam Butte, Contoso Basin, XTR'], ['Deal 1 of 2'], ['No orders yet']]);
   const md = formatReground(rows);
-  assert.deepEqual(missingCounts(rows), { missing: { entries: 16, lines: 8 }, renamed: { entries: 1, lines: 1 }, number: { entries: 4, lines: 3 }, expected: { entries: 3, lines: 3 }, varies: { entries: 1, lines: 1 }, beyond: { entries: 0, lines: 0 }, extra: { entries: 8, lines: 4 } });
+  assert.deepEqual(missingCounts(rows), { missing: { entries: 16, lines: 8 }, renamed: { entries: 1, lines: 1 }, number: { entries: 4, lines: 3 }, expected: { entries: 3, lines: 3 }, varies: { entries: 1, lines: 1 }, beyond: { entries: 0, lines: 0 }, extra: { entries: 8, lines: 4 }, left: { entries: 0, lines: 0 } });
   assert.match(md, /## Extra since the recording\n\n[^\n]*8 in 4 lines[^\n]*\n\n\| What \| Screen \(steps\) \|\n\|---\|---\|\n\| “Filter boots” \(button\) \| catalog \(1-2\) \|\n\| 5 of 7 rows of the list “Boots”: “Contoso Alpine”, “Fabrikam Mesa”, “Fabrikam Butte”, “Contoso Basin”, “XTR”\. Recorded: 8 rows, starting “Fabrikam Trail”/);
   assert.match(md, /\| 2 in 2 of 8 rows of the list “Boots” that are still there, starting “Waterproof leather”, “Wide fit” \|[^\n]*\n\| 3 like “Note: …”, starting “Note: ships in a box”, “Note: free returns”, “Note: two colours” \|/);
   assert.match(md, /\| 6 of 8 rows of the list “Boots”, from “Fabrikam Summit”, “Contoso Ridge”, “Fabrikam Ranger”, “Contoso Peak”, “Fabrikam Canyon”\. Recorded, it starts “Fabrikam Trail”, “Fabrikam Summit”, “Contoso Hiker”, “Contoso Ridge”, “Fabrikam Ranger”\. Today: 7 rows, starting “Contoso Alpine”, “Fabrikam Trail”, “Fabrikam Mesa”, “Contoso Hiker”, “Fabrikam Butte” \| the guard held POST api\.contoso\.test\/catalog\/\*\/items \| catalog \(1-2\) \|/);
@@ -1078,4 +1078,93 @@ test('an API undo\'s Note gives the steps for when it can\'t, and the approval l
   assert.ok(four.flat().every(x => !/^\w*\)|\($/.test(x) && (x.match(/\(/g) || []).length === (x.match(/\)/g) || []).length), JSON.stringify(four));
   const list = resetSteps('# Reset: X\n\n## Undo · Chat\n\n- Go to chat\n- Undo with the app pack: chat-app:new-task\n  Undoes: beat 1, Press Enter\n  Note: an API call; if it can\'t: Click "Delete {task}"\n');
   assert.deepEqual(list.map(x => [x.text, !!x.fallback]), [['Undo with the app pack: chat-app:new-task', false], ['Click "Delete {task}"', true]]);
+});
+
+test('what a Leave out line names: each list row that has its words, and all that\'s in it; not a control named by everything under it', () => {
+  const sc = { headings: [], items: [
+    { text: 'Inbox' }, { text: 'Ask Fabrikam Alerts anything' },
+    { text: 'Weekly digest', list: 1, row: 2 }, { text: 'From: Fabrikam Alerts', list: 1, row: 2 },
+    { text: 'Order 1001 shipped', list: 1, row: 3 }, { text: 'From: Fabrikam Alertsmith', list: 1, row: 3 },
+    { text: 'Teams and channels', list: 5, row: 6 }, { text: 'Contoso Beta', list: 5, row: 7 }, { text: 'General', list: 5, row: 8 },
+  ], controls: [
+    { role: 'treeitem', name: 'Teams and channels Contoso Beta General Fabrikam Ops General Northwind Sales General See all channels', list: 5, row: 6 },
+    { role: 'treeitem', name: 'Team Contoso Beta', list: 5, row: 7 },
+    { role: 'treeitem', name: 'Contoso Beta Channel General', list: 5, row: 8 },
+  ] };
+  const left = xs => xs.filter(x => x.left).map(x => x.text || x.name);
+  const m = leftOut(sc, ['Fabrikam Alerts', 'Contoso Beta']);
+  assert.deepEqual(left(m.items), ['Ask Fabrikam Alerts anything', 'Weekly digest', 'From: Fabrikam Alerts', 'Contoso Beta', 'General']);
+  assert.deepEqual(left(m.controls), ['Team Contoso Beta', 'Contoso Beta Channel General']);
+  // A copy: the screen as read keeps none of it, and one with nothing to leave out is the same screen.
+  assert.deepEqual([sc.items.some(i => i.left), leftOut(sc, ['Northwind Traders']) === sc], [false, true]);
+  assert.deepEqual([holds(sc, { kind: 'words', text: 'Weekly digest' }), holds(m, { kind: 'words', text: 'Weekly digest' }), holds(m, { kind: 'words', text: 'Order 1001 shipped' })], [true, false, true]);
+});
+
+test('her Leave out: reset.md keeps it word for word; what it names never proves a step; the review lists it', async () => {
+  const demo = demoDir();
+  // Placeholders: the real lines name what the screens show, and each app pack's filter.
+  const leave = ['## Leave out', '', '<!-- In the capture browser only: these apps\' own data is filtered before the page draws it, so the replica never shows it. Nothing changes in the tenant. -->', '',
+    '- admin: "Certified by you"', '  From: admin-pack:hide-badge', '- chat: mail from "alerts@fabrikam.test"', '  From: chat-app:hide-sender', '  Shows: “Fabrikam Alerts”'].join('\n');
+  // A filter's words (a sender's address) and the words the screens show it by (its name), when they differ.
+  assert.deepEqual(parseReset(`# Reset: T\n\n${leave}\n\n## Check\n\n- chat: no "x"\n  From: beat 1\n`).leaveOut, [
+    { app: 'admin', what: '"Certified by you"', values: ['Certified by you'], from: 'admin-pack:hide-badge', shows: ['Certified by you'] },
+    { app: 'chat', what: 'mail from "alerts@fabrikam.test"', values: ['alerts@fabrikam.test'], from: 'chat-app:hide-sender', shows: ['Fabrikam Alerts'] }]);
+  // Without it, the certify lands on the badge's words; with it (the demo's reset.md), on what the capture will show.
+  const proofOf = w => formatLands(planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker: w }).plan.beats[1].steps.find(s => s.target === 'Certified').lands);
+  assert.equal(proofOf(walkerFromDemo(demo)), 'admin-certified · "Certified by you"');
+  writeFileSync(join(demo.dir, 'reset.md'), `# Reset: old\n\n${leave}\n\n## Check\n\n- admin: stale\n  From: beat 1\n`);
+  const walker = walkerFromDemo(demo);
+  assert.deepEqual(walker.screen('admin-certified').items.filter(i => i.left).map(i => i.text), ['Certified by you']);
+  assert.equal(proofOf(walker), 'admin-certified · control "Enable Sync" on');
+  // The screens' cache keeps them as read.
+  walker.save();
+  assert.doesNotMatch(readFileSync(join(demo.out, 'ai', 'screens.json'), 'utf8'), /"left"/);
+  // Made again from the plan, reset.md keeps her section word for word, before its checks, and again the same.
+  writeFileSync(join(demo.dir, 'plan.md'), formatPlan(planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker }).plan));
+  const { text } = await writeReset(demo, { packs: null });
+  assert.ok(text.includes(`\n\n${leave}\n\n## Check\n`), text);
+  assert.doesNotMatch(text, /stale/);
+  assert.equal((await writeReset(demo, { packs: null })).text, text);
+  // The review lists it by app, in her words, as the screens show it (a name, not an address).
+  const lines = leftOutLines(parseReset(text).leaveOut, demo.cfg.apps);
+  assert.deepEqual(lines, [{ where: 'Admin center', text: '"Certified by you"' }, { where: 'Chat app', text: 'mail from "Fabrikam Alerts"' }]);
+  assert.match(reviewHtml({ title: 'T', beats: [], timings: [], needs: [], leftOut: lines, stats: [] }), /<h2>Left out of your replica<\/h2><p class="sum">Nothing changes in your tenant\..*Admin center<\/span>&quot;Certified by you&quot;/s);
+  await finish({ demo, packs: null });
+  assert.match(readFileSync(join(demo.out, 'review', 'index.html'), 'utf8'), /<h2>Left out of your replica<\/h2>.*Chat app<\/span>mail from &quot;Fabrikam Alerts&quot;/s);
+});
+
+test('the re-ground: what she leaves out never proves a step, and it\'s listed as hers, not as missing or extra', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-left-'));
+  const page = body => `<!doctype html><html><head><title>Mail</title></head><body>${body}</body></html>`;
+  const mail = rows => `<h1>Inbox</h1><ul aria-label="Messages">${rows.map(([s, f]) => `<li><span>${s}</span><span>From: ${f}</span></li>`).join('')}</ul>`;
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  writeFileSync(join(dir, 'data', 'snaps', 'inbox.html'), page(mail([['Weekly digest', 'Fabrikam Alerts'], ['Order 1001 shipped', 'Avery Chen']])));
+  writeFileSync(join(dir, 'flow.json'), JSON.stringify({ apps: [{ id: 'mail', key: 'M' }], beats: [{ active: 'mail', states: { mail: 'inbox' } }], path: [], states: { inbox: { app: 'mail', snap: 'inbox' } } }));
+  writeFileSync(join(dir, 'reset.md'), '# Reset: Mail\n\n## Leave out\n\n- mail: mail from "alerts@fabrikam.test"\n  From: mail-app:hide-sender\n  Shows: "Fabrikam Alerts"\n');
+  const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps: [{ id: 'mail', key: 'M', title: 'Mail', url: 'https://mail.contoso.test/' }] } };
+  // Today: the digest again, a new notice from the sender she leaves out, and a new order.
+  const today = page(mail([['Weekly digest', 'Fabrikam Alerts'], ['Security notice', 'Fabrikam Alerts'], ['Order 1001 shipped', 'Avery Chen'], ['Order 1002 shipped', 'Dana Hill']]));
+  const at = sec => new Date(Date.UTC(2026, 10, 24, 9, 0, sec)).toISOString();
+  const two = t => [0, 1].map(i => ({ at: at(t + i), docs: [{ key: 'main', html: today }] }));
+  const ws = join(dir, 'walk', 'walk-screens');
+  mkdirSync(ws, { recursive: true });
+  for (const [f, v] of Object.entries({ 'start-mail': two(0), '1-1': two(10) })) writeFileSync(join(ws, f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
+  const walk = { beats: [{ beat: 1, steps: [{ step: 0, text: 'Go to mail', status: 'reached' }] }], starts: [{ app: 'mail' }] };
+  // A plan made before she left it out: it lands on the digest's words.
+  const text = '# Mail\n\n## Beat 1 · Inbox\n\n- Go to mail\n  Lands on: inbox · "Weekly digest"\n';
+  const show = es => es.map(e => [e.cls, e.kind === 'list' ? `${e.count} rows: ${e.rows.join(', ')}` : e.text]);
+  // Without it, the digest's words prove the step, and the new notice is extra.
+  const plain = regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo, { leaveOut: [] }), walk, reads: walkReads(ws), apps: demo.cfg.apps, leaveOut: [] }).rows;
+  assert.deepEqual([plain[0].now, plain[0].changed, show(plain[0].missing), show(plain[0].extra)], ['inbox · "Weekly digest"', false, [], [['extra', '2 rows: Security notice, Order 1002 shipped']]]);
+  // With it (the demo's reset.md), the step lands on what the capture will show, and what it names is hers.
+  const { rows } = regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk, reads: walkReads(ws), apps: demo.cfg.apps });
+  assert.deepEqual([rows[0].now, rows[0].basis, rows[0].why], ['inbox · "From: Avery Chen"', 'both', '“Weekly digest” isn\'t on today\'s screen']);
+  assert.deepEqual(show(rows[0].missing), [['left', 'Weekly digest'], ['left', 'From: Fabrikam Alerts']]);
+  assert.deepEqual(show(rows[0].extra), [['left', 'Security notice'], ['extra', 'Order 1002 shipped'], ['extra', 'From: Dana Hill']]);
+  const n = missingCounts(rows);
+  assert.deepEqual([n.missing, n.extra, n.left], [{ entries: 0, lines: 0 }, { entries: 2, lines: 2 }, { entries: 3, lines: 3 }]);
+  const md = formatReground(rows);
+  assert.doesNotMatch(md, /## Missing since the recording/);
+  assert.match(md, /## Extra since the recording\n\n[^\n]*2 in 2 lines/);
+  assert.match(md, /## Left out \(her choice\)\n\n[^\n]*3 in 3 lines\.\n\n\| What \| Where \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| “Weekly digest” \| In the recording \| inbox \(1-1\) \|\n\| “From: Fabrikam Alerts” \| In the recording \| inbox \(1-1\) \|\n\| “Security notice” \| New today \| inbox \(1-1\) \|/);
 });

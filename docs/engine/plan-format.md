@@ -72,7 +72,8 @@ After the screen's name and ` · `, one proof, in plain words. Either part may b
 | (none) | Nothing: the review lists the step under **Needs you**. | `{ screen, kind: null, text: null }` |
 
 - **The page's words:** what it shows in every frame (`innerText`), not what's in a closed dialog or a tooltip, and not
-  a row a capture put back (below).
+  a row a capture put back (below), nor what she leaves out of the replica ([the reset](#the-reset-resetmd)'s Leave
+  out).
 - **A control:** as below, the same rule the reader uses on a recorded page.
 - **Comparing:** words, names and a box's text are compared lowercased, with quotes (`"“”'‘’`) and invisible
   characters dropped and runs of spaces as one space. A name is the whole name; a box's text is its start.
@@ -148,7 +149,9 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
    screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each visit); what's
    in a closed dialog; what's in a tooltip (role `tooltip`: on the screen only while hovered); a row a capture put
    back (`data-d1-row`: a list that shows only the rows in view, which the capture scrolled through), before the step
-   or after it, since a live page shows it only once it's scrolled to.
+   or after it, since a live page shows it only once it's scrolled to; what she leaves out of the replica (the reset's
+   Leave out: a row that has its words, in its app), on the recording's screens and today's, since the capture
+   browser filters it out.
 7. **`still`:** the page's own words: not in a nav, an aside or its header, not a skip link ("Skip to main content"),
    not what half the site's pages show, a heading first, no number, on the screen before and after.
 8. **Nothing proves it:** the review lists the step under **Needs you** ("A run can't check this step").
@@ -243,6 +246,10 @@ own and its variants'), with the same exclusions, less today's side of what's re
 words in a place that varies between runs. It's what a capture now would show that the recording doesn't: new teams,
 test notes, other chats. Neither list has a tooltip's words: they aren't on the screen until hovered.
 
+**Left out (her choice):** what the reset's Leave out names, on either side, is in neither list: it's listed on its
+own, as what the recording has and what's new today. The capture browser filters it out, so the replica won't show it,
+and nothing changes in the tenant. It comes before every class above.
+
 In both, a list is what the reader marks as one (a list, listbox, grid, table, tree, tablist, menu, radio group or feed;
 `ul`, `ol`, `table`, `menu`), with its rows (an item, option, row, tree item, tab, menu item, radio or post; `li`,
 `tr`). A row's name is its first words (not someone's initials before their name). What describes one row's element
@@ -327,7 +334,7 @@ each `{ app, strength, wrote, step }`).
 
 Made from the plan's writes, in reverse, and from the state the demo's first screens show (`scenecast ai reset`). The
 capture pass runs it before and after a run: Undo, then Set first, then Check. During the run, it makes each
-`Set before` just before its step.
+`Set before` just before its step, and its browser leaves out what `Leave out` names all through.
 
 ```markdown
 # Reset: Supplier delay
@@ -359,6 +366,16 @@ capture pass runs it before and after a run: Undo, then Set first, then Check. D
   Set: "Enable Sync" · chat-app:plugin-switch
   Opens: https://chat.example.com/plugins
   Seen: beat 3, chat-added
+
+## Leave out
+
+<!-- In the capture browser only: these apps' own data is filtered before the page draws it, so the replica never shows it. Nothing changes in the tenant. -->
+
+- chat: "Contoso Beta"
+  From: chat-app:hide-plugin
+- mail: mail from "alerts@fabrikam.example.com"
+  From: mail-app:hide-sender
+  Shows: "Fabrikam Alerts"
 
 ## Check
 
@@ -393,6 +410,14 @@ capture pass runs it before and after a run: Undo, then Set first, then Check. D
   saved and nothing in the replica. Its lines read like Set first's; `Seen:` is the screen that step lands on.
   `(step N)` follows the step's words when its beat has them more than once (N counted from 1). The plan doesn't
   change.
+- **Leave out**: what she leaves out of the replica, without changing the tenant (it's shared): an app's own data the
+  capture browser filters before the page draws it (an entry in a catalog, a team, mail from a sender). Each line is
+  `<app>: <what>`, with the filter's words in quotes, and `From:` the app pack's filter. When the screens show it in
+  other words (a sender by name, not by address), `Shows:` has those, in quotes. Scenecast never writes or changes
+  it: made again, reset.md keeps the section word for word. What it names on a screen (by `Shows:`, else by the words
+  in quotes: a list's row that has them, and all that's in it; outside a list, the words or the control) never proves
+  a step, on the recording's screens or today's, isn't a start state or a check, and the re-ground lists it as hers
+  (above). The review lists it under **Left out of your replica**, by the words the screens show.
 - **Check**: read-only. Each line is something the screen shows, and none of them clicks anything that changes. With
   the writes' checks come the start state's (`From: start: …`): the settings above, versions ("is version 1.4.9"),
   what a list of switches holds, the theme each app renders in, and what the demo points at on an app's first screen
@@ -406,10 +431,15 @@ capture pass runs it before and after a run: Undo, then Set first, then Check. D
 Names come from the captures (the task's title, the skill's name). Copilot can name things differently on each run,
 so the capture pass fills in what its own run made.
 
-`packages/ai/reset.mjs`: `resetFor(plan, { walker, packs })`, `formatReset(r)`, `parseReset(text)` (`{ undo, set,
-before, checks, needs }`: its Undo as a plan; each `before` `{ beat, text, n, items }`, its items read like `set`'s
-`{ what, set, opens, seen }`; each check `{ app, screen, text, from }`, `screen` null when the line has none).
-`packages/ai/start.mjs`: `startState(plan, { walker, packs })` (`{ facts, changes }`).
+`packages/ai/reset.mjs`: `resetFor(plan, { walker, packs })`, `formatReset(r)` (`r.leaveOutText`: the Leave out section
+as written, `leaveOutSection(text)`), `parseReset(text)` (`{ undo, set, before, leaveOut, checks, needs }`: its Undo
+as a plan; each `before` `{ beat, text, n, items }`, its items read like `set`'s `{ what, set, opens, seen }`; each
+`leaveOut` `{ app, what, values, from, shows }`, `values` the words in quotes, `shows` its `Shows:` line's (else
+`values`); each check `{ app, screen, text, from }`, `screen` null when the line has none). `packages/ai/start.mjs`:
+`startState(plan, { walker, packs })` (`{ facts, changes }`). `packages/ai/landing.mjs`: `leftOut(screen, words)` marks
+what a Leave out line names on a screen (`left`, by its `shows`), which `unseen()` keeps out of every proof;
+`walkerFromDemo(demo, { leaveOut })` marks the recording's screens, from the demo's reset.md when `leaveOut` isn't
+given (`walker.leaveOut`), and `regroundPlan()` today's reads.
 
 ## In code
 
@@ -423,10 +453,11 @@ and `approval(demo)` (whether `plan.md` is still the text that was approved). `p
 `packChecked(packs)`, the writes its app packs check), `holds(screen, lands)` checks one on a screen the reader read
 (`true`, `false`, or `null` for none). `packages/ai/walker.mjs`: `landed(at, step)` (`{ ok, why }`: on the screen its
 `Lands on` names, with its proof holding there), `written(text)`, `unstable(text, app)`.
-`packages/ai/reground.mjs`: `regroundPlan(plan, { walker, walk, reads })` (`{ plan, rows }`, a row per step with its
-proof before and after and its `basis`: `both`, `today`, `none`, `suspect`, `write`, `missed` or `unreached`; `missing`
-and `extra`, each entry with its class `cls`), `walkReads(dir)`, `formatReground(rows)`, `regroundCounts(rows)`,
-`missingCounts(rows)`, `heldKind(request)`. `walker.captures(id)`: every capture the recording has of a screen. The
+`packages/ai/reground.mjs`: `regroundPlan(plan, { walker, walk, reads, leaveOut })` (`{ plan, rows }`, a row per step
+with its proof before and after and its `basis`: `both`, `today`, `none`, `suspect`, `write`, `missed` or `unreached`;
+`missing` and `extra`, each entry with its class `cls`, `left` for what she leaves out), `walkReads(dir)`,
+`formatReground(rows)`, `regroundCounts(rows)`, `missingCounts(rows)` (per class, `extra` and `left`),
+`heldKind(request)`. `walker.captures(id)`: every capture the recording has of a screen. The
 reader (`packages/script/html.mjs`) marks each item and control with the `list` and `row` it's in (`lists[at]` is the
 list's name and role).
 

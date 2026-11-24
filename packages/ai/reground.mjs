@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { readScreen } from '@scenecast/script/html.mjs';
-import { chooseProof, holds, proofWords, pageWords, pnorm, changes, presence } from './landing.mjs';
+import { chooseProof, holds, proofWords, pageWords, pnorm, changes, presence, leftOut } from './landing.mjs';
 import { formatLands, formatPlan, formatStep, parsePlan } from './plan.mjs';
 import { walkerFromDemo, inPlace } from './walker.mjs';
 import { aiDir } from './run.mjs';
@@ -111,7 +111,8 @@ function heldDuring(walk, reads, steps, rowOf, appAt, sites) {
   return { held, windows };
 }
 // Off the page, for what a capture shows: in a closed dialog or a template, or in a tooltip (shown only while hovered).
-// A row a capture put back isn't: the replica shows it (proofs never use it: landing.mjs unseen()).
+// A row a capture put back isn't: the replica shows it (proofs never use it: landing.mjs unseen()). Nor is what she
+// leaves out (left): it's listed, as hers.
 const offPage = x => !!(x.shut || x.tip);
 // A capture's words, as offPage leaves them.
 const capRead = new WeakMap();
@@ -122,7 +123,7 @@ const short = t => (t = String(t).replace(/\s+/g, ' ').trim()).length > 80 ? `${
 const q = t => `“${cell(short(t))}”`, qs = xs => xs.map(q).join(', ');
 function errorsOn(got, rec) {
   const was = rec ? pageWords(rec) : '', out = [];
-  for (const g of got) for (const i of g.items || []) if (!offPage(i) && i.text && (ERROR.test(i.text) || i.role === 'alert') && !was.includes(pnorm(i.text)) && !out.some(x => pnorm(x) === pnorm(i.text))) out.push(i.text);
+  for (const g of got) for (const i of g.items || []) if (!offPage(i) && !i.left && i.text && (ERROR.test(i.text) || i.role === 'alert') && !was.includes(pnorm(i.text)) && !out.some(x => pnorm(x) === pnorm(i.text))) out.push(i.text);
   return out.filter(t => !out.some(u => u !== t && pnorm(u).length < pnorm(t).length && pnorm(t).includes(pnorm(u))));
 }
 // A screen's items a run can count on, as the proofs' (not in a closed dialog, a live region, a time, a message or a
@@ -139,8 +140,8 @@ function soundItems(sc, keep) {
 }
 // Innermost only: a box holding words that are missing (or extra) is too.
 const innermost = its => its.filter(x => !its.some(u => u !== x && pnorm(u.text).length < pnorm(x.text).length && pnorm(x.text).includes(pnorm(u.text))));
-const lostFrom = (was, got, keep) => innermost(soundItems(was, keep)).map(i => i.text).filter(t => t.split(/\s+/).length >= 2 && got.every(g => !pageWords(g).includes(pnorm(t))));
-const inList = x => ({ ...(x.list !== undefined ? { list: x.list } : {}), ...(x.row !== undefined ? { row: x.row } : {}), ...(x.restored ? { restored: true } : {}), ...(x.nav ? { nav: true } : {}) });
+const lostFrom = (was, got, keep) => innermost(soundItems(was, keep).filter(i => !i.left)).map(i => i.text).filter(t => t.split(/\s+/).length >= 2 && got.every(g => !pageWords(g).includes(pnorm(t))));
+const inList = x => ({ ...(x.list !== undefined ? { list: x.list } : {}), ...(x.row !== undefined ? { row: x.row } : {}), ...(x.restored ? { restored: true } : {}), ...(x.nav ? { nav: true } : {}), ...(x.left ? { left: true } : {}) });
 // A row's own control named by everything in it (an option "Fabrikam Orders Daily orders Plugin", "AC Avery Chen
 // People", a grid row): what's in the row counts, each on its own.
 const ROWISH = /^(option|row|listitem|treeitem|menuitem|menuitemcheckbox|menuitemradio)$/;
@@ -149,7 +150,7 @@ const whole = (sc, c) => { if (!ROWISH.test(c.role || '')) return false; const l
 // reads lack, each { kind: 'words' | 'control', text, role, list, row } (list, row: where it is in a list on the
 // recorded screen). A control's own words count once, as the control.
 function missingFrom(rec, got, keep) {
-  const names = got.map(g => new Set((g.controls || []).filter(c => !offPage(c)).map(c => pnorm(c.name))));
+  const names = got.map(g => new Set((g.controls || []).filter(c => !offPage(c) && !c.left).map(c => pnorm(c.name))));
   const out = [], seen = new Set();
   for (const c of rec.controls || []) {
     const n = pnorm(c.name);
@@ -162,7 +163,10 @@ function missingFrom(rec, got, keep) {
 }
 // What a capture of today's product would show that the recording doesn't: the words and controls both of today's
 // reads have that none of the recording's captures of the screen show, as words or as a control (caps), as
-// missingFrom's (list, row: on today's first read). skip: what's accounted for already.
+// missingFrom's (list, row: on today's first read). What she leaves out counts as there, to be listed as hers. skip:
+// what's accounted for already.
+const nowRead = new WeakMap();
+const nowWords = sc => { if (!nowRead.has(sc)) nowRead.set(sc, pnorm((sc.items || []).filter(i => !offPage(i) && !i.restored && i.tag !== 'textarea').map(i => i.text).join('\n'))); return nowRead.get(sc); };
 function extraFrom(caps, got, keep, skip) {
   const words = caps.map(capWords), named = caps.map(c => new Set((c.controls || []).filter(x => !offPage(x)).map(x => pnorm(x.name))));
   const recorded = n => named.some(x => x.has(n)) || words.some(w => w.includes(n));
@@ -174,7 +178,7 @@ function extraFrom(caps, got, keep, skip) {
     seen.add(n);
     out.push({ kind: 'control', text: c.name, role: c.role, ...inList(c) });
   }
-  for (const i of innermost(soundItems(got[0], keep).filter(i => !seen.has(pnorm(i.text)) && !skip(i.text) && !recorded(pnorm(i.text)) && got.every(g => pageWords(g).includes(pnorm(i.text)))))) out.push({ kind: 'words', text: i.text, role: i.role, ...inList(i) });
+  for (const i of innermost(soundItems(got[0], keep).filter(i => !seen.has(pnorm(i.text)) && !skip(i.text) && !recorded(pnorm(i.text)) && got.every(g => nowWords(g).includes(pnorm(i.text)))))) out.push({ kind: 'words', text: i.text, role: i.role, ...inList(i) });
   return out;
 }
 // A screen's lists, as the reader marks them: list → its rows in page order, each row → its label (its first words with
@@ -208,8 +212,9 @@ function sameListAt(sc, list, other) {
   return same ? +same[0] : null;
 }
 const sameList = (sc, list, other) => { const at = sameListAt(sc, list, other); return at === null ? null : [...((listsOf(other).get(at)) || new Map()).values()]; };
-// Whether an entry's row is gone from every one of the other screens: none has its name, as words or a control.
-const hasText = (o, n) => (o.items || []).some(i => !offPage(i) && pnorm(i.text) === n) || (o.controls || []).some(c => !offPage(c) && pnorm(c.name) === n);
+// Whether an entry's row is gone from every one of the other screens: none has its name, as words or a control (what
+// she leaves out isn't had: the capture won't show it).
+const hasText = (o, n) => (o.items || []).some(i => !offPage(i) && !i.left && pnorm(i.text) === n) || (o.controls || []).some(c => !offPage(c) && !c.left && pnorm(c.name) === n);
 const rowGone = (sc, e, others) => { const l = rowLabel(sc, e); return !!l && others.every(o => !hasText(o, pnorm(l))); };
 // A list's rows a capture put back (restored), and how it's named in reground.md: its name, else its first rows.
 const restoredRows = (sc, list) => new Set([...(sc.items || []), ...(sc.controls || [])].filter(x => x.list === list && x.restored).map(x => x.row));
@@ -274,6 +279,7 @@ function collapse(classed, sc, others) {
   return rest;
 }
 // What's missing since the recording, by why (formatReground's classes), in this order:
+//   left      what she leaves out of the replica (reset.md's Leave out): hers, listed on its own, never missing
 //   beyond    in a row the recording's capture scrolled to and put back (restored), or of a list that shows only part
 //             of the rows it says it has, then and today, and says it has no fewer today, when today's reads don't have
 //             the row: a walk doesn't scroll, so it's beyond its view, not missing
@@ -311,6 +317,7 @@ function missingClasses(entries, { rec, got, app, why, madeBy, varies }) {
     return parts.get(list);
   };
   const one = e => {
+    if (e.left) return { ...e, cls: 'left' };
     if (e.restored && rowGone(rec, e, got)) return { ...e, cls: 'beyond', why: 'the recording\u2019s capture scrolled the list to them; a walk doesn\u2019t scroll' };
     const part = partial(e.list);
     if (part && rowGone(rec, e, got)) return { ...e, cls: 'beyond', why: part };
@@ -358,7 +365,9 @@ function shakyToday(rec, got, walker, app) {
 // app?, frame? }] }, inputs: [{ at, for }], starts: [{ app }], events: [{ kind, app?, host, at }] }, a row per plan
 // step, step from 0); reads: walkReads();
 // apps: the demo's ({ id, url }; else the walker's); packs: make.mjs loadPacks()'s, for each app's hosts and the
-// requests its pack has reviewed as staying held. Each row: { beat, step, text, screen, status, was, now, basis, why,
+// requests its pack has reviewed as staying held; leaveOut: what she leaves out of the replica (reset.md's Leave out,
+// parseReset's; else the walker's), marked on today's reads of its app as on the recording's screens: never a proof,
+// and listed in its own class (left). Each row: { beat, step, text, screen, status, was, now, basis, why,
 // changed, number, held, missing, extra }, missing: what the recorded screen has that today's reads lack, each in a
 // class (missingClasses); extra: what today's reads have that no capture of the screen in the recording has.
 // basis one of
@@ -373,7 +382,7 @@ function shakyToday(rec, got, walker, app) {
 //              a step whose words may be its doing): the recording's proof stays
 //   missed     the walk didn't land it (why says why): the recording's proof stays
 //   unreached  the walk didn't get here, or ran it and saved no screen: the recording's proof stays
-export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = null }) {
+export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = null, leaveOut = null }) {
   const plan = JSON.parse(JSON.stringify(plan0));
   const steps = plan.beats.flatMap((b, bi) => b.steps.map((s, si) => ({ s, bi, si })));
   const rowOf = (bi, si) => ((((walk && walk.beats) || [])[bi] || {}).steps || []).find(r => r.step === si) || null;
@@ -384,6 +393,13 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
   const appAt = [];
   { let a = null; for (const { s } of steps) { if (s.kind === 'app') a = s.app; appAt.push(a); } }
   const sites = sitesOf(apps || walker.apps || [], packs);
+  const leave = leaveOut || walker.leaveOut || [], leftOf = new WeakMap();
+  const mark = (scs, app) => {
+    const values = leave.filter(l => l.app === app).flatMap(l => l.shows || l.values || []);
+    if (!scs || !values.length) return scs;
+    if (!leftOf.has(scs)) leftOf.set(scs, scs.map(sc => leftOut(sc, values)));
+    return leftOf.get(scs);
+  };
   // What may have broken an app's page today, from when until the page loads again (a new document of the app's, in
   // walk.events: { kind: 'loaded', app?, host, at }), else to the end of the walk: a held request that isn't telemetry
   // and that no pack has reviewed as staying held, for the app it was for; a response of 500 or more to the app that
@@ -449,15 +465,15 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
     const r0 = rowOf(bi, si), status = r0 ? r0.status : null;
     const needs = (r0 && r0.needs) || (status === 'after-miss' ? missNeeds[bi] : null) || null;
     if (status === 'missed' && needs) missNeeds[bi] = needs;
-    const ran = RAN.has(status), got = ran ? reads.step(bi + 1, si + 1) : null;
-    const to = s.lands && s.lands.screen, from = cur;
+    const ran = RAN.has(status), to = s.lands && s.lands.screen, from = cur;
     const app = appAt[k] || ((walker.flow.states[to] || {}).app || null);
-    const before = started ? prev : s.kind !== 'app' && app ? reads.start(app) : [];
+    const got = ran ? mark(reads.step(bi + 1, si + 1), app) : null;
+    const before = started ? prev : s.kind !== 'app' && app ? mark(reads.start(app), app) : [];
     if (ran || status === 'missed') { started = true; prev = got; }
     if (got && app) {
       const at = (reads.at && reads.at(bi + 1, si + 1)) || [], t0 = at.length ? Math.min(...at) : when[k];
       for (const e of errorsOn(got, to ? walker.screen(to) : null)) reasons.push({ app, t: t0, why: `today's screen shows an error the recording doesn't: “${short(e)}”` });
-      const was = lastRead[app] || { got: reads.start(app), from: 'its start screen' };
+      const was = lastRead[app] || { got: mark(reads.start(app), app), from: 'its start screen' };
       if (s.kind === 'app' && was.got) {
         const lost = lostFrom(was.got[was.got.length - 1], got, keep(app));
         if (lost.length) reasons.push({ app, t: t0, why: `${app} lost words while nothing ran in it, since ${was.from}: “${short(lost[0])}”${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}` });
@@ -487,7 +503,7 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
       // renamed or a number that changed, and words in a place that varies between runs.
       const paired = new Set(row.missing.flatMap(e => e.nows || (e.now ? [e.now] : [])).map(pnorm));
       const caps = walker.captures ? walker.captures(to) : [rec];
-      row.extra = collapse(extraFrom(caps, got, keep(app), t => paired.has(pnorm(t)) || unstable(t)).map(e => ({ ...e, cls: 'extra' })), got[0], caps);
+      row.extra = collapse(extraFrom(caps, got, keep(app), t => paired.has(pnorm(t)) || unstable(t)).map(e => ({ ...e, cls: e.left ? 'left' : 'extra' })), got[0], caps);
     }
     // A step that didn't land as planned while its app's page may be broken keeps its proof: what's missing may not be
     // the product's doing.
@@ -560,10 +576,10 @@ function missingLines(rows, field = 'missing') {
   return [...lines.values()];
 }
 const where = l => [...l.at].map(([sc, st]) => `${sc} (${st.join(', ')})`).join('; ');
-// Per class, and what's extra: { entries (each word, control or list row), lines }.
+// Per class, what's extra, and what she leaves out (left, on either side): { entries (each word, control or list row), lines }.
 export const missingCounts = rows => {
   const ls = [...missingLines(rows), ...missingLines(rows, 'extra')], n = c => ({ entries: ls.filter(l => l.cls === c).reduce((k, l) => k + l.entries, 0), lines: ls.filter(l => l.cls === c).length });
-  return Object.fromEntries([...CLASSES.map(([c]) => [c, n(c)]), ['extra', n('extra')]]);
+  return Object.fromEntries([...CLASSES.map(([c]) => [c, n(c)]), ['extra', n('extra')], ['left', n('left')]]);
 };
 export function formatReground(rows) {
   const c = regroundCounts(rows);
@@ -596,7 +612,7 @@ export function formatReground(rows) {
     out.push('');
   }
   // What a capture of today's product would lose, by why.
-  const lines = missingLines(rows);
+  const lines = missingLines(rows).filter(l => l.cls !== 'left');
   if (lines.length) {
     const n = missingCounts(rows);
     out.push('## Missing since the recording', '', 'Words, controls and list rows a recorded screen has that both of today\u2019s reads lack. A list\u2019s rows are one line.', '',
@@ -611,11 +627,18 @@ export function formatReground(rows) {
     }
   }
   // What a capture of today's product would show that the recording doesn't: tenant clutter to clear first, or what's new.
-  const extra = missingLines(rows, 'extra');
+  const extra = missingLines(rows, 'extra').filter(l => l.cls !== 'left');
   if (extra.length) {
     const n = missingCounts(rows).extra;
     out.push('## Extra since the recording', '', `Words, controls and list rows both of today\u2019s reads have that no capture of the screen in the recording has: ${n.entries} in ${n.lines} lines. A capture now would show them.`, '',
       '| What | Screen (steps) |', '|---|---|', ...extra.map(l => `| ${l.what} | ${where(l)} |`), '');
+  }
+  // What she leaves out of the replica (reset.md's Leave out): what the recording has, then what's new today.
+  const left = [...missingLines(rows).filter(l => l.cls === 'left').map(l => ({ ...l, side: 'In the recording' })), ...missingLines(rows, 'extra').filter(l => l.cls === 'left').map(l => ({ ...l, side: 'New today' }))];
+  if (left.length) {
+    const n = missingCounts(rows).left;
+    out.push('## Left out (her choice)', '', `What reset.md\u2019s Leave out takes out: the capture browser filters it before the page draws it, so the replica never shows it, and nothing changes in the tenant. ${n.entries} in ${n.lines} lines.`, '',
+      '| What | Where | Screen (steps) |', '|---|---|---|', ...left.map(l => `| ${l.what} | ${l.side} | ${where(l)} |`), '');
   }
   const kept = rows.filter(r => r.basis === 'write' || r.basis === 'missed' || r.basis === 'unreached');
   if (kept.length) {

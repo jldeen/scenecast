@@ -12,7 +12,7 @@ import { parsePlan, formatPlan, formatStep, writesOf, stepCount } from './plan.m
 import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
-import { resetFor, formatReset, parseReset } from './reset.mjs';
+import { resetFor, formatReset, parseReset, leaveOutSection } from './reset.mjs';
 import { fallbackSteps, undoGroups } from './reset-run.mjs';
 import { readTalkTrack, talkTrackText } from '@scenecast/script/talk.mjs';
 import { aiDir } from './run.mjs';
@@ -130,8 +130,11 @@ export async function writeReset(demo, { packs } = {}) {
   if (!existsSync(f)) throw new Error('make the plan first');
   const plan = parsePlan(readFileSync(f, 'utf8'));
   packs = packs === undefined ? await loadPacks(demo) : packs;
+  const rf = join(demo.dir, RESET), was = existsSync(rf) ? readFileSync(rf, 'utf8') : '';
   const r = resetFor(plan, { walker: walkerFromDemo(demo), packs });
+  // Her Leave out, word for word: it's hers, not the generator's.
+  r.leaveOutText = leaveOutSection(was);
   const text = formatReset(r);
-  writeFileSync(join(demo.dir, RESET), text);
+  writeFileSync(rf, text);
   return { text, reset: r };
 }

@@ -16,7 +16,8 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readScreen } from '@scenecast/script/html.mjs';
 import { findItem, norm } from './find.mjs';
-import { holds, proofWords, isBox } from './landing.mjs';
+import { holds, proofWords, isBox, leftOut } from './landing.mjs';
+import { parseReset } from './reset.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
 const READER = 18;
@@ -75,12 +76,23 @@ export function inPlace(a, b) {
   return { changed };
 }
 
-export function walkerFromDemo(demo, { cache = true } = {}) {
+// leaveOut: what she leaves out of the replica (reset.md's Leave out, parseReset's); without it, the demo's reset.md's.
+// Each screen of its app has it marked left (landing.mjs leftOut), so it never proves a step; the cache keeps the screens
+// as read.
+export function walkerFromDemo(demo, { cache = true, leaveOut } = {}) {
   const flowPath = join(demo.dir, 'flow.json');
   if (!existsSync(flowPath)) return null;
   const flow = JSON.parse(readFileSync(flowPath, 'utf8'));
   const S = flow.states || {};
   const apps = (flow.apps || []).map(a => ({ id: a.id, key: a.key || null, title: a.title || a.id, ...(((demo.cfg || {}).apps || []).find(x => x.id === a.id) || {}) }));
+  const leave = leaveOut !== undefined ? leaveOut || [] : (() => { try { return parseReset(readFileSync(join(demo.dir, 'reset.md'), 'utf8')).leaveOut; } catch (e) { return []; } })();
+  const leftMemo = new WeakMap();
+  const mark = (sc, app) => {
+    const values = leave.filter(l => l.app === app).flatMap(l => l.shows || l.values || []);
+    if (!sc || !values.length) return sc;
+    if (!leftMemo.has(sc)) leftMemo.set(sc, leftOut(sc, values));
+    return leftMemo.get(sc);
+  };
   const cacheFile = join(demo.out || join(demo.dir, '.out'), 'ai', 'screens.json');
   let saved = {};
   if (cache) try { saved = JSON.parse(readFileSync(cacheFile, 'utf8')); } catch (e) { saved = {}; }
@@ -121,7 +133,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     // The page's own title (a Copilot task's name), from the build's record of the capture.
     let title = st.title || null;
     if (!title) try { title = JSON.parse(readFileSync(join(demo.dir, 'data', 'snaps', snap + '.json'), 'utf8')).title || null; } catch (e) {}
-    const out = { id, app: st.app, title: title || id, ...sc, fills: (st.fill || []).map(f => ({ ...f, name: specName(f) })), captured: !!src };
+    const out = mark({ id, app: st.app, title: title || id, ...sc, fills: (st.fill || []).map(f => ({ ...f, name: specName(f) })), captured: !!src }, st.app);
     memo.set(k, out);
     return out;
   };
@@ -135,7 +147,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     if (!st) return null;
     for (const g of flow.groups || []) for (const o of g.open || []) if (o.closed === (st.snap || id) && g.app === st.app) {
       const k = `${id}~open`;
-      if (!memo.has(k)) { const src = builtOf(o.open) || rawOf(o.open); memo.set(k, src ? { id, app: st.app, ...readScreen(src.docs()), fills: [] } : null); }
+      if (!memo.has(k)) { const src = builtOf(o.open) || rawOf(o.open); memo.set(k, src ? mark({ id, app: st.app, ...readScreen(src.docs()), fills: [] }, st.app) : null); }
       return memo.get(k) ? { screen: memo.get(k), label: (g.template || {}).label || null } : null;
     }
     return null;
@@ -343,7 +355,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
   };
   const variantOf = v => { const m = /^v\d+-(.+)$/.exec(v) || /^tog-(.+)-[a-z]+$/.exec(v) || /^(.+)-(?:more|open)$/.exec(v); return m && S[m[1]] ? m[1] : null; };
   // Every capture the recording has of a screen: its own, then its variants'.
-  const captures = sig => [screen(sig), ...(flow.variants || []).filter(v => variantOf(v) === sig).map(snapScreen)].filter(Boolean);
+  const captures = sig => [screen(sig), ...(flow.variants || []).filter(v => variantOf(v) === sig).map(v => mark(snapScreen(v), (S[sig] || {}).app))].filter(Boolean);
   const unstableSet = () => {
     if (shaky) return shaky;
     const set = [], pairs = [];
@@ -385,5 +397,5 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     if (s.kind === 'type' && (s.differs || (l.kind === 'box' && !sc.controls.some(c => isBox(c) && c.value)))) return { ok: true, why: `the recording has other words typed here${s.differs ? `: ${s.differs}` : ''}` };
     return holds(sc, l) ? { ok: true, why: null } : { ok: false, why: `${proofWords(l)} isn't on ${sig}` };
   }
-  return { flow, apps, start, screen, captures, view, shown, opened, step, recorded, landed, written, writtenItem, unstable, typedTexts, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
+  return { flow, apps, start, screen, captures, view, shown, opened, step, recorded, landed, written, writtenItem, unstable, typedTexts, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [], leaveOut: leave };
 }
