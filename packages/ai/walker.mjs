@@ -49,7 +49,7 @@ function specMatches(m, c, sc) {
 
 // Two captures of one screen, item by item in page order: the items that changed in place (up to three for up to
 // three, between items both have): [what one says, what the other says].
-function inPlace(a, b) {
+export function inPlace(a, b) {
   const seq = sc => (sc.items || []).filter(i => !i.shut).map(i => ({ t: String(i.text || '').toLowerCase().replace(/[^a-z0-9$%]+/g, ' ').trim() })).filter(x => x.t);
   const A0 = seq(a), B0 = seq(b);
   let i = 0, j = 0;

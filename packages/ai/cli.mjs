@@ -6,6 +6,8 @@
 //   ai plan    --demo <dir> --walkthrough <recording.json> [--script <file>]   the same from one walkthrough
 //   ai approve --demo <dir>     approve plan.md as it is now (its writes included; any edit needs approving again)
 //   ai reset   --demo <dir>     reset.md: the plan's writes undone, and a read-only checklist
+//   ai reground --demo <dir> [--walk <dir>]   the plan's proofs again, on the screens a live walk read today
+//                               (walk.json and walk-screens/): reground.md, and plan.reground.md (plan.md stays)
 //   ai finish  --demo <dir>     after the build: her script for the guide, the beat keys, focus points, the review
 //   ai record  --demo <dir>     Record for me: run the approved plan in the browser while recording; then the script
 //   ai script  --demo <dir>     the talk track (script.md) from what was recorded
@@ -27,7 +29,7 @@ const exitWhenOut = code => process.stdout.write('', () => process.exit(code));
 const args = process.argv.slice(2);
 const sub = args[0];
 const emit = e => console.log('@ai ' + JSON.stringify(e));
-const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model', '--plan', '--yes', '--script', '--walkthrough'].includes(args[i - 1]));
+const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model', '--plan', '--yes', '--script', '--walkthrough', '--walk'].includes(args[i - 1]));
 
 async function main() {
   const settings = readSettings();
@@ -66,6 +68,7 @@ async function main() {
     }
     case 'approve': { const { approve } = await import('./make.mjs'); return approve(demo()); }
     case 'reset': { const { writeReset } = await import('./make.mjs'); const r = await writeReset(demo()); return { undo: r.reset.undo.length, checks: r.reset.checks.length, needs: r.reset.needs, file: 'reset.md' }; }
+    case 'reground': { const { reground } = await import('./reground.mjs'); return reground(demo(), { from: arg(args, '--walk', null) }); }
     case 'finish': { const { finish } = await import('./finish.mjs'); return finish({ demo: demo(), emit }); }
     case 'record': {
       const d = demo();
@@ -105,7 +108,7 @@ async function main() {
       return { sent: readdirSync(dir).sort().map(f => { const r = JSON.parse(readFileSync(join(dir, f), 'utf8')); return { file: join(dir, f), task: r.task, model: r.model, at: r.at, chars: r.prompt.length, pageText: r.pageText }; }) };
     }
     default:
-      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|approve|reset|finish|record|bench|script|coach|answer|stop|sent');
+      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|approve|reset|reground|finish|record|bench|script|coach|answer|stop|sent');
       return null;
   }
 }

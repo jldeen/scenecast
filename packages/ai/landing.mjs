@@ -86,10 +86,18 @@ const numbered = t => /\d/.test(String(t).replace(/#\d+\b|\b[a-z]{1,6}-\d{2,}\b/
 // control's state; what a box says; a control only the new screen has; words gone, with words of the page's own still
 // there. A Type step: its own words. typed: what other steps type (never a proof). next: the plan's next step that
 // acts on the page (not a wait or a scroll).
+// live (reground.mjs): the step's screen as the product shows it today (afters: its reads, once the page was quiet)
+// and the screen before it today (befores). The proof is chosen from today's first read; it must hold on every read
+// and on the recording, and on none of the screens before, the recording's or today's. With live.only, today's alone:
+// the product changed since the recording. live.unstable: words today's reads can't count on.
 // → { lands: { kind, … }, number, differs, why }: lands.kind is null when nothing proves the step, and `why` says so.
-export function chooseProof(s, from, to, walker, { typed = [], next = null } = {}) {
-  const after = walker.screen(to);
-  const before = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
+export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null } = {}) {
+  const rec = walker.screen(to);
+  const recBefore = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
+  const reads = live ? (live.afters || []).filter(Boolean) : [], readsBefore = live ? (live.befores || []).filter(Boolean) : [];
+  const after = live ? reads[0] : rec;
+  const afters = live ? [...(live.only || !rec ? [] : [rec]), ...reads] : [rec];
+  const before = live ? [...(live.only ? [] : recBefore), ...readsBefore] : recBefore;
   const none = why => ({ lands: { kind: null, text: null }, why });
   if (!after) return none(`there's no screen ${to}`);
   const app = (walker.flow.states[to] || {}).app, fromApp = from && (walker.flow.states[from] || {}).app;
@@ -97,25 +105,28 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null } = {
   // Another step's words: what it types, a stretch of it (four words or more), or words holding the start of a
   // sentence it types (a search term inside other words is only a word on the page).
   const typedIn = t => { const n = pnorm(t); return n.length > 1 && typed.some(v => { const m = pnorm(v); return !!m && (n === m || (m.includes(n) && (count(n) >= 4 || n.length >= 25)) || (count(m) >= 4 && n.includes(m.slice(0, 24)))); }); };
-  const stable = t => !!t && /[a-z]/i.test(t) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !typedIn(t);
-  const proves = l => holds(after, l) === true && before.every(b => holds(b, l) === false);
+  const stable = t => !!t && /[a-z]/i.test(t) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
+  const proves = l => afters.every(sc => holds(sc, l) === true) && before.every(b => holds(b, l) === false);
 
   if (s.kind === 'type' && s.value) {
-    const r = typing(s, from, after, before, walker);
+    const r = typing(s, from, after, before, walker, live && { reads, befores: readsBefore });
     if (r) return r;
   }
   if (from === to) return none('it lands where it already was');
   if (!pageWords(after) && !(after.controls || []).length) return none(`the screen it lands on (${to}) has no words`);
 
-  const usableOn = sc => i => !i.shut && !i.live && !i.time && i.tag !== 'textarea' && !(walker.writtenItem && walker.writtenItem(i, sc));
+  // Today's words alone can't be told from Copilot's (the recording's streams show what it wrote): never a message's.
+  const usableOn = sc => i => !i.shut && !i.live && !i.time && i.tag !== 'textarea' && !(walker.writtenItem && walker.writtenItem(i, sc)) && !(live && live.only && i.article !== undefined);
   const usable = usableOn(after);
   const all = shows(after), items = all.filter(usable);
   // What a proof reads must come from words a run can count on, not only from a toast, a time or Copilot's words.
   const sound = sc => pnorm(shows(sc).filter(usableOn(sc)).map(i => i.text).join('\n'));
-  const soundAfter = sound(after), soundBefore = before[0] ? sound(before[0]) : '';
-  const fromSound = l => l.kind === 'words' ? soundAfter.includes(pnorm(l.text))
-    : l.kind === 'control' || l.kind === 'box' ? (after.controls || []).some(c => !c.shut && !c.live && !c.time && pnorm(c.name) === pnorm(l.kind === 'box' ? l.box : l.control))
-    : l.kind === 'gone' ? soundAfter.includes(pnorm(l.still)) && soundBefore.includes(pnorm(l.gone)) : false;
+  const soundAfters = afters.map(sound);
+  const soundBefores = (live ? [live.only ? null : recBefore[0], readsBefore[0]] : [before[0]]).filter(Boolean).map(sound);
+  const soundCtl = (sc, n) => (sc.controls || []).some(c => !c.shut && !c.live && !c.time && pnorm(c.name) === pnorm(n));
+  const fromSound = l => l.kind === 'words' ? soundAfters.every(w => w.includes(pnorm(l.text)))
+    : l.kind === 'control' || l.kind === 'box' ? afters.every(sc => soundCtl(sc, l.kind === 'box' ? l.box : l.control))
+    : l.kind === 'gone' ? soundAfters.every(w => w.includes(pnorm(l.still))) && soundBefores.length > 0 && soundBefores.every(w => w.includes(pnorm(l.gone))) : false;
   const bad = new Set(all.filter(i => !usable(i)).map(i => pnorm(i.text)));
   const lines = items.filter(i => i.kind === 'text').map(i => i.text), labels = items.filter(i => i.kind !== 'text').map(i => i.text);
   const heads = (after.headings || []).filter(h => !bad.has(pnorm(h)));
@@ -151,20 +162,27 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null } = {
     for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
     for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });
     for (const mine of [true, false]) for (const c of controls) if ((!mine || !(frame.has(pnorm(c.name)) || c.nav)) && pick({ kind: 'control', control: c.name, state: null })) return found({ kind: 'control', control: c.name, state: null });
-    if (gone) for (const x of goneFrom(before[0], after)) if (pick({ kind: 'gone', gone: x, still: gone })) return found({ kind: 'gone', gone: x, still: gone });
+    if (gone) for (const x of goneFrom(readsBefore[0] || before[0], after)) if (pick({ kind: 'gone', gone: x, still: gone })) return found({ kind: 'gone', gone: x, still: gone });
   }
   return none(`nothing on ${to} tells it from the screen before`);
 }
 
 // Typing: the start of its own words, in the page's words when it's an editable area (they show there), else as what
 // the box says. When the recorded screen has other words in that box, the step says so (Differs): the recording can't
-// show these.
-function typing(s, from, after, before, walker) {
+// show these. live: today's reads after it, and before it: the proof is what they show it typed, in the box the
+// recording names, else in the box that has it now; the recording may have other words there.
+function typing(s, from, after, before, walker, live = null) {
   const own = lead(s.value);
   if (!own) return null;
   const r = from && walker.recorded ? walker.recorded(from, s) : null, field = r && r.control;
   const seen = before.some(b => pageWords(b).includes(pnorm(own)));
-  const lands = field && field.editable === 'content' && !seen ? { kind: 'words', text: own } : field && field.name ? { kind: 'box', box: field.name, says: own } : null;
+  let lands = field && field.editable === 'content' && !seen ? { kind: 'words', text: own } : field && field.name ? { kind: 'box', box: field.name, says: own } : null;
+  if (live) {
+    const shown = l => !!l && live.reads.every(sc => holds(sc, l) === true) && live.befores.every(b => holds(b, l) === false);
+    if (!shown(lands)) { const c = (after.controls || []).find(x => isBox(x) && !x.shut && x.name && pnorm(x.value).startsWith(pnorm(own))); lands = c ? { kind: 'box', box: c.name, says: own } : null; }
+    if (!shown(lands)) lands = !seen && shown({ kind: 'words', text: own }) ? { kind: 'words', text: own } : null;
+    return lands ? { lands, number: false, differs: null } : null;
+  }
   if (!lands) return null;
   // Other words in that box on the recorded screen, or typed in another box, and not these anywhere: the recording
   // can't show this step.

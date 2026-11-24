@@ -17,6 +17,7 @@ import { approve, approval } from './make.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou } from './finish.mjs';
+import { regroundPlan, walkReads, formatReground, reground } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
 import { checkFocusJson } from '@stuntdouble/core/lib/overrides.mjs';
@@ -518,4 +519,99 @@ test('the finish: focus points with via that the replica takes, beat keys, and h
   assert.ok(g.beats[0].do.some(d => /^\*\*⌥F\*\*: Kestrel moved/.test(d.text)));
   // The review's timings: each beat's lines at a steady pace, against the time her script gives it.
   assert.deepEqual(beatTimings(plan, ['5s', '~1m15s']).map(r => r[1]), ['about 11 s to say, in 5 s (long)', 'about 1 s to say, in 75 s', 'about 0:12 to say, in 1:20']);
+});
+
+test('proofs on today\'s product: kept, new, today only, behind a write, not reached; never a greeting or a passing tip', () => {
+  // A shop, recorded; then a read-only walk of it today: its catalog's heading, an item's heading and a link renamed,
+  // another greeting on the home screen, and a tip that changes between the walk's two reads.
+  const dir = mkdtempSync(join(tmpdir(), 'sc-reground-'));
+  const help = '<nav><a href="/help">Help</a></nav>';
+  const item = v => `<h1>Contoso Outfitters</h1>${help}<h2>Fabrikam Boots details</h2><label>Promo code <input type="text"${v ? ` value="${v}"` : ''}></label><button>Add to cart</button><a href="/">Contoso home</a><a href="/sale">Sale</a>`;
+  const snaps = {
+    home: `<h1>Contoso Outfitters</h1><p>Hi, what are you shopping for?</p>${help}<a href="/catalog">Catalog</a>`,
+    // The same screen captured again, with the greeting it gives on another visit.
+    'tog-home-collapsed': `<h1>Contoso Outfitters</h1><p>Hello! Looking for something?</p>${help}<a href="/catalog">Catalog</a>`,
+    catalog: `<h1>Contoso Outfitters</h1>${help}<h2>Spring catalog</h2><p>Filter by size</p><a href="/boots">Fabrikam Boots</a>`,
+    item: item(''), 'item-typed': item('SPRING25'),
+    cart: `<h1>Contoso Outfitters</h1>${help}<h2>Your cart</h2><button>Checkout</button>`,
+    checkout: `<h1>Contoso Outfitters</h1>${help}<h2>Pay for your order</h2>`,
+    sale: `<h1>Contoso Outfitters</h1>${help}<h2>Spring sale</h2>`,
+  };
+  const INPUT = { sel: 'input' };
+  const flow = { apps: [{ id: 'shop', key: 'S' }], variants: ['tog-home-collapsed'], beats: [{ active: 'shop', states: { shop: 'home' } }], path: [],
+    states: { home: { app: 'shop', snap: 'home' }, catalog: { app: 'shop', snap: 'catalog' }, item: { app: 'shop', snap: 'item', on: [{ type: INPUT, to: 'item-typed' }], fill: [{ ...INPUT, value: 'SPRING25' }] },
+      'item-typed': { app: 'shop', snap: 'item-typed' }, cart: { app: 'shop', snap: 'cart' }, checkout: { app: 'shop', snap: 'checkout' }, sale: { app: 'shop', snap: 'sale' } } };
+  const page = body => `<!doctype html><html><head><title>Contoso</title></head><body>${body}</body></html>`;
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  for (const [id, body] of Object.entries(snaps)) writeFileSync(join(dir, 'data', 'snaps', id + '.html'), page(body));
+  writeFileSync(join(dir, 'flow.json'), JSON.stringify(flow));
+  const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps: [{ id: 'shop', key: 'S', title: 'Contoso shop' }] } };
+  const text = `# Boots
+
+## Beat 1 · Browse
+
+- Go to shop
+  Lands on: home · "Contoso Outfitters"
+- Click "Catalog"
+  Lands on: catalog · "Spring catalog"
+- Click "Fabrikam Boots"
+  Lands on: item · "Fabrikam Boots details"
+- Type "SPRING25" in "Promo code"
+  Lands on: item-typed · box "Promo code" says "SPRING25"
+- Click "Add to cart" — ask first
+  Writes: adds the boots to the cart
+  Lands on: cart · "Your cart"
+- Click "Checkout"
+  Lands on: checkout · "Pay for your order"
+
+## Beat 2 · Look again
+
+- Click "Contoso home"
+  Lands on: home · control "Catalog"
+- Click "Sale"
+  Lands on: sale · "Spring sale"
+`;
+  writeFileSync(join(dir, 'plan.md'), text);
+  // Today's screens, as the walk saves them: two reads of each, as the frames' markup.
+  const home = tip => page(`<h1>Contoso Outfitters</h1><p>Good to see you again</p>${help}<a href="/catalog">Shop the catalog</a><h3>Tip of the day: ${tip}</h3>`);
+  const today = v => page(`<h1>Contoso Outfitters</h1>${help}<h2>Boots by Fabrikam</h2><label>Promo code <input type="text"${v ? ` value="${v}"` : ''}></label><button>Add to cart</button><a href="/">Contoso home</a>`);
+  const two = (a, b = a) => ({ reads: [[{ key: 'main', html: a }], [{ key: 'main', html: b }]] });
+  const walkDir = join(dir, 'walk-12');
+  const screens = { 'start-shop': two(home('wear thick socks'), home('try a half size up')), '1-1': two(home('wear thick socks'), home('try a half size up')),
+    '1-2': two(page(`<h1>Contoso Outfitters</h1>${help}<h2>Summer catalog</h2><p>Filter by size</p><a href="/boots">Fabrikam Boots</a>`)),
+    '1-3': two(today('')), '1-4': two(today('SPRING25')), '2-1': two(home('wear thick socks'), home('try a half size up')) };
+  mkdirSync(join(walkDir, 'walk-screens'), { recursive: true });
+  for (const [f, v] of Object.entries(screens)) writeFileSync(join(walkDir, 'walk-screens', f + '.json'), JSON.stringify(v));
+  const row = (step, t, status, why) => ({ step, text: t, status, ...(why ? { why } : {}) });
+  const walk = { beats: [
+    { beat: 1, steps: [row(0, 'Go to shop', 'reached'), row(1, 'Click "Catalog"', 'drifted'), row(2, 'Click "Fabrikam Boots"', 'drifted'), row(3, 'Type "SPRING25" in "Promo code"', 'reached'),
+      row(4, 'Click "Add to cart"', 'write', 'adds the boots to the cart'), row(5, 'Click "Checkout"', 'after-write', 'needs beat 1\'s write: Click "Add to cart"')] },
+    { beat: 2, steps: [row(0, 'Click "Contoso home"', 'drifted'), row(1, 'Click "Sale"', 'missed', 'no “Sale” on this screen')] }] };
+  writeFileSync(join(walkDir, 'walk.json'), JSON.stringify(walk));
+  const walker = walkerFromDemo(demo);
+  const { plan, rows } = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) });
+  assert.deepEqual(rows.map(r => [r.text, r.now, r.basis, r.why]), [
+    ['Go to shop', 'home · "Contoso Outfitters"', 'both', null],
+    ['Click "Catalog"', 'catalog · "Filter by size"', 'both', '“Spring catalog” isn\'t on today\'s screen'],
+    ['Click "Fabrikam Boots"', 'item · "Promo code"', 'both', '“Fabrikam Boots details” isn\'t on today\'s screen'],
+    ['Type "SPRING25" in "Promo code"', 'item-typed · box "Promo code" says "SPRING25"', 'both', null],
+    ['Click "Add to cart"', 'cart · "Your cart"', 'write', 'a write: adds the boots to the cart'],
+    ['Click "Checkout"', 'checkout · "Pay for your order"', 'write', 'needs beat 1\'s write: Click "Add to cart"'],
+    // Nothing on both: today's alone. Not the greeting (the recording's changes on each visit), not the tip (it
+    // changed between the two reads).
+    ['Click "Contoso home"', 'home · "Shop the catalog"', 'today', 'the “Catalog” control isn\'t on today\'s screen'],
+    ['Click "Sale"', 'sale · "Spring sale"', 'unreached', 'no “Sale” on this screen'],
+  ]);
+  assert.equal(formatLands(plan.beats[1].steps[0].lands), 'home · "Shop the catalog"');
+  const greeting = regroundPlan(parsePlan(text), { walker: { ...walker, unstable: null }, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[6];
+  assert.equal(greeting.now, 'home · "Good to see you again"');
+  assert.match(formatReground(rows), /\| Kept: it holds today and in the recording \| 2 \|\n\| New: it holds today and in the recording \| 2 \|\n\| Today's product only: it changed since the recording \| 1 \|/);
+  // Written beside the plan, which stays as it is (its approval is its exact text).
+  assert.deepEqual(reground(demo, { from: walkDir }), { steps: 8, kept: 2, changed: 2, today: 1, none: 0, write: 2, unreached: 1, file: 'reground.md', plan: 'plan.reground.md' });
+  assert.equal(readFileSync(join(dir, 'plan.md'), 'utf8'), text);
+  assert.match(readFileSync(join(demo.out, 'ai', 'plan.reground.md'), 'utf8'), /- Click "Contoso home"\n  Lands on: home · "Shop the catalog"\n/);
+  // A walk of another plan isn't this plan's.
+  const old = JSON.parse(JSON.stringify(walk));
+  old.beats[0].steps[1].text = 'Click "Shoes"';
+  assert.throws(() => regroundPlan(parsePlan(text), { walker, walk: old, reads: walkReads(join(walkDir, 'walk-screens')) }), /the walk was of another plan \(beat 1, step 2/);
 });

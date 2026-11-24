@@ -137,7 +137,9 @@ one beat per beat of the replica: edit it under **Script** like any script.
   beats, Say, Do and Screen lines and prompts), `html.mjs` (a capture's controls and words, without a browser);
   `packages/ai/walker.mjs` (the recorded screens and where each step leads, the capture browser's interface),
   `from-script.mjs` (Do lines to steps, grounded, with writes, landings, differences and focus), `walkthrough.mjs`,
-  `reset.mjs`, `make.mjs` (plan, approval, reset), `finish.mjs` (guide script, beat keys, focus points, the review).
+  `reset.mjs`, `make.mjs` (plan, approval, reset), `finish.mjs` (guide script, beat keys, focus points, the review),
+  `landing.mjs` (what proves each step), `reground.mjs` (those proofs again, on the screens a live walk read today:
+  `scenecast ai reground`).
   The plan's format: [engine/plan-format.md](engine/plan-format.md). App packs (`@stuntdouble/apps`) give each app's names,
   writes and their undos when they're there; without them, plain rules.
 - The recorder's `observe` command (`packages/capture/outline-page.js`) gives the page as the AI sees it; the AI

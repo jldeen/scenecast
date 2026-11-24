@@ -144,6 +144,31 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
 The site's frame is what half its pages show or more: a site is the app's host, a page an address with all its
 screens. The offline walker checks a step the same way (`walker.landed(at, step)`).
 
+### Proofs on today's product (`scenecast ai reground`)
+
+The product changes after it's recorded: a heading is renamed, a greeting is different. A live walk of the plan
+(read-only, in the capture browser) saves each screen it reaches, read twice once the page is quiet, about a second
+apart, and each app's start screen. `scenecast ai reground` chooses each step's proof again, by the rules above, on
+those reads:
+
+1. **It holds today and in the recording:** on the recorded screen and on every read of the step's screen today, and
+   on none of the screens before it, the recording's or today's (the reads after the step before; before anything
+   ran, the app's start screen). The plan's own proof stays while it does.
+2. **Today only:** when nothing does, a proof on today's reads alone, marked: the product changed since the
+   recording. Never words in a message (today's can't be told from Copilot's), words where the recording's captures
+   differ (what the greeting says today), or words that change between the two reads.
+3. **Nothing proves it today:** the step goes on **Needs you**.
+4. **Not reached:** a step behind a write the walk didn't make, or one it didn't get to, keeps its recorded proof,
+   marked.
+
+It writes `.out/ai/reground.md` (each proof before and after, and why), `reground.json` and `plan.reground.md`.
+`plan.md` stays as it is: its approval is its exact text, so adopting the new one means approving it again.
+
+The walk's files, in `.out/ai` (or `--walk <dir>`): `walk.json` (a row per step: `{ step, text, status, why }`),
+`walk-screens/<beat>-<step>.json` (both counted from 1) and `walk-screens/start-<app>.json`, each
+`{ reads: [[{ key, html }, …], …] }`. A read is the page's documents, its own (`key: "main"`) and then each frame's, as
+the capture serializer writes them, so a box's value, a checked box and open shadow roots are in the markup.
+
 ## Details under a line
 
 `Focus:` says what the line points at (one per focus point, in order):
@@ -252,6 +277,9 @@ and `approval(demo)` (whether `plan.md` is still the text that was approved). `p
 `proveLandings(plan, walker, flags)` chooses each step's proof (`chooseProof()`), `holds(screen, lands)` checks one on
 a screen the reader read (`true`, `false`, or `null` for none). `packages/ai/walker.mjs`: `landed(at, step)` (`{ ok,
 why }`: on the screen its `Lands on` names, with its proof holding there), `written(text)`, `unstable(text, app)`.
+`packages/ai/reground.mjs`: `regroundPlan(plan, { walker, walk, reads })` (`{ plan, rows }`, a row per step with its
+proof before and after and its `basis`: `both`, `today`, `none`, `write` or `unreached`), `walkReads(dir)`,
+`formatReground(rows)`.
 
 ## Changes
 

@@ -231,6 +231,8 @@ scenecast ai plan   --demo <dir> --script <file>        # Make it from my script
 scenecast ai plan   --demo <dir> --walkthrough <recording.json> [--script <file>]   # the same from one walkthrough
 scenecast ai approve --demo <dir>     # approve plan.md as it is (its writes); any edit needs approving again
 scenecast ai reset  --demo <dir>      # reset.md: each write undone, and a read-only checklist
+scenecast ai reground --demo <dir> [--walk <dir>]   # each step's proof again, on the screens a live walk read today:
+                                                    # .out/ai/reground.md and plan.reground.md (plan.md stays)
 scenecast ai finish --demo <dir>      # after the build: script.md for the guide, ⌥1–⌥9, focus points, .out/review/
 scenecast ai record --demo <dir>      # Record for me: the approved plan, in the browser, while recording; then script.md
 scenecast ai script --demo <dir>      # the talk track (script.md) from the recording: one beat per replica beat
