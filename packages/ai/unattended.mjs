@@ -19,7 +19,7 @@ import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { formatStep, formatLands, stepCount } from './plan.mjs';
 import { recordOpts } from '@stuntdouble/core/lib/demo.mjs';
-import { rx, settled, aiDir, appTab } from './run.mjs';
+import { rx, settled, aiDir, appTab, sleep } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 import { approval as approvalOf } from './make.mjs';
 import { liveWalker, walkerPacks } from './live.mjs';
@@ -243,7 +243,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // A failed check stops it. A step it can't prove (the plan gives no proof, or its words were on the screen before)
     // goes in run.unprovable, and then the next step goes on only if its control is the one (exactly one, by its exact
     // name, of its kind), and never if it's a write: the step before every write has a proven landing.
-    // Each landing proven on the live page (landing.mjs liveProof): the page read before the step and twice after it,
+    // Each landing proven on the live page (landing.mjs liveProof): the page read before the step and after it (twice
+    // unless the first read proves it strongly),
     // in the reader's shape. strong, weak or none goes in run.landings; after a write, its pack's read-only check
     // passing is strong. A write goes on only as writeGate says: the landings in its app since its last write all
     // strong. The run never asks: where it would, it stops before the write, keeps a picture and both reads, runs the
@@ -254,6 +255,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // Each read in the reader's shape, what she leaves out of the replica marked left (never a proof).
     const screensOf = (reads, id) => (reads || []).map(r => { try { return leftFor(lo, id, readScreen(r.docs)); } catch (e) { return null; } }).filter(Boolean);
     const typedSoFar = [], lastReads = {};
+    // Each app's last read after a step ({ read, seq, inputs }): the next step's read before, when it's the very next
+    // step and no input ran since. run.reads counts what was read and what was used again.
+    const lastAfter = {};
+    let stepSeq = 0;
+    run.reads = { before: { read: 0, reused: 0 }, after: { one: 0, two: 0 } };
     const packCheck = known => {
       const p = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(x => x && x.id === known.pack) : null;
       const pw = p && (p.writes || []).find(x => x.id === known.write);
@@ -301,7 +307,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       }
       const pre = await w.landsBefore(app, step, prev);
       // The page before it: for a Go to, the screen before it in plan order (the app it leaves); none before the first.
-      const before = bi === 0 && si === 0 ? [] : await w.reads(step.kind === 'app' ? prev : app, { n: 1 }).catch(() => []);
+      const seq = ++stepSeq, bApp = step.kind === 'app' ? prev : app, kept = lastAfter[bApp];
+      const reuse = !!kept && kept.seq === seq - 1 && kept.inputs === w.inputs().length && !sb;
+      const before = bi === 0 && si === 0 ? [] : reuse ? [kept.read] : await w.reads(bApp, { n: 1 }).catch(() => []);
+      if (bi || si) run.reads.before[reuse ? 'reused' : 'read']++;
       // Would it write? Read the screen as the step will find it.
       let wr = null;
       if (step.kind === 'click' || step.kind === 'press') {
@@ -338,11 +347,17 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       } else r = await w.act(app, step);
       if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why };
       const c = await w.check(app, step);
-      const afters = await w.reads(app).catch(() => []);
+      // Read once after it; a second read, about a second later, only when the first doesn't prove it strongly (a
+      // proof then has to hold on both).
+      let afters = await w.reads(app, { n: 1 }).catch(() => []);
       lastReads[app] = afters;
       if (!c.ok) return { kind: c.kind, why: c.why };
-      const lp = liveProof(step, { before: screensOf(before, step.kind === 'app' ? prev : app), afters: screensOf(afters, app), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
+      const proofOn = rs => liveProof(step, { before: screensOf(before, step.kind === 'app' ? prev : app), afters: screensOf(rs, app), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
       const byCheck = !!(checked && checked.ok);
+      let lp = proofOn(afters);
+      if (!byCheck && lp.strength !== 'strong') { await sleep(1000); afters = [...afters, ...await w.reads(app, { n: 1 }).catch(() => [])]; lastReads[app] = afters; lp = proofOn(afters); }
+      run.reads.after[afters.length > 1 ? 'two' : 'one']++;
+      lastAfter[app] = { read: afters[afters.length - 1], seq, inputs: w.inputs().length };
       const strength = byCheck ? 'strong' : lp.strength;
       const url = (await w.controls(app).catch(() => ({}))).url || null;
       run.landings.push({ beat: bi + 1, index: si, app, step: at.text, expected: step.lands ? formatLands(step.lands) : null, got: { screen: c.screen || null, url, text: byCheck ? `the pack's check: ${checked.status}${checked.picked ? ` ${JSON.stringify(checked.picked)}` : ''}` : proofWords(lp.lands) }, ok: true, strength, basis: byCheck ? 'pack check' : 'live', ...(strength === 'strong' ? {} : { why: lp.why }), ...(r.wrote ? { wrote: true } : {}), ...(checked ? { check: checked } : {}) });
@@ -383,7 +398,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
           if (stop.leak) Object.assign(run.stopped, { app: stop.leak.app, saving: stop.leak.what, ...(stop.leak.picture ? { picture: stop.leak.picture } : {}), ...(stop.leak.hits ? { where: stop.leak.hits } : {}) });
           // Before a write: both reads of the page as it was, and the step for her (the reset after still runs).
           if (stop.beforeWrite) {
-            const reads = lastReads[app];
+            let reads = lastReads[app];
+            // Both reads of the page as it was: a strong landing was read once, so its second now (no input since).
+            if (reads && reads.length === 1) { await sleep(1000); reads = [...reads, ...await w.reads(app, { n: 1 }).catch(() => [])]; }
             if (reads && reads.length) { mkdirSync(stops, { recursive: true }); run.stopped.reads = join(stops, `${bi + 1}-${si + 1}-${stop.kind}.reads.json.gz`); writeFileSync(run.stopped.reads, gzipSync(JSON.stringify(reads))); }
             run.needsYou.push({ beat: bi + 1, step: si, text: at.text, why: stop.why });
           }
