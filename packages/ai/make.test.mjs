@@ -9,13 +9,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
-import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames } from './from-script.mjs';
+import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, landingFor, proveLandings } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
 import { approve, approval } from './make.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
-import { pointsFromPlan, guideScript, beatStarts, beatTimings } from './finish.mjs';
+import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou } from './finish.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
 import { checkFocusJson } from '@stuntdouble/core/lib/overrides.mjs';
@@ -43,7 +43,8 @@ function demoDir() {
   const box = '<div role="textbox" contenteditable="true" aria-label="Message"></div>';
   const snaps = {
     'chat-home': `<h1>New chat</h1>${box}<div role="radiogroup"><div role="radio" aria-checked="false">Chat</div><div role="radio" aria-checked="true">Notes</div></div>`,
-    'chat-typed': `<h1>New chat</h1>${box}`,
+    // A chat box shows what was typed in it (an input field wouldn't: its value isn't in the page's words).
+    'chat-typed': `<h1>New chat</h1><div role="textbox" contenteditable="true" aria-label="Message">What's changed on PO-1?</div>`,
     'chat-answer': `<h2>Kestrel delay answer</h2><p>Kestrel moved the ship date by six days.</p><p>That puts about $35,073 in penalties at risk with Brightline.</p><section><h3>Save note</h3><button aria-label="Save: Save note">Save</button><button aria-label="Cancel: Save note">Cancel</button></section><div role="tab">Sources</div>${box}`,
     'chat-saved': '<p>Your note is saved as kestrel-note in your notes.</p>',
     'chat-sources': "<p>Sources: the supplier's notice in Teams and two emails.</p>",
@@ -250,6 +251,35 @@ test('a list framed the way she shows one: its heading and first step; a section
   assert.deepEqual(sectionsOf({ items: [h(1, 'Comments', 'h2'), item(2, 'Write a reply', { role: 'button' }), item(3, 'Skip comments', { role: 'button' }), h(4, 'Footer', 'h2'), item(5, 'Manage cookies', { role: 'button' })] }), []);
 });
 
+test('a landing proves its step: words its screen shows that the one before didn\'t, else a control, else Needs you', () => {
+  const screen = (headings, items, controls = []) => ({ headings, controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', box: [i, 0, i + 1, 1], ...(typeof it === 'string' ? { text: it } : it) })), text: [...headings, ...items.map(it => it.text || it)].join('\n') });
+  const page = screen(['Operations'], ['Operations', 'Foundry IQ · Knowledge base', 'Add content'], [{ role: 'button', name: 'Add content' }]);
+  // The picker shows "Foundry IQ" (the page had it, inside a longer line), a time that a reload changes, a closed
+  // dialog's heading, and its own tab.
+  const picker = screen(['Operations', 'Foundry IQ'], ['Operations', 'Foundry IQ · Knowledge base', 'Add content', '2 min ago', { text: 'Response time details', shut: true }, { text: 'Web IQ', kind: 'control', role: 'tab' }], [{ role: 'button', name: 'Add content' }, { role: 'tab', name: 'Web IQ' }]);
+  const badge = screen(['Operations'], ['Operations', 'Foundry IQ · Knowledge base', 'Add content'], [{ role: 'button', name: 'Add content' }, { role: 'button', name: 'Endorsement: Certified' }]);
+  assert.deepEqual(landingFor([page], picker), { text: 'Web IQ' });
+  // Closing it only takes words away; a badge only its label tells apart.
+  assert.deepEqual(landingFor([picker], page), { text: null });
+  assert.deepEqual(landingFor([page], badge), { text: 'Endorsement: Certified', control: 'button' });
+  // A plan, in order: each landing against the screen before its step. The first has nothing before it.
+  const S = { page, picker, badge };
+  const walker = { screen: id => S[id], shown: id => S[id], states: Object.keys(S), flow: { states: { page: { app: 'iq' }, picker: { app: 'iq' }, badge: { app: 'iq' } } } };
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'iq', lands: { screen: 'page', text: 'Operations' } },
+    { kind: 'click', target: 'Add content', line: '1.1', lands: { screen: 'picker', text: 'Foundry IQ' } },
+    { kind: 'press', key: 'Escape', line: '1.2', lands: { screen: 'page', text: 'Operations' } },
+    { kind: 'click', target: 'Certified', line: '1.3', lands: { screen: 'badge', text: 'Operations' } }] }] };
+  const flags = proveLandings(plan, walker);
+  assert.deepEqual(plan.beats[0].steps.map(s => [s.lands.screen, s.lands.text]), [['page', 'Operations'], ['picker', 'Web IQ'], ['page', null], ['badge', 'Endorsement: Certified']]);
+  assert.deepEqual(flags.map(f => [f.kind, f.at]), [['landing', '1.2'], ['landing', '1.3']]);
+  assert.match(flags[0].text, /^Press Escape: everything page shows was on the screen before it/);
+  assert.match(flags[1].text, /looks for its "Endorsement: Certified" button instead$/);
+  // The review lists them; Copilot isn't asked about them (they're not her script's to fix).
+  assert.deepEqual(needsYou({ planReview: { flags }, plan: { beats: [] } }).map(n => [n.kind, n.where]), [["A run can't check this step", 'line 1.2'], ["A run can't check this step", 'line 1.3']]);
+  const input = scriptPlanInput(parseTalkTrack(PROSE, 'p.md'), null, { draft: { plan: { beats: [] }, flags: [{ kind: 'landing', at: '1.1', text: 'x' }, { kind: 'differs', at: '1.1', text: 'The product shows "Save"' }] } });
+  assert.deepEqual(input.script.beats[0].lines[0].issues, ['The product shows "Save"']);
+});
+
 test('a walker never writes; offline, the recording says where a write went', () => {
   const walker = walkerFromDemo(demoDir());
   assert.throws(() => walker.step('chat-answer', { kind: 'click', target: 'Save: Save note', writes: 'saves it' }), e => e.code === 'WRITE');
@@ -312,8 +342,11 @@ test('a walkthrough makes the same kind of plan: steps, landings, writes, a beat
   const walker = walkerFromDemo(demoDir());
   const rec = { path: [{ checkpoint: 'chat-home' }, { type: BOX, text: "What's changed on PO-1?", checkpoint: 'chat-typed' }, { enter: BOX, checkpoint: 'chat-answer' },
     { click: { sel: 'button[aria-label="Save: Save note"]' }, checkpoint: 'chat-saved' }, { app: 'admin', checkpoint: 'admin-home' }, { click: { sel: '[data-testid="cert-badge"]' }, checkpoint: 'admin-certified' }] };
-  const plan = planFromRecording(rec, { walker });
+  const flags = [];
+  const plan = planFromRecording(rec, { walker, flags });
   assert.deepEqual(plan.beats.map(b => b.steps.map(s => s.text)), [['Go to chat', `Type "What's changed on PO-1?"`, 'Press Enter', 'Wait for the answer'], ['Click "Save: Save note"'], ['Go to admin', 'Click "Certified"']]);
+  // Its landings prove each step too: what was typed shows in the chat box, and nothing needs her.
+  assert.deepEqual([plan.beats[0].steps[1].lands, flags], [{ screen: 'chat-typed', text: "What's changed on PO-1?" }, []]);
   // A click recorded by its test id is named from the screen; the prompt is the first one sent.
   assert.deepEqual(plan.beats.flatMap(b => b.steps).filter(s => s.writes).map(s => s.writes.split(' (')[0]), ['sends prompt 1 in Chat app', 'saves "Save note"', 'endorses it: "Certified"']);
 });
