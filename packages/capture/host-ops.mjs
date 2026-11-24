@@ -10,6 +10,7 @@
 //                                   non-read it let through (passed: method, host, path shape, by: allowed | a planned write)
 //   capEvents({ since })            what happened that a plan can't: a page opening another window, a native dialog
 //                                    (dismissed: a confirm is never accepted), a tab leaving for another host
+//                                    (navigated), a tab's new document (loaded: a real load, not an in-page route)
 //   capShot({ tab, file })          a picture of a tab, for a stop
 //   capBack({ tab })                the tab's previous page (the walker's way back from an off-plan landing)
 //   capUrl({ tab })                 where a tab is now (one that left the app has lost its mark)
@@ -52,6 +53,9 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     p.on('popup', q => { events.push({ kind: 'popup', from: hostOf(p.url()), host: hostOf(q.url()), at: at() }); });
     p.on('dialog', d => { events.push({ kind: 'dialog', type: d.type(), host: hostOf(p.url()), at: at() }); d.dismiss().catch(() => {}); });
     p.on('framenavigated', f => { if (f === p.mainFrame()) events.push({ kind: 'navigated', host: hostOf(f.url()), path: (() => { try { return new URL(f.url()).pathname; } catch (e) { return ''; } })(), at: at() }); });
+    // A new document in the tab (a real load or reload; an in-page route change is only navigated): where a delayed
+    // effect of a held request ends.
+    p.on('load', () => { let path = ''; try { path = new URL(p.url()).pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, '{id}'); } catch (e) {} events.push({ kind: 'loaded', host: hostOf(p.url()), path, at: at() }); });
   };
   for (const p of cb.ctx.pages()) watch(p);
   cb.ctx.on('page', watch);
