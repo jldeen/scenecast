@@ -122,14 +122,19 @@ POST). A planned write opens the app's own hosts for its one step.
 - `why`: one line per entry (the entry is the key): what the app sends it for, why it changes nothing, and what the
   app looks like with it held. An app that shows an error with a read held gets that read allowed, after review: a
   replica never shows an error the product doesn't.
+- `stayHeld`: entries in the same form for what the app sends by itself to a host its writes use (a refresh, a
+  subscription): held even while a planned write opens that host, so only the write's own calls pass in its step.
+  Each has a `why` line too: how often walks saw it, and that it was held through them with nothing broken. A held one
+  during a write is marked `duringWrite` in run.json.
 
-`guardFor(cfg)` gives a demo's: `{ hosts, allow }` (its apps' and their packs', plus `capture.allow`).
+`guardFor(cfg)` gives a demo's: `{ hosts, allow, stayHeld }` (its apps' and their packs', plus `capture.allow`).
 
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
-with `apis.<name>` naming the page that signs in (`open`) and the host (`host`, or `hostPattern`); the capture pass
-calls it from the page or frame that sends the app's own calls there, with the Authorization it sends, held in memory
-for the one call. A path's `{placeholders}` are one segment each, filled from the demo's `apps[].values` (its IDs)
+with `apis.<name>` naming the page that signs in (`open`), the host (`host`, or `hostPattern`) and, when the page
+around it calls that host too, the frame's host whose calls to use (`from`: IQ's Power BI frame, not its portal); the
+capture pass calls it from that page or frame, with the Authorization it sends, held in memory for the one call. A
+`check.api` GET runs the same way, with the guard as it is. A path's `{placeholders}` are one segment each, filled from the demo's `apps[].values` (its IDs)
 and the run's results. Packs never hold credentials or tokens (`checkPack` refuses them).
 
 ## Private packs
@@ -154,7 +159,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `themePack(app, theme)`, `platformPack(app, platform)` | a theme or platform pack, by demo app id or pack id |
 | `writeFor(pack, step, field)` | the write a parsed plan step makes, or null |
 | `safeFor(pack, step, field)` | the safe entry for a plan step (it only opens a picker or menu), or null |
-| `guardFor(cfg)` | the read-only guard's `{ hosts, allow }` for a demo (its apps' packs, plus `capture.allow`) |
+| `guardFor(cfg)` | the read-only guard's `{ hosts, allow, stayHeld }` for a demo (its apps' packs, plus `capture.allow`) |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice

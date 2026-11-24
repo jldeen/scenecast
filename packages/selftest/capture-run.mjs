@@ -26,6 +26,8 @@ import { chromium } from 'playwright-core';
 import { startTasks, startFixture } from '../../examples/fixture-app/server.mjs';
 import { browserApp } from '@stuntdouble/capture/browser.mjs';
 import { selftestGuard } from './guard.mjs';
+import { gunzipSync } from 'node:zlib';
+import { readScreen } from '@scenecast/script/html.mjs';
 import { nameParity } from './name-parity.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,7 +69,7 @@ const HOST = `127.0.0.1:${TASKS}`, NOTES_HOST = `127.0.0.1:${NOTES}`;
 mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
 // apiPath: new-task's API undo (as a private pack's), on the page's own session; null: none. notesApi: pin-note's, on
 // the notes frame's session.
-const writePack = ({ frameHost = true, apiPath = null, notesApi = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
     { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}) } },
@@ -76,8 +78,8 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false } = {}) 
     { id: 'pin-note', what: 'Pins the note', on: { kind: 'click', target: 'Pin note' }, undo: { steps: ['Click "Unpin note"'], ...(notesApi ? { api: { use: 'notes', method: 'POST', path: '/api/unpin' } } : {}) } },
     { id: 'unpin-note', what: 'Unpins the note', on: { kind: 'click', target: 'Unpin note' }, undo: null },
   ],
-  guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}) },
-  apis: { tasks: { open: `http://${HOST}/`, host: HOST }, notes: { open: `http://${HOST}/`, host: NOTES_HOST } },
+  guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}), ...(stayHeld ? { stayHeld } : {}) },
+  apis: { tasks: { open: `http://${HOST}/`, host: HOST }, notes: { open: `http://${HOST}/`, host: NOTES_HOST, from: NOTES_HOST } },
 }, null, 1));
 writePack();
 
@@ -244,6 +246,25 @@ try {
   const seenIn = nst.seen.filter(t => t >= u0 && t <= u1).length;
   const heldIn = (rj.guard.held || []).filter(h => h.host === NOTES_HOST && h.path === '/api/seen' && Date.parse(h.at) >= u0 && Date.parse(h.at) <= u1).length;
   check('and while that call is open, the app\'s other non-reads to the host stay held', u1 > u0 && seenIn === 0 && heldIn > 0, JSON.stringify({ unpin: [u0, u1], seenIn, heldIn, seen: nst.seen.length }));
+  // A write opens its app's hosts for its step: the app's own background POST to one of them (the notes frame's pings)
+  // stays held when the pack keeps it held (guard.stayHeld), and the write still lands.
+  writePack({ stayHeld: [`/^POST ${NOTES_HOST.replace(/\./g, '\\.')}\\/api\\/seen$/`] });
+  writeFileSync(join(DEMO, 'reset.md'), PIN_RESET);
+  // And the demo's capture.keepBodies keeps those held requests' bodies, in a file of their own.
+  const setKeep = keep => { const f = join(DEMO, 'demo.json'), c = JSON.parse(readFileSync(f, 'utf8')); if (keep) c.capture.keepBodies = keep; else delete c.capture.keepBodies; writeFileSync(f, JSON.stringify(c, null, 2)); };
+  setKeep([`${NOTES_HOST}/api/seen`]);
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.notePing(true);
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const sst2 = tasks.state();
+  tasks.notePing(false);
+  const duringWrite = (rj.guard.held || []).filter(h => h.host === NOTES_HOST && h.path === '/api/seen' && h.duringWrite).length;
+  check('a background POST to a write\'s host stays held during the write (stayHeld), and the write lands', !rj.stopped && rj.writes.length === 1 && rj.writes[0].write === 'pin-note' && count(tasks.log, 'POST notes/api/pin') === 1 && sst2.seen.length === 0 && duringWrite > 0 && rj.reset.after && rj.reset.after.ok && sst2.pinned === false, JSON.stringify({ stopped: rj.stopped, writes: rj.writes, seen: sst2.seen.length, duringWrite, after: rj.reset.after && rj.reset.after.ok }));
+  const kept = (() => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'held-bodies.json'), 'utf8')); } catch (e) { return null; } })();
+  check('and the held bodies the demo asked for are kept in their own file, not in run.json', kept && kept.length > 0 && kept.every(b => b.path === '/api/seen' && /^\{"seen":\d+\}$/.test(b.body)) && !readFileSync(join(DEMO, '.out', 'ai', 'run.json'), 'utf8').includes('\\"seen\\"'), JSON.stringify({ kept: kept && kept.slice(0, 2), n: kept && kept.length }));
+  setKeep(null);
   writePack();
   writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
   writeFileSync(join(DEMO, 'reset.md'), RESET);
@@ -312,6 +333,11 @@ try {
   check('and it wrote nothing', !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry') && tasks.state().tasks.length === 0, tasks.log.join(', '));
   const typedScreen = (() => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk-screens', '1-2.json'), 'utf8')); } catch (e) { return null; } })();
   check('and it kept each screen it landed on: its words, its controls, what a box holds', typedScreen && typedScreen.words.includes('No tasks yet') && typedScreen.controls.some(c => c.name === 'New task' && c.role === 'textbox' && c.value === 'Call Kestrel') && typedScreen.controls.some(c => c.name === 'Pin note' && c.frame === NOTES_HOST), JSON.stringify(typedScreen && { words: typedScreen.words.slice(0, 6), controls: typedScreen.controls.slice(0, 12) }));
+  // And each one in the reader's shape, read twice: the recorder's serialization, so a box's value is in its markup.
+  const readsOf = name => { try { return JSON.parse(gunzipSync(readFileSync(join(DEMO, '.out', 'ai', 'walk-screens', `${name}.reads.json.gz`)))); } catch (e) { return null; } };
+  const typedReads = readsOf('1-2'), startReads = readsOf('start-tasks');
+  const rs = typedReads && typedReads.length === 2 ? readScreen(typedReads[1].docs) : null;
+  check('and in the reader\'s shape, read twice: the page and its frames, what a box holds, each start screen too', rs && typedReads.every(r => r.docs.some(d => d.key === 'main') && r.docs.some(d => d.key === NOTES_HOST)) && rs.controls.some(c => c.name === 'New task' && c.role === 'textbox' && c.value === 'Call Kestrel') && rs.controls.some(c => c.name === 'Pin note' && c.frame === NOTES_HOST) && startReads && startReads.length === 2 && readScreen(startReads[0].docs).text.includes('No tasks yet'), JSON.stringify({ reads: typedReads && typedReads.map(r => r.docs.map(d => [d.key, d.html.length])), controls: rs && rs.controls.slice(0, 8), start: !!startReads }));
   const cl = (wj.beats[0] && wj.beats[0].steps[2] && wj.beats[0].steps[2].cleared) || {};
   check('the beat stopped at the write: what it typed for it is cleared, no draft left', cl.cleared === true && cl.in === 'New task', JSON.stringify(wj.beats[0] && wj.beats[0].steps[2]));
   await run(['capture', 'stop', '--demo', DEMO], { env: E });

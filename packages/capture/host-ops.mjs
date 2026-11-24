@@ -13,14 +13,16 @@
 //   capShot({ tab, file })          a picture of a tab, for a stop
 //   capBack({ tab })                the tab's previous page (the walker's way back from an off-plan landing)
 //   capUrl({ tab })                 where a tab is now (one that left the app has lost its mark)
-//   capApi({ tab, open, host | hostPattern, method, path, body })
-//                                   an API undo in the app's own signed-in session: its page opened (a read), the
+//   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick })
+//                                   a pack's API check (GET, HEAD: the guard as it is; only pick's number and true/false
+//                                   fields come back) or API undo in the app's own signed-in session (from: the
+//                                   frame's host whose calls it takes the session from, and calls from): its page opened (a read), the
 //                                   Authorization the page sends to that host caught (in memory, for the one call,
 //                                   never written), then the call from the page or frame that made the app's own
 //                                   call, the guard open for that call only (its method and exact address). path:
 //                                   already filled and encoded; one that leaves the origin or that the address would
 //                                   change (dot segments, a backslash) is refused
-//                                   → { ok, status, method, host, path, from } | { ok: false, why }
+//                                   → { ok, status, method, host, path, from, picked? } | { ok: false, why }
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
 //                                    user is active and the screen unlocked (the capture browser has no person)
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -69,9 +71,9 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   return {
     async capInfo() { return { capture: true, mode: cb.mode, guarded: !!base }; },
     async capGuard(c) {
-      if (guard) await guard.stop();
-      guard = await cb.guard({ hosts: c.hosts || null, allow: c.allow || [], mode: c.mode || 'hold', local: !!c.local });
-      log(`guard on (${c.mode || 'hold'}): ${(c.hosts || ['every web host']).join(', ')}; ${(c.allow || []).length} allowed`);
+      // It replaces the guard that's on (the start's, or a run's) with no gap between them.
+      guard = await cb.guard({ hosts: c.hosts || null, allow: c.allow || [], stayHeld: c.stayHeld || [], keepBodies: c.keepBodies || [], mode: c.mode || 'hold', local: !!c.local });
+      log(`guard on (${c.mode || 'hold'}): ${(c.hosts || ['every web host']).join(', ')}; ${(c.allow || []).length} allowed, ${(c.stayHeld || []).length} held even for a write`);
       return { on: true };
     },
     async capOpen(c) {
@@ -86,40 +88,53 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       return { id };
     },
     async capClose(c) { const close = opens.get(c.id); if (close) { close(); opens.delete(c.id); } return { closed: !!close }; },
-    async capGuardOff() { for (const close of opens.values()) close(); opens.clear(); if (guard) await guard.stop(); guard = null; if (base) await base(); return { on: !!base }; },
+    // Back to the start's guard (in before the run's comes out), or none.
+    async capGuardOff() { for (const close of opens.values()) close(); opens.clear(); if (base) await base(); else if (guard) await guard.stop(); guard = null; return { on: !!base }; },
     // A run's guard, else the one on from the start.
-    async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {}, passed: g && g.passed ? g.passed() : [] }; },
+    async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {}, passed: g && g.passed ? g.passed() : [], bodies: g && g.bodies ? g.bodies() : [] }; },
     async capEvents(c) { return { events: events.slice(c.since || 0), total: events.length }; },
     async capApi(c) {
       const g = guard || (base && base.guard);
       if (!g || !g.watchAuth) return { ok: false, why: "no guard to see the app's own calls (API undos run in the capture browser)" };
       const re = c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
       const p = await tabOf(c.tab);
-      g.watchAuth(re);
+      g.watchAuth(re, c.from || null);
       try {
         await p.goto(c.open, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
         for (const t0 = Date.now(); !g.peekAuth() && Date.now() - t0 < (c.waitS || 20) * 1000;) await new Promise(r => setTimeout(r, 250));
         const auth = g.takeAuth();
-        if (!auth) return { ok: false, why: `the page made no signed-in call to ${c.hostPattern || c.host}` };
+        if (!auth) return { ok: false, why: `the page made no signed-in call to ${c.hostPattern || c.host}${c.from ? ` from ${c.from}` : ''}` };
         // The address: the path on the origin the session came from, exactly as given (nothing a URL parser would
         // change, nowhere else).
         const target = apiTarget(c.path, auth.origin);
         if (!target) return { ok: false, why: `"${c.path}" isn't a plain path on ${auth.host}` };
         const method = String(c.method || '').toUpperCase();
-        if (!/^(DELETE|PATCH|POST|PUT)$/.test(method)) return { ok: false, why: `an API undo is DELETE, PATCH, POST or PUT, not "${c.method}"` };
+        const read = /^(GET|HEAD)$/.test(method);
+        if (!read && !/^(DELETE|PATCH|POST|PUT)$/.test(method)) return { ok: false, why: `an API call here is a pack's check (GET, HEAD) or undo (DELETE, PATCH, POST, PUT), not "${c.method}"` };
         // From the page or frame that made the app's own call, as the app does (the API's CORS rules allow that one;
         // IQ's API answers its Power BI frame, not the portal around it), with the browser's own credentials mode.
-        const frame = (auth.from && p.frames().find(f => originOf(f.url()) === auth.from)) || p.mainFrame();
+        // With from (the pack names the frame), only that frame: never the page around it instead.
+        const frame = (auth.from && p.frames().find(f => originOf(f.url()) === auth.from)) || (c.from ? null : p.mainFrame());
+        if (!frame) return { ok: false, why: `no frame from ${c.from} to call from` };
+        // A check's answer: its status, and only the number and true/false fields it names (pick), never text.
+        const call = () => frame.evaluate(async ({ url, method, auth, body, pick }) => {
+          try {
+            const res = await fetch(url, { method, headers: { authorization: auth, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+            let picked;
+            if (pick && pick.length) { const j = await res.json().catch(() => null); picked = {}; for (const k of pick) if (j && (typeof j[k] === 'number' || typeof j[k] === 'boolean')) picked[k] = j[k]; }
+            return { status: res.status, picked };
+          } catch (e) { return { error: String((e && e.message) || e) }; }
+        }, { url: target.href, method, auth: auth.value, body: read ? null : (c.body || null), pick: Array.isArray(c.pick) ? c.pick.map(String) : null });
+        const from = hostOf(frame.url());
+        const done = r => {
+          log(`API ${read ? 'check' : 'undo'}: ${method} ${auth.host}${String(c.path).replace(/[0-9a-f-]{16,}|\d{4,}/gi, '{id}')} from ${from}: ${r.status || r.error}`);
+          return r.status ? { ok: r.status >= 200 && r.status < 300, status: r.status, method, host: auth.host, path: c.path, from, ...(r.picked ? { picked: r.picked } : {}) } : { ok: false, why: r.error, from };
+        };
+        // A read passes the guard as it is; an undo opens its one call only.
+        if (read) return done(await call());
         let close; const opened = new Promise(r => { close = r; });
         g.pass(() => opened, { hosts: [auth.host], method, url: target.href });
-        try {
-          const r = await frame.evaluate(async ({ url, method, auth, body }) => {
-            try { const res = await fetch(url, { method, headers: { authorization: auth, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: res.status }; } catch (e) { return { error: String((e && e.message) || e) }; }
-          }, { url: target.href, method, auth: auth.value, body: c.body || null });
-          const from = hostOf(frame.url());
-          log(`API undo: ${c.method} ${auth.host}${String(c.path).replace(/[0-9a-f-]{16,}|\d{4,}/gi, '{id}')} from ${from}: ${r.status || r.error}`);
-          return r.status ? { ok: r.status >= 200 && r.status < 300, status: r.status, method, host: auth.host, path: c.path, from } : { ok: false, why: r.error, from };
-        } finally { close(); }
+        try { return done(await call()); } finally { close(); }
       } finally { g.watchAuth(null); }
     },
     async capActive(c) {

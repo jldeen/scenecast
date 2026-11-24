@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld } from './browser.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
 
@@ -176,4 +176,14 @@ test("which page or frame sent a request: its Origin, else its Referer's", () =>
   assert.equal(senderOrigin({ Origin: 'https://frame.example.com' }), 'https://frame.example.com');
   assert.equal(senderOrigin({ origin: 'null', referer: 'https://frame.example.com/app?x=1' }), 'https://frame.example.com');
   assert.equal(senderOrigin({}), null);
+});
+
+test("a pack's stay-held entries: its own background calls, matched as allow entries are", () => {
+  const list = ['/^POST api\\.example\\.com\\/v1\\/refresh$/', 'api.example.com/v1/subscribe', '/^POST api\\.example\\.com\\/v1\\/search$/ when body /^\\{"q":""\\}$/'];
+  assert.equal(staysHeld({ method: 'post', url: 'https://api.example.com/v1/refresh' }, list), true);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/subscribe/x' }, list), true);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/items' }, list), false);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":""}' }, list), true);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":"x"}' }, list), false);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/refresh' }, []), false);
 });

@@ -15,6 +15,7 @@
 // its start-screen sweeps run side by side, an app per window.
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { formatStep, stepCount } from './plan.mjs';
 import { recordOpts } from '@stuntdouble/core/lib/demo.mjs';
 import { rx, settled, aiDir, appTab } from './run.mjs';
@@ -158,7 +159,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       emit({ event: 'stage', name: 'reset-after', label: 'Putting the demo back as it started' });
       try { run.reset.after = await runReset({ demo, cmd, walker: liveWalker({ demo, cmd, packs, log }), phase: 'after', approval: ap, ran, results, emit }); } catch (e) { run.reset.after = { ok: false, why: e.message }; }
     }
-    Object.assign(run.guard, await guardOff(cmd, g.hosts));
+    { const off = await guardOff(cmd, g.hosts); keepBodiesOut(demo, off.bodies); Object.assign(run.guard, off); }
     if (wRun) run.inputs = wRun.inputs();
     try { run.events = (await cmd('capEvents', {}, 30)).events.filter(e => e.kind !== 'navigated'); } catch (e) {}
     save();
@@ -195,16 +196,27 @@ function namesOf(write, r) {
 // The read-only guard on every web host (the apps' and any other: a write mustn't leave by a side door), with the
 // packs' allow-lists for what the apps send while only looked at. A planned write opens the app's own hosts.
 async function guardOn(demo, cmd, packs) {
-  const g = packs && packs.guardFor ? packs.guardFor(demo.cfg) : { hosts: demo.cfg.apps.map(a => { try { return new URL(a.url).host; } catch (e) { return null; } }).filter(Boolean), allow: [] };
-  await cmd('capGuard', { hosts: null, allow: g.allow, mode: 'hold', local: g.hosts.some(h => LOOPBACK.test(h)) }, 30);
+  const g = packs && packs.guardFor ? packs.guardFor(demo.cfg) : { hosts: demo.cfg.apps.map(a => { try { return new URL(a.url).host; } catch (e) { return null; } }).filter(Boolean), allow: [], stayHeld: [] };
+  // A demo's capture.keepBodies (its local demo.json): the held requests whose bodies a person wants to review.
+  const keepBodies = (demo.cfg.capture && demo.cfg.capture.keepBodies) || [];
+  await cmd('capGuard', { hosts: null, allow: g.allow, stayHeld: g.stayHeld || [], keepBodies, mode: 'hold', local: g.hosts.some(h => LOOPBACK.test(h)) }, 30);
   return g;
 }
 // What the guard held, and every host the browser reached that isn't one of the apps' own.
+// The held requests' bodies a demo asked to keep (capture.keepBodies), in .out/ai/held-bodies.json: local only, for a
+// person reviewing an allow entry. None: no file.
+function keepBodiesOut(demo, bodies) {
+  const f = join(aiDir(demo), 'held-bodies.json');
+  if (bodies && bodies.length) { mkdirSync(aiDir(demo), { recursive: true }); writeFileSync(f, JSON.stringify(bodies, null, 1)); }
+  else rmSync(f, { force: true });
+}
 async function guardOff(cmd, hosts) {
   const out = {};
   try {
     const l = await cmd('capLog', {}, 30);
     out.held = l.held; out.counts = l.counts; out.passed = l.passed || [];
+    // Kept bodies go in a file of their own (keepBodiesOut), never in run.json or walk.json.
+    if (l.bodies && l.bodies.length) Object.defineProperty(out, 'bodies', { value: l.bodies, enumerable: false });
     const own = h => hosts.some(x => h === x || h.replace(/:\d+$/, '') === x || h.replace(/:\d+$/, '').endsWith('.' + x));
     const away = {};
     for (const [k, n] of Object.entries(l.counts || {})) { const host = k.split(' ').pop(); if (host && host !== '?' && !own(host)) away[k] = n; }
@@ -228,15 +240,25 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
   const shots = join(aiDir(demo), 'walk');
-  // Every screen it lands on, as it is today (local only, under .out): for re-grounding a plan on the product now.
+  // Every screen it lands on, and each app's start screen, as it is today (local only, under .out): for re-grounding a
+  // plan on the product now. <name>.json: its words and controls; <name>.reads.json.gz: the screen in the reader's
+  // shape, read twice about a second apart ([{ at, docs: [{ key, html }] }, …]).
   const screensDir = join(aiDir(demo), 'walk-screens');
   rmSync(screensDir, { recursive: true, force: true });
   mkdirSync(screensDir, { recursive: true });
+  const keepReads = async (name, app) => {
+    const r = await w.reads(app).catch(() => null);
+    if (r) writeFileSync(join(screensDir, `${name}.reads.json.gz`), gzipSync(JSON.stringify(r)));
+  };
   const seenAt = {};
   let walk;
   try {
     const starts = [];
-    for (const a of demo.cfg.apps) { const did = await w.home(a.id); const bad = did.find(d => d.why); starts.push({ app: a.id, did, ...(bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await w.startCheck(a.id, plan)) }); }
+    for (const a of demo.cfg.apps) {
+      const did = await w.home(a.id); const bad = did.find(d => d.why);
+      starts.push({ app: a.id, did, ...(bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await w.startCheck(a.id, plan)) });
+      await keepReads(`start-${a.id}`, a.id);
+    }
     seenAt.starts = starts;
     walk = await walkPlan(plan, {
       live: true,
@@ -260,6 +282,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
       if (e.event === 'walk' && ['reached', 'drifted', 'unproven'].includes(e.status) && e.app) {
         const sn = await w.screenNow(e.app).catch(err => ({ error: err.message }));
         writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn }, null, 1));
+        await keepReads(`${e.beat}-${e.step + 1}`, e.app);
       }
       // A picture of each miss and each drifted landing, for whoever reads walk.json; for a drifted one, what the
       // screen says instead (its title, headings and first lines), so a plan's landing words can follow the product.
@@ -275,7 +298,9 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   } finally {
     for (const b of (walk && walk.beats) || []) for (const s of b.steps) if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
     if (walk) walk.starts = seenAt.starts || [];
-    walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...(await guardOff(cmd, g.hosts)) } };
+    const off = await guardOff(cmd, g.hosts);
+    keepBodiesOut(demo, off.bodies);
+    walk = { ...(walk || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });
     writeFileSync(join(aiDir(demo), 'walk.json'), JSON.stringify(walk, null, 1));
