@@ -13,6 +13,7 @@ import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { freePort } from '@stuntdouble/core/lib/server.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = join(KIT, '..');
@@ -206,6 +207,7 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
 if (process.argv[1] && process.argv[1].endsWith('presenter-walk.mjs')) {
   const fails = [];
   const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${detail}` : '')); if (!ok) fails.push(name); };
+  await selftestGuard({ tmp: dirname(resolvePath(process.argv[2])), kept: [dirname(resolvePath(process.argv[2]))] });
   const t = await presenterWalk({ DEMO: process.argv[2], check });
   console.log(`${fails.length ? `${fails.length} FAILED` : 'ALL PASS'} (${JSON.stringify(t)})`);
   process.exit(fails.length ? 1 : 0);

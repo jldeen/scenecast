@@ -6,6 +6,7 @@ import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { flowFromBundle, applyFlowOverrides } from '@stuntdouble/player/app/bundle-flow.js';
+import { fencePath } from './test-fence.mjs';
 
 export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const KIT_VERSION = JSON.parse(readFileSync(__at('core', 'package.json'), 'utf8')).version;
@@ -54,6 +55,7 @@ export function loadDemo(dirOrArgs) {
   const c = { ...DEFAULTS, ...cfg, viewport: { ...DEFAULTS.viewport, ...(cfg.viewport || {}) }, chrome: { ...DEFAULTS.chrome, ...(cfg.chrome || {}) }, record: { ...DEFAULTS.record, ...(cfg.record || {}) } };
   // Raw captures hold real URLs (some with sign-in tokens): they live outside the demo folder by default.
   const raw = home(process.env.REPLICA_RAW || c.raw || `~/.scenecast/${c.name}/raw`);
+  fencePath(dir, 'demo'); fencePath(isAbsolute(raw) ? raw : join(dir, raw), 'raw folder');
   const out = home(process.env.REPLICA_OUT || c.out || '.out');
   // Recorded: the window it was recorded in wins over demo.json's (the app writes 1920×1080 @2 there when it makes a
   // demo; a real Chrome window is rarely that. Nov 2026: a take at 1374 @2.2 was compared, and its zoom bands placed,

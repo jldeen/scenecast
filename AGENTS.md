@@ -55,7 +55,9 @@ leave it to CI unless you're on a machine nobody is using. Details, variables an
   `apps/desktop/tests/ui.test.mjs` with the structure.
 - **Between packages:** a package import (`@stuntdouble/core/lib/demo.mjs`) or, for a file to spawn or serve,
   `at('player', 'serve.mjs')` (`@stuntdouble/core/lib/at.mjs`). Never `../other-package/`: it breaks in an install.
-- **Tests:** a few focused ones for what you change. Unit tests go in `package.json`'s `test:unit` list.
+- **Tests:** a few focused ones for what you change. Unit tests go in `package.json`'s `test:unit` list. A new
+  selftest calls `selftestGuard` (`packages/selftest/guard.mjs`) before it starts anything, with its own temp folder
+  and ports: never the app's receivers (47621–47630) or a presenter's folders.
 - **Commits:** a subject that says what changed, a plain body, and
   `Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>`. Never force-push.
 

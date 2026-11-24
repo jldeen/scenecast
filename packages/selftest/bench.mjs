@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { selftestGuard } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -22,6 +23,7 @@ const root = join(tmpdir(), 'replica-bench-' + process.pid);
 const RAW = join(root, 'raw'), DEMO = join(root, 'demo');
 rmSync(root, { recursive: true, force: true });
 mkdirSync(root, { recursive: true });
+await selftestGuard({ tmp: root, kept: [FROM, SRC_RAW] });
 
 // ---- the scaled demo -------------------------------------------------------------------------------------------
 cpSync(SRC_RAW, RAW, { recursive: true });
