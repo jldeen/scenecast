@@ -41,6 +41,9 @@ export function parseHtml(html) {
 const hiddenEl = el => 'hidden' in el.attrs || /display\s*:\s*none|visibility\s*:\s*hidden/i.test(el.attrs.style || '') || el.tag === 'svg' || el.tag === 'head';
 const unreachable = el => el.attrs['aria-hidden'] === 'true' || 'inert' in el.attrs;
 const TIMES = /^(time|relative-time|local-time|time-ago|time-until)$/;
+// A list (a list, a listbox, a grid, a table, a tree, tabs, a menu, a feed) and a row in it (an item, an option, a row,
+// a tab, a menu item, a post).
+const LISTS = /^(list|listbox|grid|treegrid|table|tree|tablist|menu|menubar|radiogroup|feed)$/, ROWS = /^(listitem|option|row|treeitem|tab|menuitem|menuitemcheckbox|menuitemradio|radio|article)$/;
 const BLOCK = new Set(['p', 'div', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'th', 'section', 'article', 'header', 'footer', 'nav', 'main', 'aside', 'button', 'a', 'label', 'dt', 'dd', 'table', 'form', 'fieldset', 'figure', 'figcaption', 'blockquote', 'pre', 'summary', 'details', 'br', 'hr', 'option']);
 // Inline formatting: its text runs on with what's around it. Any other element is set apart by a space (a page's CSS
 // often makes spans blocks, which innerText would show apart).
@@ -153,7 +156,7 @@ export function readScreen(docs, { specs = [] } = {}) {
   // A page's own headings come first; an app bar's or a menu's (inside a header, banner or nav) after them.
   const controls = [], items = [], text = [], headings = [], barHeadings = [], roots = [], ctlOf = new Map();
   let pos = 0, theme = null, times = 0, lives = 0;
-  const regions = {};
+  const regions = {}, lists = {};
   for (const { key, html } of docs) {
     const root = parseHtml(html);
     roots.push({ key: key || 'main', root });
@@ -180,7 +183,9 @@ export function readScreen(docs, { specs = [] } = {}) {
     // article: where the item's nearest article (role article, or an article: a message, a post, a comment) starts.
     // region: where the nearest part of the page named by its aria-label starts (a section, a dialog, a panel, a
     //         group: regions[at] is [its name, the region around it]).
-    const walk = (el, aria = false, bar = false, shut = false, nav = false, live = false, time = false, sect = false, art = null, reg = null) => {
+    // list, row: where the nearest list starts (lists[at] is [its name or null, its role]) and the row in it (none for
+    //         the list itself, or what's in it outside a row).
+    const walk = (el, aria = false, bar = false, shut = false, nav = false, live = false, time = false, sect = false, art = null, reg = null, lst = null, row = null) => {
       if (typeof el === 'string') return;
       if (el.tag !== '#root' && hiddenEl(el)) return;
       const role = el.attrs.role || '';
@@ -197,6 +202,8 @@ export function readScreen(docs, { specs = [] } = {}) {
       const start = pos++;
       if (el.tag === 'article' || role === 'article') art = start;
       if (clean(el.attrs['aria-label']) && (/^(section|article|aside|dialog|main|form|nav)$/.test(el.tag) || /^(region|group|dialog|alertdialog|article|tabpanel|document|main|complementary|navigation|form|feed)$/.test(role))) { regions[start] = [clean(el.attrs['aria-label']).slice(0, 120), reg]; reg = start; }
+      if (LISTS.test(role) || (!role && /^(ul|ol|table|menu)$/.test(el.tag))) { lists[start] = [clean(el.attrs['aria-label']).slice(0, 120) || null, role || el.tag]; lst = start; row = null; }
+      else if (lst !== null && (ROWS.test(role) || (!role && /^(li|tr)$/.test(el.tag)))) row = start;
       const ctl = el.tag === '#root' ? null : controlOf(el, acc);
       let mark = null;
       if (!aria && ctl && ctl.control) {
@@ -220,6 +227,8 @@ export function readScreen(docs, { specs = [] } = {}) {
           if (c.editable || textInput) { const v = el.tag === 'input' ? clean(el.attrs.value) : el.tag === 'textarea' ? clean(el.children.filter(x => typeof x === 'string').join('')) : clean(wordsOf(el)); if (v) c.value = v.slice(0, 300); }
           if (shut) c.shut = true;
           if (nav) c.nav = true;
+          if (lst !== null) c.list = lst;
+          if (row !== null) c.row = row;
           controls.push(c);
           ctlOf.set(el, c.i);
           mark = c;
@@ -228,8 +237,8 @@ export function readScreen(docs, { specs = [] } = {}) {
       if (/^h[1-6]$/.test(el.tag) || el.attrs.role === 'heading') { const h = clean(wordsOf(el)); if (h) (bar ? barHeadings : headings).push(h); }
       const mine = own(el);
       const item = mine && el.tag !== '#root' ? { i: items.length, kind: ctl && ctl.control ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
-      if (item) { if (shut) item.shut = true; if (nav) item.nav = true; if (art !== null) item.article = art; if (reg !== null) item.region = reg; items.push(item); }
-      el.children.forEach(c => walk(c, aria, bar, shut, nav, live, time, sect, art, reg));
+      if (item) { if (shut) item.shut = true; if (nav) item.nav = true; if (art !== null) item.article = art; if (reg !== null) item.region = reg; if (lst !== null) item.list = lst; if (row !== null) item.row = row; items.push(item); }
+      el.children.forEach(c => walk(c, aria, bar, shut, nav, live, time, sect, art, reg, lst, row));
       if (item) { item.text = clean(wordsOf(el).replace(/\n/g, ' ')).slice(0, 2000); item.box = [start, 0, pos, 1]; }
       for (const m of [item, mark]) if (m) { if (lives > l0) m.live = true; if (times > t0) m.time = true; }
     };
@@ -246,7 +255,7 @@ export function readScreen(docs, { specs = [] } = {}) {
     if (el) { for (let p = el; p && k < 0; p = p.parent) if (ctlOf.has(p)) k = ctlOf.get(p); if (k < 0) k = inside(el); }
     picks[m.key] = k;
   }
-  return { controls, items: items.filter(it => it.text), headings: [...headings, ...barHeadings].slice(0, 30), text: text.join('\n'), theme, regions, ...(specs.length ? { picks } : {}) };
+  return { controls, items: items.filter(it => it.text), headings: [...headings, ...barHeadings].slice(0, 30), text: text.join('\n'), theme, regions, lists, ...(specs.length ? { picks } : {}) };
 }
 
 // Light or dark, as the page's root says it (a color scheme, a theme attribute, or a theme class); null if it doesn't.

@@ -150,6 +150,15 @@ test('a capture read without a browser: where words are (its frame, a live regio
   assert.equal(sc.regions[item('When to use').region][0], 'Skill preview: triage');
   const ctl = n => sc.controls.find(c => c.name === n) || {};
   assert.deepEqual([ctl('Overview').selected, ctl('Files').selected, ctl('Promo code').value, ctl('Search tools').value, ctl('Message').value], [true, false, 'SPRING25', 'IQ', 'Hello there']);
+  // Each tab is a row of the tablist; what isn't in a list has neither.
+  assert.deepEqual([ctl('Overview').list, ctl('Files').list, sc.lists[ctl('Overview').list]], [ctl('Files').list, ctl('Files').list, [null, 'tablist']]);
+  assert.notEqual(ctl('Overview').row, ctl('Files').row);
+  assert.deepEqual([item('Overview').row, ctl('Promo code').list, item('When to use').list], [ctl('Overview').row, undefined, undefined]);
+  // A list inside a row of another: what's in it is in the inner list, in its own rows.
+  const nested = readScreen([{ key: 'main', html: '<ul aria-label="Groups"><li><h3>Our numbers</h3><ul role="listbox" aria-label="Results"><li role="option">Fabrikam Orders</li><li role="option">Contoso Returns</li></ul></li></ul>' }]);
+  const n = t => nested.items.find(i => i.text === t);
+  assert.deepEqual([nested.lists[n('Our numbers').list][0], nested.lists[n('Fabrikam Orders').list][0]], ['Groups', 'Results']);
+  assert.deepEqual([n('Fabrikam Orders').list === n('Contoso Returns').list, n('Fabrikam Orders').row === n('Contoso Returns').row], [true, false]);
 });
 
 test('a capture read without a browser: an id names what getElementById finds, the first with it', () => {
