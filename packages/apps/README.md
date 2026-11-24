@@ -132,6 +132,24 @@ POST). A planned write opens the app's own hosts for its one step.
 
 `guardFor(cfg)` gives a demo's: `{ hosts, allow, stayHeld }` (its apps' and their packs', plus `capture.allow`).
 
+### Services the app needs (`services`)
+
+A service of the app's own that its recorded screens depend on, which can fail by itself (Microsoft IQ's plugin
+service: answering 500, its add picker says "Plugins could not be loaded").
+
+```json
+"services": [{ "name": "IQ's plugin service", "match": "/^GET substrate\\.office\\.com\\/copilotconnectors\\/[^/]+\\/api\\/plugins$/", "start": true, "waitS": 90, "why": "…" }]
+```
+
+- `name`: what people read ("IQ's plugin service is failing (500). Try again later.").
+- `match`: the one call, as a guard entry over `METHOD host/path`. The capture never calls it: it watches the page's
+  own calls, and keeps every answer (run.json `services`).
+- `start`: the page asks for it as the app starts. An unattended capture waits up to `waitS` (90 s) after the app's
+  start for that call, and captures nothing unless it answers 2xx.
+- During a run, a 500 or a failed call to it stops the run before that beat's next write, and lists the step.
+
+`servicesFor(cfg)` gives a demo's: `[{ app, name, match, start, waitS }]`.
+
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
 with `apis.<name>` naming the page that signs in (`open`), the host (`host`, or `hostPattern`) and, when the page
@@ -163,6 +181,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `writeFor(pack, step, field)` | the write a parsed plan step makes, or null |
 | `safeFor(pack, step, field)` | the safe entry for a plan step (it only opens a picker or menu), or null |
 | `guardFor(cfg)` | the read-only guard's `{ hosts, allow, stayHeld }` for a demo (its apps' packs, plus `capture.allow`) |
+| `servicesFor(cfg)` | the services a demo's apps need, from their packs (`[{ app, name, match, start, waitS }]`) |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice

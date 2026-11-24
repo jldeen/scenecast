@@ -222,6 +222,16 @@ export function guardFor(cfg, list = packs()) {
   return { hosts: [...hosts], allow, stayHeld };
 }
 
+// A demo's pack-named services: what an app needs from a service of its own to show its recorded screens (IQ's
+// plugin service). A pack's services: [{ name, match (a guard entry over "METHOD host/path"), start (its page asks for
+// it as the app starts), waitS }]. The capture watches the page's own calls to them: one answering 500 means try
+// later, not a half-done run. → [{ app, name, match, start, waitS }]
+export function servicesFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) for (const sv of ((byApp[a.id] || {}).services) || []) if (sv && sv.name && sv.match) out.push({ app: a.id, name: sv.name, match: sv.match, start: !!sv.start, waitS: +sv.waitS || 90 });
+  return out;
+}
+
 // Problems with a pack's shape (the tests and the drafting tool check every pack with it).
 export function checkPack(p) {
   const out = [];
@@ -272,6 +282,11 @@ export function checkPack(p) {
     if (when !== null && (!/^\/.+\/[a-z]*$/.test(when) || /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(when))) out.push(`guard.${list} "${e}": after "when body", a /pattern/ the body has to match, not every body`);
   }
   for (const [name, a] of Object.entries(p.apis || {})) if (!a.open || !(a.host || a.hostPattern)) out.push(`apis ${name}: open (the page that signs in) and host or hostPattern`);
+  // A service: a name people read, and the one call it is (a /pattern/ over "METHOD host/path", never everything).
+  for (const sv of p.services || []) {
+    if (!sv || !sv.name) out.push('services: every service has a name ("IQ\'s plugin service")');
+    else if (typeof sv.match !== 'string' || !/^\/\^[A-Z]+ .+\/[a-z]*$/.test(sv.match)) out.push(`services ${sv.name}: match is a /^METHOD host\\/path$/ pattern`);
+  }
   const text = JSON.stringify(p, (k, v) => k.startsWith('_') ? undefined : v);
   if (SECRET.test(text)) out.push('looks like a credential or token: packs never hold them (an API undo uses the browser\'s signed-in session)');
   for (const f of [...(((p.flow || {}).vendorCss) || []), ...Object.values(((p.theme || {}).themes) || {}), ...Object.values(((p.platform || {}).platforms) || {}), ((p.build || {}).repairs || {}).css].filter(Boolean)) if (!packFile(p, f)) out.push(`missing file ${f}`);

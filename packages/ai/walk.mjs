@@ -141,3 +141,15 @@ export function heldWhileDrifted(walk) {
   }
   return [...kinds.values()].filter(k => !k.outside && k.steps.length).map(({ kind, n, steps }) => ({ kind, n, steps }));
 }
+
+// Each step's failed requests and answers of 400 or more: from its first input to the next step's first input (the
+// last step's to the walk's end), so what comes after a step's last read is still its own. A step keeps its own app's
+// and ones no app can be named for. steps: in walk order, each { from (ISO), app }; net: every one the walk saw
+// ({ at, app, … }). → a list per step.
+export function stepNets(steps, net, end) {
+  const t = x => Date.parse(x);
+  return steps.map((s, i) => {
+    const from = t(s.from), to = i + 1 < steps.length ? t(steps[i + 1].from) : t(end);
+    return (net || []).filter(n => { const at = t(n.at); return at >= from && at < to && (!n.app || !s.app || n.app === s.app); });
+  });
+}

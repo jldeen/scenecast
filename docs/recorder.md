@@ -158,6 +158,11 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
   app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
   for that one step. A write that isn't approved stops the run before it, with a picture.
+- **Services the apps need** (a pack's `services`: IQ's plugin service). At the start, after each app's start
+  screen, the page's own call to each one has to answer 2xx (it waits up to 90 s for it), or nothing is captured:
+  "IQ's plugin service is failing (500). Try again later." During a run, one answering 500 or failing stops the run
+  before that beat's next write, runs the reset after, and lists the step in `needsYou`. Every answer is in
+  run.json's `services`.
 - **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json, each with
   the tab, the frame and the app it came from (by the request's own target and document, never by when it came: a
   background tab sends during another app's step), and each passed non-read with the allow entry that let it through. A pack's `guard.stayHeld` stays held even during a write's step (the app's own background calls to the host the write opens).
@@ -226,8 +231,10 @@ title; its words in every frame; every control's name, role, frame, state and wh
 `<name>.reads.json.gz` beside it: the screen in the reader's shape (`[{ at, docs: [{ key, html }] }]`, read twice
 about a second apart, the recorder's serialization), local only, to re-ground a plan on the product as it is today.
 walk.json names the plan it walked by its sha256 (`plan`): a re-ground refuses a walk of another plan. Each step
-also keeps, with their app and frame, what the guard held in it (`held`) and the requests that failed other than by
-the guard or answered 400 or more (`net`): how a service error shows up.
+also keeps, with their app and frame, what the guard held in it (`held`, from its first input to its last read) and
+the requests that failed other than by the guard or answered 400 or more, with every answer from a pack-named service
+(`net`, from its first input to the next step's: an answer after its last read is still its own): how a service
+error shows up.
 A demo's `capture.keepBodies` (in its local demo.json) keeps the bodies of the held requests it names in
 `.out/ai/held-bodies.json`, for a person reviewing an allow entry. At a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, drifted (its words changed), unproven (its words were there

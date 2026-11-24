@@ -14,7 +14,8 @@
 //   capShot({ tab, file })          a picture of a tab, for a stop
 //   capBack({ tab })                the tab's previous page (the walker's way back from an off-plan landing)
 //   capUrl({ tab })                 where a tab is now (one that left the app has lost its mark)
-//   capNet({ on: true } | { since })  requests that failed other than by the guard, answers ≥ 400 (tab, frame)
+//   capNet({ on: true, watch? } | { since })  requests that failed other than by the guard, answers ≥ 400 (tab,
+//                                   frame), and every answer from a watched service ({ name, match }), tagged service
 //   capAuthWatch({ host | hostPattern, from? } | { off: true })   arm (or disarm) catching the app's own session
 //   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick, armed? })
 //                                   a pack's API check (GET, HEAD: the guard as it is; only pick's number and true/false
@@ -30,6 +31,7 @@
 //                                    user is active and the screen unlocked (the capture browser has no person)
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { allowedBy } from './browser.mjs';
 
 const originOf = u => { try { return new URL(u).origin; } catch (e) { return null; } };
 const hostRe = c => c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
@@ -76,7 +78,9 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   let guard = null, opens = new Map(), n = 0;
   // Requests that failed other than by the guard, and answers of 400 or more, from every tab and frame (capNet): how
   // a service error shows up in a walk. Address shapes only (IDs out), never a body.
-  let net = null;
+  let net = null, services = [];
+  // A pack-named service ({ name, match }: match as a guard entry, over "METHOD host/path"): every answer, any status.
+  const serviceOf = (method, url) => { const e = allowedBy({ method, url }, services.map(w => w.match)); return e ? services.find(w => w.match === e).name : null; };
   const shape = p => String(p || '').replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, '{id}').replace(/\d{5,}/g, '{n}');
   const sentBy = r => { let tab = null, frame = null; try { const f = r.frame(); frame = hostOf(f.url()); tab = hostOf(f.page().url()); } catch (e) {} return { tab, frame }; };
   const netOn = () => {
@@ -85,17 +89,20 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     cb.ctx.on('requestfailed', r => {
       const why = (r.failure() || {}).errorText || 'failed';
       if (/BLOCKED_BY_CLIENT/.test(why)) return;
-      try { const u = new URL(r.url()); if (/^https?:$/.test(u.protocol)) net.push({ at: at(), method: r.method(), host: u.host, path: shape(u.pathname), failed: why, ...sentBy(r) }); } catch (e) {}
+      try { const u = new URL(r.url()), service = services.length ? serviceOf(r.method(), r.url()) : null; if (/^https?:$/.test(u.protocol)) net.push({ at: at(), method: r.method(), host: u.host, path: shape(u.pathname), failed: why, ...sentBy(r), ...(service ? { service } : {}) }); } catch (e) {}
     });
     cb.ctx.on('response', r => {
-      if (r.status() < 400) return;
-      try { const q = r.request(), u = new URL(r.url()); net.push({ at: at(), method: q.method(), host: u.host, path: shape(u.pathname), status: r.status(), ...sentBy(q) }); } catch (e) {}
+      const q = r.request(), service = services.length ? serviceOf(q.method(), r.url()) : null;
+      if (r.status() < 400 && !service) return;
+      try { const u = new URL(r.url()); net.push({ at: at(), method: q.method(), host: u.host, path: shape(u.pathname), status: r.status(), ...sentBy(q), ...(service ? { service } : {}) }); } catch (e) {}
     });
   };
   const active = new Map();
   return {
     // { on: true } starts recording; { since } reads what came since.
-    async capNet(c) { if (c.on) { netOn(); return { on: true, total: net.length }; } return { net: (net || []).slice(c.since || 0), total: (net || []).length }; },
+    // { on: true, watch?: [{ name, match }] } starts recording (watch: services whose every answer is kept, tagged
+    // service); { since } reads what came since.
+    async capNet(c) { if (c.on) { netOn(); if (Array.isArray(c.watch)) services = c.watch.filter(w => w && w.name && w.match); return { on: true, total: net.length }; } return { net: (net || []).slice(c.since || 0), total: (net || []).length }; },
     async capInfo() { return { capture: true, mode: cb.mode, guarded: !!base }; },
     async capGuard(c) {
       // It replaces the guard that's on (the start's, or a run's) with no gap between them.
