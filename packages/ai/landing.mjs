@@ -79,18 +79,35 @@ function frameOf(walker, app) {
 }
 // A number that can change: not one in a name that only identifies (#2, PO-1001).
 const numbered = t => /\d/.test(String(t).replace(/#\d+\b|\b[a-z]{1,6}-\d{2,}\b/gi, ''));
+// Words that show only inside a message (an article: a chat message, a post, a comment), where a run can't tell the
+// app's words from what Copilot wrote (a review comment's heading): every innermost item holding them is in one.
+const within = (b, a) => !!(a.box && b.box) && a.box[0] < b.box[0] && b.box[2] <= a.box[2];
+function inMessage(sc, t) {
+  const n = pnorm(t);
+  if (!sc || !n) return false;
+  const its = shows(sc).filter(i => pnorm(i.text).includes(n)), inner = its.filter(a => !its.some(b => b !== a && within(b, a)));
+  return inner.length > 0 && inner.every(i => i.article !== undefined);
+}
+// A write its app pack names (`· pack:write` on its Writes line) and checks, read-only, after it runs: a run proves
+// that write by the pack's check (packs: make.mjs loadPacks()'s).
+export const packChecked = packs => s => {
+  const m = / · ([\w.-]+):([\w.-]+)$/.exec((s && s.writes) || '');
+  const p = m && packs && Object.values(packs.forApp || {}).find(x => x && x.id === m[1]);
+  return !!(p && (p.writes || []).some(w => w.id === m[2] && w.check));
+};
 
 // The proof for one step, from the screen before it (`from`; for "Go to X", where the plan was) to the one it lands on
 // (`to`). In this order, words without a number first, then with one (flagged): the control the plan's next step
 // clicks, when it's in a live region (an approval card); words the new screen shows that the one before didn't; a
 // control's state; what a box says; a control only the new screen has; words gone, with words of the page's own still
-// there. A Type step: its own words. typed: what other steps type (never a proof). next: the plan's next step that
+// there. Words that show only inside a message (a chat message, a post, a comment) come after all of those (message). A Type step: its own words. typed: what other steps type (never a proof). next: the plan's next step that
 // acts on the page (not a wait or a scroll). first: proofs to try right after the plan's own, by the same rules.
 // live (reground.mjs): the step's screen as the product shows it today (afters: its reads, once the page was quiet)
 // and the screen before it today (befores). The proof is chosen from today's first read; it must hold on every read
 // and on the recording, and on none of the screens before, the recording's or today's. With live.only, today's alone:
 // the product changed since the recording. live.unstable: words today's reads can't count on.
-// → { lands: { kind, … }, number, differs, why }: lands.kind is null when nothing proves the step, and `why` says so.
+// → { lands: { kind, … }, number, message, differs, why }: lands.kind is null when nothing proves the step, and `why`
+// says so.
 export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [] } = {}) {
   const rec = walker.screen(to);
   const recBefore = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
@@ -145,27 +162,34 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   const l0 = s.lands || {};
   const own = l0.kind ? Object.fromEntries(Object.entries(l0).filter(([k]) => k !== 'screen')) : l0.text ? { kind: 'words', text: l0.text } : null;
   // Words gone: within one app, from the screen before (live, with no recording, the page as it was before the step).
-  const gone = s.kind !== 'app' && ((from && fromApp === app) || (live && live.only && !from && readsBefore.length)) ? stillFor(after, before, frame, stable) : null;
+  // Its `still`: the page's own words, outside a message first.
+  const goneOk = s.kind !== 'app' && !!((from && fromApp === app) || (live && live.only && !from && readsBefore.length));
+  const gone = goneOk ? stillFor(after, before, frame, stable) : null;
+  const stillEarly = !goneOk ? null : gone && !inMessage(after, gone) ? gone : stillFor(after, before, frame, t => stable(t) && !inMessage(after, t));
   // A control in a live region proves a step only when the plan's next step clicks it (the same name, and its role
   // when the step gives one): that step needs exactly it. Live-region words never do.
   const nextHit = next && next.kind === 'click' && next.target && walker.control ? walker.control(after, next.target, undefined, to) : null;
   const nextCtl = nextHit && nextHit.el && nextHit.el.live && !nextHit.el.shut && !nextHit.el.time && pnorm(nextHit.el.name) === pnorm(next.target) && (!next.role || nextHit.el.role === next.role) ? nextHit.el : null;
 
-  for (const digits of [false, true]) {
+  // Words only inside a message come last, after every other proof (late), and say so (message).
+  const goneBefore = readsBefore[0] || before[0];
+  const msgOf = l => l.kind === 'words' ? inMessage(after, l.text) : l.kind === 'gone' ? inMessage(after, l.still) || inMessage(goneBefore, l.gone) : false;
+  for (const late of [false, true]) for (const digits of [false, true]) {
     // A number in what nearly all the site's screens show (its name: "Microsoft 365") doesn't change from screen to screen.
     const fine = t => stable(t) && (digits || !numbered(t) || frame.always.has(pnorm(t)));
-    const pick = l => textsOf(l).every(fine) && fromSound(l) && proves(l);
-    const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))) });
+    const pick = l => msgOf(l) === late && textsOf(l).every(fine) && fromSound(l) && proves(l);
+    const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))), message: late });
     // The plan's own proof, while it still proves the step.
     if (own && pick(own)) return found(own);
     // What the caller expects first (liveProof: the step's own control in a new state, the next step's control).
     for (const f of first) if (pick(f)) return found(f);
-    if (nextCtl) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
+    if (nextCtl && !late) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
     for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
     for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
     for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });
     for (const mine of [true, false]) for (const c of controls) if ((!mine || !(frame.has(pnorm(c.name)) || c.nav)) && pick({ kind: 'control', control: c.name, state: null })) return found({ kind: 'control', control: c.name, state: null });
-    if (gone) for (const x of goneFrom(readsBefore[0] || before[0], after)) if (pick({ kind: 'gone', gone: x, still: gone })) return found({ kind: 'gone', gone: x, still: gone });
+    const still = late ? gone : stillEarly;
+    if (still) for (const x of goneFrom(goneBefore, after)) if (pick({ kind: 'gone', gone: x, still })) return found({ kind: 'gone', gone: x, still });
   }
   return none(`nothing on ${to} tells it from the screen before`);
 }
@@ -222,8 +246,10 @@ function goneFrom(b, after) {
 
 // Every "Lands on" in a plan, in order, each against the screen the plan was on before its step. Its proof is kept
 // while it still proves the step; otherwise chooseProof() picks one. A step nothing proves goes on the review's Needs
-// you (kind "landing"), and so does one proven by a number (kind "number": it can change).
-export function proveLandings(plan, walker, flags = []) {
+// you (kind "landing"), and so does one proven by a number (kind "number": it can change), or only by words in a
+// message (kind "message"), unless it's a write its app pack checks (checked: packChecked(packs)): a run proves that
+// by the pack's check.
+export function proveLandings(plan, walker, flags = [], { checked = null } = {}) {
   if (!walker) return flags;
   const steps = plan.beats.flatMap((b, bi) => b.steps.map(s => [s, bi]));
   const typedAll = [...(walker.typedTexts ? walker.typedTexts() : []), ...steps.map(([s]) => s.kind === 'type' ? s.value : null).filter(Boolean)];
@@ -238,6 +264,7 @@ export function proveLandings(plan, walker, flags = []) {
     s.lands = { screen: to, ...r.lands, text: r.lands.kind === 'words' ? r.lands.text : null };
     if (r.differs && !s.differs) s.differs = r.differs;
     const flag = !r.lands.kind ? { kind: 'landing', text: `${formatStep(s)}: ${r.why}, so a run can't tell whether it worked` }
+      : r.message && !(checked && checked(s)) ? { kind: 'message', text: `${formatStep(s)}: a run checks it by ${proofWords(r.lands)}, words inside a message, which can be different on another run` }
       : r.number ? { kind: 'number', text: `${formatStep(s)}: a run checks it by ${proofWords(r.lands)}, a number that can change` } : null;
     if (flag && !flags.some(f => f.kind === flag.kind && f.text === flag.text && f.at === (s.line || null))) flags.push({ ...flag, beat: bi + 1, line: s.line || null, at: s.line || null });
   }

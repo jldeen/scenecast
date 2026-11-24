@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { formatPlan, parsePlan, formatLands, formatStep } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
-import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, proveLandings } from './from-script.mjs';
+import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind, sectionsOf, myNames, proveLandings, packChecked } from './from-script.mjs';
 import { holds, liveProof, writeGate } from './landing.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
@@ -662,4 +662,32 @@ test('a landing proven on the live page: what the plan expects is strong, any ot
   assert.deepEqual(writeGate([L('weak'), L('strong', { wrote: true }), L('strong')], 'iq'), { ok: true, why: null });
   assert.deepEqual(writeGate([{ app: 'chat', strength: 'none', step: 'Press Escape' }, L('strong')], 'chat'), { ok: false, why: '“Press Escape” isn\'t proven' });
   assert.deepEqual(writeGate([], 'iq'), { ok: false, why: 'nothing in iq is proven yet' });
+});
+
+test('words only inside a message prove a step last, and say so, unless it\'s a write its app pack checks', () => {
+  const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
+  // A pull request whose review comments are messages (Copilot's among them), and a chat whose sent prompt is one.
+  const S = {
+    list: sc(['Pull requests', 'Fabrikam checkout fixes']),
+    pr: sc(['Fabrikam checkout fixes', { text: 'Copilot reviewed', article: 7 }, { text: 'Approved', role: 'heading', article: 7 }, { text: 'Status and details', role: 'heading' }]),
+    files: sc(['Fabrikam checkout fixes', { text: 'Copilot reviewed', article: 7 }, { text: 'Changes recommended', role: 'heading', article: 7 }, { text: 'Status and details', role: 'heading' }]),
+    chat: sc(['New chat'], [{ role: 'textbox', name: 'Message', editable: 'content' }]),
+    sent: sc(['New chat', { text: 'You said:', role: 'heading', article: 3 }, { text: 'What changed on PO-1?', article: 3 }], [{ role: 'textbox', name: 'Message', editable: 'content' }]),
+  };
+  const walker = { screen: id => S[id], shown: id => S[id], states: Object.keys(S), flow: { states: Object.fromEntries(Object.keys(S).map(k => [k, { app: /chat|sent/.test(k) ? 'chat' : 'pr' }])) } };
+  const checked = packChecked({ forApp: { chat: { id: 'chat-app', writes: [{ id: 'send', check: { expect: 'a new chat' } }] } } });
+  const plan = writes => ({ beats: [{ steps: [
+    { kind: 'app', app: 'pr', lands: { screen: 'list' } },
+    { kind: 'click', target: 'Fabrikam checkout fixes', line: '1.1', lands: { screen: 'pr', kind: 'words', text: 'Approved' } },
+    { kind: 'click', target: 'Files changed', line: '1.2', lands: { screen: 'files' } },
+    { kind: 'app', app: 'chat', lands: { screen: 'chat' } },
+    { kind: 'press', key: 'Enter', line: '1.3', writes, lands: { screen: 'sent' } }] }] });
+  const p = plan('sends a prompt · chat-app:send'), flags = proveLandings(p, walker, [], { checked });
+  // Words outside a message first, the plan's own included; a message's only when nothing else tells the screens apart.
+  assert.deepEqual(p.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['pr · "Status and details"', 'files · "Changes recommended"', 'chat · "New chat"', 'sent · "You said:"']);
+  assert.deepEqual(flags.map(f => [f.kind, f.at]), [['message', '1.2']]);
+  assert.match(flags[0].text, /^Click "Files changed": a run checks it by “Changes recommended”, words inside a message/);
+  // The same send, which no pack checks: it says so too.
+  assert.deepEqual(proveLandings(plan('sends a prompt'), walker, [], { checked }).map(f => [f.kind, f.at]), [['message', '1.2'], ['message', '1.3']]);
+  assert.deepEqual(needsYou({ planReview: { flags }, plan: { beats: [] } }).map(n => n.kind), ['Words in a message']);
 });

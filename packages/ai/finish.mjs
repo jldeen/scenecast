@@ -116,7 +116,7 @@ const INFO = new Set(['restored']);
 export const addedFromRecording = planReview => ((planReview && planReview.flags) || []).filter(f => INFO.has(f.kind)).map(f => ({ where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text }));
 export function needsYou({ planReview, reset, plan, fidelity, points }) {
   const out = [];
-  const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step", number: 'A number that can change' };
+  const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step", number: 'A number that can change', message: 'Words in a message' };
   for (const f of ((planReview && planReview.flags) || []).filter(f => !INFO.has(f.kind))) out.push({ kind: KIND[f.kind] || 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
   for (const n of (reset && reset.needs) || []) out.push({ kind: n.kind === 'start' ? 'A step is missing' : 'Reset', where: `beat ${n.beat}`, text: n.text });
   plan.beats.forEach((b, bi) => (b.lines || []).forEach((l, li) => { if (!(l.focus || []).some(f => f.on)) out.push({ kind: 'No focus point', where: `line ${bi + 1}.${li + 1}`, text: `Nothing on its screens backs “${l.text.slice(0, 80)}${l.text.length > 80 ? '…' : ''}”. Add one in the editor if it needs one.` }); }));

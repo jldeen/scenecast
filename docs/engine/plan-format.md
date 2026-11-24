@@ -130,16 +130,21 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
    what nearly every screen of the site shows (`Microsoft 365 admin center`) doesn't count. Words with a number only
    when nothing else tells the screens apart, and then the review lists the step under **Needs you** ("A number that
    can change").
-4. **Never:** what a reload, the clock or the computer changes (a time or a date, a duration, a size, a long number,
+4. **Words in a message after everything else.** Words that show only inside a message (a chat message, a post, a
+   comment: an `article`) come after every other proof, `still` and `gone` included: a run can't tell the app's words
+   there from what Copilot wrote (a review comment's heading). When only they tell the screens apart, the review
+   lists the step under **Needs you** ("Words in a message"), unless it's a write its app pack checks: a run proves
+   that by the pack's check.
+5. **Never:** what a reload, the clock or the computer changes (a time or a date, a duration, a size, a long number,
    a shortcut's keys like `⌘⇧B`); what's in a live region (a toast, a status: role `status`, `alert`, `log`,
    `marquee` or `timer`, `aria-live`, an `output`), but for the control the next step clicks (above); what Copilot
    wrote as the recording ran (its answers, a heading or
    a button it named, the names it made up, and what's in a part of the page named by one); what another step types;
    words the screen's own captures show differently (its zoom levels and toggles: a greeting that changes on each
    visit); what's in a closed dialog.
-5. **`still`:** the page's own words: not in a nav, an aside or its header, not what half the site's pages show, a
+6. **`still`:** the page's own words: not in a nav, an aside or its header, not what half the site's pages show, a
    heading first, no number, on the screen before and after.
-6. **Nothing proves it:** the review lists the step under **Needs you** ("A run can't check this step").
+7. **Nothing proves it:** the review lists the step under **Needs you** ("A run can't check this step").
 
 The site's frame is what half its pages show or more: a site is the app's host, a page an address with all its
 screens. The offline walker checks a step the same way (`walker.landed(at, step)`).
@@ -315,9 +320,10 @@ needs }`: its Undo as a plan; each check `{ app, screen, text, from }`, `screen`
 still the lines' words; `lines` has the same lines with `focus: [{ texts, around, mark, dir, via, on }]`.
 `formatPlan(plan)` writes it back. `writesOf(plan)` lists the approved writes. `packages/ai/make.mjs`: `approve(demo)`
 and `approval(demo)` (whether `plan.md` is still the text that was approved). `packages/ai/landing.mjs`:
-`proveLandings(plan, walker, flags)` chooses each step's proof (`chooseProof()`), `holds(screen, lands)` checks one on
-a screen the reader read (`true`, `false`, or `null` for none). `packages/ai/walker.mjs`: `landed(at, step)` (`{ ok,
-why }`: on the screen its `Lands on` names, with its proof holding there), `written(text)`, `unstable(text, app)`.
+`proveLandings(plan, walker, flags, { checked })` chooses each step's proof (`chooseProof()`; `checked` is
+`packChecked(packs)`, the writes its app packs check), `holds(screen, lands)` checks one on a screen the reader read
+(`true`, `false`, or `null` for none). `packages/ai/walker.mjs`: `landed(at, step)` (`{ ok, why }`: on the screen its
+`Lands on` names, with its proof holding there), `written(text)`, `unstable(text, app)`.
 `packages/ai/reground.mjs`: `regroundPlan(plan, { walker, walk, reads })` (`{ plan, rows }`, a row per step with its
 proof before and after and its `basis`: `both`, `today`, `none`, `write` or `unreached`), `walkReads(dir)`,
 `formatReground(rows)`.

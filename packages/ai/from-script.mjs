@@ -4,7 +4,7 @@
 // every time, and what the tests run); Copilot works out what the rules can't, on screen, when the plan runs.
 import { formatStep, risk } from './plan.mjs';
 import { findItem, composer, searchBox } from './find.mjs';
-import { proveLandings, isBox } from './landing.mjs';
+import { proveLandings, isBox, packChecked } from './landing.mjs';
 import { words, facts, pickItems, sentences } from '@scenecast/script/match.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
@@ -617,7 +617,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
     walker.save();
   }
   plan.beats = plan.beats.filter(b => b.steps.length || b.say.length);
-  proveLandings(plan, walker, flags);
+  proveLandings(plan, walker, flags, { checked: packChecked(packs) });
   return { plan, flags };
 }
 
@@ -633,7 +633,7 @@ function landText(before, after) {
 }
 
 // Where a step lands, proven: landing.mjs (proveLandings runs at the end of every plan, walkthroughs' too).
-export { proveLandings };
+export { proveLandings, packChecked };
 
 // Beat-level targets (a Do list before the lines) go to the line they share the most words with, keeping their order.
 function assignHints(hints, lines) {
