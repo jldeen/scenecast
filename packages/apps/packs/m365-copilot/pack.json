@@ -368,10 +368,12 @@
   ],
   "guard": {
     "allow": [
-      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/",
+      "/^POST titles\\.prod\\.mos\\.microsoft\\.com\\/marketplace\\/v1\\/users\\/titles\\/query$/"
     ],
     "why": {
-      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review)."
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review).",
+      "/^POST titles\\.prod\\.mos\\.microsoft\\.com\\/marketplace\\/v1\\/users\\/titles\\/query$/": "Copilot's Plugins page lists the marketplace's titles (skills and connectors) with it: the body is a listing filter (public scope, element types, no admin-blocked titles), no IDs, nothing typed. Held, the page has no \"Roles & Industry\" section, which the recording shows (walk 13 screens 4-1 and 7-2; read-only check Nov 24, 3 held on one Plugins click)."
     }
   }
 }

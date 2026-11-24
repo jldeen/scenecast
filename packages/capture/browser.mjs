@@ -148,6 +148,12 @@ export function guardVerdict({ method, url, body = null }, { hosts = null, allow
   const at = u.host + u.pathname;
   return allow.some(a => entryMatches(a, m, at, body)) ? 'pass' : 'hold';
 }
+// The allow entry that let a request through (for the record: passed non-reads by entry), or null.
+export function allowedBy({ method, url, body = null }, allow = []) {
+  let u; try { u = new URL(url); } catch (e) { return null; }
+  const m = String(method || 'GET').toUpperCase();
+  return (allow || []).find(a => entryMatches(a, m, u.host + u.pathname, body)) || null;
+}
 // A pack's stay-held entries: what an app sends by itself to a host its writes use (a refresh, a subscription), held
 // even while a planned write opens that host. Same form as allow entries.
 export function staysHeld({ method, url, body = null }, stayHeld = []) {
@@ -538,10 +544,10 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   // the request.
   const hooks = new Set();
   let everyTarget = null;
-  const onPaused = async e => {
+  const onPaused = async (e, from = {}) => {
     let url = e.request.url;
     for (const h of hooks) {
-      const r = await h.on(e.request, url).catch(() => null);
+      const r = await h.on(e.request, url, from).catch(() => null);
       if (r && r.fail) return { fail: true };
       if (r && r.url) url = r.url;
     }
@@ -566,8 +572,12 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     const st = { open: [], counts: {}, held: [], passed: [], bodies: [], authFor: null, authFrom: null, auth: null };
     // What's open: a planned write's hosts, or one call (its method and exact address). Never every host.
     const passing = (u, method) => openFor(st.open, u, method);
-    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData, headers }, url) => {
+    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData, headers }, url, from = {}) => {
       let u = null; try { u = new URL(url); } catch (x) {}
+      // Who sent it: the tab (its page's host) and the frame (the document's origin, from its Origin or Referer; else
+      // the target's own address), not the time it came: a background tab sends during another app's step.
+      const hostOfUrl = x => { try { return new URL(x).host || null; } catch (y) { return null; } };
+      const sender = { tab: hostOfUrl(from.page), frame: hostOfOrigin(senderOrigin(headers)) || hostOfUrl(from.target && from.target.url), ...(from.target && from.target.type !== 'page' && from.target.type !== 'iframe' ? { by: from.target.type } : {}) };
       // An API undo's session: the Authorization the page itself sends to that host, kept in memory for the one call,
       // and which page or frame sent it (the call goes from there: the API's CORS rules allow the app's own frame).
       if (st.authFor && u && st.authFor.test(u.host)) {
@@ -581,12 +591,12 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
       st.counts[k] = (st.counts[k] || 0) + 1;
       if (v === 'hold') {
-        st.held.push({ method, host: u && u.host, path: u ? pathShape(u.pathname) : '', at: new Date().toISOString(), held: gm === 'hold', ...(stay ? { duringWrite: true } : {}) });
+        st.held.push({ method, host: u && u.host, path: u ? pathShape(u.pathname) : '', at: new Date().toISOString(), held: gm === 'hold', ...sender, ...(stay ? { duringWrite: true } : {}) });
         if (u && keepBodies.length && staysHeld({ method, url, body: postData }, keepBodies)) st.bodies.push({ method, host: u.host, path: u.pathname, at: new Date().toISOString(), body: postData == null ? null : String(postData).slice(0, 4000) });
       }
       // Every non-read that went out, and why: the allow-list (or a read, a local or an unguarded host), or a planned
       // write's opening.
-      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by });
+      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by, ...sender, ...(by === 'allowed' ? { entry: allowedBy({ method, url, body: postData }, allow) } : {}) });
       if (v === 'hold' && gm === 'hold') return { fail: true };
       return null;
     } });
