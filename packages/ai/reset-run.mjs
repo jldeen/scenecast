@@ -14,6 +14,21 @@ import { parseStep, formatStep } from './plan.mjs';
 import { appTab, sleep } from './run.mjs';
 import { norm } from './find.mjs';
 
+// A pack's API undo filled in: its {placeholders} from the demo's own values (demo.json apps[].values: which business
+// plugin, which workspace) and what the run made (run.json's results). The demo's values win. Each value goes in as a
+// value only: encoded as one path segment (free text such as what was typed can't add a segment or a query), and into
+// the body's strings as it is (it can't add a field). → { path, body, left: ['{name}', …] not known }
+export function fillApi(api, results = {}, values = {}) {
+  const vals = { ...(results || {}), ...(values || {}) };
+  const known = k => vals[k] !== undefined && vals[k] !== null && vals[k] !== '';
+  const left = [...new Set(`${api.path || ''} ${api.body ? JSON.stringify(api.body) : ''}`.match(/\{\w+\}/g) || [])].filter(x => !known(x.slice(1, -1)));
+  if (left.length) return { path: null, body: null, left };
+  const path = String(api.path || '').replace(/\{(\w+)\}/g, (m, k) => encodeURIComponent(String(vals[k])));
+  const fillIn = v => typeof v === 'string' ? v.replace(/\{(\w+)\}/g, (m, k) => String(vals[k]))
+    : Array.isArray(v) ? v.map(fillIn) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [fillIn(k), fillIn(x)])) : v;
+  return { path, body: api.body ? fillIn(api.body) : null, left };
+}
+
 // The plan's own read-only steps from an app's start screen to one of its screens (a check on a screen other than the
 // start): from the app's first "Go to", the steps the plan takes in that app (going back to it carries on where it
 // was), up to the first that lands there. null when a write comes first (that screen is what a write made, not
@@ -150,9 +165,10 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     const pw = pack && (pack.writes || []).find(w => w.id === m[2]);
     const api = pw && pw.undo && pw.undo.api, at = api && pack.apis && pack.apis[api.use];
     if (!api || !at) return fall(`the ${m[1]} pack has no API undo for ${m[2]}`);
-    const path = fill(api.path || ''), body = api.body ? JSON.parse(fill(JSON.stringify(api.body))) : null;
-    const left = `${path} ${body ? JSON.stringify(body) : ''}`.match(/\{\w+\}/g);
-    if (left) return fall(`the run didn't record ${[...new Set(left)].join(', ')}`);
+    const appCfg = (demo.cfg.apps || []).find(a => a.id === app) || {};
+    const f = fillApi(api, results, appCfg.values);
+    if (f.left.length) return fall(`the run didn't record ${f.left.join(', ')}`);
+    const { path, body } = f;
     const r = await cmd('capApi', { tab: appTab(demo, app), open: at.open, host: at.host, hostPattern: at.hostPattern, method: api.method, path, body }, 150).catch(e => ({ ok: false, why: e.message }));
     if (!r.ok) return fall(r.why || `the API answered ${r.status}`);
     did.push(`${app}: ${s.text} (${api.method}, ${r.status})`);

@@ -164,9 +164,12 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   that step on the app's hosts and its pack's `guard.hosts` (a frame's host goes there; a tenant's in a private pack).
 - **API undos.** reset.md's `Undo with the app pack: <pack>:<write>` runs the pack's `undo.api` (a private pack's) in
   the app's own signed-in session: its `apis.<use>.open` page opened, the Authorization it sends to that host caught
-  in memory for the one call, the call made from the page with the guard open for that host only, its
-  `{placeholders}` filled from run.json's results. If it can't, the Note's `if it can't: A › B` steps run instead
-  (approved with the rest: the approval list shows them).
+  in memory for the one call, the call made from the page or frame that sent it (IQ's API answers its Power BI frame,
+  not the portal), with the guard open for that one call only (its method and exact address). Its `{placeholders}`
+  are filled from demo.json's `apps[].values` (the demo's own IDs and names: which business plugin, which section),
+  then run.json's results; the demo's values win, and each value is one encoded path segment, so it can't add a
+  segment or a query. If it can't, the Note's `if it can't: A › B` steps run instead (approved with the rest: the
+  approval list shows them).
 - **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
   leaving the app's hosts, a sign-in page (never signed in: Sign in again; the guard holding an app's sign-in says
   so, with the request), what a step lands on not showing, a control that isn't there, a step only a person can do.
