@@ -195,5 +195,14 @@
       "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/": "IQ's add picker lists the Azure AI Search services for its Foundry IQ tab; Azure Resource Graph only reads, by design; held, the Foundry IQ tab says \"could not be loaded\" (Nov 23 review).",
       "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{\"Scenario\":\\{\"Name\":\"MicrosoftIQ\\.Web\\.Copilot_Peek\"(?![\\s\\S]*\"(?:Display)?QueryString\"\\s*:\\s*\"(?!\"))/": "IQ's add picker (and its Copilot peek) lists the account's people, chats, channels, files, sites, messages and meetings with it, with nothing typed: a listing only reads. Only IQ's scenario and empty queries pass (a typed search stays held). Held, the picker has no People, Chats or Channels (Nov 24 checks)."
     }
-  }
+  },
+  "services": [
+    {
+      "name": "IQ's plugin service",
+      "match": "/^GET substrate\\.office\\.com\\/copilotconnectors\\/[^/]+\\/api\\/plugins$/",
+      "start": true,
+      "waitS": 90,
+      "why": "IQ's page asks it for the plugins its add picker lists, as it starts (Nov 24: 3 of 3 starts, 8 to 47 s after IQ's address opened). Answering 500, the picker says \"Plugins could not be loaded\" and the demo's plugin card isn't there (walks 11 and 14)."
+    }
+  ]
 }
