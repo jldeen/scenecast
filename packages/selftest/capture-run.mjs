@@ -16,7 +16,7 @@
 //   5. a read-only live walk of the plan: it stops at the write and goes on with the next beat
 //   6. the same plan through the recorder extension (Record for me, attended) records the same screens
 //   node packages/selftest/capture-run.mjs [--keep] [--no-extension]
-import './reap.mjs';
+import { endTree } from './reap.mjs';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, readdirSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,16 +48,25 @@ const fails = [], times = {};
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 2000)}` : '')); if (!ok) fails.push(name); };
 const GIT_ID = { GIT_AUTHOR_NAME: 'scenecast run test', GIT_AUTHOR_EMAIL: 'run-test@localhost', GIT_COMMITTER_NAME: 'scenecast run test', GIT_COMMITTER_EMAIL: 'run-test@localhost' };
 const ENV = { ...process.env, ...GIT_ID, REPLICA_RX_PORT: String(RX), REPLICA_NO_OPEN: '1', SCENECAST_AI_MODEL: 'stub', SCENECAST_AI_HOME: join(tmp, 'ai-home'), STUNTDOUBLE_PACKS: join(tmp, 'packs') };
+// Each CLI run has a time limit: one that runs over is ended (its whole tree) and reported as
+// "FAIL timed out in <what>, after <its last line>", and the test goes on, so a hang shows where it stopped.
+const lastLine = t => (String(t || '').split('\n').map(l => l.trim()).filter(Boolean).pop() || 'no output').slice(0, 300);
+const limited = (p, what, limitS, last) => {
+  const t = setTimeout(() => { const name = `timed out in ${what} (${limitS} s), after ${last()}`; console.log('FAIL ' + name); fails.push(name); endTree(p); }, limitS * 1000);
+  p.on('close', () => clearTimeout(t));
+};
 const run = (args, opts = {}) => new Promise(res => {
   const p = spawn(BIN, args, { cwd: opts.cwd || tmp, env: { ...ENV, ...opts.env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { out += d; });
+  limited(p, `scenecast ${args.slice(0, 2).join(' ')}`, opts.limitS || 300, () => lastLine(out));
   p.on('close', code => res({ code, out }));
 });
 const json = s => { const i = s.indexOf('{'); return JSON.parse(s.slice(i)); };
 // A long-running `scenecast ai …`: each @ai event to onEvent as it comes.
-function aiProc(args, cwd, env, onEvent = () => {}) {
+function aiProc(args, cwd, env, onEvent = () => {}, limitS = 480) {
   const p = spawn(BIN, ['ai', ...args], { cwd, env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   const events = []; let buf = '', err = '';
+  limited(p, `scenecast ai ${args[0]}`, limitS, () => events.length ? JSON.stringify(events[events.length - 1]).slice(0, 300) : lastLine(err));
   p.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.startsWith('@ai ')) { const e = JSON.parse(l.slice(4)); if (process.env.SCENECAST_AI_TRACE) console.log('  @ai ' + l.slice(4, 300)); events.push(e); onEvent(e); } } });
   p.stderr.on('data', d => { err += d; });
   return new Promise(res => p.on('close', code => res({ code, events, err, done: events.find(e => e.event === 'done'), error: events.find(e => e.event === 'error') })));
@@ -362,6 +371,8 @@ try {
   const rs = typedReads && typedReads.length === 2 ? readScreen(typedReads[1].docs) : null;
   const refreshKind = `POST ${HOST}/api/refresh`, driftShot = (() => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk-screens', '2-1.json'), 'utf8')); } catch (e) { return null; } })();
   check('and what the guard held while a landing drifted: in its step, and listed', (wj.heldWhileDrifted || []).some(k => k.kind === refreshKind && k.steps.includes('2-1')) && driftShot && (driftShot.held || []).some(h => h.method === 'POST' && h.path === '/api/refresh') && wj.beats[1].steps[0].window, JSON.stringify({ heldWhileDrifted: wj.heldWhileDrifted, held: driftShot && driftShot.held, step: wj.beats[1] && wj.beats[1].steps[0] && { window: wj.beats[1].steps[0].window, held: wj.beats[1].steps[0].held } }));
+  const refreshNet = (wj.beats[1] && wj.beats[1].steps[0] && wj.beats[1].steps[0].net) || [];
+  check('and each step\'s failed requests and answers of 400 or more, with their app and frame', refreshNet.some(n => n.status === 404 && n.path === '/api/fresh-count' && n.app === 'tasks' && n.frame === HOST) && (wj.net || []).some(n => n.path === '/api/fresh-count'), JSON.stringify({ step: refreshNet, all: (wj.net || []).slice(0, 5) }));
   check('and in the reader\'s shape, read twice: the page and its frames, what a box holds, each start screen too, and the plan it walked', rs && typedReads.every(r => r.docs.some(d => d.key === 'main') && r.docs.some(d => d.key === NOTES_HOST)) && rs.controls.some(c => c.name === 'New task' && c.role === 'textbox' && c.value === 'Call Kestrel') && rs.controls.some(c => c.name === 'Pin note' && c.frame === NOTES_HOST) && startReads && startReads.length === 2 && readScreen(startReads[0].docs).text.includes('No tasks yet') && startShot && startShot.app === 'tasks' && String(startShot.url).startsWith(tasks.url) && startShot.title === 'Fixture Tasks' && typedScreen.app === 'tasks' && typedScreen.title === 'Fixture Tasks' && wj.plan && wj.plan.sha256 === createHash('sha256').update(readFileSync(join(DEMO, 'plan.md'))).digest('hex'), JSON.stringify({ plan: wj.plan, startShot: startShot && { app: startShot.app, url: startShot.url, title: startShot.title, status: startShot.status }, reads: typedReads && typedReads.map(r => r.docs.map(d => [d.key, d.html.length])), controls: rs && rs.controls.slice(0, 8), start: !!startReads }));
   const cl = (wj.beats[0] && wj.beats[0].steps[2] && wj.beats[0].steps[2].cleared) || {};
   check('the beat stopped at the write: what it typed for it is cleared, no draft left', cl.cleared === true && cl.in === 'New task', JSON.stringify(wj.beats[0] && wj.beats[0].steps[2]));

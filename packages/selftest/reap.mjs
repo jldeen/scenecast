@@ -24,13 +24,15 @@ childProcess.spawn = (cmd, args, opts) => {
 };
 syncBuiltinESMExports();
 
+// One child and everything it started (its group; on Windows, its process tree).
+export function endTree(p) {
+  try {
+    if (process.platform === 'win32') childProcess.spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
+    else process.kill(-p.pid, 'SIGTERM');
+  } catch (e) { try { p.kill(); } catch (e2) {} }
+}
 export function reapAll() {
-  for (const p of kids) {
-    try {
-      if (process.platform === 'win32') childProcess.spawnSync('taskkill', ['/pid', String(p.pid), '/T', '/F'], { stdio: 'ignore' });
-      else process.kill(-p.pid, 'SIGTERM');
-    } catch (e) { try { p.kill(); } catch (e2) {} }
-  }
+  for (const p of kids) endTree(p);
   kids.clear();
 }
 process.on('exit', reapAll);

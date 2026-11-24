@@ -329,6 +329,18 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const stepAt = {};
   let lastEnd = Date.now(), heldSince = 0;
   const appOfSender = senderApps(demo.cfg, packs);
+  await cmd('capNet', { on: true }, 30).catch(() => {});
+  let netSince = ((await cmd('capNet', {}, 30).catch(() => ({}))).total) || 0;
+  const netAll = [];
+  // Failed requests (not the guard's) and answers ≥ 400 in a step's window, from its own app (or none named).
+  const netIn = async (from, to, app) => {
+    const r = await cmd('capNet', { since: netSince }, 30).catch(() => null);
+    if (!r) return [];
+    netSince = r.total;
+    const named = (r.net || []).map(x => ({ ...x, app: appOfSender(x) }));
+    netAll.push(...named);
+    return named.filter(x => { const t = Date.parse(x.at); return t >= from && t <= to && (!x.app || !app || x.app === app); }).map(({ at, ...x }) => ({ at, ...x }));
+  };
   const heldIn = async (from, to, app) => {
     const l = await cmd('capLog', { since: heldSince }, 30).catch(() => null);
     if (!l) return [];
@@ -385,9 +397,10 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
           sn = await w.screenNow(e.app).catch(err => ({ error: err.message }));
           await keepReads(`${e.beat}-${e.step + 1}`, e.app);
         }
-        const to = Date.now(), held = await heldIn(from, to, e.app ? w.appOf(e.app) || e.app : null);
-        stepAt[`${e.beat}-${e.step}`] = { from: new Date(from).toISOString(), to: new Date(to).toISOString(), held };
-        if (sn) writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn, held }, null, 1));
+        const stepApp = e.app ? w.appOf(e.app) || e.app : null;
+        const to = Date.now(), held = await heldIn(from, to, stepApp), net = await netIn(from, to, stepApp);
+        stepAt[`${e.beat}-${e.step}`] = { from: new Date(from).toISOString(), to: new Date(to).toISOString(), held, net };
+        if (sn) writeFileSync(join(screensDir, `${e.beat}-${e.step + 1}.json`), JSON.stringify({ beat: e.beat, step: e.step + 1, status: e.status, screen: e.screen, ...sn, held, net }, null, 1));
         lastEnd = to;
       }
       // A picture of each miss and each drifted landing, for whoever reads walk.json; for a drifted one, what the
@@ -405,13 +418,14 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     for (const b of (walk && walk.beats) || []) for (const s of b.steps) {
       if (seenAt[`${b.beat}-${s.step}`]) s.seen = seenAt[`${b.beat}-${s.step}`];
       const at = stepAt[`${b.beat}-${s.step}`];
-      if (at) Object.assign(s, { window: { from: at.from, to: at.to }, held: at.held });
+      if (at) Object.assign(s, { window: { from: at.from, to: at.to }, held: at.held, ...(at.net && at.net.length ? { net: at.net } : {}) });
     }
     if (walk) walk.heldWhileDrifted = heldWhileDrifted(walk);
     if (walk) walk.starts = seenAt.starts || [];
     const off = await guardOff(cmd, g.hosts, appOfSender);
     keepBodiesOut(demo, off.bodies);
-    walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
+    await netIn(0, 0, null).catch(() => {});
+    walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events; } catch (e) {}
     mkdirSync(aiDir(demo), { recursive: true });
     writeFileSync(join(aiDir(demo), 'walk.json'), JSON.stringify(walk, null, 1));
