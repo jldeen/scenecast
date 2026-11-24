@@ -13,7 +13,9 @@ import { recordOpts } from '@stuntdouble/core/lib/demo.mjs';
 import { rx, observe, settled, presenter, appTab, aiDir, sleep } from './run.mjs';
 import { readPlan, readGoal } from './draft.mjs';
 
-export async function recordForMe({ demo, model, settings = {}, emit = () => {}, cmd: viaCmd }) {
+// unattended: the capture browser's path (unattended.mjs): pre-approved writes only, nobody to ask.
+export async function recordForMe({ demo, model, settings = {}, emit = () => {}, cmd: viaCmd, unattended = false }) {
+  if (unattended) { const { recordUnattended } = await import('./unattended.mjs'); return recordUnattended({ demo, emit, cmd: viaCmd }); }
   const plan = readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('draft and approve the plan first');
   const goal = readGoal(demo).goal || '';
