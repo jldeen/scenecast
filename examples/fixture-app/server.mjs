@@ -308,7 +308,8 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 // A third app with a server of its own, for the unattended capture pass (selftest/capture-run.mjs): its writes change
 // what the server keeps, so a test can see what reached it.
 //   tasks http://127.0.0.1:47821/  a task list (each with "Delete <name>"), a "New task" box that adds one on Enter
-//         (the page moves to /task/<id>), a Sync switch, Refresh (it posts, then says "Up to date: <n> tasks"),
+//         (the page moves to /task/<id>), a Sync switch, Refresh (it posts, asks for a count the server doesn't have:
+//         a 404, then says "Up to date: <n> tasks"),
 //         Archive all, and Help on another host (localhost). Every load posts /api/telemetry. The page gets a session
 //         (GET /api/session) and sends it as Authorization; deleting a task without it is refused (401), so an undo by
 //         the API has to use the page's own session. ?signin=<ms>&tid=<tenant id>: the page keeps a sign-in library's
@@ -356,7 +357,7 @@ $('box').addEventListener('keydown', async e => {
 });
 $('list').addEventListener('click', async e => { const b = e.target.closest('button[data-id]'); if (!b) return; await fetch('/api/tasks/' + b.dataset.id, { method: 'DELETE', headers: { authorization: AUTH } }); $('saved').textContent = ''; await load(); });
 $('sync').addEventListener('click', async () => { await post('/api/sync', { on: $('sync').getAttribute('aria-checked') !== 'true' }).catch(() => {}); await load(); });
-$('refresh').addEventListener('click', async () => { await post('/api/refresh').catch(() => {}); await load(); const n = $('list').children.length; $('fresh').textContent = 'Up to date: ' + n + (n === 1 ? ' task' : ' tasks'); });
+$('refresh').addEventListener('click', async () => { await post('/api/refresh').catch(() => {}); fetch('/api/fresh-count').catch(() => {}); await load(); const n = $('list').children.length; $('fresh').textContent = 'Up to date: ' + n + (n === 1 ? ' task' : ' tasks'); });
 $('archive').addEventListener('click', async () => { await post('/api/archive').catch(() => {}); await load(); });
 post('/api/telemetry', { at: location.pathname }).catch(() => {});
 load();
