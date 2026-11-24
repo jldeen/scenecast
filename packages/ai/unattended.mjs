@@ -26,6 +26,7 @@ import { liveWalker, walkerPacks } from './live.mjs';
 import { runReset, fillApi } from './reset-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { walkerFromDemo } from './walker.mjs';
+import { regroundPlan, walkReads } from './reground.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i;
@@ -306,6 +307,18 @@ async function guardOn(demo, cmd, packs) {
 // What the guard held, and every host the browser reached that isn't one of the apps' own.
 // The held requests' bodies a demo asked to keep (capture.keepBodies), in .out/ai/held-bodies.json: local only, for a
 // person reviewing an allow entry. None: no file.
+// The steps whose app's page may have been broken today, not by the product: the re-ground's suspect rule
+// (reground.mjs), on this walk and its screens. It compares with the recording, so a demo without one says why.
+// → { steps: [{ step: '<beat>-<step>', text, status, held: [kinds], why }] } or { none: why }
+export function suspectSteps({ demo, plan, walk, screensDir, packs = null }) {
+  const walker = walkerFromDemo(demo);
+  if (!walker) return { none: "there's no recording to compare today's screens with" };
+  try {
+    const forApp = packs && packs.packsForDemo ? packs.packsForDemo(demo.cfg) : null;
+    const { rows } = regroundPlan(plan, { walker, walk, reads: walkReads(screensDir), apps: (demo.cfg && demo.cfg.apps) || null, packs: forApp ? { forApp } : null });
+    return { steps: rows.filter(r => r.basis === 'suspect').map(r => ({ step: `${r.beat}-${r.step}`, text: r.text, status: r.status, held: r.held || [], why: r.why })) };
+  } catch (e) { return { none: e.message }; }
+}
 function keepBodiesOut(demo, bodies) {
   const f = join(aiDir(demo), 'held-bodies.json');
   if (bodies && bodies.length) { mkdirSync(aiDir(demo), { recursive: true }); writeFileSync(f, JSON.stringify(bodies, null, 1)); }
@@ -351,7 +364,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const plan = viaPlan || readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('make the plan first');
   packs = packs === undefined ? await walkerPacks() : packs;
-  const { walkPlan, heldWhileDrifted, stepNets } = await import('./walk.mjs');
+  const { walkPlan, stepNets } = await import('./walk.mjs');
   const g = await guardOn(demo, cmd, packs);
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
@@ -470,12 +483,12 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     }
     const nets = stepNets(walked.map(s => ({ from: s.window.from, app: s.app })), netAll, new Date().toISOString());
     walked.forEach((s, i) => { if (nets[i].length) s.net = nets[i]; });
-    if (walk) walk.heldWhileDrifted = heldWhileDrifted(walk);
     if (walk) walk.starts = seenAt.starts || [];
     const off = await guardOff(cmd, g.hosts, appOfSender);
     keepBodiesOut(demo, off.bodies);
     walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events.map(e => ({ ...e, app: appOfSender({ tab: e.host }) })); } catch (e) {}
+    walk.suspect = suspectSteps({ demo, plan, walk, screensDir, packs });
     mkdirSync(aiDir(demo), { recursive: true });
     writeFileSync(join(aiDir(demo), 'walk.json'), JSON.stringify(walk, null, 1));
   }

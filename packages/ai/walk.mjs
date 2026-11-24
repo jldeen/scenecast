@@ -118,30 +118,6 @@ export function walkTable(plan, offline, live) {
   return { rows, text: lines.join('\n'), offline: sum(offline), live: sum(live), bugs: rows.filter(r => r.bug) };
 }
 
-// Rule 2 made visible: what the read-only guard held that only came while a landing drifted or missed (a read the app
-// needed, held, can make a page the product doesn't show). A drifted or missed landing's stretch: the steps of its
-// beat since the previous drifted or missed one there (or the beat's start), through it. A kind (method, host, path)
-// counts when it was held in a stretch, in no step outside every stretch, and isn't telemetry. walk: walk.json, each
-// step with held ([{ method, host, path, n }], from its first input to its last read).
-// → [{ kind, n, steps: ['<beat>-<step>' (from 1), …] }]
-const TELEMETRY = /applicationinsights|telemetry|collector|logclient|logflight|\/v2\/track$|\/events$|events\.data\.microsoft|aria\.microsoft|\/ping$/i;
-export function heldWhileDrifted(walk) {
-  const stretch = new Set();
-  for (const b of (walk && walk.beats) || []) {
-    let open = [];
-    for (const s of b.steps || []) { open.push(s); if (s.status === 'drifted' || s.status === 'missed') { open.forEach(x => stretch.add(x)); open = []; } }
-  }
-  const kinds = new Map();
-  for (const b of (walk && walk.beats) || []) for (const s of b.steps || []) for (const h of s.held || []) {
-    if (TELEMETRY.test(`${h.host}${h.path}`)) continue;
-    const kind = `${h.method} ${h.host}${h.path}`, k = kinds.get(kind) || { kind, n: 0, steps: [], outside: false };
-    k.n += h.n || 1;
-    if (stretch.has(s)) { const at = `${b.beat}-${s.step + 1}`; if (!k.steps.includes(at)) k.steps.push(at); } else k.outside = true;
-    kinds.set(kind, k);
-  }
-  return [...kinds.values()].filter(k => !k.outside && k.steps.length).map(({ kind, n, steps }) => ({ kind, n, steps }));
-}
-
 // Each step's failed requests and answers of 400 or more: from its first input to the next step's first input (the
 // last step's to the walk's end), so what comes after a step's last read is still its own. A step keeps its own app's
 // and ones no app can be named for. steps: in walk order, each { from (ISO), app }; net: every one the walk saw

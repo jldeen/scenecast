@@ -234,7 +234,10 @@ walk.json names the plan it walked by its sha256 (`plan`): a re-ground refuses a
 also keeps, with their app and frame, what the guard held in it (`held`, from its first input to its last read) and
 the requests that failed other than by the guard or answered 400 or more, with every answer from a pack-named service
 (`net`, from its first input to the next step's: an answer after its last read is still its own): how a service
-error shows up.
+error shows up. `suspect` lists the steps whose app's page may have been broken today, not by the product, by the
+re-ground's own rule (`regroundPlan` in `packages/ai/reground.mjs`: a held request no pack has reviewed, an answer of
+500 or more for that app, an error the recording doesn't show, or words lost while nothing ran), until the page loads
+again; it compares with the recording, so a demo without one says why instead (`none`).
 A demo's `capture.keepBodies` (in its local demo.json) keeps the bodies of the held requests it names in
 `.out/ai/held-bodies.json`, for a person reviewing an allow entry. At a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, drifted (its words changed), unproven (its words were there
