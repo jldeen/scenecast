@@ -179,9 +179,8 @@ those reads:
      Its kind is its method, host and path, with ids as `*`. It counts for the app it was for: the request's own
      `app` or frame, else the app whose hosts it went to (its address, its pack's `match` and `guard.hosts`), else
      the app of the step it was held in.
-   - **A service the step's app needed answered 500 or more,** in the step's window (from its first input to the next
-     step's), and isn't telemetry: from the step's start, so its own reads count too (the answer can come after them).
-     A response for another app doesn't count.
+   - **A service answered 500 or more** (not telemetry): for the app that asked (the request's tab and frame), from
+     then on, wherever the walk was. A picker can load its plugins once, before it's opened.
    - **Today's screen shows an error the recording doesn't:** "couldn't load" (or "could not be loaded", "failed to
      load", "unable to load"), "check your connection", "try again", "something went wrong", or anything in an alert.
    - **An app lost words while nothing ran in it:** what its last read showed and its next one, after a Go to,
@@ -221,8 +220,10 @@ typing, live regions). Each goes in the first class that fits:
 
 1. **Beyond the walk's view:** in a row the recording's capture scrolled to and put back (`data-d1-row`: a list that
    shows only the rows in view, which `packages/capture/flows/virtual-list.js` scrolls through), when no read today has
-   the row. A walk doesn't scroll, so these aren't missing. The rows the page showed (no `data-d1-row`) compare with
-   today's rows in view as any others do.
+   the row. So is a row of a list that shows only part of the rows it says it has, in the recording and today, and
+   says it has no fewer today (it grew, or its order changed: what's past today's view). A walk doesn't scroll, so
+   these aren't missing, and they carry no reason. A list that shows all its rows, or has fewer today, keeps what's
+   gone as missing.
 2. **Varies between runs:** someone's presence, or words in the page's own content that the recording's captures show
    differently (a greeting), even when the recording first shows them after a write.
 3. **Made by a write the walk didn't make:** the recording first shows it, in path order, after that write (the app's

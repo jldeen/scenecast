@@ -679,8 +679,8 @@ test('proofs on today\'s product: kept, new, today only, behind a write, missed;
   const l = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
   assert.deepEqual(l.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
   assert.equal(l[2].why, 'shop lost words while nothing ran in it, since its start screen: “Free returns on boots”; check the app before adopting');
-  // A response of 500 or more to the step's own app, in its window (to the next step's start): the service it names was
-  // down for the step, from its start. Not another app's, telemetry's, or a 404.
+  // A response of 500 or more to the app that asked: the service it names was down for it from then on. Not
+  // telemetry's, or a 404.
   writeFileSync(join(walkDir, 'walk-screens', 'start-shop.reads.json.gz'), gzipSync(JSON.stringify(screens['start-shop'])));
   const net = [{ at: at(27), method: 'GET', host: 'api.contoso.test', path: '/catalog/2026/items', status: 503, app: 'shop' }, { at: at(14), method: 'GET', host: 'mail.contoso.test', path: '/inbox', status: 500 },
     { at: at(15), method: 'POST', host: 'telemetry.contoso.test', path: '/events', status: 500, app: 'shop' }, { at: at(16), method: 'GET', host: 'api.contoso.test', path: '/photo', status: 404, app: 'shop' }];
@@ -688,14 +688,14 @@ test('proofs on today\'s product: kept, new, today only, behind a write, missed;
   const down = regroundPlan(parsePlan(text), { walker, walk: { ...walk, net }, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows;
   assert.deepEqual(down.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
   assert.equal(down[2].why, 'GET api.contoso.test/catalog/*/items answered 503; check the app before adopting');
-  // Even when it answered after the step's reads (it was on its way while they were taken).
-  const gap = { ...walk, net: [{ ...net[0], at: at(33) }], inputs: [{ at: at(35), for: 'Type "SPRING25" in "Promo code"' }] };
-  assert.equal(regroundPlan(parsePlan(text), { walker, walk: gap, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows[2].basis, 'suspect');
+  // From when it answered: not for a step read before then.
+  const gap = { ...walk, net: [{ ...net[0], at: at(33) }] };
+  assert.deepEqual(regroundPlan(parsePlan(text), { walker, walk: gap, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows.filter((r, k) => k === 2 || k === 6).map(r => r.basis), ['both', 'suspect']);
   // A step the walk missed is when the walk's window for it ends: what the guard held after that isn't its doing.
   const missed = { ...walk, beats: [walk.beats[0], { ...walk.beats[1], steps: [walk.beats[1].steps[0], { ...walk.beats[1].steps[1], window: { from: at(60), to: at(62) } }] }] };
   const heldAt = sec => ({ ...missed, guard: { held: [{ method: 'POST', host: 'api.contoso.test', path: '/cart', at: at(sec), app: 'shop' }] } });
   assert.deepEqual([61, 65].map(sec => regroundPlan(parsePlan(text), { walker, walk: heldAt(sec), reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows[7].basis), ['suspect', 'missed']);
-  // A 500 in a missed step's own window counts for it from its start, not for the step before.
+  // A 500 while the walk looked for a step it missed: that step's, not the one before.
   const late = { ...missed, net: [{ ...net[0], at: at(61) }] };
   assert.deepEqual(regroundPlan(parsePlan(text), { walker, walk: late, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows.map(r => r.basis).slice(6), ['today', 'suspect']);
 });
@@ -788,7 +788,7 @@ test('what a capture of today\'s product would lose, by why (renamed, a number, 
   assert.deepEqual([reloaded[1].missing.find(e => e.kind === 'list').why, reloaded[3].basis], [held, 'both']);
 });
 
-test('a response of 500 or more counts for the step whose window it\'s in, when it\'s for that step\'s app', () => {
+test('a response of 500 or more counts for the app that asked, from then until it loads again, wherever the walk was', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sc-down-'));
   const page = body => `<!doctype html><html><head><title>Contoso</title></head><body>${body}</body></html>`;
   const snaps = { shop: '<h1>Contoso shop</h1><a href="/c">Catalog</a>', catalog: '<h1>Contoso shop</h1><h2>Spring catalog</h2>', mail: '<h1>Fabrikam mail</h1><a href="/i">Inbox</a>', inbox: '<h1>Fabrikam mail</h1><h2>Your inbox</h2>' };
@@ -808,12 +808,16 @@ test('a response of 500 or more counts for the step whose window it\'s in, when 
   for (const [f, v] of Object.entries(screens)) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
   const steps = [['Go to shop', 'reached'], ['Click "Catalog"', 'reached'], ['Go to mail', 'reached'], ['Click "Inbox"', 'drifted']].map(([t, status], step) => ({ step, text: t, status }));
   const walk = { beats: [{ beat: 1, steps }], starts: [{ app: 'shop' }, { app: 'mail' }], inputs: [{ at: at(15), for: 'Click "Catalog"' }, { at: at(35), for: 'Click "Inbox"' }] };
-  const inbox = sec => regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk: { ...walk, net: [{ at: at(sec), method: 'GET', host: 'mail.fabrikam.test', path: '/api/folders', status: 500 }] }, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows[3];
-  // Mail's service down while the shop's step ran: not the shop step's, and not mail's later. In mail's own step: its.
-  assert.deepEqual([17, 37].map(sec => [inbox(sec).basis, inbox(sec).why]), [['today', '“Your inbox” isn\'t on today\'s screen'], ['suspect', 'GET mail.fabrikam.test/api/folders answered 500; check the app before adopting']]);
+  const down = (sec, host = 'mail.fabrikam.test', events = []) => ({ ...walk, events, net: [{ at: at(sec), method: 'GET', host, path: '/api/folders', status: 500 }] });
+  const inbox = w => regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk: w, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows[3];
+  // Mail's service down while the walk was in the shop: mail's later steps. Not after mail loads again, not a step read
+  // before it answered, and not the shop's.
+  assert.deepEqual([inbox(down(17)).basis, inbox(down(17)).why], ['suspect', 'GET mail.fabrikam.test/api/folders answered 500; check the app before adopting']);
+  const reload = [{ kind: 'loaded', host: 'mail.fabrikam.test', path: '/', at: at(32) }];
+  assert.deepEqual([down(17, undefined, reload), down(45), down(17, 'shop.contoso.test')].map(w => inbox(w).basis), ['today', 'today', 'today']);
 });
 
-test('a list that shows only the rows in view: rows the recording scrolled to are beyond the walk\'s view, the rows it says it has a number', () => {
+test('a list that shows only the rows in view: rows the recording scrolled to, or past today\'s view of a list that grew, are beyond the walk\'s view; the rows it says it has a number', () => {
   // A ledger grid, recorded with the rows its capture scrolled to put back (data-d1-row), each row's tooltip in a portal;
   // today, the walk reads only the rows in view, in another order, and the grid says it has more.
   const dir = mkdtempSync(join(tmpdir(), 'sc-virtual-'));
@@ -829,29 +833,35 @@ test('a list that shows only the rows in view: rows the recording scrolled to ar
   const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps: [{ id: 'books', key: 'B', title: 'Contoso books' }] } };
   const text = '# Books\n\n## Beat 1 · Look\n\n- Go to books\n  Lands on: home · "Contoso"\n- Click "Ledgers"\n  Lands on: ledgers · "Ledgers"\n';
   // Today's rows in view: one as recorded, one the recording scrolled to, two new; the grid says 12.
-  const today = grid(12, [['Fabrikam Audit'], ['Contoso Ledger'], ['Contoso Fleet'], ['Contoso Budget']].map(([n]) => [n]))
+  const today = (count = 12) => grid(count, [['Fabrikam Audit'], ['Contoso Ledger'], ['Contoso Fleet'], ['Contoso Budget']].map(([n]) => [n]))
     + '<ul role="listbox" aria-label="Owners"><li role="option"><span>AC</span><span>Avery Chen</span><span>Finance lead</span></li><li role="option"><span>DH</span><span>Dana Hill</span><span>Auditor</span></li></ul>';
   const at = sec => new Date(Date.UTC(2026, 10, 24, 9, 0, sec)).toISOString();
   const two = (t, html) => [0, 1].map(i => ({ at: at(t + i), docs: [{ key: 'main', html: page(html) }] }));
   const walkDir = join(dir, 'walk');
   mkdirSync(join(walkDir, 'walk-screens'), { recursive: true });
-  for (const [f, v] of Object.entries({ 'start-books': two(0, '<h1>Contoso</h1><a href="/l">Ledgers</a>'), '1-1': two(10, '<h1>Contoso</h1><a href="/l">Ledgers</a>'), '1-2': two(20, today) })) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
+  for (const [f, v] of Object.entries({ 'start-books': two(0, '<h1>Contoso</h1><a href="/l">Ledgers</a>'), '1-1': two(10, '<h1>Contoso</h1><a href="/l">Ledgers</a>'), '1-2': two(20, today()) })) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
   const walk = { beats: [{ beat: 1, steps: [{ step: 0, text: 'Go to books', status: 'reached' }, { step: 1, text: 'Click "Ledgers"', status: 'reached' }] }], starts: [{ app: 'books' }] };
   const { rows } = regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk, reads: walkReads(join(walkDir, 'walk-screens')), apps: demo.cfg.apps });
   const show = e => [e.cls, e.kind === 'list' ? `${e.count} of ${e.total} rows (${e.entries}): ${e.rows.join(', ')}` : e.text, e.now || null];
-  // 9 rows → 12. Gone from the rows in view: what to look at. The rows the capture scrolled to that today's rows in
-  // view don't have: beyond the walk's view. Tooltips aren't on the screen until hovered: never listed.
+  // 9 rows → 12. The rows the capture scrolled to that today's rows in view don't have, and the rows it showed that
+  // today's view doesn't (the list shows part of its rows and has more today): beyond the walk's view, each a line.
+  // Tooltips aren't on the screen until hovered: never listed.
   assert.deepEqual(rows[1].missing.map(show), [
     ['number', '9', '12'],
-    ['missing', '2 of 9 rows (2): Fabrikam Payroll, Contoso Notes', null],
+    ['beyond', '2 of 9 rows (2): Fabrikam Payroll, Contoso Notes', null],
     ['beyond', '4 of 9 rows (4): Fabrikam Travel, Contoso Assets, Fabrikam Grants, Contoso Leases', null],
   ]);
   // New in view: the two new rows as one line. A person's row is named by their name, not their initials; its option,
   // named by all of it, is what's in it.
   assert.deepEqual(rows[1].extra.map(show), [['extra', '2 of 5 rows (2): Fabrikam Audit, Contoso Budget', null], ['extra', '2 of 2 rows (6): Avery Chen, Dana Hill', null]]);
   const md = formatReground(rows);
-  assert.match(md, /\| 2 rows of a list, of the 4 in view \(9 with the ones its capture scrolled to\): “Fabrikam Payroll”, “Contoso Notes”\. Today: 5 rows, starting “Name”, “Fabrikam Audit”/);
-  assert.match(md, /### Beyond the walk’s view: rows of a list it didn’t scroll\n\n\| What \| Why \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| 4 of 9 rows of a list, from “Fabrikam Travel”, “Contoso Assets”, “Fabrikam Grants”, “Contoso Leases” \| the recording’s capture scrolled the list to them; a walk doesn’t scroll \| ledgers \(1-2\) \|/);
+  assert.match(md, /\| 2 of 9 rows of a list, from “Fabrikam Payroll”, “Contoso Notes” \| the list shows 5 of the 12 rows it says it has \(9 recorded\), and these aren’t among them \| ledgers \(1-2\) \|/);
+  // A list that has fewer rows today: what its view lost is missing.
+  writeFileSync(join(walkDir, 'walk-screens', '1-2.reads.json.gz'), gzipSync(JSON.stringify(two(20, today(8)))));
+  const fewer = regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk, reads: walkReads(join(walkDir, 'walk-screens')), apps: demo.cfg.apps }).rows;
+  assert.deepEqual(fewer[1].missing.map(show).slice(0, 2), [['number', '9', '8'], ['missing', '2 of 9 rows (2): Fabrikam Payroll, Contoso Notes', null]]);
+  assert.match(formatReground(fewer), /\| 2 rows of a list, of the 4 in view \(9 with the ones its capture scrolled to\): “Fabrikam Payroll”, “Contoso Notes”\. Today: 5 rows, starting “Name”, “Fabrikam Audit”/);
+  assert.match(md, /### Beyond the walk’s view: rows of a list it didn’t scroll\n\n\| What \| Why \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| 2 of 9 rows [^\n]*\n\| 4 of 9 rows of a list, from “Fabrikam Travel”, “Contoso Assets”, “Fabrikam Grants”, “Contoso Leases” \| the recording’s capture scrolled the list to them; a walk doesn’t scroll \| ledgers \(1-2\) \|/);
   assert.match(md, /### A number changed\n\n\| Recorded \| Today \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| The rows the list starting “Name”, “Contoso Ledger” says it has: “9” \| “12” \| ledgers \(1-2\) \|/);
 });
 

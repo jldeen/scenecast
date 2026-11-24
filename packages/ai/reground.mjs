@@ -245,7 +245,7 @@ function collapse(classed, sc, others) {
   for (const e of classed) {
     const h = heads.get(key(e)), kept = !h && rowLabel(sc, e);
     if (!h && !kept) { out.push(e); continue; }
-    const k = h ? `gone|${h.cls}|${e.list}` : `kept|${e.cls}|${e.list}`;
+    const k = h ? `gone|${h.cls}|${e.list}|${h.why || ''}` : `kept|${e.cls}|${e.list}|${e.why || ''}`;
     if (!groups.has(k)) groups.set(k, { h: h || e, gone: !!h, es: [] });
     groups.get(k).es.push(e);
   }
@@ -274,8 +274,9 @@ function collapse(classed, sc, others) {
   return rest;
 }
 // What's missing since the recording, by why (formatReground's classes), in this order:
-//   beyond    in a row the recording's capture scrolled to and put back (restored), when today's reads don't have the
-//             row: a walk doesn't scroll, so it's beyond its view, not missing
+//   beyond    in a row the recording's capture scrolled to and put back (restored), or of a list that shows only part
+//             of the rows it says it has, then and today, and says it has no fewer today, when today's reads don't have
+//             the row: a walk doesn't scroll, so it's beyond its view, not missing
 //   varies    someone's presence, or words in the page's own content the recording's captures show differently (a
 //             greeting)
 //   expected  made by a write the walk didn't make: the recording first shows it, in path order, after that write (the
@@ -296,8 +297,23 @@ const numbers = t => String(t).match(/\d+(?:[.,]\d+)*/g) || [];
 function missingClasses(entries, { rec, got, app, why, madeBy, varies }) {
   const used = got.map(() => new Set()), had = new Set((rec.controls || []).map(c => pnorm(c.name)));
   const shown = new Set([...(rec.items || []).map(i => pnorm(i.text)), ...had]);
+  // A list that shows only part of the rows it says it has, in the recording and on each of today's reads, and says it
+  // has no fewer today: why its recorded rows today's don't have are past today's view, else null.
+  const parts = new Map();
+  const partial = list => {
+    if (list === undefined) return null;
+    if (!parts.has(list)) {
+      const said = ((rec.lists || {})[list] || [])[2], showed = ((listsOf(rec).get(list)) || new Map()).size - restoredRows(rec, list).size;
+      const now = got.map(g => { const at = sameListAt(rec, list, g); return at === null ? null : { said: ((g.lists || {})[at] || [])[2] || null, shows: ((listsOf(g).get(at)) || new Map()).size }; });
+      parts.set(list, said && showed < said && now.every(x => x && x.said && x.shows < x.said && x.said >= said)
+        ? `the list shows ${now[0].shows} of the ${now[0].said} rows it says it has (${said} recorded), and these aren\u2019t among them` : null);
+    }
+    return parts.get(list);
+  };
   const one = e => {
     if (e.restored && rowGone(rec, e, got)) return { ...e, cls: 'beyond', why: 'the recording\u2019s capture scrolled the list to them; a walk doesn\u2019t scroll' };
+    const part = partial(e.list);
+    if (part && rowGone(rec, e, got)) return { ...e, cls: 'beyond', why: part };
     // Someone's presence, or a greeting, before a write: words that vary in the page's own content aren't a write's.
     // In the app's frame they may be (a chat a write started, its title in Recent).
     const v = varies(e.text, app);
@@ -370,23 +386,20 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
   const sites = sitesOf(apps || walker.apps || [], packs);
   // What may have broken an app's page today, from when until the page loads again (a new document of the app's, in
   // walk.events: { kind: 'loaded', app?, host, at }), else to the end of the walk: a held request that isn't telemetry
-  // and that no pack has reviewed as staying held, for the app it was for; a response of 500 or more to a step's own
-  // app in the step's window; an error a read shows that the recording doesn't; words an app lost while nothing ran
-  // in it.
+  // and that no pack has reviewed as staying held, for the app it was for; a response of 500 or more to the app that
+  // asked; an error a read shows that the recording doesn't; words an app lost while nothing ran in it.
   const { held, windows } = heldDuring(walk, reads, steps, rowOf, appAt, sites);
   const reviewed = h => sites.some(a => a.stayHeld.some(e => reviews(e, h)));
   const reasons = held.filter(x => !isTelemetry(x.kind) && !reviewed(x.h)).map(x => ({ app: x.app, t: x.t, held: x.kind, why: `the guard held ${x.kind}` }));
-  // When each step began: its first input (the walk's window for it, else its reads'). Its window runs to the next
-  // step's start. A response of 500 or more in it (walk.net: { at, method, host, path, status, app?, frame? }), for the
-  // step's own app and not telemetry, means the service it names was down for the step, from its start.
+  // When each step began: its first input (the walk's window for it, else its reads').
   const ownWindow = (bi, si, end) => { const r = rowOf(bi, si), t = r && r.window ? Date.parse(r.window[end]) : NaN; return Number.isFinite(t) ? t : null; };
   const begins = steps.map(({ bi, si }) => { const w = windows.get(`${bi + 1}-${si + 1}`); return ownWindow(bi, si, 'from') ?? (w ? w.from : null); });
+  // A response of 500 or more that isn't telemetry (walk.net: { at, method, host, path, status, app?, frame? }): the
+  // service it names was down for the app that asked (the request's tab and frame), from then on, wherever the walk was
+  // (a picker loads its plugins once, before it's opened).
   for (const n of (walk && walk.net) || []) {
     const t = Date.parse(n.at), app = appOfRequest(sites, n), kind = heldKind(n);
-    if (!(+n.status >= 500) || !Number.isFinite(t) || !app || isTelemetry(kind)) continue;
-    let k = -1;
-    for (const [j, b] of begins.entries()) if (b !== null && b <= t) k = j;
-    if (k >= 0 && appAt[k] === app) reasons.push({ app, t: begins[k], why: `${kind} answered ${n.status}` });
+    if (+n.status >= 500 && Number.isFinite(t) && app && !isTelemetry(kind)) reasons.push({ app, t, why: `${kind} answered ${n.status}` });
   }
   const loads = ((walk && walk.events) || []).filter(e => e && e.kind === 'loaded').map(e => ({ t: Date.parse(e.at), app: e.app || (sites.find(a => a.hosts.some(x => hostIs(e.host, x))) || {}).id || null }))
     .filter(e => Number.isFinite(e.t) && e.app);
