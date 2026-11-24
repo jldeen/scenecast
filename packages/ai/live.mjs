@@ -104,6 +104,7 @@ export function startUrls(demo) {
   return out;
 }
 
+const SIG_SRC = "const out = []; for (const f of page.frames()) { const r = await f.evaluate(() => window.__rkrec ? window.__rkrec.sig() : null).catch(() => null); if (r) out.push((f === page.mainFrame() ? 'main' : 'frame') + '=' + r); } return out.sort().join(' ');";
 // tabs: { app: mark } a tab of its own for an app instead of the app's (Set before's side tab, capTab).
 export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = null, log = () => {} }) {
   const apps = demo.cfg.apps || [];
@@ -619,6 +620,13 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   // The screen in the reader's shape, twice about gapMs apart once it's quiet ([{ at, docs: [{ key, html }] }, …]):
   // for readScreen and the landing rules, as on a recorded screen; words that differ between the two come and go by
   // themselves (an answer still streaming, a toast, a clock).
+  // The recorder's screen signature of an app's tab now (recorder.js recSig: each frame's __rkrec.sig()), null when
+  // the recorder isn't in it.
+  async function sigNow(app) {
+    const id = appOf(app) || app;
+    const v = await cmd('js', { tab: tab(id), code: SIG_SRC }, 30).catch(() => null);
+    return typeof v === 'string' && v ? v : null;
+  }
   async function reads(app, { n = 2, gapMs = 1000 } = {}) {
     const id = appOf(app) || app;
     await quiet(id, 800, 15000);
@@ -630,5 +638,5 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     }
     return out;
   }
-  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, uniqueControl, startCheck, proofOf, screenNow, reads, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
+  return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, landsBefore, uniqueControl, startCheck, proofOf, screenNow, reads, sigNow, typed: () => ({ ...typedIn }), inputs: () => inputs.slice() };
 }

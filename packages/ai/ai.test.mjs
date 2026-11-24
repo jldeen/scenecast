@@ -14,7 +14,7 @@ import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
 import { stepNets } from './walk.mjs';
-import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps } from './unattended.mjs';
+import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps, canReuse } from './unattended.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -234,6 +234,20 @@ test("a walk's suspect steps are the re-ground's: a 500 for an app's own service
   assert.deepEqual(suspectSteps({ demo, plan, walk: walk([]), screensDir, packs }), { steps: [{ step: '1-2', text: 'Click "Inbox"', status: 'drifted', held: [], why: 'GET mail.fabrikam.test/api/folders answered 500; check the app before adopting' }] });
   assert.deepEqual(suspectSteps({ demo, plan, walk: walk([{ kind: 'loaded', host: 'mail.fabrikam.test', path: '/', at: at(32) }]), screensDir, packs }), { steps: [] });
   assert.deepEqual(suspectSteps({ demo: { ...demo, dir: mkdtempSync(join(tmpdir(), 'sc-none-')) }, plan, walk: walk([]), screensDir, packs }), { none: "there's no recording to compare today's screens with" });
+});
+
+test("a step's read before is the last step's read after only when nothing ran and the page's signature is the same", () => {
+  const kept = { seq: 4, inputs: 7, sig: 'main=a1:20' };
+  const now = (o = {}) => ({ seq: 5, inputs: 7, setBefore: false, sig: 'main=a1:20', ...o });
+  assert.equal(canReuse(kept, now()), true);
+  // It changed on its own (a stream ending, a toast): a new read.
+  assert.equal(canReuse(kept, now({ sig: 'main=b2:24' })), false);
+  assert.equal(canReuse(kept, now({ sig: null })), false, 'no recorder in the tab: never');
+  assert.equal(canReuse({ ...kept, sig: null }, now()), false, 'it changed while it was read');
+  assert.equal(canReuse(kept, now({ inputs: 8 })), false, 'an input ran since');
+  assert.equal(canReuse(kept, now({ seq: 6 })), false, 'not the step just before');
+  assert.equal(canReuse(kept, now({ setBefore: true })), false, 'something was set off camera for this step');
+  assert.equal(canReuse(null, now()), false);
 });
 
 test("the app a request came from: its tab's host, else its frame's, by each app's and its pack's hosts", () => {
