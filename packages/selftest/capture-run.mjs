@@ -5,6 +5,9 @@
 //      (a new task), a step the plan calls read-only whose request the guard holds (Refresh posts), the reset after;
 //      the two apps' start sweeps side by side
 //   1b. the reader and the served replica name the run's recorded controls alike (name-parity.mjs)
+//   1c. a write inside a frame (another host): the reader agrees in the frame, the guard opens the pack's hosts for it
+//   1d. an API undo in the page's own session; when it can't, the Note's steps
+//   1e. the capture start waits for a slow sign-in, and refuses one that never comes
 //   2. a write the plan didn't approve (Archive all) stops the run before it, with a picture
 //   3. a step that leaves the app (Help, on another host) stops it
 //   3b. a step it can't prove (its words were there before): it goes on only by its next control, and stops
@@ -34,9 +37,9 @@ const keep = process.argv.includes('--keep');
 const withExtension = !process.argv.includes('--no-extension');
 // Receiver ports away from every other test's and the app's (47621–47630): a recorder extension looks for its receiver
 // on its own port and the nine after it, so two tests' within ten of each other can find each other's.
-const RX = 47741, RX_EXT = 47751, REPLICA_PORT = 4741, PARITY_PORT = 4742, TASKS = 47821, CHAT = 47822, ADMIN = 47823;
+const RX = 47741, RX_EXT = 47751, RX_SIGN = 47743, REPLICA_PORT = 4741, PARITY_PORT = 4742, TASKS = 47821, CHAT = 47822, ADMIN = 47823, NOTES = 47824;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-run-'));
-await selftestGuard({ tmp, receivers: [RX, RX_EXT], extensions: [RX_EXT], ports: [REPLICA_PORT, PARITY_PORT, TASKS, CHAT, ADMIN] });
+await selftestGuard({ tmp, receivers: [RX, RX_EXT, RX_SIGN], extensions: [RX_EXT], ports: [REPLICA_PORT, PARITY_PORT, TASKS, CHAT, ADMIN, NOTES] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [], times = {};
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 2000)}` : '')); if (!ok) fails.push(name); };
@@ -58,18 +61,24 @@ function aiProc(args, cwd, env, onEvent = () => {}) {
 }
 
 
-// The tasks app's pack (an external one, as a demo's own would be): its writes and what it sends while looked at.
-const HOST = `127.0.0.1:${TASKS}`;
+// The tasks app's pack (an external one, as a demo's own would be): its writes and what it sends while looked at. Its
+// notes panel is a frame on a host of its own (hosts: a write opens it too).
+const HOST = `127.0.0.1:${TASKS}`, NOTES_HOST = `127.0.0.1:${NOTES}`;
 mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
-writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+// apiPath: new-task's API undo (as a private pack's), on the page's own session; null: none.
+const writePack = ({ frameHost = true, apiPath = null } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
-    { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'] } },
+    { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}) } },
     { id: 'delete-task', what: 'Deletes a task', on: { kind: 'click', target: '/^Delete /' }, undo: null },
     { id: 'sync', what: 'Turns Sync on or off', on: { kind: 'switch', target: 'Sync' }, undo: { same: 'sync' } },
+    { id: 'pin-note', what: 'Pins the note', on: { kind: 'click', target: 'Pin note' }, undo: { steps: ['Click "Unpin note"'] } },
+    { id: 'unpin-note', what: 'Unpins the note', on: { kind: 'click', target: 'Unpin note' }, undo: null },
   ],
-  guard: { allow: [`${HOST}/api/telemetry`] },
+  guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}) },
+  apis: { tasks: { open: `http://${HOST}/`, host: HOST } },
 }, null, 1));
+writePack();
 
 const PLAN = extra => `# Tasks demo
 
@@ -108,12 +117,12 @@ const RESET = `# Reset: Tasks demo
 - tasks: shows "No tasks yet"
 `;
 
-const tasks = startTasks({ port: TASKS });
+const tasks = startTasks({ port: TASKS, notesPort: NOTES });
 const fx = startFixture({ chatPort: CHAT, adminPort: ADMIN });
 const procs = [];
 let ctx = null;
-async function newDemo(name, rx, capture) {
-  const r = await run(['new', name, '--dir', tmp, '--title', 'Tasks demo', '--port', String(REPLICA_PORT), '--app', `tasks=${tasks.url}`, '--app', `admin=${fx.admin}`]);
+async function newDemo(name, rx, capture, apps = [['tasks', tasks.url], ['admin', fx.admin]]) {
+  const r = await run(['new', name, '--dir', tmp, '--title', 'Tasks demo', '--port', String(REPLICA_PORT), ...apps.flatMap(([id, url]) => ['--app', `${id}=${url}`])]);
   check(`${name}: scaffold`, r.code === 0, r.out);
   const DEMO = join(tmp, name);
   const cfg = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8'));
@@ -171,6 +180,64 @@ try {
   const np = builtRun.code === 0 ? await nameParity({ demo: DEMO, port: PARITY_PORT }).catch(e => ({ error: e.message })) : null;
   check('the reader and the served replica name every recorded control alike', np && !np.error && np.screens > 0 && np.differ.length === 0, JSON.stringify(np || builtRun.out.slice(-800)));
 
+  // 1c · A write inside a frame (the notes panel, on its own host): the reader agrees about its control in that frame's
+  // markup, the click is hit-tested through the frame, and the guard opens the app's hosts with the frame's (the
+  // pack's hosts) for that one step. The reset after unpins it, in the frame too.
+  const PIN_PLAN = `# Tasks demo\n\n## Beat 1 · A pinned note\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Pin note" — ask first\n  Writes: pins the note · fixture-tasks:pin-note\n  Lands on: "Note is pinned"\n`;
+  const PIN_RESET = `# Reset: Tasks demo\n\n## Undo · Tasks\n\n- Go to tasks\n- Click "Unpin note"\n  Undoes: beat 1, Click "Pin note"\n\n## Check\n\n- tasks: no "Note is pinned"\n`;
+  writeFileSync(join(DEMO, 'plan.md'), PIN_PLAN); writeFileSync(join(DEMO, 'reset.md'), PIN_RESET);
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const pinIn = (rj.inputs || []).find(i => i.kind === 'click' && i.on === 'Pin note');
+  check('a write inside a frame: the reader agrees in its frame, the click lands on it, the guard opens the frame\'s host for it', res.code === 0 && !rj.stopped && rj.writes.length === 1 && rj.writes[0].write === 'pin-note' && count(tasks.log, 'POST notes/api/pin') === 1 && pinIn && pinIn.frame === NOTES_HOST && pinIn.landed && pinIn.landed.frame === NOTES_HOST, JSON.stringify({ stopped: rj.stopped, writes: rj.writes, pinIn, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  check('and the reset after unpins it, in the frame', count(tasks.log, 'POST notes/api/unpin') === 1 && rj.reset.after && rj.reset.after.ok && tasks.state().pinned === false, JSON.stringify({ after: rj.reset.after, state: tasks.state() }));
+  // Without the frame's host in the pack, the write's POST to it is held: it never reaches the notes server.
+  writePack({ frameHost: false });
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  check('a frame\'s host the pack doesn\'t name stays held: the write never reaches it, and the run stops', rj.stopped && count(tasks.log, 'POST notes/api/pin') === 0 && tasks.state().pinned === false && (rj.guard.held || []).some(h => h.host === NOTES_HOST && h.path === '/api/pin'), JSON.stringify({ stopped: rj.stopped, held: (rj.guard.held || []).filter(h => h.host === NOTES_HOST), log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  writePack();
+  writeFileSync(join(DEMO, 'reset.md'), RESET);
+
+  // 1d · An API undo (a private pack's): "Undo with the app pack" runs the pack's call in the page's own signed-in
+  // session (the server refuses a delete without it), with the task id the run recorded. If it can't (here, a path
+  // the server doesn't know), the Note's steps run instead, as approved.
+  const RESET_API = RESET.replace('- Click "Delete Call Kestrel"\n  Undoes: beat 1, Press Enter', '- Undo with the app pack: fixture-tasks:new-task\n  Undoes: beat 1, Press Enter\n  Note: an API call in the capture browser\'s own signed-in session, with {taskId} from the run; if it can\'t: Click "Delete {typed}"');
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET_API);
+  writePack({ apiPath: '/api/tasks/{taskId}' });
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const apiDid = ((rj.reset.after || {}).did || []).join(' | ');
+  check('an API undo: the run\'s task deleted by the pack\'s call, in the page\'s own session', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Undo with the app pack: fixture-tasks:new-task \(DELETE, 200\)/.test(apiDid) && count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && !tasks.log.some(l => / 401$/.test(l)) && tasks.state().tasks.length === 0, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  writePack({ apiPath: '/api/nope/{taskId}' });
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const fbDid = ((rj.reset.after || {}).did || []).join(' | ');
+  check('and when the call can\'t, the Note\'s steps undo it', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Click "Delete Call Kestrel"/.test(fbDid) && count(tasks.log, 'DELETE /api/nope/{id}') === 1 && count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && tasks.state().tasks.length === 0, JSON.stringify({ after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  writePack();
+  writeFileSync(join(DEMO, 'reset.md'), RESET);
+
+  // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
+  // tenant check, and still refuses when it never does.
+  const TID = '11111111-2222-3333-4444-555555555555';
+  const SIGN = await newDemo('signin', RX_SIGN, true, [['tasks', `${tasks.url}?signin=25000&tid=${TID}`]]);
+  const signCfg = (url, profile, settle) => { const f = join(SIGN, 'demo.json'), c = JSON.parse(readFileSync(f, 'utf8')); c.apps[0].url = url; Object.assign(c.capture, { tenant: TID, profile: join(tmp, profile) }); if (settle) c.capture.signInSettleS = settle; else delete c.capture.signInSettleS; writeFileSync(f, JSON.stringify(c, null, 2)); };
+  const SE = { REPLICA_RX_PORT: String(RX_SIGN) };
+  signCfg(`${tasks.url}?signin=25000&tid=${TID}`, 'signin-profile-1', null);
+  let sst = json((await run(['capture', 'start', '--demo', SIGN], { env: SE })).out);
+  check('the capture start waits for a sign-in that takes 25 s, and goes on', sst.ok === true, JSON.stringify(sst));
+  await run(['capture', 'stop', '--demo', SIGN], { env: SE });
+  signCfg(`${tasks.url}?signin=never&tid=${TID}`, 'signin-profile-2', 12);
+  sst = json((await run(['capture', 'start', '--demo', SIGN], { env: SE })).out);
+  check('and refuses when it never settles', sst.ok === false && /couldn't tell which tenant tasks is signed in to/.test(sst.error || ''), JSON.stringify(sst));
+  await run(['capture', 'stop', '--demo', SIGN], { env: SE });
+
   // 2 · A write the plan didn't approve: the run stops before it, with a picture; nothing reaches the server.
   writeFileSync(join(DEMO, 'plan.md'), PLAN('- Click "Archive all"\n'));
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
@@ -218,6 +285,8 @@ try {
   const st = wj.beats.map(b => b.steps.map(s => s.status).join(','));
   check('a live walk: reached, then the write not run, then the next beat (its words need that write)', res.code === 0 && st[0] === 'reached,reached,write' && st[1] === 'drifted' && /Up to date: 1 task/.test(wj.beats[1].steps[0].why || '') && wj.beats[1].steps[0].needs === 'beat 1\'s write: Press Enter', JSON.stringify({ st, b2: wj.beats[1], err: res.err.slice(-800) }));
   check('and it wrote nothing', !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry') && tasks.state().tasks.length === 0, tasks.log.join(', '));
+  const typedScreen = (() => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk-screens', '1-2.json'), 'utf8')); } catch (e) { return null; } })();
+  check('and it kept each screen it landed on: its words, its controls, what a box holds', typedScreen && typedScreen.words.includes('No tasks yet') && typedScreen.controls.some(c => c.name === 'New task' && c.role === 'textbox' && c.value === 'Call Kestrel') && typedScreen.controls.some(c => c.name === 'Pin note' && c.frame === NOTES_HOST), JSON.stringify(typedScreen && { words: typedScreen.words.slice(0, 6), controls: typedScreen.controls.slice(0, 12) }));
   const cl = (wj.beats[0] && wj.beats[0].steps[2] && wj.beats[0].steps[2].cleared) || {};
   check('the beat stopped at the write: what it typed for it is cleared, no draft left', cl.cleared === true && cl.in === 'New task', JSON.stringify(wj.beats[0] && wj.beats[0].steps[2]));
   await run(['capture', 'stop', '--demo', DEMO], { env: E });
@@ -257,8 +326,8 @@ try {
   }
 } catch (e) { check('ran to the end', false, e.stack); }
 finally {
-  for (const port of [RX, RX_EXT]) await fetch(`http://127.0.0.1:${port}/quit`, { method: 'POST' }).catch(() => {});
-  for (const d of ['run', 'ext']) if (existsSync(join(tmp, d))) await run(['capture', 'stop', '--demo', join(tmp, d)], { env: { REPLICA_RX_PORT: String(d === 'run' ? RX : RX_EXT) } }).catch(() => {});
+  for (const port of [RX, RX_EXT, RX_SIGN]) await fetch(`http://127.0.0.1:${port}/quit`, { method: 'POST' }).catch(() => {});
+  for (const d of ['run', 'ext', 'signin']) if (existsSync(join(tmp, d))) await run(['capture', 'stop', '--demo', join(tmp, d)], { env: { REPLICA_RX_PORT: String(d === 'run' ? RX : d === 'signin' ? RX_SIGN : RX_EXT) } }).catch(() => {});
   if (ctx) await ctx.close().catch(() => {});
   await sleep(500);
   for (const p of procs) try { p.kill(); } catch (e) {}

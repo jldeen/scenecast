@@ -159,6 +159,14 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
   for that one step. A write that isn't approved stops the run before it, with a picture.
 - **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json.
+- **Writes in frames too** (Microsoft IQ's Power BI frame): exactly one control by that name in the page and its
+  frames, the reader agreeing in that frame's markup, the click hit-tested through the frames, and the guard open for
+  that step on the app's hosts and its pack's `guard.hosts` (a frame's host goes there; a tenant's in a private pack).
+- **API undos.** reset.md's `Undo with the app pack: <pack>:<write>` runs the pack's `undo.api` (a private pack's) in
+  the app's own signed-in session: its `apis.<use>.open` page opened, the Authorization it sends to that host caught
+  in memory for the one call, the call made from the page with the guard open for that host only, its
+  `{placeholders}` filled from run.json's results. If it can't, the Note's `if it can't: A › B` steps run instead
+  (approved with the rest: the approval list shows them).
 - **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
   leaving the app's hosts, a sign-in page (never signed in: Sign in again; the guard holding an app's sign-in says
   so, with the request), what a step lands on not showing, a control that isn't there, a step only a person can do.
@@ -174,8 +182,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 - **Names controls the reader's way** (`controlOf`, `packages/script/naming.mjs`), so a plan's step finds the control
   the reader named on the recorded screen. Until the two are shown alike (`packages/selftest/name-parity.mjs`), a
   write also needs the reader, reading the screen's markup as it is then, to find its control the same way.
-- **The reset before and after.** The demo's `preflight.reset`/`resetFix`, else reset.md: before, the check, then the
-  undos and the set-first steps, then the check again (it fails closed: nothing is recorded when the tenant isn't
+- **The reset before and after.** The demo's `preflight.reset`/`resetFix`, else reset.md: before, the check (a check
+  on a screen other than the start is reached by the plan's own read-only steps there, under the guard, before any
+  of the reset's writes; `pathTo`), then the undos and the set-first steps, then the check again (it fails closed: nothing is recorded when the tenant isn't
   as the demo starts); after, the undos of what ran, the start set again, the check.
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
   the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
@@ -194,7 +203,12 @@ only (a click, a hover, a scroll, a wait), under the guard; anything else is ref
 name. The capture browser denies every app's
 site notifications (never grants them): an app's "turn on notifications" banner isn't in any recording.
 
-`scenecast ai walk --live` walks the plan read-only (`walkLive`): at a write it skips the rest of that beat and goes
+A capture start waits up to `capture.signInSettleS` (60 s) for each app's sign-in to settle before the tenant check
+refuses (M365 Copilot's can take a while after its own landing); another tenant refuses at once.
+
+`scenecast ai walk --live` walks the plan read-only (`walkLive`). Every screen it lands on goes in
+`.out/ai/walk-screens/<beat>-<step>.json` (its words in every frame; every control's name, role, frame, state and what
+a box holds), local only, to re-ground a plan on the product as it is today. at a write it skips the rest of that beat and goes
 on with the next; walk.json says, for each step, reached, drifted (its words changed), unproven (its words were there
 before), a write, after a write, or missed (and which write it needed), with what each click hit (`hit`), any error
 the app showed (`trouble`), every input (`inputs`) and the guard's held and passed requests. `ai walk` without
