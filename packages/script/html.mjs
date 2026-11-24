@@ -214,8 +214,10 @@ export function readScreen(docs, { specs = [] } = {}) {
           else if (el.tag === 'input' && /^(checkbox|radio)$/i.test(el.attrs.type || '')) c.on = 'checked' in el.attrs;
           if (el.attrs['aria-pressed'] === 'true' || el.attrs['aria-pressed'] === 'false') c.pressed = el.attrs['aria-pressed'] === 'true';
           if (el.attrs['aria-selected'] === 'true' || el.attrs['aria-selected'] === 'false') c.selected = el.attrs['aria-selected'] === 'true';
-          // What's in a box, as captured (an input's value, a text area's text, an editable area's words).
-          if (c.editable) { const v = el.tag === 'input' ? clean(el.attrs.value) : el.tag === 'textarea' ? clean(el.children.filter(x => typeof x === 'string').join('')) : clean(wordsOf(el)); if (v) c.value = v.slice(0, 300); }
+          // What's in a box, as captured: a text input's value (a search box's too), a text area's text, an editable
+          // area's words.
+          const textInput = el.tag === 'input' && !/^(checkbox|radio|button|submit|reset|image|hidden|password|file|range|color)$/i.test(el.attrs.type || '');
+          if (c.editable || textInput) { const v = el.tag === 'input' ? clean(el.attrs.value) : el.tag === 'textarea' ? clean(el.children.filter(x => typeof x === 'string').join('')) : clean(wordsOf(el)); if (v) c.value = v.slice(0, 300); }
           if (shut) c.shut = true;
           if (nav) c.nav = true;
           controls.push(c);
