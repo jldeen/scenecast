@@ -114,7 +114,7 @@ async function newDemo(name, rx, capture) {
   const cfg = JSON.parse(readFileSync(join(DEMO, 'demo.json'), 'utf8'));
   Object.assign(cfg, { raw: join(tmp, name + '-raw'), receiverPort: rx, viewport: { width: 1600, height: 900, dpr: 1 }, zooms: [150] });
   Object.assign(cfg.record, { settleMs: 1200, typeIdleMs: 700, everyMs: 250, streamMinMs: 1200, auto: { hoverMax: 6, clickMax: 3, maxS: 25, zoom: false, drags: false, chips: false } });
-  if (capture) Object.assign(cfg, { recorder: 'capture', capture: { profile: join(tmp, 'capture-profile'), window: process.env.SCENECAST_CAPTURE_WINDOW || 'auto', ...(process.env.CI ? { mockKeychain: true } : {}) } });
+  if (capture) Object.assign(cfg, { recorder: 'capture', capture: { guard: 'hold', profile: join(tmp, 'capture-profile'), window: process.env.SCENECAST_CAPTURE_WINDOW || 'auto', ...(process.env.CI ? { mockKeychain: true } : {}) } });
   writeFileSync(join(DEMO, 'demo.json'), JSON.stringify(cfg, null, 2));
   writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
   if (capture) writeFileSync(join(DEMO, 'reset.md'), RESET);
@@ -191,6 +191,8 @@ try {
   const st = wj.beats.map(b => b.steps.map(s => s.status).join(','));
   check('a live walk: reached, then the write not run, then the next beat', res.code === 0 && st[0] === 'reached,reached,write' && st[1] === 'missed' && /Call Kestrel/.test(wj.beats[1].steps[0].why || '') && wj.beats[1].steps[0].needs === 'beat 1\'s write: Press Enter', JSON.stringify({ st, b2: wj.beats[1], err: res.err.slice(-800) }));
   check('and it wrote nothing', !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry') && tasks.state().tasks.length === 0, tasks.log.join(', '));
+  const cl = (wj.beats[0] && wj.beats[0].steps[2] && wj.beats[0].steps[2].cleared) || {};
+  check('the beat stopped at the write: what it typed for it is cleared, no draft left', cl.cleared === true && cl.in === 'New task', JSON.stringify(wj.beats[0] && wj.beats[0].steps[2]));
   await run(['capture', 'stop', '--demo', DEMO], { env: E });
 
   // ---- 6 · The same plan through the recorder extension: the same screens -------------------------------------------

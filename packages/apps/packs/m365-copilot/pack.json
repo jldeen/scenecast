@@ -365,5 +365,10 @@
     "spike E presets m365-copilot.json (busy, stream timings, group selectors, auto budget)",
     "spike A live captures Nov 20 (themes, scores)",
     "demo1-reset SKILL.md and dist (writes, undo steps, checks, effects; product behavior only)"
-  ]
+  ],
+  "guard": {
+    "allow": [
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
+    ]
+  }
 }
