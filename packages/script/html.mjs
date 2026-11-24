@@ -44,6 +44,7 @@ const TIMES = /^(time|relative-time|local-time|time-ago|time-until)$/;
 // A list (a list, a listbox, a grid, a table, a tree, tabs, a menu, a feed) and a row in it (an item, an option, a row,
 // a tab, a menu item, a post).
 const LISTS = /^(list|listbox|grid|treegrid|table|tree|tablist|menu|menubar|radiogroup|feed)$/, ROWS = /^(listitem|option|row|treeitem|tab|menuitem|menuitemcheckbox|menuitemradio|radio|article)$/;
+const says = n => +n > 0 ? +n : null;
 const BLOCK = new Set(['p', 'div', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'th', 'section', 'article', 'header', 'footer', 'nav', 'main', 'aside', 'button', 'a', 'label', 'dt', 'dd', 'table', 'form', 'fieldset', 'figure', 'figcaption', 'blockquote', 'pre', 'summary', 'details', 'br', 'hr', 'option']);
 // Inline formatting: its text runs on with what's around it. Any other element is set apart by a space (a page's CSS
 // often makes spans blocks, which innerText would show apart).
@@ -183,9 +184,14 @@ export function readScreen(docs, { specs = [] } = {}) {
     // article: where the item's nearest article (role article, or an article: a message, a post, a comment) starts.
     // region: where the nearest part of the page named by its aria-label starts (a section, a dialog, a panel, a
     //         group: regions[at] is [its name, the region around it]).
-    // list, row: where the nearest list starts (lists[at] is [its name or null, its role]) and the row in it (none for
-    //         the list itself, or what's in it outside a row).
-    const walk = (el, aria = false, bar = false, shut = false, nav = false, live = false, time = false, sect = false, art = null, reg = null, lst = null, row = null) => {
+    // list, row: where the nearest list starts (lists[at] is [its name or null, its role, the rows it says it has
+    //         (aria-rowcount or aria-setsize, its own or its first row's) or null]) and the row in it (none for the
+    //         list itself, or what's in it outside a row). What describes one row's element (aria-describedby: a
+    //         tooltip in a portal) is in that row too, marked described.
+    // restored: in a row a capture put back (data-d1-row: packages/capture/flows/virtual-list.js scrolls a list that
+    //         shows only the rows in view and keeps every row), not one the page showed.
+    const desc = new Map(), spans = new Map();
+    const walk = (el, aria = false, bar = false, shut = false, nav = false, live = false, time = false, sect = false, art = null, reg = null, lst = null, row = null, back = false) => {
       if (typeof el === 'string') return;
       if (el.tag !== '#root' && hiddenEl(el)) return;
       const role = el.attrs.role || '';
@@ -202,8 +208,11 @@ export function readScreen(docs, { specs = [] } = {}) {
       const start = pos++;
       if (el.tag === 'article' || role === 'article') art = start;
       if (clean(el.attrs['aria-label']) && (/^(section|article|aside|dialog|main|form|nav)$/.test(el.tag) || /^(region|group|dialog|alertdialog|article|tabpanel|document|main|complementary|navigation|form|feed)$/.test(role))) { regions[start] = [clean(el.attrs['aria-label']).slice(0, 120), reg]; reg = start; }
-      if (LISTS.test(role) || (!role && /^(ul|ol|table|menu)$/.test(el.tag))) { lists[start] = [clean(el.attrs['aria-label']).slice(0, 120) || null, role || el.tag]; lst = start; row = null; }
-      else if (lst !== null && (ROWS.test(role) || (!role && /^(li|tr)$/.test(el.tag)))) row = start;
+      if (LISTS.test(role) || (!role && /^(ul|ol|table|menu)$/.test(el.tag))) { lists[start] = [clean(el.attrs['aria-label']).slice(0, 120) || null, role || el.tag, says(el.attrs['aria-rowcount']) || says(el.attrs['aria-setsize'])]; lst = start; row = null; }
+      else if (lst !== null && (ROWS.test(role) || (!role && /^(li|tr)$/.test(el.tag)))) { row = start; if (!lists[lst][2]) lists[lst][2] = says(el.attrs['aria-setsize']); }
+      back = back || 'data-d1-row' in el.attrs;
+      if (row !== null && el.attrs['aria-describedby']) for (const id of el.attrs['aria-describedby'].split(/\s+/).filter(Boolean)) { const was = desc.get(id); desc.set(id, was === undefined || (was && was.lst === lst && was.row === row) ? { lst, row } : null); }
+      const i0 = items.length, c0 = controls.length;
       const ctl = el.tag === '#root' ? null : controlOf(el, acc);
       let mark = null;
       if (!aria && ctl && ctl.control) {
@@ -229,6 +238,7 @@ export function readScreen(docs, { specs = [] } = {}) {
           if (nav) c.nav = true;
           if (lst !== null) c.list = lst;
           if (row !== null) c.row = row;
+          if (back) c.restored = true;
           controls.push(c);
           ctlOf.set(el, c.i);
           mark = c;
@@ -237,12 +247,18 @@ export function readScreen(docs, { specs = [] } = {}) {
       if (/^h[1-6]$/.test(el.tag) || el.attrs.role === 'heading') { const h = clean(wordsOf(el)); if (h) (bar ? barHeadings : headings).push(h); }
       const mine = own(el);
       const item = mine && el.tag !== '#root' ? { i: items.length, kind: ctl && ctl.control ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
-      if (item) { if (shut) item.shut = true; if (nav) item.nav = true; if (art !== null) item.article = art; if (reg !== null) item.region = reg; if (lst !== null) item.list = lst; if (row !== null) item.row = row; items.push(item); }
-      el.children.forEach(c => walk(c, aria, bar, shut, nav, live, time, sect, art, reg, lst, row));
+      if (item) { if (shut) item.shut = true; if (nav) item.nav = true; if (art !== null) item.article = art; if (reg !== null) item.region = reg; if (lst !== null) item.list = lst; if (row !== null) item.row = row; if (back) item.restored = true; items.push(item); }
+      el.children.forEach(c => walk(c, aria, bar, shut, nav, live, time, sect, art, reg, lst, row, back));
+      if (el.attrs.id && ids.get(el.attrs.id) === el) spans.set(el.attrs.id, [i0, items.length, c0, controls.length]);
       if (item) { item.text = clean(wordsOf(el).replace(/\n/g, ' ')).slice(0, 2000); item.box = [start, 0, pos, 1]; }
       for (const m of [item, mark]) if (m) { if (lives > l0) m.live = true; if (times > t0) m.time = true; }
     };
     walk(root);
+    // What describes one row's element, and isn't in a list itself, is in that row.
+    for (const [id, ref] of desc) {
+      const sp = ref && spans.get(id);
+      if (sp) for (const x of [...items.slice(sp[0], sp[1]), ...controls.slice(sp[2], sp[3])]) if (x.list === undefined) { x.list = ref.lst; x.row = ref.row; x.described = true; }
+    }
     text.push(wordsOf(root));
   }
   if (!theme) { const t = controls.find(c => /^switch to (dark|light) (mode|theme)$/i.test(c.name) && c.pressed !== undefined); if (t) theme = /dark/i.test(t.name) === !t.pressed ? 'light' : 'dark'; }

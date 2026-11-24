@@ -19,7 +19,7 @@ import { findItem } from './find.mjs';
 import { holds, proofWords, isBox } from './landing.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
-const READER = 16;
+const READER = 17;
 
 const norm = s => String(s || '').toLowerCase().replace(/[“”"'’]/g, '').replace(/\s+/g, ' ').trim();
 

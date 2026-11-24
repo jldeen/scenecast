@@ -151,7 +151,7 @@ test('a capture read without a browser: where words are (its frame, a live regio
   const ctl = n => sc.controls.find(c => c.name === n) || {};
   assert.deepEqual([ctl('Overview').selected, ctl('Files').selected, ctl('Promo code').value, ctl('Search tools').value, ctl('Message').value], [true, false, 'SPRING25', 'IQ', 'Hello there']);
   // Each tab is a row of the tablist; what isn't in a list has neither.
-  assert.deepEqual([ctl('Overview').list, ctl('Files').list, sc.lists[ctl('Overview').list]], [ctl('Files').list, ctl('Files').list, [null, 'tablist']]);
+  assert.deepEqual([ctl('Overview').list, ctl('Files').list, sc.lists[ctl('Overview').list]], [ctl('Files').list, ctl('Files').list, [null, 'tablist', null]]);
   assert.notEqual(ctl('Overview').row, ctl('Files').row);
   assert.deepEqual([item('Overview').row, ctl('Promo code').list, item('When to use').list], [ctl('Overview').row, undefined, undefined]);
   // A list inside a row of another: what's in it is in the inner list, in its own rows.
@@ -159,6 +159,15 @@ test('a capture read without a browser: where words are (its frame, a live regio
   const n = t => nested.items.find(i => i.text === t);
   assert.deepEqual([nested.lists[n('Our numbers').list][0], nested.lists[n('Fabrikam Orders').list][0]], ['Groups', 'Results']);
   assert.deepEqual([n('Fabrikam Orders').list === n('Contoso Returns').list, n('Fabrikam Orders').row === n('Contoso Returns').row], [true, false]);
+  // A list that shows only the rows in view: the rows it says it has, the rows a capture put back, and a tooltip that
+  // describes one row (in a portal) in that row; one that describes two rows in neither.
+  const grid = readScreen([{ key: 'main', html: '<div role="grid" aria-rowcount="40"><div role="row"><span aria-describedby="t1">Contoso Ledger</span></div>'
+    + '<div role="row" data-d1-row=""><span aria-describedby="t2 both">Fabrikam Payroll</span><button>Open</button></div><div role="row"><span aria-describedby="both">Contoso Notes</span></div></div>'
+    + '<ul><li aria-setsize="7">Spring</li></ul><div role="tooltip" id="t1"><span>Name: Contoso Ledger</span></div><div role="tooltip" id="both"><span>Owner: Avery Chen</span></div>' }]);
+  const g = t => grid.items.find(i => i.text === t) || {}, open = grid.controls.find(c => c.name === 'Open');
+  assert.deepEqual(Object.values(grid.lists).map(l => l[2]), [40, 7]);
+  assert.deepEqual([g('Name: Contoso Ledger').row, g('Owner: Avery Chen').row], [g('Contoso Ledger').row, undefined]);
+  assert.deepEqual([g('Contoso Ledger').restored, g('Fabrikam Payroll').restored, open.restored, open.row === g('Fabrikam Payroll').row], [undefined, true, true, true]);
 });
 
 test('a capture read without a browser: an id names what getElementById finds, the first with it', () => {
