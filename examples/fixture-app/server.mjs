@@ -370,8 +370,8 @@ body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:8px;colo
 <script>
 let AUTH = '', pinging = false;
 const session = fetch('/api/session').then(r => r.json()).then(j => { AUTH = 'Bearer ' + j.token; }).catch(() => {});
-const call = (path, method) => session.then(() => fetch(path, { method: method || 'GET', headers: { authorization: AUTH } }));
-const show = st => { document.getElementById('state').textContent = st.pinned ? 'Note is pinned' : 'Nothing pinned'; if (st.ping && !pinging) { pinging = true; setInterval(() => call('/api/seen', 'POST').catch(() => {}), 150); } };
+const call = (path, method, body) => session.then(() => fetch(path, { method: method || 'GET', headers: { authorization: AUTH, ...(body ? { 'content-type': 'application/json' } : {}) }, body }));
+const show = st => { document.getElementById('state').textContent = st.pinned ? 'Note is pinned' : 'Nothing pinned'; if (st.ping && !pinging) { pinging = true; setInterval(() => call('/api/seen', 'POST', JSON.stringify({ seen: Date.now() })).catch(() => {}), 150); } };
 const load = () => call('/api/note').then(r => r.json()).then(show);
 for (const [id, path] of [['pin', '/api/pin'], ['unpin', '/api/unpin']]) document.getElementById(id).addEventListener('click', async () => { await call(path, 'POST').catch(() => {}); await load(); });
 load();

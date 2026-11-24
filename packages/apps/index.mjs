@@ -201,13 +201,14 @@ const WRITE_NAME = /^(?:send|post|save|delete|remove|approve|submit|merge|publis
 const SECRET = /(?:authorization"\s*:\s*"|\bbearer\s+[a-z0-9._-]{12,}|\beyJ[a-zA-Z0-9_-]{20,}\.|\bghp_[A-Za-z0-9]{20,}|\bgithub_pat_|\bxox[bp]-|\bsk-[A-Za-z0-9]{20,}|access[_-]?token"\s*:\s*"[^"]{8,}|password"\s*:\s*"[^"]+)/i;
 
 // The read-only guard for a demo (stage D): every request that isn't a read is held unless its app's pack allows it.
-// A pack's guard: { allow: ['host/path-prefix' | '/regex over METHOD host/path/'], hosts: [more hosts its app uses] }.
+// A pack's guard: { allow: ['host/path-prefix' | '/regex over METHOD host/path/'], hosts: [more hosts its app uses],
+// stayHeld: [entries as allow's: its own background calls to those hosts, held even while a write opens them] }.
 // What the apps send while they're only looked at (telemetry, presence, search) goes in allow, from measured traffic,
 // reviewed by hand; a tenant's own hosts only in a private pack (~/.stuntdouble/packs).
 export function guardFor(cfg, list = packs()) {
   const byApp = packsForDemo(cfg, list);
   const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https://${s}`).host; } catch (e) { return null; } };
-  const hosts = new Set(), allow = [];
+  const hosts = new Set(), allow = [], stayHeld = [];
   for (const a of (cfg && cfg.apps) || []) {
     for (const h of [a.url, a.match].map(hostOf).filter(Boolean)) hosts.add(h);
     const p = byApp[a.id];
@@ -215,9 +216,10 @@ export function guardFor(cfg, list = packs()) {
     for (const m of p.match || []) { const h = hostOf(m); if (h && !h.includes('*')) hosts.add(h); }
     for (const h of ((p.guard || {}).hosts) || []) hosts.add(h);
     for (const x of ((p.guard || {}).allow) || []) if (!allow.includes(x)) allow.push(x);
+    for (const x of ((p.guard || {}).stayHeld) || []) if (!stayHeld.includes(x)) stayHeld.push(x);
   }
   for (const x of ((cfg && cfg.capture && cfg.capture.allow) || [])) if (!allow.includes(x)) allow.push(x);
-  return { hosts: [...hosts], allow };
+  return { hosts: [...hosts], allow, stayHeld };
 }
 
 // Problems with a pack's shape (the tests and the drafting tool check every pack with it).
@@ -260,13 +262,14 @@ export function checkPack(p) {
     for (const w of hits) out.push(`${at}: write ${w.id} has the same step; a safe step never writes`);
   }
   // A guard's allow-list names what's let through: a host (and path), never everything; ' when body /pattern/' after it
-  // narrows it to the bodies that only read.
-  for (const e of ((p.guard || {}).allow) || []) {
+  // narrows it to the bodies that only read. Its stay-held list (held even while a write opens the host) is named the
+  // same way.
+  for (const list of ['allow', 'stayHeld']) for (const e of ((p.guard || {})[list]) || []) {
     const [x, when] = typeof e === 'string' && e.includes(' when body ') ? e.split(' when body ') : [e, null];
     const re = typeof x === 'string' && /^\/.+\/[a-z]*$/.test(x);
-    if (typeof x !== 'string' || !x.trim()) out.push('guard.allow: strings, a host and path prefix or a /pattern/');
-    else if (re ? /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(x) : !/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?(\/|$)|^[0-9.]+(:\d+)?(\/|$)/i.test(x)) out.push(`guard.allow "${x}": a host and path prefix ("host.example.com/api/") or a /pattern/ over "METHOD host/path", never everything`);
-    if (when !== null && (!/^\/.+\/[a-z]*$/.test(when) || /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(when))) out.push(`guard.allow "${e}": after "when body", a /pattern/ the body has to match, not every body`);
+    if (typeof x !== 'string' || !x.trim()) out.push(`guard.${list}: strings, a host and path prefix or a /pattern/`);
+    else if (re ? /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(x) : !/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?(\/|$)|^[0-9.]+(:\d+)?(\/|$)/i.test(x)) out.push(`guard.${list} "${x}": a host and path prefix ("host.example.com/api/") or a /pattern/ over "METHOD host/path", never everything`);
+    if (when !== null && (!/^\/.+\/[a-z]*$/.test(when) || /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(when))) out.push(`guard.${list} "${e}": after "when body", a /pattern/ the body has to match, not every body`);
   }
   for (const [name, a] of Object.entries(p.apis || {})) if (!a.open || !(a.host || a.hostPattern)) out.push(`apis ${name}: open (the page that signs in) and host or hostPattern`);
   const text = JSON.stringify(p, (k, v) => k.startsWith('_') ? undefined : v);
