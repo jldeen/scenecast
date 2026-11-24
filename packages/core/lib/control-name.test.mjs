@@ -6,7 +6,7 @@ test('one rule for what\'s a control, its role and its name, the same after a tr
   // A small DOM: elements as { tag, attrs, text }, found by id.
   const els = {};
   const el = (tag, attrs = {}, text = '') => { const e = { tag, attrs, text }; if (attrs.id) els[attrs.id] = e; return e; };
-  const acc = { tag: e => e.tag, attr: (e, n) => (n in e.attrs ? e.attrs[n] : null), text: e => e.text, byId: id => els[id] || null };
+  const acc = { tag: e => e.tag, attr: (e, n) => (n in e.attrs ? e.attrs[n] : null), text: e => e.text, byId: id => els[id] || null, labels: e => e.labels || [] };
   el('span', { id: 'l1' }, 'Search'); el('span', { id: 'l2' }, 'tools');
   const cases = [
     [el('button', { 'aria-label': 'Close panel' }, 'X'), { control: true, role: 'button', name: 'Close panel' }],
@@ -20,6 +20,11 @@ test('one rule for what\'s a control, its role and its name, the same after a tr
     [el('input', { type: 'Submit', value: 'Go' }), { control: true, role: 'button', name: 'Go' }],
     [el('div', { role: 'row', tabindex: '-1' }, 'Row'), { control: true, role: 'row', name: 'Row' }],
     [el('div', {}, 'Just words'), { control: false, role: 'div', name: '' }],
+    // A field's <label>s, after aria-label and aria-labelledby, before what's in it and its placeholder.
+    [{ ...el('input', { placeholder: 'Enter code' }), labels: [el('label', {}, 'Promo code')] }, { control: true, role: 'textbox', name: 'Promo code' }],
+    [{ ...el('select', {}, 'Newest Oldest'), labels: [el('label', {}, 'Sort'), el('label', {}, 'by')] }, { control: true, role: 'combobox', name: 'Sort by' }],
+    [{ ...el('input', { type: 'checkbox', 'aria-labelledby': 'l1' }), labels: [el('label', {}, 'Remember me')] }, { control: true, role: 'checkbox', name: 'Search' }],
+    [{ ...el('button', {}, 'Save'), labels: [el('label', {}, 'Not this')] }, { control: true, role: 'button', name: 'Save' }],
     [el('summary', {}, Array.from({ length: 60 }, (_, i) => i).join(' ')), { control: true, role: 'button', name: Array.from({ length: 60 }, (_, i) => i).join(' ').slice(0, 90) }],
   ];
   const sent = new Function(`return (${controlOf})`)();
