@@ -206,7 +206,16 @@
   ],
   "guard": {
     "allow": [
-      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/"
-    ]
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/",
+      "/^POST teams\\.cloud\\.microsoft\\/ups\\/[a-z]+\\/v1\\/presence\\/getpresence\\/?$/",
+      "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchShortProfile$/",
+      "/^POST teams\\.microsoft\\.com\\/api\\/authsvc\\/v1\\.0\\/authzcore$/"
+    ],
+    "why": {
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review).",
+      "/^POST teams\\.cloud\\.microsoft\\/ups\\/[a-z]+\\/v1\\/presence\\/getpresence\\/?$/": "Reads people's presence (a list of users in, their status out); setting presence is another endpoint. Held, Teams shows 'status Unknown' (Nov 23).",
+      "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchShortProfile$/": "Reads display names for user ids. Held, a post's author shows as 'Unknown user' (Nov 23).",
+      "/^POST teams\\.microsoft\\.com\\/api\\/authsvc\\/v1\\.0\\/authzcore$/": "Teams' auth service: turns the sign-in into a Teams session; held on a cold start, Teams stays on its sign-in splash (Nov 23)."
+    }
   }
 }

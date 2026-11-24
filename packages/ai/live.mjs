@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findItem, composer, searchBox } from './find.mjs';
-import { risk, formatStep } from './plan.mjs';
+import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
 
@@ -36,19 +36,22 @@ export async function walkerPacks() {
   } catch (e) { return null; }
 }
 
-// Where each app starts in the demo: its start screen in the recording (flow.json's first beat), else its address.
-// The capture browser opens an app at its address; a demo starts on a page of its own (a list, a workspace).
+// Where each app starts in the demo: its own `start` in demo.json (an address that opens on the demo's first screen,
+// for an app that opens where it was last, as Teams does), else its start screen in the recording (flow.json's first
+// beat), else its address. The capture browser opens an app at its address; a demo starts on a page of its own.
 export function startUrls(demo) {
   const out = Object.fromEntries((demo.cfg.apps || []).map(a => [a.id, a.url]));
+  const own = new Set((demo.cfg.apps || []).filter(a => a.start).map(a => a.id));
   let flow; try { flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8')); } catch (e) { return out; }
   const S = flow.states || {};
   for (const [app, sig] of Object.entries(((flow.beats || [])[0] || {}).states || {})) {
-    if (out[app] === undefined) continue;
+    if (out[app] === undefined || own.has(app)) continue;
     const snap = (S[sig] || {}).snap || sig;
     for (const f of [demo.raw && join(demo.raw, 'snaps', snap + '.json'), join(demo.dir, 'data', 'snaps', snap + '.json')].filter(Boolean)) {
       try { const u = JSON.parse(readFileSync(f, 'utf8')).url; if (/^https?:/.test(u || '')) { out[app] = u; break; } } catch (e) {}
     }
   }
+  for (const a of demo.cfg.apps || []) if (a.start) out[a.id] = a.start;
   return out;
 }
 
@@ -82,7 +85,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     log(`the recorder didn't see that step within ${maxS} s`);
     return false;
   };
-  // A control by name, given a few seconds to show up.
+  // A control by name, given a few seconds to show up: the page's own, else one in its frames (Microsoft IQ's controls
+  // are in Power BI's), by the same names, at its place on the page.
   const locate = async (id, name, kind) => {
     let o = null;
     for (let i = 0; i < 6; i++) {
@@ -91,7 +95,31 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       if (el) return { el, o };
       if (i < 5) await sleep(800);
     }
+    if (kind !== 'composer' && name) { const el = await inFrames(id, name, kind).catch(() => null); if (el) return { el, o }; }
     return { el: null, o };
+  };
+  const inFrames = async (id, name, kind) => {
+    const sel = kind === 'field' ? 'input,textarea,[contenteditable=true],[role=textbox],[role=searchbox],[role=combobox]'
+      : 'button,a[href],input,textarea,[contenteditable=true],[role=button],[role=link],[role=treeitem],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[role=textbox],[role=searchbox],[role=combobox]';
+    // Each frame's controls, at their place on the page: the frame's own box plus the control's place in it.
+    const items = await cmd('js', { tab: tab(id), code: `
+      const out = [];
+      for (const f of page.frames()) {
+        if (f === page.mainFrame()) continue;
+        const fe = await f.frameElement().catch(() => null), fb = fe ? await fe.boundingBox().catch(() => null) : null;
+        if (!fb) continue;
+        const list = await f.evaluate(sel => [...document.querySelectorAll(sel)].slice(0, 600).map(e => {
+          const r = e.getBoundingClientRect();
+          if (!r.width || !r.height) return null;
+          return { name: (e.getAttribute('aria-label') || e.innerText || e.value || e.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 200), role: e.getAttribute('role') || e.tagName.toLowerCase(), editable: e.isContentEditable || /^(INPUT|TEXTAREA)$/.test(e.tagName), disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true', x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        }).filter(Boolean), ${JSON.stringify(sel)}).catch(() => []);
+        for (const it of list) if (it.name) out.push({ ...it, x: Math.round(fb.x + it.x), y: Math.round(fb.y + it.y), frame: true });
+      }
+      return out;` }, 60).catch(() => null);
+    // By its name only (equal, or one inside the other): a few shared words found the wrong control in a frame.
+    const el = Array.isArray(items) ? findItem(items, name, kind) : null;
+    const a = norm(el && el.name), w = norm(name);
+    return el && (a === w || a.includes(w) || w.includes(a) && a.length > 3) ? el : null;
   };
   const focusedField = o => (o.items || []).find(it => it.focused && (it.editable || /textbox|searchbox|combobox/.test(it.role))) || null;
 
@@ -183,7 +211,12 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
       throw e;
     }
     const host = hostOf(o.url), text = landedOn(o.url, (o.text || '').slice(0, 4000), (apps.find(a => a.id === id) || {}).match);
-    if (text.at === 'signin') return { ok: false, kind: 'signin', why: `a sign-in page (${host}): Sign in again` };
+    if (text.at === 'signin') {
+      // The guard's doing, when it held the app's own requests: say so (only a real sign-in asks her to sign in again).
+      const held = ((await cmd('capLog', {}, 30).catch(() => ({}))).held || []).filter(h => h.host && onHosts(h.host, id));
+      if (held.length) return { ok: false, kind: 'guard', why: `the guard held ${id}'s sign-in: ${[...new Set(held.map(h => `${h.method} ${h.host}${h.path}`))].slice(0, 3).join(', ')}` };
+      return { ok: false, kind: 'signin', why: `a sign-in page (${host}): Sign in again` };
+    }
     if (text.at === 'blocked') return { ok: false, kind: 'signin', why: `a sign-in policy page (${host})` };
     if (!onHosts(host, id)) return { ok: false, kind: 'offplan', why: `it left ${id} for ${host}` };
     const want = step.lands && step.lands.text;
@@ -268,12 +301,26 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, log = (
     }
     return { screen: c.screen, landed: true, wrote: false, did: r.did };
   }
-  // An app on its start screen (a read: the page is opened again at its address).
+  // An app on its start screen: opened again at its address (a read), then its own startSteps in demo.json, for a
+  // start screen no address reaches (Microsoft IQ's business plugin: a click on its sidebar item). They're read-only
+  // steps: one that would write is refused.
   const starts = startUrls(demo);
   async function home(app) {
     const id = appOf(app) || app;
     await cmd('goto', { tab: tab(id), url: starts[id] }, 90).catch(e => log(`${id}: couldn't open its start screen (${e.message})`));
     await quiet(id, 800, 20000);
+    const did = [];
+    for (const text of (apps.find(a => a.id === id) || {}).startSteps || []) {
+      const s = parseStep(text);
+      // Its control, given time to draw (IQ's Power BI takes a while): up to 30 s.
+      if (s.target) for (let i = 0; i < 5 && !(await locate(id, s.target, s.kind === 'type' ? 'field' : undefined)).el; i++) await sleep(1500);
+      const r = await act(id, s).catch(e => ({ missing: true, why: e.message }));
+      did.push({ step: text, ...(r.missing || r.needsYou ? { why: r.why } : { did: r.did }) });
+      if (r.missing || r.needsYou) { log(`${id}: its start step "${text}": ${r.why}`); break; }
+    }
+    // The pointer off what it clicked (its hover state isn't the start screen's).
+    if (did.length) { const o = await controls(id).catch(() => ({})); await cmd('hover', { tab: tab(id), x: (o.vw || 1600) - 3, y: (o.vh || 900) - 3 }, 30).catch(() => {}); await quiet(id, 500, 5000); }
+    return did;
   }
   return { start, step, act, write, check, goBack, writeOf, controls, words, quiet, hostsOf, appOf, tab, screenOf, focusedField, locate, home, clearTyped, typed: () => ({ ...typedIn }) };
 }
