@@ -528,7 +528,7 @@ test('the finish: focus points with via that the replica takes, beat keys, and h
   assert.deepEqual(beatTimings(plan, ['5s', '~1m15s']).map(r => r[1]), ['about 11 s to say, in 5 s (long)', 'about 1 s to say, in 75 s', 'about 0:12 to say, in 1:20']);
 });
 
-test('proofs on today\'s product: kept, new, today only, behind a write, not reached; never a greeting or a passing tip', () => {
+test('proofs on today\'s product: kept, new, today only, behind a write, missed; never a greeting, a passing tip or a page the guard broke', () => {
   // A shop, recorded; then a read-only walk of it today: its catalog's heading, an item's heading and a link renamed,
   // another greeting on the home screen, and a tip that changes between the walk's two reads.
   const dir = mkdtempSync(join(tmpdir(), 'sc-reground-'));
@@ -582,11 +582,12 @@ test('proofs on today\'s product: kept, new, today only, behind a write, not rea
   // Today's screens, as the walk saves them: two reads of each, about a second apart, as the frames' markup.
   const home = tip => page(`<h1>Contoso Outfitters</h1><p>Good to see you again</p>${help}<a href="/catalog">Shop the catalog</a><h3>Tip of the day: ${tip}</h3>`);
   const today = v => page(`<h1>Contoso Outfitters</h1>${help}<h2>Boots by Fabrikam</h2><label>Promo code <input type="text"${v ? ` value="${v}"` : ''}></label><button>Add to cart</button><a href="/">Contoso home</a>`);
-  const two = (a, b = a) => [a, b].map((html, i) => ({ at: `2026-11-24T08:00:0${i}.000Z`, docs: [{ key: 'main', html }] }));
+  const at = sec => new Date(Date.UTC(2026, 10, 24, 8, 0, sec)).toISOString();
+  const two = (t, a, b = a) => [a, b].map((html, i) => ({ at: at(t + i), docs: [{ key: 'main', html }] }));
   const walkDir = join(dir, 'walk-12');
-  const screens = { 'start-shop': two(home('wear thick socks'), home('try a half size up')), '1-1': two(home('wear thick socks'), home('try a half size up')),
-    '1-2': two(page(`<h1>Contoso Outfitters</h1>${help}<h2>Summer catalog</h2><p>Filter by size</p><a href="/boots">Fabrikam Boots</a>`)),
-    '1-3': two(today('')), '1-4': two(today('SPRING25')), '2-1': two(home('wear thick socks'), home('try a half size up')) };
+  const screens = { 'start-shop': two(0, home('wear thick socks'), home('try a half size up')), '1-1': two(10, home('wear thick socks'), home('try a half size up')),
+    '1-2': two(20, page(`<h1>Contoso Outfitters</h1>${help}<h2>Summer catalog</h2><p>Filter by size</p><a href="/boots">Fabrikam Boots</a>`)),
+    '1-3': two(30, today('')), '1-4': two(40, today('SPRING25')), '2-1': two(50, home('wear thick socks'), home('try a half size up')) };
   mkdirSync(join(walkDir, 'walk-screens'), { recursive: true });
   for (const [f, v] of Object.entries(screens)) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
   const row = (step, t, status, why) => ({ step, text: t, status, ...(why ? { why } : {}) });
@@ -607,14 +608,14 @@ test('proofs on today\'s product: kept, new, today only, behind a write, not rea
     // Nothing on both: today's alone. Not the greeting (the recording's changes on each visit), not the tip (it
     // changed between the two reads).
     ['Click "Contoso home"', 'home · "Shop the catalog"', 'today', 'the “Catalog” control isn\'t on today\'s screen'],
-    ['Click "Sale"', 'sale · "Spring sale"', 'unreached', 'no “Sale” on this screen'],
+    ['Click "Sale"', 'sale · "Spring sale"', 'missed', 'no “Sale” on this screen'],
   ]);
   assert.equal(formatLands(plan.beats[1].steps[0].lands), 'home · "Shop the catalog"');
   const greeting = regroundPlan(parsePlan(text), { walker: { ...walker, unstable: null }, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[6];
   assert.equal(greeting.now, 'home · "Good to see you again"');
   assert.match(formatReground(rows), /\| Kept: it holds today and in the recording \| 2 \|\n\| New: it holds today and in the recording \| 2 \|\n\| Today's product only: it changed since the recording \| 1 \|/);
   // Written beside the plan, which stays as it is (its approval is its exact text).
-  assert.deepEqual(reground(demo, { from: walkDir }), { steps: 8, kept: 2, changed: 2, today: 1, none: 0, write: 2, unreached: 1, file: 'reground.md', plan: 'plan.reground.md' });
+  assert.deepEqual(reground(demo, { from: walkDir }), { steps: 8, kept: 2, changed: 2, today: 1, suspect: 0, none: 0, write: 2, missed: 1, unreached: 0, file: 'reground.md', plan: 'plan.reground.md' });
   assert.equal(readFileSync(join(dir, 'plan.md'), 'utf8'), text);
   assert.match(readFileSync(join(demo.out, 'ai', 'plan.reground.md'), 'utf8'), /- Click "Contoso home"\n  Lands on: home · "Shop the catalog"\n/);
   // A walk of another plan isn't this plan's.
@@ -632,6 +633,26 @@ test('proofs on today\'s product: kept, new, today only, behind a write, not rea
   writeFileSync(join(walkDir, 'walk-screens', '1-2.json'), JSON.stringify({ beat: 1, step: 2, status: 'drifted', screen: 'catalog', words: ['Contoso Outfitters'], controls: [] }));
   const bare = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[1];
   assert.deepEqual([bare.basis, bare.now, bare.why], ['unreached', 'catalog · "Spring catalog"', 'the walk saved its screen without the page\u2019s markup']);
+  // The walk says a step needs a write it didn't make in this app (a missed one, the steps after it, or a drifted one):
+  // behind that write, and never a proof from today alone.
+  const needs = 'beat 1\'s write: Click "Add to cart"';
+  const needing = { ...walk, beats: [walk.beats[0], { beat: 2, steps: walk.beats[1].steps.map(r => ({ ...r, needs })) }] };
+  const nd = regroundPlan(parsePlan(text), { walker, walk: needing, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
+  assert.deepEqual(nd.slice(6).map(r => [r.basis, r.now, r.why]), [
+    ['write', 'home · control "Catalog"', `needs ${needs}`],
+    ['write', 'sale · "Spring sale"', `needs ${needs} (the walk: no “Sale” on this screen)`],
+  ]);
+  // While a step ran, the guard held requests. A kind it also held while a step landed as planned is the app's own
+  // background; one it held only while steps didn't may have broken the page, so that step keeps its proof and goes on
+  // Needs you, to check the pack first. By time (the walk's inputs and reads), or the walk's own held list for a step.
+  const events = { method: 'POST', host: 'telemetry.contoso.test', path: '/events' }, items = n => ({ method: 'GET', host: 'api.contoso.test', path: `/catalog/${n}/items` });
+  const guarded = { ...walk, starts: [{ app: 'shop' }], inputs: [{ at: at(25), for: 'Click "Fabrikam Boots"' }], guard: { held: [{ ...events, at: at(5) }, { ...items(2026), at: at(27) }, { ...events, at: at(28) }] } };
+  writeFileSync(join(walkDir, 'walk-screens', '2-1.json'), JSON.stringify({ beat: 2, step: 1, held: [items(2027)] }));
+  const g = regroundPlan(parsePlan(text), { walker, walk: guarded, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
+  const held = 'the guard held GET api.contoso.test/catalog/*/items; check the pack before adopting';
+  assert.deepEqual(g.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'missed']);
+  assert.deepEqual([g[2].now, g[2].why, g[6].now, g[6].why], ['item · "Fabrikam Boots details"', held, 'home · control "Catalog"', held]);
+  assert.match(formatReground(g), /\| The guard held a request while it ran \(Needs you\) \| 2 \|[\s\S]*## Needs you\n\nThe guard held a request/);
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
