@@ -3,7 +3,8 @@
 // walkthrough to the same plan, and the finish (focus points with via, her script for the guide).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -572,16 +573,16 @@ test('proofs on today\'s product: kept, new, today only, behind a write, not rea
   Lands on: sale · "Spring sale"
 `;
   writeFileSync(join(dir, 'plan.md'), text);
-  // Today's screens, as the walk saves them: two reads of each, as the frames' markup.
+  // Today's screens, as the walk saves them: two reads of each, about a second apart, as the frames' markup.
   const home = tip => page(`<h1>Contoso Outfitters</h1><p>Good to see you again</p>${help}<a href="/catalog">Shop the catalog</a><h3>Tip of the day: ${tip}</h3>`);
   const today = v => page(`<h1>Contoso Outfitters</h1>${help}<h2>Boots by Fabrikam</h2><label>Promo code <input type="text"${v ? ` value="${v}"` : ''}></label><button>Add to cart</button><a href="/">Contoso home</a>`);
-  const two = (a, b = a) => ({ reads: [[{ key: 'main', html: a }], [{ key: 'main', html: b }]] });
+  const two = (a, b = a) => [a, b].map((html, i) => ({ at: `2026-11-24T08:00:0${i}.000Z`, docs: [{ key: 'main', html }] }));
   const walkDir = join(dir, 'walk-12');
   const screens = { 'start-shop': two(home('wear thick socks'), home('try a half size up')), '1-1': two(home('wear thick socks'), home('try a half size up')),
     '1-2': two(page(`<h1>Contoso Outfitters</h1>${help}<h2>Summer catalog</h2><p>Filter by size</p><a href="/boots">Fabrikam Boots</a>`)),
     '1-3': two(today('')), '1-4': two(today('SPRING25')), '2-1': two(home('wear thick socks'), home('try a half size up')) };
   mkdirSync(join(walkDir, 'walk-screens'), { recursive: true });
-  for (const [f, v] of Object.entries(screens)) writeFileSync(join(walkDir, 'walk-screens', f + '.json'), JSON.stringify(v));
+  for (const [f, v] of Object.entries(screens)) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
   const row = (step, t, status, why) => ({ step, text: t, status, ...(why ? { why } : {}) });
   const walk = { beats: [
     { beat: 1, steps: [row(0, 'Go to shop', 'reached'), row(1, 'Click "Catalog"', 'drifted'), row(2, 'Click "Fabrikam Boots"', 'drifted'), row(3, 'Type "SPRING25" in "Promo code"', 'reached'),
@@ -619,8 +620,10 @@ test('proofs on today\'s product: kept, new, today only, behind a write, not rea
   writeFileSync(join(dir, 'plan.md'), text.replace('- Click "Catalog"\n', '- Click "Menu"\n  Lands on: home\n- Click "Catalog"\n'));
   assert.throws(() => reground(demo, { from: walkDir }), /the walk was of another plan \(beat 1, step 2 was “Click "Catalog"”, now “Click "Menu"”\)/);
   assert.equal(reground(demo, { from: walkDir, plan: join(walkDir, 'walked.md') }).kept, 2);
-  // A screen saved without its markup (only its words and controls) isn't read: the step says why.
-  writeFileSync(join(walkDir, 'walk-screens', '1-2.json'), JSON.stringify({ beat: 1, step: 2, words: ['Contoso Outfitters'], controls: [] }));
+  // A screen saved without its markup (only its words and controls: a walk from before reads were kept) isn't read:
+  // the step says why.
+  rmSync(join(walkDir, 'walk-screens', '1-2.reads.json.gz'));
+  writeFileSync(join(walkDir, 'walk-screens', '1-2.json'), JSON.stringify({ beat: 1, step: 2, status: 'drifted', screen: 'catalog', words: ['Contoso Outfitters'], controls: [] }));
   const bare = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[1];
   assert.deepEqual([bare.basis, bare.now, bare.why], ['unreached', 'catalog · "Spring catalog"', 'the walk saved its screen without the page\u2019s markup']);
 });

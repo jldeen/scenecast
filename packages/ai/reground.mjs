@@ -11,6 +11,7 @@
 //   reground(demo, { from, plan })                  .out/ai/reground.md and .json, and plan.reground.md
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { readScreen } from '@scenecast/script/html.mjs';
 import { chooseProof, holds, proofWords } from './landing.mjs';
 import { formatLands, formatPlan, formatStep, parsePlan } from './plan.mjs';
@@ -21,23 +22,28 @@ const PLAN = 'plan.md';
 // A walk's steps that ran, so their screens were read (walk.mjs's statuses).
 const RAN = new Set(['reached', 'drifted', 'unproven']);
 
-// The screens a walk saved: walk-screens/<beat>-<step>.json (both from 1) and start-<app>.json, each
-// { reads: [[{ key, html }, …], …] }: a read is the page's documents (its own, then each frame's) as the capture
-// serializer writes them. → step(beat, step) / start(app): the reads as the reader reads them, or null; why(beat,
-// step): why there are none.
+// The screens a walk saved (walk-screens/, as the live walk writes them: unattended.mjs): <beat>-<step>.reads.json.gz
+// (both from 1) and start-<app>.reads.json.gz, each gzipped JSON [{ at, docs: [{ key, html }] }, …]: the page read
+// twice, about a second apart once quiet, as its documents (its own, key "main", then each frame's, by its host) the
+// way the recorder's serializer writes them (serialize.js, without CSS). <beat>-<step>.json beside it holds the walk's
+// words and controls, which this doesn't use. → step(beat, step) / start(app): the reads as the reader reads them, or
+// null; why(beat, step): why there are none.
 export function walkReads(dir) {
   const memo = new Map(), whys = new Map();
-  const load = f => {
-    if (!memo.has(f)) {
-      let got = null, j = null;
-      try { j = JSON.parse(readFileSync(join(dir, f), 'utf8')); } catch (e) {}
-      try { got = ((j && j.reads) || []).filter(d => Array.isArray(d) && d.length).map(d => readScreen(d)); } catch (e) { whys.set(f, `the reader couldn't read its screen (${e.message})`); }
-      if (j && !(got && got.length) && !whys.has(f)) whys.set(f, 'the walk saved its screen without the page\u2019s markup');
-      memo.set(f, got && got.length ? got : null);
+  const load = name => {
+    if (!memo.has(name)) {
+      let got = null;
+      const gz = join(dir, `${name}.reads.json.gz`);
+      if (existsSync(gz)) {
+        try { got = JSON.parse(gunzipSync(readFileSync(gz)).toString('utf8')).map(r => r && r.docs).filter(d => Array.isArray(d) && d.some(x => x && x.html)).map(d => readScreen(d)); }
+        catch (e) { whys.set(name, `the reader couldn't read its screen (${e.message})`); }
+      }
+      if (!(got && got.length) && !whys.has(name)) whys.set(name, existsSync(join(dir, `${name}.json`)) ? 'the walk saved its screen without the page\u2019s markup' : 'the walk saved no screen for it');
+      memo.set(name, got && got.length ? got : null);
     }
-    return memo.get(f);
+    return memo.get(name);
   };
-  return { step: (beat, step) => load(`${beat}-${step}.json`), start: app => load(`start-${app}.json`), why: (beat, step) => whys.get(`${beat}-${step}.json`) || null };
+  return { step: (beat, step) => load(`${beat}-${step}`), start: app => load(`start-${app}`), why: (beat, step) => whys.get(`${beat}-${step}`) || null };
 }
 
 // Words in a place where the recording's captures differ (a greeting that changes on each visit): what a read today

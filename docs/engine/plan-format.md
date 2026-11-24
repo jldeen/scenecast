@@ -166,11 +166,13 @@ It writes `.out/ai/reground.md` (each proof before and after, and why, and the s
 adopting the new one means approving it again. A walk is of one plan: re-grounding another is refused. `--plan
 <file>` names the plan the walk walked when it isn't the demo's `plan.md` now.
 
-The walk's files, in `.out/ai` (or `--walk <dir>`): `walk.json` (a row per step: `{ step, text, status, why }`),
-`walk-screens/<beat>-<step>.json` (both counted from 1) and `walk-screens/start-<app>.json`, each
-`{ reads: [[{ key, html }, …], …] }`. A read is the page's documents, its own (`key: "main"`) and then each frame's, as
-the capture serializer writes them, so a box's value, a checked box and open shadow roots are in the markup. A step
-whose screen was saved without them is listed as not reached.
+The walk's files, in `.out/ai` (or `--walk <dir>`), as the live walk writes them: `walk.json` (a row per step:
+`{ step, text, status, why }`) and, in `walk-screens/`, `<beat>-<step>.reads.json.gz` (both counted from 1) and
+`start-<app>.reads.json.gz`. Each is gzipped JSON, `[{ at, docs: [{ key, html }] }, …]`: the page read twice, about a
+second apart once it's quiet. A read's documents are the page's own (`key: "main"`) and then each frame's (by its
+host), as the recorder's serializer writes them (`packages/capture/serialize.js`, without CSS), so a box's value, a
+checked box and open shadow roots are in the markup. A step whose screen was saved without them (only
+`<beat>-<step>.json`'s words and controls) is listed as not reached.
 
 ## Details under a line
 
