@@ -672,11 +672,32 @@ test('proofs on today\'s product: kept, new, today only, behind a write, missed;
   const e = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
   assert.deepEqual(e.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
   assert.equal(e[2].why, 'today\'s screen shows an error the recording doesn\'t: “Couldn\'t load your cart. Check your connection and try again.”; check the app before adopting');
+  writeFileSync(join(walkDir, 'walk-screens', '1-3.reads.json.gz'), gzipSync(JSON.stringify(two(30, page(`<h1>Contoso Outfitters</h1>${help}<h2>Boots by Fabrikam</h2><p>Sizes could not be loaded. Retry</p><a href="/">Contoso home</a>`)))));
+  assert.match(regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows[2].why, /^today's screen shows an error the recording doesn't: “Sizes could not be loaded\. Retry”/);
   writeFileSync(join(walkDir, 'walk-screens', '1-3.reads.json.gz'), gzipSync(JSON.stringify(two(30, today('')))));
   writeFileSync(join(walkDir, 'walk-screens', 'start-shop.reads.json.gz'), gzipSync(JSON.stringify(two(0, page(`<h1>Contoso Outfitters</h1><p>Good to see you again</p>${help}<a href="/catalog">Shop the catalog</a><p>Free returns on boots</p>`)))));
   const l = regroundPlan(parsePlan(text), { walker, walk, reads: walkReads(join(walkDir, 'walk-screens')) }).rows;
   assert.deepEqual(l.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
   assert.equal(l[2].why, 'shop lost words while nothing ran in it, since its start screen: “Free returns on boots”; check the app before adopting');
+  // A response of 500 or more to the step's own app, in its window (to the next step's start): the service it names was
+  // down for the step, from its start. Not another app's, telemetry's, or a 404.
+  writeFileSync(join(walkDir, 'walk-screens', 'start-shop.reads.json.gz'), gzipSync(JSON.stringify(screens['start-shop'])));
+  const net = [{ at: at(27), method: 'GET', host: 'api.contoso.test', path: '/catalog/2026/items', status: 503, app: 'shop' }, { at: at(14), method: 'GET', host: 'mail.contoso.test', path: '/inbox', status: 500 },
+    { at: at(15), method: 'POST', host: 'telemetry.contoso.test', path: '/events', status: 500, app: 'shop' }, { at: at(16), method: 'GET', host: 'api.contoso.test', path: '/photo', status: 404, app: 'shop' }];
+  const apps = [{ id: 'shop', url: 'https://shop.contoso.test/' }, { id: 'mail', url: 'https://mail.contoso.test/' }];
+  const down = regroundPlan(parsePlan(text), { walker, walk: { ...walk, net }, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows;
+  assert.deepEqual(down.map(r => r.basis), ['both', 'unreached', 'suspect', 'both', 'write', 'write', 'suspect', 'suspect']);
+  assert.equal(down[2].why, 'GET api.contoso.test/catalog/*/items answered 503; check the app before adopting');
+  // Even when it answered after the step's reads (it was on its way while they were taken).
+  const gap = { ...walk, net: [{ ...net[0], at: at(33) }], inputs: [{ at: at(35), for: 'Type "SPRING25" in "Promo code"' }] };
+  assert.equal(regroundPlan(parsePlan(text), { walker, walk: gap, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows[2].basis, 'suspect');
+  // A step the walk missed is when the walk's window for it ends: what the guard held after that isn't its doing.
+  const missed = { ...walk, beats: [walk.beats[0], { ...walk.beats[1], steps: [walk.beats[1].steps[0], { ...walk.beats[1].steps[1], window: { from: at(60), to: at(62) } }] }] };
+  const heldAt = sec => ({ ...missed, guard: { held: [{ method: 'POST', host: 'api.contoso.test', path: '/cart', at: at(sec), app: 'shop' }] } });
+  assert.deepEqual([61, 65].map(sec => regroundPlan(parsePlan(text), { walker, walk: heldAt(sec), reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows[7].basis), ['suspect', 'missed']);
+  // A 500 in a missed step's own window counts for it from its start, not for the step before.
+  const late = { ...missed, net: [{ ...net[0], at: at(61) }] };
+  assert.deepEqual(regroundPlan(parsePlan(text), { walker, walk: late, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows.map(r => r.basis).slice(6), ['today', 'suspect']);
 });
 
 test('what a capture of today\'s product would lose, by why (renamed, a number, made by a write the walk didn\'t make, varies, missing), and show that the recording doesn\'t; a list\'s rows as one line', () => {
@@ -765,6 +786,31 @@ test('what a capture of today\'s product would lose, by why (renamed, a number, 
   assert.equal(rows[3].basis, 'suspect');
   const reloaded = regroundPlan(parsePlan(text), { walker, walk: { ...walk, events: [{ kind: 'loaded', host: 'shop.contoso.test', path: '/', at: at(40) }] }, reads, apps: demo.cfg.apps }).rows;
   assert.deepEqual([reloaded[1].missing.find(e => e.kind === 'list').why, reloaded[3].basis], [held, 'both']);
+});
+
+test('a response of 500 or more counts for the step whose window it\'s in, when it\'s for that step\'s app', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-down-'));
+  const page = body => `<!doctype html><html><head><title>Contoso</title></head><body>${body}</body></html>`;
+  const snaps = { shop: '<h1>Contoso shop</h1><a href="/c">Catalog</a>', catalog: '<h1>Contoso shop</h1><h2>Spring catalog</h2>', mail: '<h1>Fabrikam mail</h1><a href="/i">Inbox</a>', inbox: '<h1>Fabrikam mail</h1><h2>Your inbox</h2>' };
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  for (const [id, body] of Object.entries(snaps)) writeFileSync(join(dir, 'data', 'snaps', id + '.html'), page(body));
+  const apps = [{ id: 'shop', key: 'S', url: 'https://shop.contoso.test/' }, { id: 'mail', key: 'M', url: 'https://mail.fabrikam.test/' }];
+  writeFileSync(join(dir, 'flow.json'), JSON.stringify({ apps, beats: [{ active: 'shop', states: { shop: 'shop', mail: 'mail' } }], path: [], states: Object.fromEntries(Object.keys(snaps).map(id => [id, { app: /^(mail|inbox)$/.test(id) ? 'mail' : 'shop', snap: id }])) }));
+  const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps } };
+  const text = '# Two apps\n\n## Beat 1 · Both\n\n- Go to shop\n  Lands on: shop · "Contoso shop"\n- Click "Catalog"\n  Lands on: catalog · "Spring catalog"\n'
+    + '- Go to mail\n  Lands on: mail · "Fabrikam mail"\n- Click "Inbox"\n  Lands on: inbox · "Your inbox"\n';
+  const at = sec => new Date(Date.UTC(2026, 10, 24, 10, 0, sec)).toISOString();
+  const two = (t, body) => [0, 1].map(i => ({ at: at(t + i), docs: [{ key: 'main', html: page(body) }] }));
+  const walkDir = join(dir, 'walk');
+  mkdirSync(join(walkDir, 'walk-screens'), { recursive: true });
+  // Today the inbox has another heading: a proof from today's reads alone, unless its page may be broken.
+  const screens = { 'start-shop': two(0, snaps.shop), 'start-mail': two(2, snaps.mail), '1-1': two(10, snaps.shop), '1-2': two(20, snaps.catalog), '1-3': two(30, snaps.mail), '1-4': two(40, '<h1>Fabrikam mail</h1><h2>Inbox for Avery Chen</h2>') };
+  for (const [f, v] of Object.entries(screens)) writeFileSync(join(walkDir, 'walk-screens', f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
+  const steps = [['Go to shop', 'reached'], ['Click "Catalog"', 'reached'], ['Go to mail', 'reached'], ['Click "Inbox"', 'drifted']].map(([t, status], step) => ({ step, text: t, status }));
+  const walk = { beats: [{ beat: 1, steps }], starts: [{ app: 'shop' }, { app: 'mail' }], inputs: [{ at: at(15), for: 'Click "Catalog"' }, { at: at(35), for: 'Click "Inbox"' }] };
+  const inbox = sec => regroundPlan(parsePlan(text), { walker: walkerFromDemo(demo), walk: { ...walk, net: [{ at: at(sec), method: 'GET', host: 'mail.fabrikam.test', path: '/api/folders', status: 500 }] }, reads: walkReads(join(walkDir, 'walk-screens')), apps }).rows[3];
+  // Mail's service down while the shop's step ran: not the shop step's, and not mail's later. In mail's own step: its.
+  assert.deepEqual([17, 37].map(sec => [inbox(sec).basis, inbox(sec).why]), [['today', '“Your inbox” isn\'t on today\'s screen'], ['suspect', 'GET mail.fabrikam.test/api/folders answered 500; check the app before adopting']]);
 });
 
 test('a list that shows only the rows in view: rows the recording scrolled to are beyond the walk\'s view, the rows it says it has a number', () => {

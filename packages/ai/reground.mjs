@@ -82,11 +82,13 @@ function sitesOf(apps = [], packs = null) {
 // step it was held in (from the step's first input, else the step before's last read, to its own last read). A step's
 // own held list (walk-screens' <beat>-<step>.json held), when the walk gives one, is that step's.
 // → { held, windows: Map '<beat>-<step>' → { from, end } }
+// Which app a request was for: the walk's own word (its app, or its frame's host), else the app whose hosts it went to.
+const appOfRequest = (sites, h) => ((h.app && sites.find(a => a.id === h.app)) || sites.find(a => a.hosts.some(x => hostIs(h.frame || h.frameHost, x))) || sites.find(a => a.hosts.some(x => hostIs(h.host, x))) || {}).id || null;
 function heldDuring(walk, reads, steps, rowOf, appAt, sites) {
   const inputs = ((walk && walk.inputs) || []).map(i => ({ t: Date.parse(i.at), for: i.for })).filter(i => Number.isFinite(i.t));
   const starts = ((walk && walk.starts) || []).flatMap(st => (reads.startAt && reads.startAt(st.app)) || []);
   const begun = starts.length ? Math.max(...starts) : -Infinity;
-  const appFor = h => ((h.app && sites.find(a => a.id === h.app)) || sites.find(a => a.hosts.some(x => hostIs(h.frame || h.frameHost, x))) || sites.find(a => a.hosts.some(x => hostIs(h.host, x))) || {}).id || null;
+  const appFor = h => appOfRequest(sites, h);
   const windows = new Map(), held = [];
   let last = begun;
   for (const [k, { s, bi, si }] of steps.entries()) {
@@ -109,7 +111,7 @@ function heldDuring(walk, reads, steps, rowOf, appAt, sites) {
   return { held, windows };
 }
 // An error a page shows: one of these, or anything in an alert.
-const ERROR = /\b(?:couldn['’]?t load|could not load|can['’]?t load|check your connection|try again|something went wrong)\b/i;
+const ERROR = /\b(?:could(?:n['’]?t| not) (?:be )?load(?:ed)?|can['’]?t (?:be )?load(?:ed)?|(?:failed|unable) to load|check your connection|try again|something went wrong)\b/i;
 const short = t => (t = String(t).replace(/\s+/g, ' ').trim()).length > 80 ? `${t.slice(0, 77)}…` : t;
 const q = t => `“${cell(short(t))}”`, qs = xs => xs.map(q).join(', ');
 function errorsOn(got, rec) {
@@ -364,17 +366,31 @@ export function regroundPlan(plan0, { walker, walk, reads, apps = null, packs = 
   const sites = sitesOf(apps || walker.apps || [], packs);
   // What may have broken an app's page today, from when until the page loads again (a new document of the app's, in
   // walk.events: { kind: 'loaded', app?, host, at }), else to the end of the walk: a held request that isn't telemetry
-  // and that no pack has reviewed as staying held, for the app it was for; an error a read shows that the recording
-  // doesn't; words an app lost while nothing ran in it.
+  // and that no pack has reviewed as staying held, for the app it was for; a response of 500 or more to a step's own
+  // app in the step's window; an error a read shows that the recording doesn't; words an app lost while nothing ran
+  // in it.
   const { held, windows } = heldDuring(walk, reads, steps, rowOf, appAt, sites);
   const reviewed = h => sites.some(a => a.stayHeld.some(e => reviews(e, h)));
   const reasons = held.filter(x => !isTelemetry(x.kind) && !reviewed(x.h)).map(x => ({ app: x.app, t: x.t, held: x.kind, why: `the guard held ${x.kind}` }));
+  // When each step began: its first input (the walk's window for it, else its reads'). Its window runs to the next
+  // step's start. A response of 500 or more in it (walk.net: { at, method, host, path, status, app?, frame? }), for the
+  // step's own app and not telemetry, means the service it names was down for the step, from its start.
+  const ownWindow = (bi, si, end) => { const r = rowOf(bi, si), t = r && r.window ? Date.parse(r.window[end]) : NaN; return Number.isFinite(t) ? t : null; };
+  const begins = steps.map(({ bi, si }) => { const w = windows.get(`${bi + 1}-${si + 1}`); return ownWindow(bi, si, 'from') ?? (w ? w.from : null); });
+  for (const n of (walk && walk.net) || []) {
+    const t = Date.parse(n.at), app = appOfRequest(sites, n), kind = heldKind(n);
+    if (!(+n.status >= 500) || !Number.isFinite(t) || !app || isTelemetry(kind)) continue;
+    let k = -1;
+    for (const [j, b] of begins.entries()) if (b !== null && b <= t) k = j;
+    if (k >= 0 && appAt[k] === app) reasons.push({ app, t: begins[k], why: `${kind} answered ${n.status}` });
+  }
   const loads = ((walk && walk.events) || []).filter(e => e && e.kind === 'loaded').map(e => ({ t: Date.parse(e.at), app: e.app || (sites.find(a => a.hosts.some(x => hostIs(e.host, x))) || {}).id || null }))
     .filter(e => Number.isFinite(e.t) && e.app);
   const reloaded = (app, from, to) => loads.some(e => e.app === app && e.t > from && e.t <= to);
-  // When each step was: its last read; one without, before the next step with reads began.
+  // When each step was: its last read; one without, the end of the walk's window for it (a step it missed), else just
+  // before the next step began.
   const when = [];
-  { let next = Infinity; for (let k = steps.length - 1; k >= 0; k--) { const w = windows.get(`${steps[k].bi + 1}-${steps[k].si + 1}`); when[k] = w ? w.end : next - 1; if (w) next = w.from; } }
+  { let next = Infinity; for (let k = steps.length - 1; k >= 0; k--) { const { bi, si } = steps[k], w = windows.get(`${bi + 1}-${si + 1}`); when[k] = w ? w.end : ownWindow(bi, si, 'to') ?? next - 1; if (begins[k] !== null) next = begins[k]; } }
   // What a proof never uses (landing.mjs), as words lost or missing: not times, keys, Copilot's words or another
   // step's typing. Listing what's missing, someone's presence and words that vary between captures stay, as varying.
   const varies = (t, app) => presence(t) ? "someone's presence" : walker.unstable && walker.unstable(t, app) ? "the recording's captures of this screen differ there" : null;

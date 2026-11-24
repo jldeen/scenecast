@@ -176,8 +176,11 @@ those reads:
      Its kind is its method, host and path, with ids as `*`. It counts for the app it was for: the request's own
      `app` or frame, else the app whose hosts it went to (its address, its pack's `match` and `guard.hosts`), else
      the app of the step it was held in.
-   - **Today's screen shows an error the recording doesn't:** "couldn't load", "check your connection", "try again",
-     "something went wrong", or anything in an alert.
+   - **A service the step's app needed answered 500 or more,** in the step's window (from its first input to the next
+     step's), and isn't telemetry: from the step's start, so its own reads count too (the answer can come after them).
+     A response for another app doesn't count.
+   - **Today's screen shows an error the recording doesn't:** "couldn't load" (or "could not be loaded", "failed to
+     load", "unable to load"), "check your connection", "try again", "something went wrong", or anything in an alert.
    - **An app lost words while nothing ran in it:** what its last read showed and its next one, after a Go to,
      doesn't.
 
@@ -195,8 +198,10 @@ walk is of one plan: re-grounding another is refused. `--plan <file>` names the 
 demo's `plan.md` now.
 
 The walk's files, in `.out/ai` (or `--walk <dir>`), as the live walk writes them: `walk.json` (a row per step: `{ step,
-text, status, why }`; `guard.held`, each held request `{ method, host, path, at, app?, frame? }`; `inputs`, each thing
-the walk did `{ at, for }`, `for` naming its step) and, in `walk-screens/`, `<beat>-<step>.reads.json.gz` (both counted
+text, status, why, window? }`, `window` from the step's first input to its end; `guard.held`, each held request `{
+method, host, path, at, app?, frame? }`; `inputs`, each thing the walk did `{ at, for }`, `for` naming its step; `net`,
+each request that failed or answered 400 or more, `{ at, method, host, path, status | failed, app?, frame? }`;
+`events`, each `{ kind, app?, host, at }`, `loaded` for a new document) and, in `walk-screens/`, `<beat>-<step>.reads.json.gz` (both counted
 from 1) and `start-<app>.reads.json.gz`. Each is gzipped JSON, `[{ at, docs: [{ key, html }] }, …]`: the page read
 twice, about a second apart once it's quiet. A read's documents are the page's own (`key: "main"`) and then each frame's
 (by its host), as the recorder's serializer writes them (`packages/capture/serialize.js`, without CSS), so a box's
