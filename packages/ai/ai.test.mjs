@@ -2,7 +2,8 @@
 // coach's matching, and what leaves the computer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parsePlan, parseStep, formatPlan, risk, writesOf, parseLands, formatLands } from './plan.mjs';
@@ -12,8 +13,8 @@ import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
-import { heldWhileDrifted, stepNets } from './walk.mjs';
-import { senderApps, serviceAnswer } from './unattended.mjs';
+import { stepNets } from './walk.mjs';
+import { senderApps, serviceAnswer, suspectSteps } from './unattended.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -212,22 +213,27 @@ test("a Check line reads the same from either parser: a string, or { app, screen
   assert.equal(checkLine({ app: null, screen: null, text: 'no app here' }), 'no app here');
 });
 
-test("what the guard held only while a landing drifted or missed: off telemetry, never in a step outside", () => {
-  const H = (path, host = 'api.example.com', n = 1) => ({ method: 'POST', host, path, n });
-  const walk = { beats: [
-    { beat: 1, steps: [{ step: 0, status: 'reached', held: [H('/refresh')] }, { step: 1, status: 'reached', held: [] }] },
-    { beat: 2, steps: [
-      { step: 0, status: 'reached', held: [H('/search')] },
-      { step: 1, status: 'drifted', held: [H('/titles/query', 'titles.example.com', 2), H('/v2/track', 'eastus.in.applicationinsights.azure.com'), H('/refresh')] },
-      { step: 2, status: 'reached', held: [] },
-      { step: 3, status: 'missed', held: [H('/titles/query', 'titles.example.com')] },
-      { step: 4, status: 'reached', held: [H('/late')] },
-    ] },
-  ] };
-  assert.deepEqual(heldWhileDrifted(walk), [
-    { kind: 'POST api.example.com/search', n: 1, steps: ['2-1'] },
-    { kind: 'POST titles.example.com/titles/query', n: 3, steps: ['2-2', '2-4'] },
-  ]);
+test("a walk's suspect steps are the re-ground's: a 500 for an app's own service, until its page loads again; none without a recording", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-suspect-'));
+  const page = body => `<!doctype html><html><head><title>Fabrikam</title></head><body>${body}</body></html>`;
+  const snaps = { mail: '<h1>Fabrikam mail</h1><a href="/i">Inbox</a>', inbox: '<h1>Fabrikam mail</h1><h2>Your inbox</h2>' };
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  for (const [id, body] of Object.entries(snaps)) writeFileSync(join(dir, 'data', 'snaps', id + '.html'), page(body));
+  const apps = [{ id: 'mail', key: 'M', url: 'https://mail.fabrikam.test/' }];
+  writeFileSync(join(dir, 'flow.json'), JSON.stringify({ apps, beats: [{ active: 'mail', states: { mail: 'mail' } }], path: [], states: { mail: { app: 'mail', snap: 'mail' }, inbox: { app: 'mail', snap: 'inbox' } } }));
+  const demo = { dir, out: join(dir, '.out'), raw: join(dir, 'no-raw'), cfg: { name: 't', apps } };
+  const plan = parsePlan('# Mail\n\n## Beat 1 · Look\n\n- Go to mail\n  Lands on: mail · "Fabrikam mail"\n- Click "Inbox"\n  Lands on: inbox · "Your inbox"\n');
+  const at = sec => new Date(Date.UTC(2026, 10, 24, 10, 0, sec)).toISOString();
+  const two = (t, body) => [0, 1].map(i => ({ at: at(t + i), docs: [{ key: 'main', html: page(body) }] }));
+  const screensDir = join(dir, 'walk-screens');
+  mkdirSync(screensDir, { recursive: true });
+  for (const [f, v] of Object.entries({ 'start-mail': two(0, snaps.mail), '1-1': two(10, snaps.mail), '1-2': two(40, '<h1>Fabrikam mail</h1><h2>Inbox for Avery Chen</h2>') })) writeFileSync(join(screensDir, f + '.reads.json.gz'), gzipSync(JSON.stringify(v)));
+  const walk = events => ({ beats: [{ beat: 1, steps: [{ step: 0, text: 'Go to mail', status: 'reached' }, { step: 1, text: 'Click "Inbox"', status: 'drifted' }] }], starts: [{ app: 'mail' }], inputs: [{ at: at(35), for: 'Click "Inbox"' }],
+    events, net: [{ at: at(17), method: 'GET', host: 'mail.fabrikam.test', path: '/api/folders', status: 500 }] });
+  const packs = { packsForDemo: () => ({}) };
+  assert.deepEqual(suspectSteps({ demo, plan, walk: walk([]), screensDir, packs }), { steps: [{ step: '1-2', text: 'Click "Inbox"', status: 'drifted', held: [], why: 'GET mail.fabrikam.test/api/folders answered 500; check the app before adopting' }] });
+  assert.deepEqual(suspectSteps({ demo, plan, walk: walk([{ kind: 'loaded', host: 'mail.fabrikam.test', path: '/', at: at(32) }]), screensDir, packs }), { steps: [] });
+  assert.deepEqual(suspectSteps({ demo: { ...demo, dir: mkdtempSync(join(tmpdir(), 'sc-none-')) }, plan, walk: walk([]), screensDir, packs }), { none: "there's no recording to compare today's screens with" });
 });
 
 test("the app a request came from: its tab's host, else its frame's, by each app's and its pack's hosts", () => {
