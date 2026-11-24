@@ -20,8 +20,8 @@ const lineId = (bi, li) => `${bi + 1}.${li + 1}`;
 export function scriptPlanInput(track, walker, { pageText = false, draft = null } = {}) {
   const R = s => redact(clean(s));
   const drafted = id => draft ? draft.plan.beats.flatMap(b => b.steps).filter(s => s.line === id).map(s => R(formatStep(s))) : [];
-  // What didn't fit her words (a landing a run can't check isn't hers to fix: it stays out).
-  const issues = id => draft ? draft.flags.filter(f => f.at === id && f.kind !== 'landing').map(f => R(f.text).slice(0, 220)) : [];
+  // What didn't fit her words (how a run checks a step isn't hers to fix: those stay out).
+  const issues = id => draft ? draft.flags.filter(f => f.at === id && f.kind !== 'landing' && f.kind !== 'number').map(f => R(f.text).slice(0, 220)) : [];
   const script = {
     title: R(track.title),
     prompts: (track.prompts || []).map(p => ({ n: p.n, ...(p.label ? { label: R(p.label) } : {}), text: R(p.text) })),

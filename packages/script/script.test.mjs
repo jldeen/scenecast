@@ -136,6 +136,22 @@ test('a capture read without a browser: a field\'s <label>, by its for or around
   assert.deepEqual(sc.controls.map(c => [c.role, c.name]), [['textbox', 'Promo code'], ['checkbox', 'Remember me'], ['div', 'Its own words'], ['textbox', 'Inside'], ['textbox', 'Far field']]);
 });
 
+test('a capture read without a browser: where words are (its frame, a live region, a time, a message, a named part) and what a control is set to', () => {
+  const sc = readScreen([{ key: 'main', html: '<header><a href="/">Admin center</a></header><nav aria-label="Pages"><a href="/a">Plugins</a></nav>'
+    + '<main><article><h2>Copilot said:</h2><p>Fabrikam moved the date.</p></article><section aria-label="Skill preview: triage"><h3>When to use</h3></section>'
+    + '<p>Updated <relative-time datetime="2026-11-17">Nov 17, 2026</relative-time></p><div role="status">Message sent</div>'
+    + '<div role="tablist"><div role="tab" aria-selected="true">Overview</div><div role="tab" aria-selected="false">Files</div></div>'
+    + '<input aria-label="Promo code" value="SPRING25"><div contenteditable="true" aria-label="Message">Hello there</div>'
+    + '<aside><h4>Details</h4></aside><article><header><span>Card header</span></header></article></main>' }]);
+  const item = t => sc.items.find(i => i.text === t) || {};
+  assert.deepEqual(['Admin center', 'Plugins', 'Details', 'Card header', 'When to use'].map(t => !!item(t).nav), [true, true, true, false, false]);
+  assert.deepEqual([item('Message sent').live, item('Nov 17, 2026').time, item('Updated Nov 17, 2026').time], [true, true, true]);
+  assert.equal(item('Copilot said:').article, item('Fabrikam moved the date.').article);
+  assert.equal(sc.regions[item('When to use').region][0], 'Skill preview: triage');
+  const ctl = n => sc.controls.find(c => c.name === n) || {};
+  assert.deepEqual([ctl('Overview').selected, ctl('Files').selected, ctl('Promo code').value, ctl('Message').value], [true, false, 'SPRING25', 'Hello there']);
+});
+
 test('a capture read without a browser: an id names what getElementById finds, the first with it', () => {
   const sc = readScreen([{ key: 'main', html: '<span id="t">Close panel</span><span id="t">Other</span><button aria-labelledby="t">x</button>' }]);
   assert.deepEqual(sc.controls.map(c => [c.role, c.name]), [['button', 'Close panel']]);

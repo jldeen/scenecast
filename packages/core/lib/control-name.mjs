@@ -35,13 +35,14 @@ export function controlOf(el, acc) {
   if (!control) return { control, role, name: '' };
   // Its name: the first of these that isn't empty (cleaned as above): aria-label; the words of the elements aria-labelledby
   // names; the words of its <label>s (an input, select or textarea); its own words (not for a box you type in);
-  // placeholder, data-placeholder, aria-placeholder, title, alt, value. A name said twice in a row ("Share Share")
-  // once; at most 90 characters.
+  // placeholder, data-placeholder, aria-placeholder, title, alt, and a button input's value (never what's typed in a
+  // box). A name said twice in a row ("Share Share") once; at most 90 characters.
   const words = els => els.map(e => acc.text(e)).join(' ');
   const by = has('aria-labelledby') ? words(attr('aria-labelledby').split(/\s+/).map(id => id && acc.byId(id)).filter(Boolean)) : '';
   const label = /^(input|select|textarea)$/.test(tag) ? words(acc.labels(el) || []) : '';
   const own = tag === 'input' || tag === 'textarea' || editable ? '' : acc.text(el);
-  const name = [attr('aria-label'), by, label, own, attr('placeholder'), attr('data-placeholder'), attr('aria-placeholder'), attr('title'), attr('alt'), attr('value')]
+  const value = tag === 'input' && /^(button|submit|reset)$/.test(type) ? attr('value') : '';
+  const name = [attr('aria-label'), by, label, own, attr('placeholder'), attr('data-placeholder'), attr('aria-placeholder'), attr('title'), attr('alt'), value]
     .map(clean).find(Boolean) || '';
   return { control, role, name: name.replace(/^(.{2,}?) ?\1$/, '$1').slice(0, 90) };
 }

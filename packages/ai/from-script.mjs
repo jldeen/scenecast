@@ -4,6 +4,7 @@
 // every time, and what the tests run); Copilot works out what the rules can't, on screen, when the plan runs.
 import { formatStep, risk } from './plan.mjs';
 import { findItem, composer, searchBox } from './find.mjs';
+import { proveLandings } from './landing.mjs';
 import { words, facts, pickItems, sentences } from '@scenecast/script/match.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
@@ -612,70 +613,8 @@ function landText(before, after) {
   return t ? t.text : null;
 }
 
-// ---- where a step lands, proven -----------------------------------------------------------------------------------
-// A run checks a step by the words its "Lands on" names (packages/ai/live.mjs check(): the page's innerText, every
-// frame, lowercased, quotes out, spaces collapsed, then includes()). Words the screen before already showed pass even
-// when the step did nothing, so a landing's words must be on the screen it lands on and not on the screen before.
-const rnorm = s => String(s || '').toLowerCase().replace(/[“”"'’‘]/g, '').replace(/\s+/g, ' ').trim();
-// Words a reload changes (a time, a size, a long number): a run would never find them again.
-const VOLATILE = /\d+(?:[.,]\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?|hrs?|hours?|kb|mb|gb)\b|\bago\b|\bjust now\b|\b\d{1,2}:\d{2}\b|\d{8,}/i;
-// What a page shows as a run reads it: its words, less what's in a closed dialog or typed in a text area (its value
-// isn't in innerText).
-const showsText = sc => (sc.items || []).filter(i => !i.shut && i.tag !== 'textarea').map(i => i.text).join('\n');
-const ROLE_WORD = { button: 'button', link: 'link', tab: 'tab', menuitem: 'menu item', option: 'option', checkbox: 'checkbox', switch: 'switch', radio: 'option', textbox: 'box', searchbox: 'box', combobox: 'list' };
-
-// Words a screen shows that the screens before it (the product's and the replica's read) don't: its headings, then
-// its lines, then what its controls show (a tab's label, what was typed in a chat box), then the start of a long line,
-// then single words; the screen's own before the app's frame (what most of its screens show). Else a control only it
-// has, by its name (`control`: a run looks for it). Else none.
-export function landingFor(before, after, { frame = new Set() } = {}) {
-  if (!after) return { text: null };
-  const had = before.filter(Boolean).map(sc => rnorm(sc.text)), shows = rnorm(showsText(after));
-  const fresh = t => { const n = rnorm(t); return n.length > 1 && /[a-z]/.test(n) && !VOLATILE.test(t) && shows.includes(n) && !had.some(h => h.includes(n)); };
-  const count = t => t.split(/\s+/).length;
-  const lead = t => { let out = ''; for (const w of t.split(/\s+/)) { if ((out + ' ' + w).trim().length > 60) break; out = (out + ' ' + w).trim(); } return out; };
-  const shown = after.items.filter(i => !i.shut && i.tag !== 'textarea'), lines = shown.filter(i => i.kind === 'text').map(i => i.text), labels = shown.filter(i => i.kind !== 'text').map(i => i.text);
-  const ranked = [
-    ...after.headings.filter(t => count(t) >= 2 && t.length < 70),
-    ...lines.filter(t => count(t) >= 2 && t.length < 70),
-    ...labels.filter(t => count(t) >= 2 && t.length < 70),
-    ...[...lines, ...labels].filter(t => t.length >= 70).map(lead).filter(t => count(t) >= 3),
-    ...[...after.headings, ...lines, ...labels].filter(t => count(t) === 1 && t.length >= 4),
-  ];
-  for (const own of [true, false]) { const t = ranked.find(x => (!own || !frame.has(norm(x))) && fresh(x)); if (t) return { text: t }; }
-  const names = new Set(before.filter(Boolean).flatMap(sc => sc.controls.map(c => rnorm(c.name))));
-  const c = after.controls.find(c => !c.shut && c.name && c.name.length < 70 && /[a-z]/i.test(c.name) && !VOLATILE.test(c.name) && !names.has(rnorm(c.name)) && !had.some(h => h.includes(rnorm(c.name))));
-  return c ? { text: c.name, control: ROLE_WORD[c.role] || 'control' } : { text: null };
-}
-
-// Every "Lands on" in a plan, checked in order against the screen the plan was on before its step (for "Go to X", the
-// other app's): words the new screen shows and that one didn't. One that fails gets landingFor()'s words; a step with
-// only a control, or nothing, to tell by goes on the review's Needs you (flags, kind "landing"). Rules-only plans,
-// Copilot's (after its answer is grounded) and walkthroughs all go through here.
-export function proveLandings(plan, walker, flags = []) {
-  if (!walker) return flags;
-  let cur = null;
-  plan.beats.forEach((b, bi) => b.steps.forEach(s => {
-    const to = s.lands && s.lands.screen, from = cur;
-    if (!to) return;
-    cur = to;
-    const after = walker.screen(to);
-    if (!after) return;
-    const before = from ? [walker.screen(from), walker.shown(from)] : [], t = s.lands.text, n = rnorm(t);
-    if (from !== to && t && !VOLATILE.test(t) && rnorm(showsText(after)).includes(n) && !before.some(sc => sc && rnorm(sc.text).includes(n))) return;
-    const app = (walker.flow.states[to] || {}).app;
-    const l = from === to ? { text: null } : landingFor(before, after, { frame: app ? frameTexts(walker, app) : new Set() });
-    s.lands = { ...s.lands, text: l.text };
-    if (l.text && !l.control) return;
-    const why = from === to ? 'it lands where it already was'
-      : !rnorm(showsText(after)) ? `the screen it lands on (${to}) has no words`
-      : `everything ${to} shows was on the screen before it`;
-    const text = l.control ? `${formatStep(s)}: ${why}, so a run looks for its "${l.text}" ${l.control} instead`
-      : `${formatStep(s)}: ${why}, so a run can't tell whether it worked`;
-    if (!flags.some(f => f.kind === 'landing' && f.text === text && f.at === (s.line || null))) flags.push({ kind: 'landing', text, beat: bi + 1, line: s.line || null, at: s.line || null });
-  }));
-  return flags;
-}
+// Where a step lands, proven: landing.mjs (proveLandings runs at the end of every plan, walkthroughs' too).
+export { proveLandings };
 
 // Beat-level targets (a Do list before the lines) go to the line they share the most words with, keeping their order.
 function assignHints(hints, lines) {
