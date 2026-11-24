@@ -11,6 +11,7 @@ import { findItem, nameFits, norm } from './find.mjs';
 import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
+import { fillApi } from './reset-run.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -193,4 +194,12 @@ test('record for me: each click is counted by the recorder before the next step 
   process.stdin.destroy();
   assert.equal(r.steps, 1);
   assert.equal(countedAtStop, 1, 'the click was still held when the recording stopped');
+});
+
+test("an API undo filled in: the demo's values win, each one a single encoded segment, the body's fields fixed", () => {
+  const api = { path: '/v1/plugins/{pluginId}/sections/{section}/{item}.md?resource=context', body: { stage: 0, note: '{item}' } };
+  const f = fillApi(api, { item: '../admin?x=1', pluginId: 'from-the-run' }, { pluginId: 'p1', section: 'Our numbers' });
+  assert.equal(f.path, '/v1/plugins/p1/sections/Our%20numbers/..%2Fadmin%3Fx%3D1.md?resource=context');
+  assert.deepEqual(f.body, { stage: 0, note: '../admin?x=1' });
+  assert.deepEqual(fillApi(api, {}, { pluginId: 'p1' }).left, ['{section}', '{item}']);
 });

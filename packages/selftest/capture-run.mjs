@@ -65,18 +65,19 @@ function aiProc(args, cwd, env, onEvent = () => {}) {
 // notes panel is a frame on a host of its own (hosts: a write opens it too).
 const HOST = `127.0.0.1:${TASKS}`, NOTES_HOST = `127.0.0.1:${NOTES}`;
 mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
-// apiPath: new-task's API undo (as a private pack's), on the page's own session; null: none.
-const writePack = ({ frameHost = true, apiPath = null } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+// apiPath: new-task's API undo (as a private pack's), on the page's own session; null: none. notesApi: pin-note's, on
+// the notes frame's session.
+const writePack = ({ frameHost = true, apiPath = null, notesApi = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
     { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}) } },
     { id: 'delete-task', what: 'Deletes a task', on: { kind: 'click', target: '/^Delete /' }, undo: null },
     { id: 'sync', what: 'Turns Sync on or off', on: { kind: 'switch', target: 'Sync' }, undo: { same: 'sync' } },
-    { id: 'pin-note', what: 'Pins the note', on: { kind: 'click', target: 'Pin note' }, undo: { steps: ['Click "Unpin note"'] } },
+    { id: 'pin-note', what: 'Pins the note', on: { kind: 'click', target: 'Pin note' }, undo: { steps: ['Click "Unpin note"'], ...(notesApi ? { api: { use: 'notes', method: 'POST', path: '/api/unpin' } } : {}) } },
     { id: 'unpin-note', what: 'Unpins the note', on: { kind: 'click', target: 'Unpin note' }, undo: null },
   ],
   guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}) },
-  apis: { tasks: { open: `http://${HOST}/`, host: HOST } },
+  apis: { tasks: { open: `http://${HOST}/`, host: HOST }, notes: { open: `http://${HOST}/`, host: NOTES_HOST } },
 }, null, 1));
 writePack();
 
@@ -203,11 +204,14 @@ try {
   writeFileSync(join(DEMO, 'reset.md'), RESET);
 
   // 1d · An API undo (a private pack's): "Undo with the app pack" runs the pack's call in the page's own signed-in
-  // session (the server refuses a delete without it), with the task id the run recorded. If it can't (here, a path
-  // the server doesn't know), the Note's steps run instead, as approved.
+  // session (the server refuses a delete without it), with the demo's own value ({list}, demo.json apps[].values) and
+  // the task id the run recorded. If it can't (here, a path the server doesn't know), the Note's steps run instead, as
+  // approved.
+  const setValues = values => { const f = join(DEMO, 'demo.json'), c = JSON.parse(readFileSync(f, 'utf8')); c.apps.find(a => a.id === 'tasks').values = values; writeFileSync(f, JSON.stringify(c, null, 2)); };
+  setValues({ list: 'tasks' });
   const RESET_API = RESET.replace('- Click "Delete Call Kestrel"\n  Undoes: beat 1, Press Enter', '- Undo with the app pack: fixture-tasks:new-task\n  Undoes: beat 1, Press Enter\n  Note: an API call in the capture browser\'s own signed-in session, with {taskId} from the run; if it can\'t: Click "Delete {typed}"');
   writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET_API);
-  writePack({ apiPath: '/api/tasks/{taskId}' });
+  writePack({ apiPath: '/api/{list}/{taskId}' });
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
@@ -220,7 +224,28 @@ try {
   rj = readRun(DEMO);
   const fbDid = ((rj.reset.after || {}).did || []).join(' | ');
   check('and when the call can\'t, the Note\'s steps undo it', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Click "Delete Call Kestrel"/.test(fbDid) && count(tasks.log, 'DELETE /api/nope/{id}') === 1 && count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && tasks.state().tasks.length === 0, JSON.stringify({ after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  setValues(undefined);
+  // An API undo in a frame's own session (IQ's: its API answers the Power BI frame, not the portal): the notes frame's
+  // session, the call from that frame (the notes host has no CORS: from the page around it, it can't). While the call
+  // is open, the frame's own pings to that host stay held: the guard opens that one call, not the host.
+  writePack({ apiPath: null, notesApi: true });
+  writeFileSync(join(DEMO, 'plan.md'), PIN_PLAN);
+  writeFileSync(join(DEMO, 'reset.md'), PIN_RESET.replace('- Click "Unpin note"\n  Undoes: beat 1, Click "Pin note"', '- Undo with the app pack: fixture-tasks:pin-note\n  Undoes: beat 1, Click "Pin note"\n  Note: an API call in the notes frame\'s own session; if it can\'t: Click "Unpin note"'));
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  tasks.notePing(true);
+  tasks.log.length = 0;
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const nst = tasks.state();
+  tasks.notePing(false);
+  const pinDid = ((rj.reset.after || {}).did || []).join(' | ');
+  check('an API undo in a frame\'s own session goes from that frame', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Undo with the app pack: fixture-tasks:pin-note \(POST, 200\)/.test(pinDid) && count(tasks.log, 'POST notes/api/unpin') === 1 && !tasks.log.some(l => / 401$/.test(l)) && nst.pinned === false, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET') && !/api\/seen/.test(l)) }));
+  const [u0, u1] = nst.unpins[nst.unpins.length - 1] || [0, 0];
+  const seenIn = nst.seen.filter(t => t >= u0 && t <= u1).length;
+  const heldIn = (rj.guard.held || []).filter(h => h.host === NOTES_HOST && h.path === '/api/seen' && Date.parse(h.at) >= u0 && Date.parse(h.at) <= u1).length;
+  check('and while that call is open, the app\'s other non-reads to the host stay held', u1 > u0 && seenIn === 0 && heldIn > 0, JSON.stringify({ unpin: [u0, u1], seenIn, heldIn, seen: nst.seen.length }));
   writePack();
+  writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
   writeFileSync(join(DEMO, 'reset.md'), RESET);
 
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
