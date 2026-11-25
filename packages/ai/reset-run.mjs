@@ -334,8 +334,8 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     if (first.ok) return { ok: true };
     const find = pw.undo.find, fat = find && pack.apis && pack.apis[find.use];
     if (first.left && find && fat && names.length && phase === 'before') {
-      const byName = `Find by name: ${names.map(x => `"${x}"`).join(', ')}`;
-      if (!allowed(part, byName)) return { ok: false, why: `"${byName}" isn't in the approved reset` };
+      const findText = `Find by name: ${names.map(x => `"${x}"`).join(', ')}`;
+      if (!allowed(part, findText)) return { ok: false, why: `"${findText}" isn't in the approved reset` };
       const start = recorded && recorded.start(app), sc0 = start ? recorded.screen(start) || recorded.shown(start) : null;
       const { mine, kept } = byName(names, sc0);
       if (kept.length) did.push(`${app}: not found by name, the start screen shows it too: ${kept.map(x => `"${x}"`).join(', ')}`);
@@ -373,6 +373,9 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     return { ok: true };
   };
   const checkAll = () => checkLines({ demo, cmd, walker, lines: parsed.checks, plan, packs, recorded, shot });
+  // After the reset did something: a line still wrong is read again once, a few seconds later. An app can still be
+  // answering the undo's call when its screen reloads to be read (the page went quiet before its server did).
+  const checkAfterDoing = async () => { let cs = await checkAll(); if (did.length && cs.some(c => c.status === 'wrong')) { await sleep(4000); cs = await checkAll(); } return cs; };
   // The undo groups a wrong line is about: a write's (From: beat N), a pack effect's (what a run leaves, and the undos
   // of the writes it's what's left of: its leftOf), none for a start state (Set first sets it), every group for a line
   // that says nothing of where it's from.
@@ -409,7 +412,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     if (!u.ok) return { ok: false, how: 'reset.md', did, checks, undo: u.out, why: `the undo stopped: ${u.why}` };
     const st = await setFirst();
     if (!st.ok) return { ok: false, how: 'reset.md', did, checks, undo: u.out, why: `setting the start: ${st.why}` };
-    checks = await checkAll();
+    checks = await checkAfterDoing();
     const bad = [...wrongOf(checks), ...cantOf(checks)];
     return { ok: !bad.length, ...(cantOf(checks).length ? { kind: 'check' } : {}), how: 'reset.md', did, checks, undo: u.out, why: bad.length ? `still not as the demo starts: ${listOf(bad)}` : null };
   }
@@ -417,11 +420,11 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   const mine = groups.filter(g => undoesAny(g, ran));
   const u = await runGroups(mine);
   const st = u.ok ? await setFirst() : { ok: false, why: u.why };
-  let checks = await checkAll();
+  let checks = await checkAfterDoing();
   let u2 = null;
   if (wrongOf(checks).length) {
     const more = groupsFor(wrongOf(checks)).filter(g => !mine.includes(g));
-    if (more.length) { u2 = await runGroups(more); checks = await checkAll(); }
+    if (more.length) { u2 = await runGroups(more); checks = await checkAfterDoing(); }
   }
   const bad = [...wrongOf(checks), ...cantOf(checks)];
   const ok = u.ok && st.ok && !bad.length;
