@@ -157,13 +157,14 @@ async function newDemo(name, rx, capture, apps = [['tasks', tasks.url], ['admin'
 }
 const count = (log, line) => log.filter(l => l === line).length;
 const readRun = DEMO => JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'run.json'), 'utf8'));
-// A run's time by part, from its own events (each stamped as it came): the reset before, the start (apps, services,
-// start sweeps), the steps (screen sweeps included), saving the recording, the reset after.
+// A run's time by part, from its own events (each stamped as it came): the apps' services checked before the reset,
+// the reset before, the start (apps, services, start sweeps), the steps (screen sweeps included), saving the
+// recording, the reset after.
 const partsOf = evs => {
-  const at = f => (evs.find(f) || {}).t, rb = at(e => e.event === 'stage' && e.name === 'reset-before'), st = at(e => e.event === 'stage' && e.name === 'start');
+  const at = f => (evs.find(f) || {}).t, sv = at(e => e.event === 'stage' && e.name === 'services'), rb = at(e => e.event === 'stage' && e.name === 'reset-before'), st = at(e => e.event === 'stage' && e.name === 'start');
   const b0 = at(e => e.event === 'beat'), sp = at(e => e.event === 'stage' && e.name === 'stop'), ra = at(e => e.event === 'stage' && e.name === 'reset-after'), end = at(e => e.event === 'done');
   const d = (a, b) => a && b ? +((b - a) / 1000).toFixed(1) : null;
-  return { resetBefore: d(rb, st), start: d(st, b0), steps: d(b0, sp), stop: d(sp, ra), resetAfter: d(ra, end) };
+  return { services: d(sv, rb), resetBefore: d(rb, st), start: d(st, b0), steps: d(b0, sp), stop: d(sp, ra), resetAfter: d(ra, end) };
 };
 
 try {

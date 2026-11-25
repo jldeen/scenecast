@@ -27,7 +27,7 @@ const recTl = (what, t0, meta = {}) => { const e = { what, at: t0 - REC.t0, ms: 
 // what she leaves out of the replica. Each snapshot, hover's parts and stream frame is checked first; one that shows it
 // isn't saved, and the gate refuses every save after it (the run stops at its next step).
 const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
-const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : REC.active; };
+const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : (REC.twinOf && REC.twinOf.get(p)) || REC.active; };
 const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
 if (!H.leaveGated) {
   const snap0 = H.snap, post0 = H.post;
@@ -374,6 +374,9 @@ async function recTwinPages(A, st, n) {
   const pages = await OPS.capTwins({ app: A.id, n, url: A.page.url() }).then(r => (r && r.pages) || [], e => { rlogr('twins: ' + String(e.message || e).slice(0, 120)); return []; });
   const same = await Promise.all(pages.map(async q => { await recInstall(q).catch(() => {}); await recSettle(q, 900, 12000).catch(() => {}); return (await recSig(q).catch(() => null)) === st.sig; }));
   const ok = pages.filter((q, i) => same[i]);
+  // Whose window each is (Leave out's check before a twin's save reads that app's words).
+  REC.twinOf = REC.twinOf || new WeakMap();
+  for (const q of pages) REC.twinOf.set(q, A.id);
   rlogr(`twins for ${A.state}: ${ok.length} of ${pages.length} show the same screen`);
   return ok;
 }
