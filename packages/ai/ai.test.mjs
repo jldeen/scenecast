@@ -310,13 +310,14 @@ test("a save held for her own status doesn't use up a step's time to settle", as
 test("the recording's hovers: each control once per app with its screens; after a run captured, missed or gone", () => {
   const dir = mkdtempSync(join(tmpdir(), 'floor-'));
   mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
-  const def = (page, sel, text) => ({ page, anchor: { sel, text } });
-  writeFileSync(join(dir, 'data', 'snaps', 'hovers-chat.json'), JSON.stringify({ defs: { a: def('home', 'button', 'Share'), b: def('task', 'button', 'Share'), c: def('home', 'a[aria-label="Docs"]', 'Docs'), d: def('home', 'button', 'Old') } }));
+  const def = (page, sel, text, scope) => ({ page, anchor: { sel, text, count: 1 }, ...(scope ? { scope } : {}) });
+  writeFileSync(join(dir, 'data', 'snaps', 'hovers-chat.json'), JSON.stringify({ defs: { a: def('home', 'button', 'Share'), b: def('task', 'button', 'Share'), c: def('home', 'nav', 'Docs', [1, 0]), d: def('home', 'button', 'Old') } }));
   const rec = recordedHovers({ dir }, ['chat', 'admin']);
-  assert.deepEqual(rec.map(h => [h.app, h.key, h.pages]), [['chat', 'button|Share', ['home', 'task']], ['chat', 'a[aria-label="Docs"]|Docs', ['home']], ['chat', 'button|Old', ['home']]]);
-  const log = [{ app: 'chat', key: 'button|Share', shown: false, retried: true, why: 'nothing showed', picture: '/x.png', state: 's1' }, { app: 'chat', key: 'button|Share', shown: true, retried: false }, { app: 'chat', key: 'a[aria-label="Docs"]|Docs', shown: false, retried: true, why: 'nothing showed', picture: '/d.png', state: 's2' }];
+  assert.deepEqual(rec.map(h => [h.app, h.anchor, h.scope, h.pages]), [['chat', { sel: 'button', text: 'Share' }, [], ['home', 'task']], ['chat', { sel: 'nav', text: 'Docs' }, [1, 0], ['home']], ['chat', { sel: 'button', text: 'Old' }, [], ['home']]]);
+  const [share, docs, old] = rec.map(h => h.id);
+  const log = [{ app: 'chat', id: share, shown: false, retried: true, why: 'nothing showed', picture: '/x.png', state: 's1' }, { app: 'chat', id: share, shown: true, retried: false }, { app: 'chat', id: docs, shown: false, retried: true, why: 'nothing showed', picture: '/d.png', state: 's2' }];
   const out = hoverOutcomes(rec, log);
   assert.deepEqual(out.map(x => [x.text, x.status, x.picture || null]), [['Share', 'captured', null], ['Docs', 'missed', '/d.png'], ['Old', 'gone', null]]);
   assert.match(out[1].why, /on the screen and nothing showed, hovered twice/);
-  assert.equal(hoverOutcomes(rec, [{ app: 'chat', key: 'button|Old', tried: false }])[2].why, "it was on the screen and wasn't hovered (out of time)");
+  assert.equal(hoverOutcomes(rec, [{ app: 'chat', id: old, tried: false }])[2].why, "it was on the screen and wasn't hovered (out of time)");
 });

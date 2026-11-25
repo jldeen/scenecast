@@ -781,10 +781,10 @@ async function recSide(A, c) {
       let frame = null;
       if (out.frameUrl) { const f = p.frames().find(x => x.url().split('?')[0] === out.frameUrl); if (f) frame = await recFrameKey(p, f); }
       // A recorded hover that showed nothing here is tried again on the app's next screens.
-      const missed = k => out.floor && out.floor[k] && !out.floor[k].shown;
+      const missed = k => (out.floorMissKeys || []).includes(k);
       const seen = recSeen('hovers', A.id + (out.frameUrl || '')); for (const k of out.keys || []) if (!missed(k)) seen.add(k);
       const F = recFloor();
-      if (F) for (const [key, x] of Object.entries(out.floor || {})) F.seen({ app: A.id, state, page: c.page || state, key, ...x });
+      if (F) for (const [id, x] of Object.entries(out.floor || {})) F.seen({ app: A.id, state, page: c.page || state, id, ...x });
       const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
       hs.firsts.push(...(out.firsts || []));
       for (const [sel, k] of Object.entries(out.kinds || {})) { const t = hs.kinds[sel] = hs.kinds[sel] || { tried: 0, shown: 0 }; t.tried += k.tried; t.shown += k.shown; }

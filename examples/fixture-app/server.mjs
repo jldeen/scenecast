@@ -319,8 +319,8 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         drawn in order's order; an order ref with no item draws an empty row) with their count, and a Teams tree it
 //         draws from its own store (localStorage, as Teams keeps its teams in IndexedDB): Leave out's two ways.
 //         chips(true): a Chips link to /chips/1, then /chips/2 and /chips/3 (Next): six plain buttons a screen that show
-//         nothing on hover, and on the third a "Slow chip" whose card shows 1.5 s after the pointer arrives and a
-//         "Quiet chip" that shows nothing: the recorded hovers' floor.
+//         nothing on hover, and on the third a "Slow chip" (in a wrapper, as a card's anchor often is) whose card
+//         shows 1.5 s after the pointer arrives and a "Quiet chip" that shows nothing: the recorded hovers' floor.
 //         status(text): the page also shows your own status on a "Me" button ("Your profile, status <text>", as Teams'
 //         avatar), and follows GET /api/status as it changes (status(null): none).
 //   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
@@ -330,7 +330,7 @@ const chipsPage = n => `<!doctype html><html lang="en"><head><meta charset="utf-
 <style>body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328} main{max-width:720px;margin:32px auto;padding:0 24px}
 button{font:inherit;margin:4px;padding:4px 10px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa} .card{position:fixed;background:#fff;border:1px solid #c9ccd1;border-radius:6px;padding:8px 10px;box-shadow:0 2px 8px rgba(0,0,0,.15)}</style></head>
 <body><main><h1>Chips ${['', 'one', 'two', 'three'][n]}</h1><p>
-${n === 3 ? '<button id="slow">Slow chip</button><button>Quiet chip</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
+${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><a href="/chips/${n + 1}">Next</a></p>` : ''}</main>
 <script>
 const slow = document.getElementById('slow');

@@ -608,13 +608,13 @@ try {
 
   // 1j · The recording's hovers are a floor. Three screens of plain buttons; the first two show nothing on hover, so
   // the sweep learns to skip plain buttons. The demo's recording (its build's hovers, as written here) has a hover on
-  // the third screen's Slow chip (its card shows after 1.5 s, past the 900 ms learned wait), its Quiet chip, and a
-  // Removed chip that's no longer there. Slow chip: never skipped for its kind, hovered again for 2.5 s, captured.
+  // the third screen's Slow chip (its card shows after 1.5 s, past the 900 ms learned wait; anchored on its wrapper,
+  // as the build keeps a card's anchor), its Quiet chip, and a Removed chip that's no longer there. Slow chip: never skipped for its kind, hovered again for 2.5 s, captured.
   // Quiet chip: missed, listed for her with a picture. Removed chip: gone. The other plain buttons: still skipped.
   { const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
     mkdirSync(dirname(HP), { recursive: true });
-    const def = (id, text) => [id, { id, page: 'chips-3', anchor: { sel: 'button', text } }];
-    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('h1', 'Slow chip'), def('h2', 'Quiet chip'), def('h3', 'Removed chip')]) }));
+    const def = (id, sel, text) => [id, { id, page: 'chips-3', anchor: { sel, text }, scope: [] }];
+    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('h1', 'span.wrap', 'Slow chip'), def('h2', 'button', 'Quiet chip'), def('h3', 'button', 'Removed chip')]) }));
     writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Chips\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Chips"\n  Lands on: "Chips one"\n- Click "Next"\n  Lands on: "Chips two"\n- Click "Next"\n  Lands on: "Chips three"\n');
     writeFileSync(join(DEMO, 'reset.md'), '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n');
     tasks.chips(true); tasks.seed({});

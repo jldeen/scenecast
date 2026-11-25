@@ -61,12 +61,12 @@
 //                                    saves as it is. { apps: {} }: off → { on, apps }
 //                                    { read: { tab, name, role } }: the status on that tab now → { found, status? }
 //                                    { since }: what it read before each save, the one it's waiting on, the stop
-//   capHoverFloor({ apps, shots } | {})   the demo's recorded hovers as a floor: apps { <app>: ["sel|text", …] }, the
-//                                    controls its recording has a hover for. From here on the recorder's hovers sweep
-//                                    never skips them for their kind, tries each twice (the second time for 2.5 s), and
-//                                    says how each went; a picture of the screen when one showed nothing goes in shots.
-//                                    { apps: {} }: off → { on, apps }. {}: → { on, log: [{ app, state, page, key, shown,
-//                                    retried, why?, picture?, tried? }] }
+//   capHoverFloor({ apps, shots } | {})   the demo's recorded hovers as a floor: apps { <app>: [{ id, anchor, scope }] }
+//                                    (each as its build keeps it). From here on the recorder's hovers sweep never skips
+//                                    their controls for their kind, tries each twice (the second time for 2.5 s), and
+//                                    says how each went; one that showed is left out on the app's next screens; a picture
+//                                    of the screen when one showed nothing goes in shots. { apps: {} }: off → { on, apps }.
+//                                    {}: → { on, log: [{ app, state, page, id, shown, retried, why?, picture?, tried? }] }
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { allowedBy } from './browser.mjs';
@@ -429,14 +429,17 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     },
     async capHoverFloor(c) {
       if (c.apps) {
-        const apps = Object.fromEntries(Object.entries(c.apps).map(([id, ks]) => [id, [...new Set([].concat(ks || []).map(String))]]).filter(([, ks]) => ks.length));
+        const ok = f => f && typeof f.id === 'string' && f.anchor && typeof f.anchor.sel === 'string' && (f.scope === undefined || Array.isArray(f.scope));
+        const apps = Object.fromEntries(Object.entries(c.apps).map(([id, fs]) => [id, [].concat(fs || []).filter(ok).map(f => ({ id: f.id, anchor: f.anchor, scope: f.scope || [] }))]).filter(([, fs]) => fs.length));
         if (!Object.keys(apps).length) { floor = null; globalThis.__stuntdoubleHoverFloor = undefined; return { on: false }; }
         floor = { apps, shots: c.shots || null, log: [] };
         const shot = async (p, name) => {
           if (!floor || !floor.shots || !p) return null;
           try { const f = `${floor.shots}/hover-missed-${String(name).replace(/[^\w.-]+/g, '-')}.png`; mkdirSync(floor.shots, { recursive: true }); writeFileSync(f, await p.screenshot({ timeout: 30000 })); return f; } catch (e) { return null; }
         };
-        globalThis.__stuntdoubleHoverFloor = { keys: app => (floor && floor.apps[app]) || [], seen: e => { if (floor) floor.log.push({ at: at(), ...e }); }, shot };
+        // An app's recorded hovers still to show (one that showed on a screen isn't looked for again).
+        const keys = app => { if (!floor) return []; const shown = new Set(floor.log.filter(e => e.app === app && e.shown).map(e => e.id)); return (floor.apps[app] || []).filter(f => !shown.has(f.id)); };
+        globalThis.__stuntdoubleHoverFloor = { keys, seen: e => { if (floor) floor.log.push({ at: at(), ...e }); }, shot };
         log(`hover floor on: ${Object.entries(apps).map(([id, ks]) => `${id} ${ks.length}`).join(', ')}`);
         return { on: true, apps: Object.fromEntries(Object.entries(apps).map(([id, ks]) => [id, ks.length])) };
       }

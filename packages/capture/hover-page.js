@@ -109,6 +109,16 @@
       if (!root) return [];
       const out = []; const seen = new Set();
       const perSel = {};
+      // The recording's hovers (opt.floor: [{ id, anchor, scope }]), found as the replica finds them: the anchor by its
+      // selector, place and words, then down its scope (child by child). A control that is that element, holds it or
+      // is inside it is theirs (c.floor: their ids).
+      const fmatch = (el, m) => { try { if (m.sel && !el.matches(m.sel)) return false; } catch (e) { return false; } if (m.in && !el.closest(m.in)) return false; if (m.text !== undefined && norm(el.innerText) !== m.text) return false; if (m.textStarts !== undefined && !norm(el.innerText).startsWith(m.textStarts)) return false; return true; };
+      const ekids = el => [...el.children].filter(c => !/^(script|noscript|template|base)$/.test(c.localName));
+      const targets = [];
+      for (const f of opt.floor || []) {
+        let els = []; try { els = [...document.querySelectorAll(f.anchor.sel)]; } catch (e) {}
+        for (const e of els) if (fmatch(e, f.anchor)) { const t = (f.scope || []).reduce((x, i) => x && ekids(x)[i], e); if (t) targets.push([t, f.id]); }
+      }
       for (const e of root.querySelectorAll(opt.sel || INTERACTIVE)) {
         if (!visible(e)) continue;
         const r = e.getBoundingClientRect();
@@ -122,10 +132,11 @@
         seen.add(id);
         const s = specOf(owner);
         const k = s.sel + '|' + (s.in || ''), text = (s.text || s.textStarts || '').slice(0, 60);
+        const fl = targets.length ? [...new Set(targets.filter(([t]) => t === owner || t.contains(owner) || owner.contains(t)).map(([, fid]) => fid))] : [];
         perSel[k] = (perSel[k] || 0) + 1;
-        // A control the recording has a hover for (opt.floor, "sel|text") is never left out for its kind's count.
-        if (perSel[k] > (opt.perSel || 14) && !(opt.floor || []).includes(s.sel + '|' + text)) continue;
-        out.push({ x, y, id, sel: s.sel, text });
+        // A control the recording has a hover for is never left out for its kind's count.
+        if (perSel[k] > (opt.perSel || 14) && !fl.length) continue;
+        out.push({ x, y, id, sel: s.sel, text, ...(fl.length ? { floor: fl } : {}) });
       }
       return out;
     },
