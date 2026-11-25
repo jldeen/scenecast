@@ -194,7 +194,29 @@ async function recTyped(A) {
   A.state = id;
   recFill(A, T);
 }
-// What an action changed. trigger() does the action (Enter, a held-back click); without one it already happened.
+// The main frame's loads, from the DevTools protocol, one watcher a tab for the whole take: a page being left whose
+// load stopped with no new document there (a download, a link answering 204, mailto:, a cancelled navigation) wasn't
+// left after all. ok: false where the protocol's events can't be had; the wait then runs its course (navWaitS).
+const recNavs = new WeakMap();
+async function recNavOf(p) {
+  let w = recNavs.get(p);
+  if (w) return w;
+  w = { ok: false, since: Date.now(), started: 0, stopped: 0, download: 0 };
+  recNavs.set(p, w);
+  try {
+    const s = await ctx.newCDPSession(p);
+    if (typeof s.on !== 'function') { await s.detach().catch(() => {}); return w; }
+    const main = (await s.send('Page.getFrameTree')).frameTree.frame.id;
+    s.on('Page.frameStartedLoading', e => { if (e.frameId === main) w.started = Date.now(); });
+    s.on('Page.frameStoppedLoading', e => { if (e.frameId === main) w.stopped = Date.now(); });
+    s.on('Page.downloadWillBegin', e => { if (e.frameId === main) w.download = Date.now(); });
+    await s.send('Page.enable');
+    w.ok = true;
+  } catch (e) { rlogr('page loads: ' + String(e.message || e).slice(0, 120)); }
+  return w;
+}
+// What an action changed. trigger() does the action (Enter, a held-back click); without one it already happened
+// (ev.t: when, by the page's clock).
 async function recCapture(A, ev, trigger) {
   const p = A.page, o = REC.opts;
   const from = REC.states[A.state];
@@ -221,13 +243,30 @@ async function recCapture(A, ev, trigger) {
   // A click or Enter that loads a new page: the page as it was stays on screen until the new one comes (on a slow
   // computer, longer than settleMs), so this document is marked, and while it's being left nothing counts as settled;
   // a new document gets the recorder's page script and is settled on its own (up to navWaitS, 30 s, for it to come).
+  // A leave from before this action (a download link, a link answering 204: the page stayed) is no longer counted.
   const doc = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  await p.mainFrame().evaluate(t => { window.__rkDoc = t; }, doc).catch(() => {});
+  const W = await recNavOf(p);
+  await p.mainFrame().evaluate(([t, at]) => { window.__rkDoc = t; const R = window.__rkrec; if (R && R.leaving && R.leavingAt < (at || Date.now())) R.leaving = false; }, [doc, trigger ? null : ev.t || null]).catch(() => {});
   if (trigger) await trigger();
-  let sig = await recSig(p), since = Date.now(), first = null, last = null, navSince = null, loaded = false;
+  let sig = await recSig(p), since = Date.now(), first = null, last = null, navSince = null, loaded = false, stayed = null;
   for (;;) {
     await sleep(o.everyMs);
-    const nav = await p.mainFrame().evaluate(t => ({ same: window.__rkDoc === t, leaving: !!(window.__rkrec && window.__rkrec.leaving), rec: !!window.__rkrec, ready: document.readyState }), doc).catch(() => null);
+    const seen = { at: Date.now(), started: W.started, stopped: W.stopped, download: W.download };
+    const nav = await p.mainFrame().evaluate(t => ({ same: window.__rkDoc === t, leaving: !!(window.__rkrec && window.__rkrec.leaving), leavingAt: (window.__rkrec && window.__rkrec.leavingAt) || 0, rec: !!window.__rkrec, ready: document.readyState }), doc).catch(() => null);
+    // Left, but no new page came: the main frame's load since the leave stopped (a quarter second ago, with none
+    // since) and this document is still here, or no load started at all within 3 s. Settled on the page as it is.
+    if (W.ok && nav && nav.same && nav.leaving) {
+      const at = nav.leavingAt - 50;
+      const stopped = seen.stopped >= at && seen.stopped >= seen.started && seen.at - seen.stopped >= 250;
+      const none = W.since < at && seen.started < at && seen.at - nav.leavingAt >= 3000;
+      if (stopped || none) {
+        await p.mainFrame().evaluate(() => { if (window.__rkrec) window.__rkrec.leaving = false; }).catch(() => {});
+        nav.leaving = false;
+        stayed = seen.download >= at ? 'a download' : stopped ? 'its load stopped' : 'nothing loaded';
+        rlogr(`${ev.kind}${ev.desc ? ` "${ev.desc}"` : ''} left the page, but no new page came (${stayed}, ${Math.round((Date.now() - t0) / 100) / 10} s): settled on this one`);
+        since = Date.now();
+      }
+    }
     if (nav === null || (nav.same && nav.leaving) || (!nav.same && nav.ready === 'loading')) {
       navSince = navSince || Date.now();
       if (Date.now() - navSince < (o.navWaitS || 30) * 1000) { since = Date.now(); continue; }
@@ -264,7 +303,7 @@ async function recCapture(A, ev, trigger) {
     if (isStream) REC.streams[name] = { raw: name, frames: [0, frames.length - 1], to, timing: 'real', ms: Math.max(600, Math.min(o.streamMaxMs || 10000, last + 300)), realMs: last };
     rlogr(`${ev.kind} ${ev.desc ? '"' + ev.desc + '" ' : ''}→ ${to}${isStream ? ` (stream ${name}, ${frames.length} frames, ${(last / 1000).toFixed(1)} s)` : ''}`);
     return { changed: true, to, stream: isStream ? name : undefined };
-  } finally { await recSetBusy(p, false); recTl('action', t0, { kind: ev.kind, app: A.id, from: from.snap, to, productMs: product, frames: frames.length }); }
+  } finally { await recSetBusy(p, false); recTl('action', t0, { kind: ev.kind, desc: ev.desc, app: A.id, from: from.snap, to, productMs: product, frames: frames.length, ...(stayed ? { stayed } : {}) }); }
 }
 async function recEnter(A, e) {
   const fk = await recFrameKey(A.page, e.f);
@@ -298,7 +337,7 @@ async function recClick(A, e) {
     await e.f.evaluate(() => { window.__rkrec.pass++; });
     await A.page.mouse.click(off.x + e.x, off.y + e.y);
   } : null;
-  const res = await recCapture(A, { kind: 'click', desc: e.spec.desc }, trigger);
+  const res = await recCapture(A, { kind: 'click', desc: e.spec.desc, t: e.t }, trigger);
   if (!res.changed) { REC.notes.push(`${from}: click on "${e.spec.desc}" changed nothing (a dead control in the replica too)`); return; }
   const t = { click: spec };
   if (res.stream) t.stream = res.stream; else t.to = res.to;
@@ -313,7 +352,7 @@ async function recClick(A, e) {
 }
 async function recEsc(A, e) {
   const from = A.state;
-  const res = await recCapture(A, { kind: 'esc', desc: 'escape' }, null);
+  const res = await recCapture(A, { kind: 'esc', desc: 'escape', t: e.t }, null);
   if (!res.changed) return;
   REC.states[from].esc = res.to;
   REC.path.push({ key: 'Escape', checkpoint: res.to });
@@ -478,6 +517,7 @@ async function recResume(c) {
     // Light again: the worker that set it is gone, and with it the tab's emulation.
     await recLight(REC.apps[REC.apps.length - 1]);
     await recInstall(p);
+    await recNavOf(p);
     const sig = await recSettle(p, 600, 8000);
     if (sig !== (REC.states[a.state] || {}).sig && (REC.sigs[a.id] || new Map()).get(sig) !== a.state) off.push(`${a.id}: bring the tab back to ${a.state} (as captured in raw/shots/${(REC.states[a.state] || {}).snap}.png), then go on`);
   }
@@ -506,7 +546,7 @@ OPS.recordStart = async c => {
   if (missing.length || !REC.apps.length) { REC.on = false; return { error: missing.length ? `not open: ${missing.join(', ')}. Open ${missing.length > 1 ? 'them' : 'it'} in the browser the recorder is in, then start again` : 'the demo has no apps to record' }; }
   // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
   // reload), and Nov 20's second take began with a click made between takes.
-  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); A.viewport = await A.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100 })).catch(() => null); if (A.viewport) { A.viewport.zoom = Math.round(((A.page.zoom ? await A.page.zoom() : 1) || 1) * 1000) / 1000; A.viewport.browser = await A.page.evaluate(() => { const b = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map(x => x.brand).join(' '); return /Microsoft Edge/.test(b) ? 'msedge' : /Google Chrome/.test(b) ? 'chrome' : 'chromium'; }).catch(() => 'chromium'); const ts = A.page.tabSize ? await A.page.tabSize() : null; if (ts) { A.viewport.tabWidth = ts.width; A.viewport.tabHeight = ts.height; } } recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
+  for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recNavOf(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); A.viewport = await A.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100 })).catch(() => null); if (A.viewport) { A.viewport.zoom = Math.round(((A.page.zoom ? await A.page.zoom() : 1) || 1) * 1000) / 1000; A.viewport.browser = await A.page.evaluate(() => { const b = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map(x => x.brand).join(' '); return /Microsoft Edge/.test(b) ? 'msedge' : /Google Chrome/.test(b) ? 'chrome' : 'chromium'; }).catch(() => 'chromium'); const ts = A.page.tabSize ? await A.page.tabSize() : null; if (ts) { A.viewport.tabWidth = ts.width; A.viewport.tabHeight = ts.height; } } recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
   // A start screen that can't be saved (Leave out refused it) ends the take before it begins: nothing to stop after.
   try {
     for (const A of REC.apps) {

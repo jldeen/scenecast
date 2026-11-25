@@ -17,10 +17,12 @@
   const push = ev => { ev.t = Date.now(); ev.seq = ++R.seq; ev.url = location.href.split('#')[0].split('?')[0]; R.q.push(ev); save(); };
   R.drain = () => { const q = R.q; R.q = []; save(); return q; };
   // A page being left (a click or Enter that loads a new page): the driver waits for the new one instead of taking the
-  // old page, unchanged until then, as what the action led to.
-  R.leaving = false;
-  addEventListener('beforeunload', () => { R.leaving = true; });
-  addEventListener('pagehide', () => { R.leaving = true; });
+  // old page, unchanged until then, as what the action led to. leavingAt: when, so a leave from an earlier action
+  // that never happened (a download link, a link answering 204, mailto:) doesn't count for a later one.
+  R.leaving = false; R.leavingAt = 0;
+  const leave = () => { R.leaving = true; R.leavingAt = Date.now(); };
+  addEventListener('beforeunload', leave);
+  addEventListener('pagehide', leave);
   addEventListener('pageshow', e => { if (e.persisted) R.leaving = false; });
 
   // ---- matchers (the same rules as the replica shell's matches()/findEl()) -------------------------------------

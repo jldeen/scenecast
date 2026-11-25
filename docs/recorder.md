@@ -92,6 +92,13 @@ old page isn't taken as what the action led to; the recorder waits for the new d
 puts its page script there, and settles on it. A sweep that finds no page script puts it in and reads again, and one
 that still can't run says so in the log and the recording's notes.
 
+A page can say it's being left and stay: a download link, a link that answers 204, `mailto:` or another app's link,
+or a navigation that's cancelled. It used to keep the mark, so the recorder waited the whole `navWaitS` on that click,
+and again on every later step on the page. Now a mark from before the action doesn't count for it, and the recorder
+watches the main frame's loads (the DevTools protocol's `Page.frameStartedLoading` and `Page.frameStoppedLoading`): a
+load that stopped with the same document still there, or no load at all within 3 s, ends the wait. The log says so
+("left the page, but no new page came"), and the click settles on the page as it is.
+
 ### Checkpoint and resume
 
 The recording is checkpointed to the receiver after every step (`raw/recording-partial.json`). MV3 lets the browser

@@ -120,6 +120,8 @@ const CDPX = (() => {
       this._frames = new Map(); this._ctx = new Map();
       this._main = null; this._pos = { x: 0, y: 0 }; this._buttons = 0; this._mods = 0;
       this.net = new Map(); this.netAt = Date.now();
+      // Listeners from newCDPSession(...).on (the recorder's watch on the main frame's loads).
+      this._listen = new Set();
       this.mouse = {
         move: (x, y, o = {}) => this.mouseMove(x, y, o.steps || 1),
         down: (o = {}) => this.mouseButton('mousePressed', o.button || 'left', o.clickCount || 1),
@@ -180,6 +182,7 @@ const CDPX = (() => {
       return f;
     }
     onEvent(sessionId, method, p) {
+      for (const l of this._listen) if (l.method === method && l.sessionId === sessionId) { try { l.fn(p); } catch (e) {} }
       switch (method) {
         case 'Page.frameAttached': this.addFrame({ id: p.frameId }, (this._frames.get(p.frameId) || {}).sessionId || sessionId, p.parentFrameId); break;
         case 'Page.frameNavigated': this.addFrame(p.frame, sessionId, p.frame.parentId); break;
@@ -296,7 +299,12 @@ const CDPX = (() => {
     async newCDPSession(target) {
       const page = target instanceof Frame ? target.page : target, sessionId = target instanceof Frame ? target.sessionId : undefined;
       await page.attach();
-      return { send: (m, p) => page.cmd(sessionId, m, p), detach: async () => {} };
+      const mine = [];
+      return {
+        send: (m, p) => page.cmd(sessionId, m, p),
+        on: (method, fn) => { const l = { sessionId, method, fn }; page._listen.add(l); mine.push(l); },
+        detach: async () => { for (const l of mine) page._listen.delete(l); },
+      };
     },
     // The tab the presenter is looking at.
     async activePage() { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return t && tabs.get(t.id); },
