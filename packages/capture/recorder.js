@@ -398,8 +398,12 @@ async function recAuto(A) {
   REC.autoDone.add(state);
   const p = A.page, t0 = Date.now(), did = [];
   await p.bringToFront();
-  const f = await p.mainFrame().evaluate(sel => window.__rkrec ? window.__rkrec.features(sel) : null, REC.opts.groups.button).catch(() => null);
-  if (!f) return;
+  const feat = () => p.mainFrame().evaluate(sel => window.__rkrec ? window.__rkrec.features(sel) : null, REC.opts.groups.button).catch(() => null);
+  let f = await feat();
+  // A page loaded since the page script went in (a click that loads a new page): put it there and read again; a
+  // screen whose sweep can't run says so.
+  if (!f) { await recInstall(p); f = await feat(); }
+  if (!f) { rlogr(`auto ${state}: the page couldn't be read, so its side states weren't swept`); REC.notes.push(`${state}: its side states weren't swept (the page couldn't be read); record side hovers on it if it matters`); return; }
   const kinds = recSeen('kinds', A.id), newKind = !kinds.has(f.kind); kinds.add(f.kind);
   const run = async (kind, c = {}) => {
     // One budget for the whole screen (the presenter waits for it): each kind gets what's left, and zoom, which can't

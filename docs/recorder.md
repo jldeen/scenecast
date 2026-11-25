@@ -85,10 +85,12 @@ Side states are swept in the presenter's tab, not in parallel hidden tabs: a bac
 browser doesn't paint and its timers are throttled to about a second, so hovers, layouts that follow the window
 size, and animations would come out wrong there.
 
-A click or Enter that loads a new page (not an in-page route) leaves the old page on screen, unchanged, until the new
-one comes; on a slow app or computer that's longer than the settle time. The page script marks a page being left, so
-the recorder doesn't take the old page as what the action led to: it waits for the new document (up to `navWaitS`,
-30 s), puts its page script there, and settles on the new page, which then gets its screen and its sweep.
+A click or Enter that loads a new page (not an in-page route), once the recorder has taken it from the page, brings the
+new page during the click's capture, without the recorder's page script: its screen was saved, but its sweep found
+nothing to read and was skipped without a word (macOS, Nov 25). The page script now marks a page being left, so the
+old page isn't taken as what the action led to; the recorder waits for the new document (up to `navWaitS`, 30 s),
+puts its page script there, and settles on it. A sweep that finds no page script puts it in and reads again, and one
+that still can't run says so in the log and the recording's notes.
 
 ### Checkpoint and resume
 
