@@ -503,19 +503,19 @@ test('words a screen\'s captures show differently (a greeting each visit) never 
   assert.notEqual(plan.beats[0].steps[1].lands.text, 'New chat');
 });
 
-test('the approval is the plan\'s exact text: an edit needs approving again', () => {
+test('the approval is the plan\'s exact text: an edit needs approving again', async () => {
   const demo = demoDir();
   writeFileSync(join(demo.dir, 'plan.md'), '# T\n\n## Beat 1 · A\n\n- Click "Save" — ask first\n  Writes: saves it\n');
   assert.equal(approval(demo).approved, false);
-  assert.deepEqual(approve(demo).writes.map(w => w.text), ['Click "Save"']);
+  assert.deepEqual((await approve(demo)).writes.map(w => w.text), ['Click "Save"']);
   assert.equal(approval(demo).approved, true);
   writeFileSync(join(demo.dir, 'plan.md'), readFileSync(join(demo.dir, 'plan.md'), 'utf8').replace('Save"', 'Save all"'));
   assert.equal(approval(demo).approved, false);
   // Unattended needs it all approved: the plan, reset.md's steps that change the tenant, and the list's hash.
-  approve(demo);
+  await approve(demo);
   writeFileSync(join(demo.dir, 'reset.md'), '# Reset: T\n\n## Undo · Admin center\n\n- Go to admin\n- Click "Delete it"\n  Undoes: beat 1, Click "Save all"\n');
   assert.deepEqual([approval(demo).approved, approval(demo).full], [true, false]);
-  const a = approve(demo);
+  const a = await approve(demo);
   assert.deepEqual([a.reset.map(r => r.text), approval(demo).full], [['Click "Delete it"'], true]);
   writeFileSync(join(demo.dir, 'reset.md'), readFileSync(join(demo.dir, 'reset.md'), 'utf8').replace('Delete it', 'Delete all'));
   assert.deepEqual([approval(demo).approved, approval(demo).full, approval(demo).why], [true, false, 'reset.md changed since it was approved']);
@@ -550,7 +550,7 @@ test('the reset a capture pass runs: undo groups by what they undo; a check it c
     ['chat', ['Delete "kestrel-note"'], ['beat 1, Click "Save: Save note"']],
     ['chat', ['Delete the task it made ("Kestrel delay answer")'], ['beat 1, Press Enter']],
   ]);
-  const screen = { words: 'Plugin admin 17 curated here', items: [{ role: 'switch', name: 'Sync', checked: false }, { role: 'tab', name: 'Notes', checked: true }], light: true };
+  const screen = { text: 'Plugin admin 17 curated here', controls: [{ role: 'switch', name: 'Sync', on: false }, { role: 'radio', name: 'Chat', on: false }, { role: 'radio', name: 'Notes', on: true }], theme: 'light' };
   const verdicts = ['shows "17 curated here"', 'shows "18 curated here"', '"Sync" is off', '"Sync" is on', '"Notes" is picked (Chat | Notes)', 'renders light', 'no "kestrel-note"', 'no endorsement'].map(c => checkClaim(c, screen).ok);
   assert.deepEqual(verdicts, [true, false, true, false, true, true, true, false]);
 });

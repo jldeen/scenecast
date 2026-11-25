@@ -40,6 +40,7 @@ const KNOWN = [
   ['/Users/j/Documents/Act 1 talk track.docx: there\u2019s no such file', 'script-file-gone'],
   ['/Users/j/Documents/notes.docx: there\'s no such file', 'script-file-gone'],
   ['notes.docx: no lines to say in it (a table with a Say column, > quotes, \u201cquoted\u201d lines, or Say: lines)', 'script-no-lines'],
+  ['reset.md has 2 checks a run can\'t check: "tasks: everything is fine" (can\'t check "everything is fine" on its own). Make the reset again (ai reset), or fix those lines', 'reset-unchecked'],
   ['make the plan first', 'plan-first'],
   ['build the demo first: the finish needs its screens', 'build-first'],
   ['the script is empty', 'script-empty'],

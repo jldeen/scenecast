@@ -345,9 +345,10 @@ capture pass runs it before and after a run: Undo, then Set first, then Check. D
 - Click "More actions for supplier-delay"
   Undoes: beat 2, Click "Save"
 - Click "Delete"
-- You: delete the task "Supplier delay" from Recent
+- Undo with the app pack: chat-app:new-task
   Undoes: beat 3, Press Enter; beat 1, Press Enter
-  Note: do these steps 2 times, once for each
+  Names: "Supplier delay"
+  Note: do these steps 2 times, once for each; if it can't: You: delete the task "Supplier delay" from Recent
 
 ## Set first
 
@@ -398,8 +399,11 @@ capture pass runs it before and after a run: Undo, then Set first, then Check. D
   private pack's API undo, named and not written out (its host and IDs stay in the pack): the capture pass calls it in
   its own signed-in session, its `{placeholders}` filled from the demo's values (demo.json `apps[].values`: which
   plugin, which section), else from what its run made (`{taskId}`, `{skill}`), and the `Note:` has the steps by hand
-  for when it can't. What a run leaves besides its writes (saved memories) is undone only when its check finds
-  something.
+  for when it can't. `Names:` are what the script's writes made, by name, as the captures show them (a task's title,
+  a skill's name): with nothing a run recorded (the reset before), the pack's `find` looks them up and the undo runs
+  for each one found, by its id. Only those names, as approved (`Find by name: …` on the approval), and never one the
+  recording's start screen shows too (one the demo may keep). Anything else that differs is reported, never deleted.
+  What a run leaves besides its writes (saved memories) is undone only when its check finds something.
 - **Set first**: the state the demo starts in, as the first screen that shows each thing has it, in the plan's order:
   what's switched on or off, the option picked (Chat | Cowork), and the theme. `Set:` is the control that changes it
   and the app pack's write for it (only when the pack knows one), `Opens:` where, `Seen:` the screen it's read from.
@@ -420,13 +424,32 @@ capture pass runs it before and after a run: Undo, then Set first, then Check. D
   (above). The review lists it under **Left out of your replica**, by the words the screens show.
 - **Check**: read-only. Each line is something the screen shows, and none of them clicks anything that changes. With
   the writes' checks come the start state's (`From: start: …`): the settings above, versions ("is version 1.4.9"),
-  what a list of switches holds, the theme each app renders in, and what the demo points at on an app's first screen
-  (not words its captures show differently, like a greeting that changes on each visit). `<app> on <screen>:` names
-  the screen a check is read on, when Scenecast knows it (where a start state was seen, an app's first screen); the
-  capture pass gets there by the plan's read-only steps. Without it, the check reads the app as the run finds it.
-- **Needs you**: what the reset can't do on its own (an undo by hand, or one nobody has tried yet), and a state that a
-  later screen shows changed with no step of the plan between, when the app pack can't set it: a run can't show it
-  until the plan has that step.
+  what a list of switches holds (by its items: a count in its heading changes with them), the theme each app renders
+  in, and what the demo points at on an app's first screen (not words its captures show differently, like a greeting
+  that changes on each visit). `<app> on <screen>:` names the screen a check is read on, when Scenecast knows it
+  (where a start state was seen, an app's first screen). Without it, the check reads the app's start.
+
+  **How a machine reads one** (`packages/ai/check-lines.mjs`, one rule for `ai reset`, approve, `ai check`, a live
+  walk and the run). A line from an app pack's check (`From: beat N` or `From: <pack>: <effect>`) is read as the
+  pack says: its page (`open`, or navigation `steps` from the app's start), the words that prove that page (`lands`)
+  and its `look`: `absent` (none of the names on the page), `text` (shown), `rows` (a label's rows, only those the
+  recording's start screen has) or `box` with `equals` (a box holds exactly that text). Its `{placeholders}` come
+  from what the plan's writes make (the recording's task title, skill name, what was typed) and the demo's values
+  (demo.json `apps[].values`: the custom instructions' text). Any other line is a claim in one of the forms above:
+  `shows "…"`, `no "…"`, `"…" is on/off`, `"…" is picked (…)`, `"…" lists …`, `… is version …`, `renders
+  light/dark`, read on its screen as its start state was read from the recording. Its screen is reached from the app's
+  start by the plan's own steps there: navigation only (a click, a hover, a scroll, a wait, a search), the last one
+  proving the screen; never through a write. Each line reads **pass**, **wrong** or **can't** (the screen doesn't say:
+  no such switch, no version on the page, a box's text longer than a read keeps). A line a machine can't check at all
+  goes under Needs you when `ai reset` makes the file, and approve refuses a reset that has one.
+
+  Before a run, a line it **can't** read stops the run as itself (kind `check`, with a picture), and nothing is
+  undone. Undos run only for lines read and found **wrong**, and only theirs: a write's (`From: beat N`), a pack
+  effect's and the writes it's left by (its `leftOf`), none for a start state (Set first sets it), all of them for a
+  line that doesn't say where it's from.
+- **Needs you**: what the reset can't do on its own (an undo by hand, or one nobody has tried yet), a state that a
+  later screen shows changed with no step of the plan between, when the app pack can't set it (a run can't show it
+  until the plan has that step), and a check a run can't check, with why.
 
 Names come from the captures (the task's title, the skill's name). Copilot can name things differently on each run,
 so the capture pass fills in what its own run made.

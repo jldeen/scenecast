@@ -275,6 +275,10 @@ export function checkPack(p) {
       if (what === 'writes' && w.undo === undefined) out.push(`${at}: undo (steps, api, or null with irreversible: true or a note)`);
       if (!w.check) out.push(`${at}: check (read-only)`);
       for (const s of ((w.check || {}).steps || [])) if (WRITE_WORDS.test(s)) out.push(`${at}: check step "${s}" could change something; checks only look`);
+      const lk = (w.check || {}).look;
+      if (lk && !(lk.absent || lk.text || lk.rows || lk.sel || (lk.box && lk.equals))) out.push(`${at}: check look is absent, text, rows, sel, or box with equals`);
+      const fd = (w.undo || {}).find;
+      if (fd && (!fd.use || !fd.path || !fd.list || !fd.name || !fd.id || !fd.as || !fd.by)) out.push(`${at}: undo find needs use, path, list, name, id, as (the placeholder it fills) and by (what the script made: task, skill)`);
       if (w.undo && w.undo.api && !w.undo.api.use) out.push(`${at}: undo.api.use names an api (apis.<name>) whose host comes from the browser's own requests`);
     }
   }

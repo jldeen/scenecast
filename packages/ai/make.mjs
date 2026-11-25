@@ -14,6 +14,7 @@ import { planFromTrack } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset, leaveOutSection } from './reset.mjs';
 import { fallbackSteps, undoGroups } from './reset-run.mjs';
+import { checkable, checkValues } from './check-lines.mjs';
 import { readTalkTrack, talkTrackText } from '@scenecast/script/talk.mjs';
 import { aiDir } from './run.mjs';
 
@@ -96,6 +97,8 @@ export function resetSteps(resetText) {
   // An API undo's Note can give steps for when it can't run: they're listed too, so they run only as approved.
   for (const g of undoGroups(resetText)) for (const s of g.steps) if (s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) {
     for (const t of fallbackSteps(g.note)) out.push({ part: 'undo', app: g.title, of: s.text, text: t, fallback: true });
+    // With nothing a run recorded (the reset before), the script's own leftovers found by these names and undone.
+    if ((g.names || []).length) out.push({ part: 'undo', app: g.title, of: s.text, text: `Find by name: ${g.names.map(x => `"${x}"`).join(', ')}`, byName: g.names });
   }
   r.set.forEach((x, i) => out.push({ part: 'set', n: i, text: x.what, set: x.set || null }));
   // Set before: off camera, just before its step, an approved write too (listed only when reset.md has them).
@@ -103,8 +106,21 @@ export function resetSteps(resetText) {
   return out;
 }
 const listSha = (writes, reset) => sha(JSON.stringify({ writes, reset }));
-export function approve(demo) {
+// reset.md's Check lines a run can't check (check-lines.mjs checkable): [{ text, why }].
+export async function uncheckable(demo, { packs, resetText = null, plan = null } = {}) {
+  const rt = resetText !== null ? resetText : (existsSync(join(demo.dir, RESET)) ? readFileSync(join(demo.dir, RESET), 'utf8') : '');
+  if (!rt) return [];
+  plan = plan || parsePlan(readFileSync(join(demo.dir, PLAN), 'utf8'));
+  packs = packs === undefined ? await loadPacks(demo) : packs;
+  const walker = (() => { try { return walkerFromDemo(demo); } catch (e) { return null; } })();
+  const ctx = { plan, packs, cfg: demo.cfg, walker, values: checkValues({ plan, walker, cfg: demo.cfg }), appIds: (demo.cfg.apps || []).map(a => a.id) };
+  return parseReset(rt).checks.map(c => ({ text: `${c.app}${c.screen ? ` on ${c.screen}` : ''}: ${c.text}`, r: checkable(c, ctx) })).filter(x => !x.r.ok).map(x => ({ text: x.text, why: x.r.why }));
+}
+// Refused when a Check line can't be checked: a run would stop at it, after she's said go.
+export async function approve(demo, { packs } = {}) {
   const { text, writes, resetText, reset, leaveOut } = writeList(demo);
+  const bad = await uncheckable(demo, { packs, resetText: resetText || '' });
+  if (bad.length) throw new Error(`reset.md has ${bad.length === 1 ? 'a check' : `${bad.length} checks`} a run can't check: ${bad.map(b => `"${b.text}" (${b.why})`).join('; ')}. Make the reset again (ai reset), or fix those lines`);
   const a = { at: new Date().toISOString(), sha256: sha(text), writes, ...(resetText ? { reset256: sha(resetText), reset } : {}), ...(leaveOut.length ? { leaveOut } : {}), list256: listSha(writes, reset) };
   mkdirSync(aiDir(demo), { recursive: true });
   writeFileSync(join(aiDir(demo), 'approved.json'), JSON.stringify(a, null, 1) + '\n');
@@ -137,6 +153,12 @@ export async function writeReset(demo, { packs } = {}) {
   const r = resetFor(plan, { walker: walkerFromDemo(demo), packs });
   // Her Leave out, word for word: it's hers, not the generator's.
   r.leaveOutText = leaveOutSection(was);
+  // A check a run can't check isn't one: it's listed for her instead.
+  const walker = (() => { try { return walkerFromDemo(demo); } catch (e) { return null; } })();
+  const ctx = { plan, packs, cfg: demo.cfg, walker, values: checkValues({ plan, walker, cfg: demo.cfg }), appIds: (demo.cfg.apps || []).map(a => a.id) };
+  const keep = [];
+  for (const c of r.checks) { const k = checkable(c, ctx); if (k.ok) keep.push(c); else r.needs.push({ kind: 'check', text: `Check "${c.app}${c.screen ? ` on ${c.screen}` : ''}: ${c.text}" can't be checked by a run: ${k.why}` }); }
+  r.checks = keep;
   const text = formatReset(r);
   writeFileSync(rf, text);
   return { text, reset: r };

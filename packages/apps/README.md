@@ -97,8 +97,13 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
 - `check`: read-only (`steps` may only look; `checkPack` refuses a check step that could change something). A
   private pack's `check.api` (GET) can say what it answers once the write ran: `made`, a status (`"200"`) or the
   number and true/false fields it names (`{ "stage": [1, 2] }`). An unattended run makes that check right after the
-  write, in the app's own session; passing, the write's landing is strong.
-- `effects`: what a run leaves besides its writes (memories, tasks in Recent), each with a check.
+  write, in the app's own session; passing, the write's landing is strong. A reset's Check line from a check is read
+  by its `look` (docs/engine/plan-format.md, "How a machine reads one"): `absent`, `text`, `rows` (a label's rows,
+  only those the recording's start screen has) or `box` with `equals`, on its page (`open`, or navigation `steps`
+  from the app's start), proven by `lands` (words on that page; an `absent` look needs them). A check with only
+  `expect` words isn't one a run can read: `ai reset` lists its line under Needs you.
+- `effects`: what a run leaves besides its writes (memories, tasks in Recent), each with a check; `leftOf`: the
+  writes whose leftovers it is (a wrong line from it runs their undos too).
 - `safe`: clicks that look like writes but only open a picker or a menu (Microsoft IQ's "Add content to …" opens the
   add picker; "Add to business plugin" is the write). `checkPack` holds each to that: `on` is a click, `what` says it
   "only opens" a picker or menu, it's never a sign-in or account control, and no write in the pack has the same step.
@@ -193,7 +198,11 @@ with `apis.<name>` naming the page that signs in (`open`), the host (`host`, or 
 around it calls that host too, the frame's host whose calls to use (`from`: IQ's Power BI frame, not its portal); the
 capture pass calls it from that page or frame, with the Authorization it sends, held in memory for the one call. A
 `check.api` GET runs the same way, with the guard as it is. A path's `{placeholders}` are one segment each, filled from the demo's `apps[].values` (its IDs)
-and the run's results. Packs never hold credentials or tokens (`checkPack` refuses them).
+and the run's results. An API undo's `find` (`{ use, path, list, name, id, as, by, where? }`, a GET) lets the reset
+before undo the script's own leftovers with nothing a run recorded: the items of the answer's `list` whose `name`
+is one of the reset's `Names:` (what the writes made, `by`: `task`, `skill`), and whose `where` fields match,
+each undone with its `id` as `{<as>}`. Only their ids leave the page. Packs never hold credentials or tokens
+(`checkPack` refuses them).
 
 ## Private packs
 

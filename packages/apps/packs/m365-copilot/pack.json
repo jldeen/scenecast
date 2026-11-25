@@ -190,6 +190,9 @@
       },
       "check": {
         "open": "https://copilot.cloud.microsoft/home",
+        "look": {
+          "rows": "Recent"
+        },
         "expect": "Recent has no task from the run, other than the ones the demo keeps."
       }
     },
@@ -231,7 +234,8 @@
         "look": {
           "absent": "{skill}"
         },
-        "expect": "Added doesn't list the skill."
+        "expect": "Added doesn't list the skill.",
+        "lands": "Added ("
       }
     },
     {
@@ -316,8 +320,14 @@
       "what": "Every prompt in a new task leaves a task in Recent",
       "check": {
         "open": "https://copilot.cloud.microsoft/home",
+        "look": {
+          "rows": "Recent"
+        },
         "expect": "Recent holds only the tasks the demo keeps."
-      }
+      },
+      "leftOf": [
+        "new-task"
+      ]
     },
     {
       "id": "memories",
@@ -334,9 +344,13 @@
         "steps": [
           "Click \"Settings and more\"",
           "Click \"Settings\"",
-          "Click \"Personalization\""
+          "Click \"Personalization\"",
+          "Click \"Manage Saved memories\""
         ],
-        "expect": "No saved memories from the run (Copilot or Cowork)."
+        "look": {
+          "text": "Copilot hasn't captured any memories yet"
+        },
+        "expect": "No saved memories from the run (Copilot's saved memories; Cowork's aren't on this screen)."
       }
     },
     {
@@ -346,8 +360,13 @@
         "steps": [
           "Click \"Settings and more\"",
           "Click \"Settings\"",
-          "Click \"Personalization\""
+          "Click \"Personalization\"",
+          "Click \"Manage Customize Copilot\""
         ],
+        "look": {
+          "box": "custom instructions",
+          "equals": "{instructions}"
+        },
         "expect": "The custom instructions match the demo's text exactly."
       }
     },

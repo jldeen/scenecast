@@ -87,7 +87,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
     };
     const inv = fromPack(w, ctx, packs) || inverseOf(w, ctx);
     if (inv.needs) out.needs.push({ beat: w.beat, text: inv.needs });
-    if (inv.undo.length) out.undo.push({ app: w.app, steps: inv.undo, undoes: `beat ${w.beat}, ${w.text}`, note: inv.note || null });
+    if (inv.undo.length) out.undo.push({ app: w.app, steps: inv.undo, undoes: `beat ${w.beat}, ${w.text}`, note: inv.note || null, names: inv.names || [] });
     for (const c of inv.check) out.checks.push({ app: w.app, text: c, from: `beat ${w.beat}` });
   }
   // What a run leaves besides its writes (the app's pack: tasks in Recent, saved memories), with their checks.
@@ -184,6 +184,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
     const k = `${u.app}|${u.steps.join('|')}`, was = undone.get(k);
     if (!was) { undone.set(k, u); return true; }
     was.undoes += `; ${u.undoes}`; was.times = (was.times || 1) + 1;
+    was.names = [...new Set([...(was.names || []), ...(u.names || [])])];
     return false;
   });
   out.appTitle = appTitle;
@@ -207,6 +208,9 @@ function fromPack(w, ctx, packs) {
     const from = [...new Set((JSON.stringify(undo.api).match(/\{(\w+)\}/g) || []).map(x => x.slice(1, -1)))];
     const byHand = out.undo.length ? `if it can't: ${out.undo.join(' › ')}` : null;
     out.undo = [`Undo with the app pack: ${pack.id}:${pw.id}`];
+    // Its find (the reset before, with nothing a run recorded): the script's own leftovers by name, as the captures
+    // show what the write made.
+    if (undo.find && undo.find.by && known[undo.find.by]) out.names = [known[undo.find.by]];
     // Its {placeholders} come from the demo's own values first (demo.json apps[].values: which plugin, which section),
     // then from what the run made.
     out.note = [`an API call in the capture browser's own signed-in session${from.length ? `, with ${list(from.map(x => `{${x}}`))} from the demo's values (demo.json, apps[].values), else from the run` : ''}`, byHand].filter(Boolean).join('; ');
@@ -225,7 +229,7 @@ function startText(f) {
   if (f.kind === 'toggle') return `"${f.subject}" is ${f.value}`;
   if (f.kind === 'choice') return `"${f.value}" is picked (${f.subject})`;
   if (f.kind === 'version') return `${f.subject} is version ${f.value}`;
-  if (f.kind === 'list') return `"${f.subject}" lists ${list(f.value.split(', '))}`;
+  if (f.kind === 'list') return `"${f.subject.replace(/\s*\(\d+\)$/, '')}" lists ${list(f.value.split(', '))}`;
   if (f.kind === 'theme') return `renders ${f.value}`;
   return `${f.subject}: ${f.value}`;
 }
@@ -247,6 +251,7 @@ export function formatReset(r) {
       out.push(`- ${s}`);
       if (i) return;
       out.push(`  Undoes: ${u.undoes}`);
+      if ((u.names || []).length) out.push(`  Names: ${u.names.map(x => `"${x}"`).join(', ')}`);
       const note = [u.times > 1 ? `do these steps ${u.times} times, once for each` : null, u.note].filter(Boolean).join('; ');
       if (note) out.push(`  Note: ${note}`);
     });
@@ -276,7 +281,7 @@ export function formatReset(r) {
   }
   if (r.needs.length) {
     out.push('## Needs you', '');
-    for (const n of r.needs) out.push(`- Beat ${n.beat}: ${n.text}`);
+    for (const n of r.needs) out.push(n.beat ? `- Beat ${n.beat}: ${n.text}` : `- ${n.text}`);
     out.push('');
   }
   return out.join('\n');

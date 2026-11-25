@@ -80,11 +80,12 @@ mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
 // apiPath: new-task's API undo (as a private pack's), on the page's own session; null: none. notesApi: pin-note's, on
 // the notes frame's session.
 // filters: Leave out's two kinds, a response's list (Suggested, ordered by refs) and a list the page draws from its own
-// store (Teams).
-const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+// store (Teams). taskLook: new-task's check as a machine reads it (a look, its page's words); find: its API undo finds
+// the script's own tasks by name when no run recorded them.
+const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false, taskLook = false, find = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
-    { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}) }, ...(taskCheck ? { check: { api: { use: 'tasks', method: 'GET', path: '/api/tasks', made: 200 } } } : {}) },
+    { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}), ...(find ? { find: { use: 'tasks', path: '/api/tasks', list: 'tasks', name: 'name', id: 'id', as: 'taskId', by: 'typed' } } : {}) }, ...(taskCheck ? { check: { api: { use: 'tasks', method: 'GET', path: '/api/tasks', made: 200 } } } : {}), ...(taskLook ? { check: { open: `http://${HOST}/`, look: { absent: '{typed}' }, lands: 'Tasks', expect: 'No task the run added.' } } : {}) },
     { id: 'delete-task', what: 'Deletes a task', on: { kind: 'click', target: '/^Delete /' }, undo: null },
     { id: 'sync', what: 'Turns Sync on or off', on: { kind: 'switch', target: 'Sync' }, undo: { same: 'sync' } },
     { id: 'pin-note', what: 'Pins the note', on: { kind: 'click', target: 'Pin note' }, undo: { steps: ['Click "Unpin note"'], ...(notesApi ? { api: { use: 'notes', method: 'POST', path: '/api/unpin' } } : {}) }, check: { api: { use: 'notes', method: 'GET', path: '/api/note', made: { pinned: true } } } },
@@ -295,6 +296,59 @@ try {
   writePack();
   writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
   writeFileSync(join(DEMO, 'reset.md'), RESET);
+
+  // 1e2 · reset.md's Check read as a machine reads it (check-lines.mjs): live and read-only (`ai check`, and a walk's
+  // start), each line pass, wrong or can't, with a picture; a pack check through its look (what was typed, filled from
+  // the plan), and a screen through the plan's own navigation. approve refuses a line it can't check. A run stops at a
+  // line it can't read as itself, with nothing undone; the reset before finds the script's own leftovers by name.
+  {
+    const CK_PLAN = PLAN('').replace('  Lands on: "No tasks yet"', '  Lands on: tasks-home · "No tasks yet"').replace('  Lands on: "Task saved: Call Kestrel"', '  Lands on: tasks-saved · "Task saved: Call Kestrel"').replace('- Click "Refresh"\n  Lands on: "Up to date: 1 task"', '- Go to tasks\n- Click "Refresh"\n  Lands on: tasks-fresh · "Up to date"');
+    const CK_LINES = ['- tasks: shows "No tasks yet"', '- tasks: "Sync" is on', '- tasks: No task the run added\n  From: beat 1', '- tasks on tasks-fresh: shows "Up to date: 0 tasks"', '- tasks: everything is fine', '- tasks on tasks-saved: shows "Task saved: Call Kestrel"'];
+    const CK_RESET = RESET.replace(/## Check\n[\s\S]*$/, `## Check\n\n${CK_LINES.join('\n')}\n`);
+    writePack({ taskLook: true });
+    writeFileSync(join(DEMO, 'plan.md'), CK_PLAN); writeFileSync(join(DEMO, 'reset.md'), CK_RESET);
+    tasks.seed({ tasks: [], sync: false });
+    tasks.log.length = 0;
+    const ck = await aiProc(['check', '--demo', DEMO], DEMO, E);
+    const cj = (() => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'check.json'), 'utf8')); } catch (e) { return null; } })();
+    const st = cj ? cj.lines.map(l => l.status) : [];
+    check('ai check: each Check line read live, pass, wrong or can\'t; a pack check through its look, a screen through the plan\'s navigation', ck.code === 0 && JSON.stringify(st) === JSON.stringify(['pass', 'wrong', 'pass', 'pass', 'cant', 'cant']) && /"Sync" is off/.test(cj.lines[1].why) && /can't check "everything is fine"/.test(cj.lines[4].why) && /which writes/.test(cj.lines[5].why), JSON.stringify({ code: ck.code, err: ck.err.slice(-800), lines: cj && cj.lines }));
+    check('and read-only, with a picture of each screen read: nothing reached the server but reads (Refresh\'s POST held)', cj && cj.lines.filter(l => l.status !== 'cant').every(l => l.picture && existsSync(l.picture)) && !tasks.log.some(l => /^(POST \/api\/(tasks|sync|refresh)|DELETE)/.test(l)) && tasks.state().refreshes === 0, JSON.stringify({ log: tasks.log.filter(l => !l.startsWith('GET')), pics: cj && cj.lines.map(l => l.picture) }));
+    const wk = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
+    const wj = (() => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')); } catch (e) { return {}; } })();
+    check('a live walk reads the Check first, as the run does', wk.code === 0 && wj.check && JSON.stringify(wj.check.lines.map(l => l.status)) === JSON.stringify(st), JSON.stringify({ code: wk.code, check: wj.check && wj.check.lines.map(l => [l.text, l.status]) }));
+    const ap = await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    check('approve refuses a Check line a run can\'t check, before she\'s asked', ap.code !== 0 && /2 checks a run can't check/.test(ap.out) && /everything is fine/.test(ap.out) && /tasks-saved/.test(ap.out), ap.out.slice(-800));
+    // A line approve can check but the run can't read (no such switch today): the run stops at it, as itself, with its
+    // picture; the leftover a wrong line found stays, for nothing is undone.
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET.replace('- tasks: "Sync" is off\n- tasks: shows', '- tasks: "Sync" is off\n- tasks: "Turbo" is on\n- tasks: shows'));
+    const ap2 = await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    tasks.seed({ tasks: ['Call Kestrel'], sync: false });
+    tasks.log.length = 0;
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    rj = readRun(DEMO);
+    const sp = rj.stopped || {};
+    check('a line the run can\'t read stops it as itself, with its picture, and nothing is undone', ap2.code === 0 && sp.kind === 'check' && sp.stage === 'reset-before' && /no switch for "Turbo"/.test(sp.why) && sp.picture && existsSync(sp.picture) && !tasks.log.some(l => /^DELETE/.test(l)) && tasks.state().tasks.length === 1 && (rj.needsYou || []).some(n => /Turbo/.test(n.text)) && !(rj.reset.before.undo || []).length, JSON.stringify({ ap2: ap2.code, stopped: sp, undo: rj.reset.before && rj.reset.before.undo, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+    // The reset before, with nothing a run recorded: the script's own leftovers found by name through the pack and
+    // undone by their ids; another task stays.
+    writePack({ apiPath: '/api/{list}/{taskId}', find: true });
+    setValues({ list: 'tasks' });
+    const FIND_PLAN = PLAN('').replace('Lands on: "No tasks yet"', 'Lands on: "Sync is off"').replace('"Up to date: 1 task"', '"Up to date"');
+    const FIND_RESET = `# Reset: Tasks demo\n\n## Undo · Tasks\n\n- Go to tasks\n- Undo with the app pack: fixture-tasks:new-task\n  Undoes: beat 1, Press Enter\n  Names: "Call Kestrel"\n  Note: an API call in the capture browser's own signed-in session, with {taskId} from the run; if it can't: Click "Delete {typed}"\n\n## Set first\n\n- tasks: "Sync" is off\n  Set: "Sync" · fixture-tasks:sync\n\n## Check\n\n- tasks: no "Call Kestrel"\n  From: beat 1\n- tasks: "Sync" is off\n`;
+    writeFileSync(join(DEMO, 'plan.md'), FIND_PLAN); writeFileSync(join(DEMO, 'reset.md'), FIND_RESET);
+    const ap3 = json((await run(['ai', 'approve', '--demo', DEMO], { env: E })).out);
+    tasks.seed({ tasks: ['Call Kestrel', 'Buy milk', 'Call Kestrel'], sync: false });
+    tasks.log.length = 0;
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    rj = readRun(DEMO);
+    const bDid = ((rj.reset.before || {}).did || []).join(' | ');
+    check('the reset before finds the script\'s own leftovers by name, as approved, and undoes only those', (ap3.reset || []).some(r => r.text === 'Find by name: "Call Kestrel"') && rj.reset.before && rj.reset.before.ok && (bDid.match(/\(found by name\) \(DELETE, 200\)/g) || []).length === 2 && !rj.stopped && rj.reset.after && rj.reset.after.ok && count(tasks.log, 'DELETE /api/tasks/{id}') === 3 && JSON.stringify(tasks.state().tasks.map(t => t.name)) === '["Buy milk"]', JSON.stringify({ approved: ap3.reset, before: rj.reset.before, stopped: rj.stopped, after: rj.reset.after && rj.reset.after.why, state: tasks.state().tasks, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+    setValues(undefined);
+    tasks.seed({ tasks: [], sync: false });
+    writePack();
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  }
 
   // 1f · A service the app needs: not answering as the app first opens (no status at all), the run stops before the
   // reset before: nothing captured, nothing written, what an earlier run left still there ("try again later"); failing

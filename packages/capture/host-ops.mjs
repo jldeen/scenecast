@@ -20,7 +20,10 @@
 //                                   (cards.mjs): cards: { <text>: the row's name | null }, shown: what its list holds.
 //                                   keep: a local folder its answers' bodies are written to (a person's check only)
 //   capAuthWatch({ host | hostPattern, from? } | { off: true })   arm (or disarm) catching the app's own session
-//   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick, armed? })
+//   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick, find?, armed? })
+//                                   find ({ list, name, id, names, where? }, a GET's only): the ids of the answer's list
+//                                   items whose name is exactly one of names (and whose where fields match), never
+//                                   their text: a reset's undo of the script's own leftovers by name
 //                                   a pack's API check (GET, HEAD: the guard as it is; only pick's number and true/false
 //                                   fields come back) or API undo in the app's own signed-in session (from: the
 //                                   frame's host whose calls it takes the session from, and calls from): its page opened (a read), the
@@ -279,18 +282,26 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
         const frame = (auth.from && p.frames().find(f => originOf(f.url()) === auth.from)) || (c.from ? null : p.mainFrame());
         if (!frame) return { ok: false, why: `no frame from ${c.from} to call from` };
         // A check's answer: its status, and only the number and true/false fields it names (pick), never text.
-        const call = () => frame.evaluate(async ({ url, method, auth, body, pick }) => {
+        const call = () => frame.evaluate(async ({ url, method, auth, body, pick, find }) => {
           try {
             const res = await fetch(url, { method, headers: { authorization: auth, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
             let picked;
             if (pick && pick.length) { const j = await res.json().catch(() => null); picked = {}; for (const k of pick) if (j && (typeof j[k] === 'number' || typeof j[k] === 'boolean')) picked[k] = j[k]; }
+            if (find) {
+              const j = await res.json().catch(() => null), at = (o, p) => String(p).split('.').reduce((x, k) => x == null ? x : x[k], o);
+              const n = t => String(t == null ? '' : t).replace(/\s+/g, ' ').trim().toLowerCase(), want = new Set((find.names || []).map(n));
+              const list = at(j, find.list);
+              if (!Array.isArray(list)) return { status: res.status, found: null };
+              const ok = it => want.has(n(at(it, find.name))) && Object.entries(find.where || {}).every(([k, v]) => at(it, k) === v);
+              return { status: res.status, found: list.filter(ok).map(it => String(at(it, find.id))).slice(0, 50) };
+            }
             return { status: res.status, picked };
           } catch (e) { return { error: String((e && e.message) || e) }; }
-        }, { url: target.href, method, auth: auth.value, body: read ? null : (c.body || null), pick: Array.isArray(c.pick) ? c.pick.map(String) : null });
+        }, { url: target.href, method, auth: auth.value, body: read ? null : (c.body || null), pick: Array.isArray(c.pick) ? c.pick.map(String) : null, find: read && c.find ? c.find : null });
         const from = hostOf(frame.url());
         const done = r => {
           log(`API ${read ? 'check' : 'undo'}: ${method} ${auth.host}${String(c.path).replace(/[0-9a-f-]{16,}|\d{4,}/gi, '{id}')} from ${from}: ${r.status || r.error}`);
-          return r.status ? { ok: r.status >= 200 && r.status < 300, status: r.status, method, host: auth.host, path: c.path, from, ...(r.picked ? { picked: r.picked } : {}) } : { ok: false, why: r.error, from };
+          return r.status ? { ok: r.status >= 200 && r.status < 300, status: r.status, method, host: auth.host, path: c.path, from, ...(r.picked ? { picked: r.picked } : {}), ...('found' in r ? { found: r.found } : {}) } : { ok: false, why: r.error, from };
         };
         // A read passes the guard as it is; an undo opens its one call only.
         if (read) return done(await call());

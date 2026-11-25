@@ -98,6 +98,8 @@ export const CATALOG = [
   { id: 'script-no-lines', test: /no lines to say in it/i,
     title: () => 'There\u2019s nothing to say in that file', body: () => 'Scenecast reads a Say column, lines in quotes, > lines or Say: lines. Open your talk track.',
     action: () => A('Open another file', { action: 'ai-plan-script' }) },
+  { id: 'reset-unchecked', test: /reset\.md has .+ a run can.t check/i,
+    title: () => 'Some start checks can\u2019t be checked', body: () => 'A run would stop at them, after you\u2019d said go. Make the reset again: Scenecast lists the ones it can\u2019t check for you.', action: () => null },
   { id: 'plan-first', test: /^make the plan first$/i,
     title: () => 'Make the plan first', body: () => 'Draft it, or make it from your script.', action: () => null },
   { id: 'build-first', test: /build the demo first/i,

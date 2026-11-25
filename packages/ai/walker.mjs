@@ -20,7 +20,7 @@ import { holds, proofWords, isBox, leftOut } from './landing.mjs';
 import { parseReset } from './reset.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
-const READER = 18;
+const READER = 19;
 
 
 // A recorded matcher's name and what it pins down: its aria-label, test id, text.

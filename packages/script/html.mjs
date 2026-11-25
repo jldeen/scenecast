@@ -153,6 +153,9 @@ function findSpec(roots, m) {
 
 // The page's controls, items and words, from one or more documents (the page and its frames). specs: recorded
 // matchers ({ key, sel, text, … }) to resolve to the controls they pick (picks: key → control index, or -1).
+// A box's text, as read: up to BOX_MAX characters (custom instructions run to hundreds); longer (a document's body, a
+// long draft) is marked cut, so an exact match on it can't be decided from the read.
+export const BOX_MAX = 4000;
 export function readScreen(docs, { specs = [] } = {}) {
   // A page's own headings come first; an app bar's or a menu's (inside a header, banner or nav) after them.
   const controls = [], items = [], text = [], headings = [], barHeadings = [], roots = [], ctlOf = new Map();
@@ -235,7 +238,7 @@ export function readScreen(docs, { specs = [] } = {}) {
           // What's in a box, as captured: a text input's value (a search box's too), a text area's text, an editable
           // area's words.
           const textInput = el.tag === 'input' && !/^(checkbox|radio|button|submit|reset|image|hidden|password|file|range|color)$/i.test(el.attrs.type || '');
-          if (c.editable || textInput) { const v = el.tag === 'input' ? clean(el.attrs.value) : el.tag === 'textarea' ? clean(el.children.filter(x => typeof x === 'string').join('')) : clean(wordsOf(el)); if (v) c.value = v.slice(0, 300); }
+          if (c.editable || textInput) { const v = el.tag === 'input' ? clean(el.attrs.value) : el.tag === 'textarea' ? clean(el.children.filter(x => typeof x === 'string').join('')) : clean(wordsOf(el)); if (v) { c.value = v.slice(0, BOX_MAX); if (v.length > BOX_MAX) c.cut = true; } }
           if (shut) c.shut = true;
           if (nav) c.nav = true;
           if (lst !== null) c.list = lst;
