@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld, allowedBy } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, graphqlOperation, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld, allowedBy } from './browser.mjs';
+import { at } from '@stuntdouble/core/lib/at.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
 
@@ -193,6 +194,31 @@ test('the allow entry that let a request through', () => {
   assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/telemetry/x' }, allow), allow[0]);
   assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":""}' }, allow), allow[1]);
   assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":"x"}' }, allow), null);
+});
+
+test("Teams' people card: Loki's GraphQL passes a query only, and its name is kept", () => {
+  const pack = JSON.parse(readFileSync(at('apps', 'packs', 'teams', 'pack.json'), 'utf8'));
+  const GQ = pack.guard.allow.find(a => /graphql/.test(a));
+  const v = (body, url = 'https://nam.loki.delve.office.com/api/v2/graphql') => guardVerdict({ method: 'POST', url, body }, { allow: [GQ] });
+  const b = (query, more = {}) => JSON.stringify({ operationName: 'BadgesWithData_LPCBadges_DataQuery', variables: { personIds: ['x'] }, query, ...more });
+  const q = 'query BadgesWithData_LPCBadges_DataQuery($personIds: [String!]) { badges(personIds: $personIds) { id name } }';
+  assert.equal(v(b(q)), 'pass');
+  assert.equal(v(b(q), 'https://eur.loki.delve.office.com/api/v2/graphql/'), 'pass');
+  assert.equal(v(JSON.stringify({ query: '  query { me { id } }' })), 'pass');
+  for (const held of [
+    b('mutation SetBadge { setBadge(id: 1) { id } }'),
+    b('subscription Live { badges { id } }'),
+    b(q + ' mutation Also { x }'),
+    b('{ badges { id } }'),
+    JSON.stringify({ extensions: { persistedQuery: { version: 1, sha256Hash: 'a'.repeat(64) } }, variables: {} }),
+    JSON.stringify([{ query: q }]),
+    null,
+  ]) assert.equal(v(held), 'hold', String(held));
+  assert.equal(v(b(q), 'https://loki.delve.office.com/api/v2/graphql/'), 'hold');
+  assert.equal(v(b(q), 'https://nam.loki.delve.office.com/api/v2/graphql/x'), 'hold');
+  assert.equal(graphqlOperation(b(q)), 'BadgesWithData_LPCBadges_DataQuery');
+  assert.equal(graphqlOperation(JSON.stringify({ query: 'query People { me }' })), 'People');
+  assert.equal(graphqlOperation('{"a":1}'), null);
 });
 
 test("IQ's picker suggestions: its own scenario, nothing typed (public) or exactly the demo's search (private)", () => {

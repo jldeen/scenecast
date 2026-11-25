@@ -209,13 +209,29 @@
       "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/",
       "/^POST teams\\.cloud\\.microsoft\\/ups\\/[a-z]+\\/v1\\/presence\\/getpresence\\/?$/",
       "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchShortProfile$/",
-      "/^POST teams\\.microsoft\\.com\\/api\\/authsvc\\/v1\\.0\\/authzcore$/"
+      "/^POST teams\\.microsoft\\.com\\/api\\/authsvc\\/v1\\.0\\/authzcore$/",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/organization(?:\\/manager)?$/",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/schedule$/",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/oofstatus$/",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/peopleInsights\\/peoplecard$/",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/linkedin\\/profiles$/",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/graphql\\/?$/ when body /^(?![\\s\\S]*(?:^|[^\\w$])(?:mutation|subscription)(?=[\\s({@]))\\s*\\{[\\s\\S]*\"query\"\\s*:\\s*\"\\s*query\\b/",
+      "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetch$/",
+      "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchfeaturesettings$/"
     ],
     "why": {
       "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review).",
       "/^POST teams\\.cloud\\.microsoft\\/ups\\/[a-z]+\\/v1\\/presence\\/getpresence\\/?$/": "Reads people's presence (a list of users in, their status out); setting presence is another endpoint. Held, Teams shows 'status Unknown' (Nov 23).",
       "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchShortProfile$/": "Reads display names for user ids. Held, a post's author shows as 'Unknown user' (Nov 23).",
-      "/^POST teams\\.microsoft\\.com\\/api\\/authsvc\\/v1\\.0\\/authzcore$/": "Teams' auth service: turns the sign-in into a Teams session; held on a cold start, Teams stays on its sign-in splash (Nov 23)."
+      "/^POST teams\\.microsoft\\.com\\/api\\/authsvc\\/v1\\.0\\/authzcore$/": "Teams' auth service: turns the sign-in into a Teams session; held on a cold start, Teams stays on its sign-in splash (Nov 23).",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/organization(?:\\/manager)?$/": "A people card's organization and manager (Loki, the profile card's service; regions as [a-z]+). The body is only the call's request headers (a person in the address, nothing to change): a read sent as POST. Held, a hovered person's card has no \"Reports to\" or \"Show organization\" (Nov 25).",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/schedule$/": "A people card's free/busy and work hours. The body is only the call's request headers: a read. Held, the card has no \"Free on\" or \"Work hours\" line (Nov 25).",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/oofstatus$/": "A people card's out-of-office state. The body is only the call's request headers: a read (setting it is Outlook's, not this). Held, the card can't say whether they're away (Nov 25).",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/peopleInsights\\/peoplecard$/": "A people card's insights section. The body is only the call's request headers: a read. Held, the card's insights part stays empty (Nov 25).",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/linkedin\\/profiles$/": "A people card's LinkedIn match. The body is only the call's request headers: a read (linking an account is a separate flow). Held, the card has no LinkedIn possible match (Nov 25).",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/graphql\\/?$/ when body /^(?![\\s\\S]*(?:^|[^\\w$])(?:mutation|subscription)(?=[\\s({@]))\\s*\\{[\\s\\S]*\"query\"\\s*:\\s*\"\\s*query\\b/": "A people card's badges, through Loki's GraphQL (BadgesWithData_LPCBadges_DataQuery, Nov 25). Only a body that is a query: the document starts with the query keyword, and the words mutation and subscription are nowhere in the body as an operation; a batch, a persisted query (a hash, no text) or no body seen stays held. Held, the card shows \"Badges: Something went wrong. Try again\" (Nov 25).",
+      "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetch$/": "Reads a people card's person by their user reference (the body is a list of them). Held, the card opens without their details (Nov 25).",
+      "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchfeaturesettings$/": "Reads which card features apply to a person (the body is a list of user references and their kind). Held, the card leaves those parts out (Nov 25)."
     }
   },
   "filters": [

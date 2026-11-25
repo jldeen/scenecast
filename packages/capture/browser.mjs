@@ -149,6 +149,13 @@ export function guardVerdict({ method, url, body = null }, { hosts = null, allow
   const at = u.host + u.pathname;
   return allow.some(a => entryMatches(a, m, at, body)) ? 'pass' : 'hold';
 }
+// A GraphQL call's operation, by name, from its body (for the record of what passed): its operationName, else the
+// name after its first keyword. null for anything else.
+export function graphqlOperation(body) {
+  if (typeof body !== 'string' || !/"query"\s*:|"operationName"\s*:/.test(body)) return null;
+  const n = /"operationName"\s*:\s*"([\w.-]{1,120})"/.exec(body) || /"query"\s*:\s*"\s*(?:query|mutation|subscription)\s+([A-Za-z_]\w{0,119})/.exec(body);
+  return n ? n[1] : /"query"\s*:\s*"\s*(query|mutation|subscription)?/.test(body) ? '(anonymous)' : null;
+}
 // The allow entry that let a request through (for the record: passed non-reads by entry), or null.
 export function allowedBy({ method, url, body = null }, allow = []) {
   let u; try { u = new URL(url); } catch (e) { return null; }
@@ -607,7 +614,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       }
       // Every non-read that went out, and why: the allow-list (or a read, a local or an unguarded host), or a planned
       // write's opening.
-      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by, ...sender, ...(by === 'allowed' ? { entry: allowedBy({ method, url, body: postData }, allow) } : {}) });
+      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by, ...sender, ...(by === 'allowed' && /graphql/i.test(u.pathname) && graphqlOperation(postData) ? { operation: graphqlOperation(postData) } : {}), ...(by === 'allowed' ? { entry: allowedBy({ method, url, body: postData }, allow) } : {}) });
       if (v === 'hold' && gm === 'hold') return { fail: true };
       return null;
     } });

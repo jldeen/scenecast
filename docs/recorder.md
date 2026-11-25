@@ -253,20 +253,43 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   whose surroundings changed), by its words, numbers aside (an element whose own name or words are the anchor's, else
   start with them; else, for an anchor of four words or more, one holding 80% of them in any order, without its own
   card's words when the card was inside it; the innermost, nearest the recorded spot; an anchor with no words, by the
-  name in its selector).
+  name in its selector). An anchor with nothing of its own (a bare tag, no words, no container: Teams' people cards,
+  recorded on the avatar's `div`) would match half the page; it's found by its trigger instead: the control whose own
+  name holds a name from its card ("Profile picture of Pat Doe." for "PD Pat Doe Engineer…"), nearest
+  the recorded spot, else the element of its kind at that spot, about its size.
   The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
   screen's cap or time: while any is left, the next one hovered is theirs. Their first tries don't count against the
-  screen's budget (`auto.maxS`): clicks, zoom, lists and drags get the time they had without them (Nov 25: Teams' 47
-  recorded hovers took 208 s on its start screen and left the rest of it out of time). One that shows nothing, or whose
-  controls couldn't be pointed at, is tried once more for 2.5 s, last, after the screen's other side states, its control found again from scratch,
+  screen's budget (`auto.maxS`): the clicks after them get the time they had without them (Nov 25: Teams' 47
+  recorded hovers took 208 s on its start screen and left the rest of it out of time). Zoom, lists and drags have
+  their own time, outside the budget (zoom: `auto.zoomMaxS`, 90 s), and a kind of screen's zoom, chips and drags count
+  as done only once they've run, so a screen whose sweep stopped short leaves them to that kind's next screen. One that
+  shows nothing, or whose controls couldn't be pointed at, or whose one control showed another card (a card left from
+  the control before), is tried once more for 2.5 s, last, after the screen's other side states, once no card is
+  showing, its control found again from scratch,
   within `auto.floorRetryS` (45 s a screen; reaching it is said in the notes and the timeline's `hovers-again`)
   (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
   shows its card: the same words, numbers aside, or most of them in another order; `hover-card.mjs`), missed (its anchor was there and its card wasn't
-  captured) or gone (its anchor's words were on no screen the run swept): a missed one goes under Needs you with a
+  captured), gone (its anchor's words were on no screen the run swept) or not reached (recorded only on screens the
+  recording has that the run never got to: its plan stopped first, or doesn't go there): a missed one goes under Needs you with a
   picture of the screen (only a missed one keeps its picture; those the cap cut share one, and so do those whose
   controls showed other cards: a firm answer, not tried again, since a container's every control is the hover's). run.json: `hovers` (the
-  list, how each anchor was found, and the three counts the summary prints). A live walk and `ai check` don't sweep
+  list, how each anchor was found, and the counts the summary prints). A live walk and `ai check` don't sweep
   hovers.
+- **The recording's menus are a floor** too (`hovers-<app>.json` `clicks`: what the recording's click audit opened).
+  Each is found as a hover is (its selector, then without the name its label holds, as Teams' profile button's status
+  changes, then by its name, nearest the recorded spot; its point read again just before the click), clicked whatever
+  `auto.clickMax` or the time, captured, and put back its recorded way. The heuristic picks that aren't recorded keep
+  the cap and what's left of the budget. After the run each is captured, missed (it was there and nothing opened, or
+  it couldn't be clicked: under Needs you, "Open "<name>" (<app>)", with a picture), gone or not reached. run.json:
+  `menus` (the list and the counts, next to `hovers`).
+- **Each screen put back.** After each kind of side path, and at the end of a screen's sweep, the screen must be as it
+  was saved: no menu, dialog, listbox or popover opened, no pane (an aside, a complementary or named region or section)
+  opened or closed, no expander flipped (Copilot's "Collapse sidebar", admin's Cloud Shell pane). Not a raw signature:
+  admin's grid order changes on every load. What differs is closed (Escape, then each flipped control flipped back,
+  the recorder stepping aside so neither is a step of hers), else the tab is reloaded and the screen lands again (its
+  title and first heading), else nothing more is saved: the run stops before its next save, with pictures before and
+  after, and lists it for her. The recording: `putBack` (each screen, after what, what it found, and how it was put
+  back); run.json: `stopped.kind: 'put-back'`.
 - **A page that moves while it's swept** (a banner on top, a list that loads): every hover and every click reads its
   control's point again just before the pointer goes there, and uses where it is now; one that has gone from there is
   found once more by its kind and words (`hover-page.js` `pos`, `ctlPos`).

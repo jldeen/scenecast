@@ -127,6 +127,9 @@ POST). A planned write opens the app's own hosts for its one step.
   in a private pack, and a private pack's list replaces the public one, so it carries the public entries it needs.
 - An entry can end in `when body /regex/` for a request that only reads when its body says so, e.g. a catalog
   listing with nothing typed in it: it passes only when the body matches, and a body the guard can't see is held.
+  A GraphQL endpoint passes queries only: the body's document starts with `query` and has no `mutation` or
+  `subscription` (Teams' people card badges, on Loki); a batch, a persisted query (a hash, no text) or no body is held.
+  Each GraphQL call that passed keeps its operation's name in run.json's `guard.passed` (`operation`).
 - `why`: one line per entry (the entry is the key): what the app sends it for, why it changes nothing, and what the
   app looks like with it held. An app that shows an error with a read held gets that read allowed, after review: a
   replica never shows an error the product doesn't.

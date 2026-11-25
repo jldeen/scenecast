@@ -97,6 +97,8 @@ for (let step = 0; step <= steps; step++) {
     ? await ev(only => only.map(m => { const els = [...document.querySelectorAll(m.sel)].filter(e => { const t = (e.innerText || '').replace(/\s+/g, ' ').trim(); return (m.text === undefined || t === m.text) && (m.textStarts === undefined || t.startsWith(m.textStarts)); }); const e = els[m.nth || 0]; if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(r.width / 2, 40)), y: Math.round(r.y + r.height / 2), id: -1, sel: m.sel, text: m.text || m.textStarts || '' }; }).filter(Boolean), ARGS.only)
     : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
   const skip = new Set(ARGS.skipKeys || []), skipSels = new Set(ARGS.skipSels || []);
+  // How many controls each recorded hover has here (one: its anchor is that control; more: a container's).
+  const ctlCount = {}; for (const c of cands) for (const id of c.floor || []) ctlCount[id] = (ctlCount[id] || 0) + 1;
   const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && (!skipSels.has(c.sel) || fl(c)));
   // The recording's own hovers first (the next one is always one of theirs while any is left), so a screen's cap or
   // time never cuts them.
@@ -122,6 +124,12 @@ for (let step = 0; step <= steps; step++) {
       out.tried++;
       if (!atRest) { await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest()); }
       atRest = false;
+      // A second try starts with no card on the screen (one left from the control before would read as this one's).
+      if (ARGS.floorRetry) {
+        const s0 = Date.now(), cardUp = () => ev(() => [...document.querySelectorAll('[role=tooltip],[role=dialog],[popover]')].some(e => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && getComputedStyle(e).visibility !== 'hidden'; })).catch(() => false);
+        while (Date.now() - s0 < 3000 && await cardUp()) await sleep(150);
+        await ev(() => window.__d1h.takeRest());
+      }
       if (c.id > 0) await ev(id => window.__d1h.markDone(id), c.id);
       let s = Date.now(), first = null, retried = !!ARGS.floorRetry;
       const floorMiss = async why => {
@@ -206,7 +214,11 @@ for (let step = 0; step <= steps; step++) {
           if (same) { out.floor[id] = { shown: true, retried }; floorShown.add(id); }
           else if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why: 'it showed another card' };
         }
-        out.floorTries.push({ key, ids: c.floor, results, result: Object.values(results).includes('card') ? 'card' : 'other card', retried });
+        // A recorded hover whose anchor is this one control and that showed another card: once more last (floorDefer),
+        // once no card is showing; a container's controls' other cards are a firm answer.
+        const single = ARGS.floorDefer && !retried ? c.floor.filter(id => results[id] === 'other card' && ctlCount[id] === 1 && !floorShown.has(id)) : [];
+        for (const id of single) { deferred.add(id); out.floor[id] = { ...out.floor[id], deferred: true }; }
+        out.floorTries.push({ key, ids: c.floor, results, result: Object.values(results).includes('card') ? 'card' : 'other card', retried, ...(single.length ? { deferred: true } : {}) });
       }
     } finally { if (inFloor && !ARGS.floorRetry) out.floorMs += Date.now() - tc; }
   }
@@ -215,7 +227,7 @@ for (let step = 0; step <= steps; step++) {
 }
 // A recorded hover whose controls showed other cards only (a firm answer: a real card, not the recorded one; a
 // container's every control is its, so trying them again costs a pass): one picture of the screen between them.
-{ const other = Object.entries(out.floor).filter(([id, v]) => v && v.shown === false && v.why === 'it showed another card' && !floorShown.has(id)).map(([id]) => id);
+{ const other = Object.entries(out.floor).filter(([id, v]) => v && v.shown === false && v.why === 'it showed another card' && !floorShown.has(id) && !(ARGS.floorDefer && deferred.has(id))).map(([id]) => id);
   if (other.length && ARGS.floorShot) { const picture = await ARGS.floorShot(`${ARGS.page}-other`).catch(() => null); if (picture) out.floorTries.push({ key: 'other', ids: other, result: 'other card', retried: !!ARGS.floorRetry, picture }); } }
 // Found here but never hovered (none of its controls could be pointed at): tried again last too.
 if (ARGS.floorDefer) for (const id of Object.keys(out.floorFound || {})) if (!floorShown.has(id) && !out.floorTries.some(t => (t.ids || []).includes(id))) deferred.add(id);

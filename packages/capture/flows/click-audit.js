@@ -35,8 +35,12 @@ const BLOCK0 = /^(Send|Like|Dislike|Delete|Remove|Duplicate|Start dictation|Stop
 const BLOCK = ARGS.block ? new RegExp(BLOCK0.source + '|' + ARGS.block, 'i') : BLOCK0;
 
 
-// Controls: the listed ones, then (pick) every visible expander or menu button that isn't blocked.
-let controls = ARGS.controls || [];
+// Controls: the recording's own menus (ARGS.floorClicks: [{ id, name, ctl, ctlRect, restore }], found here by
+// hover-page floorClick, clicked whatever the cap or the time, put back their recorded way; out.floorClicks: per id,
+// { found, shown, why?, picture? }; their time, out.floorMs, isn't counted against maxS), the listed ones, then (pick)
+// every visible expander or menu button that isn't blocked.
+out.floorClicks = {}; out.floorMs = 0;
+let controls = [...(ARGS.floorClicks || []).map(e => ({ name: e.name, floor: e, ...(e.restore === 'toggle' ? { noEscape: true } : {}) })), ...(ARGS.controls || [])];
 if (ARGS.pick) {
   const picked = await ev(([o, block]) => {
     const B = new RegExp(block, 'i');
@@ -57,7 +61,7 @@ if (ARGS.pick) {
   const have = new Set(controls.map(c => c.name));
   controls = controls.concat(picked.filter(c => !have.has(c.name)));
 }
-if (ARGS.skipNames) { const sk = new Set(ARGS.skipNames); out.skippedSeen = controls.filter(c => sk.has(c.name)).length; controls = controls.filter(c => !sk.has(c.name)); }
+if (ARGS.skipNames) { const sk = new Set(ARGS.skipNames); out.skippedSeen = controls.filter(c => !c.floor && sk.has(c.name)).length; controls = controls.filter(c => c.floor || !sk.has(c.name)); }
 out.controls = controls.map(c => c.name);
 // Nothing to click (none here, or all clicked on another screen): done, before any waiting.
 if (!controls.length && !ARGS.probeSend) { out.frameUrl = f === p.mainFrame() ? null : f.url().split('?')[0]; out.secs = Math.round((Date.now() - t0) / 1000); return out; }
@@ -79,22 +83,30 @@ async function backToRest() {
   await install(); await move(...NEUTRAL); await quiet(400, 3000);
 }
 
+const floorShot = async name => ARGS.floorShot ? ARGS.floorShot(`click-${ARGS.page}-${name}`).catch(() => null) : null;
+let floorAt = null;
 for (const c of controls) {
-  if (Date.now() - t0 > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
+  if (floorAt !== null) { out.floorMs += Date.now() - floorAt; floorAt = null; }
+  if (!c.floor && Date.now() - t0 - out.floorMs > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
+  if (c.floor) floorAt = Date.now();
   out.tried++;
-  const r = { name: c.name };
+  const r = { name: c.name, ...(c.floor ? { floor: c.floor.id } : {}) };
+  // A recorded menu: found here now (its point read just before the click, as every control's).
+  const mOf = async () => { if (!c.floor) return c; const fm = await ev(e => window.__d1h.floorClick(e), c.floor).catch(() => null); if (fm) r.found = fm.found; return fm ? fm.m : null; };
   try {
     await move(...NEUTRAL); await quiet(300, 2000);
-    const ctl = await ev(m => window.__d1h.markCtl(m), c);
-    if (!ctl) { r.skip = 'not on screen'; out.results.push(r); continue; }
+    const m0 = await mOf();
+    const ctl = m0 ? await ev(m => window.__d1h.markCtl(m), m0) : null;
+    if (!ctl) { r.skip = 'not on screen'; if (c.floor) out.floorClicks[c.floor.id] = { found: null, shown: false }; out.results.push(r); continue; }
     await sleep(100);
     await ev(() => window.__d1h.takeRest());
     // Its point now, just before the press: a page that moved since (a banner on top) is clicked where the control
     // is. Gone from the screen: found once more.
     const now = await ev(() => window.__d1h.ctlPos());
     if (!now) {
-      const again = await ev(m => window.__d1h.markCtl(m), c);
-      if (!again) { r.skip = 'left the screen'; out.results.push(r); continue; }
+      const m1 = await mOf();
+      const again = m1 ? await ev(m => window.__d1h.markCtl(m), m1) : null;
+      if (!again) { r.skip = 'left the screen'; if (c.floor) out.floorClicks[c.floor.id] = { found: r.found || null, shown: false, why: 'its control left the screen', picture: await floorShot(`${c.floor.id}-left`) }; out.results.push(r); continue; }
       await sleep(100); await ev(() => window.__d1h.takeRest());
       Object.assign(ctl, again); r.refound = true; out.refound = (out.refound || 0) + 1;
     } else if (now.x !== ctl.x || now.y !== ctl.y) { Object.assign(ctl, now); r.moved = true; out.moved = (out.moved || 0) + 1; }
@@ -107,7 +119,7 @@ for (const c of controls) {
     if (p.url() !== urlBefore) { r.navigated = p.url().slice(0, 120); await p.goto(urlBefore, { waitUntil: 'domcontentloaded' }); await sleep(8000); f = await pickFrame(); await install(); out.results.push(r); continue; }
     r.visible = await vis();
     const res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
-    if (!res || !r.visible) { r.effect = 'none'; await ev(() => window.__d1h.unmark()); out.results.push(r); continue; }
+    if (!res || !r.visible) { r.effect = 'none'; if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'nothing opened', picture: await floorShot(c.floor.id) }; await ev(() => window.__d1h.unmark()); out.results.push(r); continue; }
     const ser = await f.evaluate(H.SERX({ parts: '[data-d1-hpart]' }));
     await ev(() => window.__d1h.unmark());
     try { await H.fetchResources(p, [{ urls: ser.urls, frame: f }]); } catch (e) {}
@@ -139,10 +151,12 @@ for (const c of controls) {
     if (!restore) { restore = 'stuck'; r.stuckOps = await vis(); await backToRest(); }
     await H.post('/hover', { page: 'click-' + ARGS.page, n: out.n, kind: 'click', cand: { text: c.name }, ctl, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, restore, reopen, revertMs, clickMs: r.ms, auto: c.auto || null, shot, css, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
     Object.assign(r, { n: out.n, restore, reopen: reopen && reopen.sel, ops: (res.ops || []).length, portals: (res.portals || []).length });
+    if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: true, restore };
     out.n++;
-  } catch (e) { r.error = String(e && e.message || e).slice(0, 200); try { await backToRest(); } catch (e2) {} }
+  } catch (e) { r.error = String(e && e.message || e).slice(0, 200); if (c.floor && !out.floorClicks[c.floor.id]) out.floorClicks[c.floor.id] = { found: r.found || null, shown: false, why: r.error, picture: await floorShot(`${c.floor.id}-error`) }; try { await backToRest(); } catch (e2) {} }
   out.results.push(r);
 }
+if (floorAt !== null) out.floorMs += Date.now() - floorAt;
 
 // Send: what it looks like with the box empty, after typing, and when hovered; then the box is emptied again.
 if (ARGS.probeSend) {

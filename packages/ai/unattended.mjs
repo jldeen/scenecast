@@ -86,17 +86,66 @@ export function recordedHovers(demo, apps) {
   }
   return [...out.values()];
 }
+// The demo's recorded menus (data/snaps/hovers-<app>.json clicks: what the recording's click audit opened), for the
+// apps the plan goes to: by where the replica finds the control, where it was, how it closes, and its screen.
+// → [{ app, id, name, page, ctl, ctlRect, restore, frame }]
+export function recordedClicks(demo, apps) {
+  const out = [];
+  for (const app of apps) {
+    let d = null;
+    try { d = JSON.parse(readFileSync(join(demo.dir, 'data', 'snaps', `hovers-${app}.json`), 'utf8')); } catch (e) { continue; }
+    for (const c of Object.values((d && d.clicks) || {})) {
+      if (!c || !c.ctl || !c.ctl.sel || !c.name) continue;
+      const ctl = { sel: c.ctl.sel, ...(c.ctl.text !== undefined ? { text: c.ctl.text } : {}), ...(c.ctl.in ? { in: c.ctl.in } : {}) };
+      out.push({ app, id: `${app}:${c.id}`, name: String(c.name), page: c.page || null, ctl, ...(c.ctlRect ? { ctlRect: c.ctlRect } : {}), restore: c.restore || null, frame: c.frame || null });
+    }
+  }
+  return out;
+}
+// The recorded screens a run reached: each app's start, then where the recording went with each step the run took
+// (steps: run.steps). → { reached, known } (sets of the recording's screens), or null without a recording to say.
+export function reachedPages(demo, plan, steps, apps) {
+  let w = null;
+  try { w = walkerFromDemo(demo); } catch (e) { return null; }
+  if (!w) return null;
+  const reached = new Set(), cur = {};
+  for (const app of apps) { try { const s0 = w.start(app); if (s0 && s0.sig) { cur[app] = s0; reached.add(s0.sig); } } catch (e) {} }
+  for (const st of steps || []) {
+    const step = (((plan.beats || [])[st.beat] || {}).steps || [])[st.step], app = st.app;
+    if (!step || !app || !cur[app] || step.kind === 'app') continue;
+    try { const r = w.recorded(cur[app], step); if (r && r.screen && r.screen.sig && r.landed !== false) { cur[app] = r.screen; reached.add(r.screen.sig); } } catch (e) {}
+  }
+  return { reached, known: new Set(w.states || []) };
+}
+const pageBase = p => String(p || '').replace(/-(frame\d+|again)$/, '');
+// Recorded only on screens the recording knows and the run never reached.
+const unreached = (pages, reach) => !!reach && pages.length > 0 && pages.every(p => reach.known.has(pageBase(p)) && !reach.reached.has(pageBase(p)));
+// Each recorded menu after a run, from its app's click audits (capHoverFloor's clickLog): captured (a sweep opened it),
+// missed (it was on a screen and nothing opened, or it couldn't be clicked), not reached (its screen never was), or
+// gone (on no screen the run swept). → [{ app, id, name, page, status, found?, why?, picture?, screen? }]
+export function menuOutcomes(recorded, sweeps, reach = null) {
+  return recorded.map(m => {
+    const mine = (sweeps || []).filter(e => e.app === m.app && e.floor && e.floor[m.id]).map(e => ({ state: e.state, r: e.floor[m.id] }));
+    const shown = mine.find(e => e.r.shown), found = mine.find(e => e.r.found);
+    const status = shown ? 'captured' : found ? 'missed' : unreached([m.page].filter(Boolean), reach) ? 'not reached' : 'gone';
+    const out = { app: m.app, id: m.id, name: m.name, page: m.page, status, ...(found ? { found: found.r.found } : {}) };
+    if (status !== 'missed') return out;
+    const pic = mine.find(e => e.r.picture) || found;
+    const why = pic.r.why === 'nothing opened' ? 'it was on the screen and nothing opened when it was clicked' : `it was on the screen, and ${pic.r.why || "it couldn't be clicked"}`;
+    return { ...out, why, picture: pic.r.picture || null, screen: pic.state || null };
+  });
+}
 // Each recorded hover after a run, from its app's sweeps (capHoverFloor's log, one entry per sweep): captured (a hover
 // captured in its app shows its card: the same words, numbers aside; for a card with no words, a control of its
 // showed), missed (its anchor was on a screen and its card wasn't captured), or gone (its anchor was on no screen the
 // run swept). found: how its anchor was found (place, or words when its place had moved).
 // → [{ app, id, sel, text, pages, status, found?, why?, picture?, screen? }]
-export function hoverOutcomes(recorded, sweeps) {
+export function hoverOutcomes(recorded, sweeps, reach = null) {
   return recorded.map(h => {
     const mine = (sweeps || []).filter(e => e.app === h.app);
     const captured = h.card ? mine.some(e => (e.cards || []).some(x => (x.cards || []).some(t => cardMatch(h.card, t)))) : mine.some(e => e.floor && e.floor[h.id] && e.floor[h.id].shown);
     const at = mine.filter(e => e.found && e.found[h.id]), found = at.some(e => e.found[h.id] === 'place') ? 'place' : at.length ? 'words' : null;
-    const status = captured ? 'captured' : found ? 'missed' : 'gone';
+    const status = captured ? 'captured' : found ? 'missed' : unreached(h.pages, reach) ? 'not reached' : 'gone';
     const out = { app: h.app, id: h.id, sel: h.anchor.sel, text: h.text, pages: h.pages, status, ...(found ? { found } : {}) };
     if (status !== 'missed') return out;
     const tries = mine.flatMap(e => (e.tries || []).filter(t => (t.ids || []).includes(h.id)).map(t => ({ ...t, state: e.state })));
@@ -208,7 +257,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
   const ownApps = ownStatusApps(demo, packs, inPlan);
   const notApps = noticeApps(demo, packs, inPlan);
-  const recHovers = recordedHovers(demo, [...inPlan]);
+  const recHovers = recordedHovers(demo, [...inPlan]), recClicks = recordedClicks(demo, [...inPlan]);
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
@@ -232,6 +281,14 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     emit({ event: 'stopped', ...run.stopped });
   };
   let ownMark = 0;
+  // A screen its side states left changed and a reload didn't put back (the recorder's put-back): nothing more saved.
+  const unrestored = async () => { const r = await cmd('recordStatus', {}, 30).catch(() => null); return r && r.unrestored ? r.unrestored : null; };
+  const restoreStopRun = (u, at = null) => {
+    const say = `${u.state}: after its ${u.after}, the screen wasn't as saved (${u.found}), and a reload didn't put it back (${u.left}). Check that app's tab, then start again.`;
+    run.stopped = { kind: 'put-back', why: say, app: u.app || null, saving: null, picture: u.pictureAfter || u.picture || null, ...(at ? { at } : {}) };
+    run.needsYou.push({ text: u.state, why: say, picture: run.stopped.picture });
+    emit({ event: 'stopped', ...run.stopped });
+  };
   // Notices (capNotices): a save that waits for one, closes it, or stops before it's kept.
   const noticeStopped = async () => { const r = notApps.length ? await cmd('capNotices', { since: 1e9 }, 30).catch(() => null) : null; return r && r.stopped ? r.stopped : null; };
   const noticeStopRun = (st, at = null) => {
@@ -351,11 +408,14 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (!on.on) { run.stopped = { kind: 'notice', why: `couldn't watch for ${notApps.map(n => n.label).join(', ')}'s notices: ${on.why || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
     }
     // The recording's hovers as a floor: never skipped by what the sweep learns, each tried twice.
-    if (recHovers.length) {
-      const byApp = {};
+    // And its menus: clicked whatever the cap or the time, put back their recorded way.
+    if (recHovers.length || recClicks.length) {
+      const byApp = {}, menus = {};
       for (const h of recHovers) (byApp[h.app] = byApp[h.app] || []).push({ id: h.id, anchor: h.anchor, scope: h.scope, rect: h.rect, card: h.card });
-      const on = await cmd('capHoverFloor', { apps: byApp, shots: stops }, 30).catch(() => ({ on: false }));
-      if (on.on) run.hovers = { recorded: recHovers.length };
+      for (const m of recClicks) (menus[m.app] = menus[m.app] || []).push(m);
+      const on = await cmd('capHoverFloor', { apps: byApp, clicks: menus, shots: stops }, 30).catch(() => ({ on: false }));
+      if (on.on && recHovers.length) run.hovers = { recorded: recHovers.length };
+      if (on.on && recClicks.length) run.menus = { recorded: recClicks.length };
     }
     const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
@@ -419,6 +479,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const doStep = async (bi, si, step, at, prev) => {
       { const os = await ownStopped(); if (os) return { kind: 'own-status', own: os }; }
       { const ns = await noticeStopped(); if (ns) return { kind: 'notice', notice: ns }; }
+      { const u = await unrestored(); if (u) return { kind: 'put-back', unrestored: u }; }
       { const lk = await leaked(); if (lk) return lk; }
       for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
       // Set before: what her script has already set when she gets here, set off camera just before the step, in a tab
@@ -523,6 +584,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (stop && !stop.own && !stop.leak && !stop.notice) { const ns = await noticeStopped(); if (ns) stop = { kind: 'notice', notice: ns }; }
         if (stop && stop.own) { ownStopRun(stop.own, at); break outer; }
         if (stop && stop.notice) { noticeStopRun(stop.notice, at); break outer; }
+        if (stop && !stop.own && !stop.leak && !stop.notice && !stop.unrestored) { const u = await unrestored(); if (u) stop = { kind: 'put-back', unrestored: u }; }
+        if (stop && stop.unrestored) { restoreStopRun(stop.unrestored, at); break outer; }
         if (stop) {
           await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
           // Leave out's own picture, taken as it refused the save, and where on the screen it was.
@@ -550,20 +613,32 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (os && !run.stopped) ownStopRun(os);
       const ns = await noticeStopped();
       if (ns && !run.stopped) noticeStopRun(ns);
+      const u = await unrestored();
+      if (u && !run.stopped) restoreStopRun(u);
       const l = await leaveNow().catch(() => null);
       if (l && l.leak && !run.stopped) leakStop(l.leak);
     }
-    // Each recorded hover: captured, gone or missed; a missed one is listed for her, with its picture.
-    if (run.hovers) {
+    // Each recorded hover and menu: captured, missed, not reached or gone; a missed one is listed for her, with its
+    // picture.
+    if (run.hovers || run.menus) {
       const fl = await cmd('capHoverFloor', {}, 30).catch(() => null);
       if (fl && fl.on) {
-        const list = hoverOutcomes(recHovers, fl.log);
-        const n = k => list.filter(x => x.status === k).length;
-        // A picture is kept only for a hover that's missed (a control can show nothing while another of its anchor's shows its card).
-        const keep = new Set(list.map(x => x.picture).filter(Boolean));
+        const reach = reachedPages(demo, plan, run.steps, [...inPlan]);
+        const list = hoverOutcomes(recHovers, fl.log, reach), mlist = menuOutcomes(recClicks, fl.clickLog || [], reach);
+        const count = l => { const n = k => l.filter(x => x.status === k).length; return { captured: n('captured'), gone: n('gone'), missed: n('missed'), ...(n('not reached') ? { notReached: n('not reached') } : {}) }; };
+        // A picture is kept only for a hover or menu that's missed (a control can show nothing while another of its
+        // anchor's shows its card; a menu can open on another screen).
+        const keep = new Set([...list, ...mlist].map(x => x.picture).filter(Boolean));
         for (const t of fl.log.flatMap(e => e.tries || [])) if (t.picture && !keep.has(t.picture)) rmSync(t.picture, { force: true });
-        Object.assign(run.hovers, { captured: n('captured'), gone: n('gone'), missed: n('missed'), list, ...(run.stopped ? { partial: true } : {}) });
-        for (const x of list.filter(x => x.status === 'missed')) run.needsYou.push({ text: `Hover over "${x.text || x.sel}" (${x.app})`, why: `${x.why}. The replica won't show its hover.`, picture: x.picture });
+        for (const r of (fl.clickLog || []).flatMap(e => Object.values(e.floor || {}))) if (r && r.picture && !keep.has(r.picture)) rmSync(r.picture, { force: true });
+        if (run.hovers) {
+          Object.assign(run.hovers, { ...count(list), list, ...(run.stopped ? { partial: true } : {}) });
+          for (const x of list.filter(x => x.status === 'missed')) run.needsYou.push({ text: `Hover over "${x.text || x.sel}" (${x.app})`, why: `${x.why}. The replica won't show its hover.`, picture: x.picture });
+        }
+        if (run.menus) {
+          Object.assign(run.menus, { ...count(mlist), list: mlist, ...(run.stopped ? { partial: true } : {}) });
+          for (const x of mlist.filter(x => x.status === 'missed')) run.needsYou.push({ text: `Open "${x.name}" (${x.app})`, why: `${x.why}. The replica won't open it.`, picture: x.picture });
+        }
       }
       await cmd('capHoverFloor', { apps: {} }, 30).catch(() => {});
     }
@@ -604,7 +679,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   return finish();
   function finish() {
     save();
-    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}), ...(run.hovers && run.hovers.list ? { hovers: { recorded: run.hovers.recorded, captured: run.hovers.captured, gone: run.hovers.gone, missed: run.hovers.missed } } : {}) };
+    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}), ...(run.hovers && run.hovers.list ? { hovers: { recorded: run.hovers.recorded, captured: run.hovers.captured, gone: run.hovers.gone, missed: run.hovers.missed, ...(run.hovers.notReached ? { notReached: run.hovers.notReached } : {}) } } : {}), ...(run.menus && run.menus.list ? { menus: { recorded: run.menus.recorded, captured: run.menus.captured, gone: run.menus.gone, missed: run.menus.missed, ...(run.menus.notReached ? { notReached: run.menus.notReached } : {}) } } : {}) };
   }
 }
 

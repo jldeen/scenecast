@@ -152,9 +152,41 @@
         const r = f.rect, dist = e => { if (!r) return 0; const b = e.getBoundingClientRect(); return Math.hypot(b.x + b.width / 2 - (r.x + r.w / 2), b.y + b.height / 2 - (r.y + r.h / 2)); };
         return hit.sort((a, b) => dist(a) - dist(b))[0];
       };
+      // An anchor with nothing of its own to find it by (a bare tag, no words, nowhere in particular: a people card's
+      // avatar, recorded as a div) matches half the page. Its trigger instead: the control whose own name holds a
+      // name from its card ("Profile picture of Pat Doe." for "PD Pat Doe Engineer…"), nearest the
+      // recorded spot; else the element of its kind at that spot, about its size.
+      const bare = a => a.text === undefined && a.textStarts === undefined && !a.in && /^[a-z][a-z0-9-]*(\.[\w-]+)*$/i.test(a.sel || '');
+      const nameOf = e => e.getAttribute('aria-label') || e.getAttribute('title') || e.getAttribute('alt') || '';
+      const trigger = f => {
+        const r = f.rect, dist = e => { if (!r) return 0; const b = e.getBoundingClientRect(); return Math.hypot(b.x + b.width / 2 - (r.x + r.w / 2), b.y + b.height / 2 - (r.y + r.h / 2)); };
+        // Its card's first words, as pairs of names (two capitalized words; initials like "SJ" aside).
+        const w = String(f.card || '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).map(x => x.replace(/[^\p{L}'-]/gu, ''));
+        const pairs = [];
+        for (let i = 0; i + 1 < w.length; i++) if (/^\p{Lu}\p{Ll}/u.test(w[i]) && /^\p{Lu}\p{Ll}/u.test(w[i + 1])) pairs.push((w[i] + ' ' + w[i + 1]).toLowerCase());
+        if (pairs.length) {
+          const named = [...document.querySelectorAll('[aria-label],[title],img[alt]')].filter(e => shown(e) && visible(e));
+          for (const pr of pairs) {
+            const re = new RegExp('(^|[^\\p{L}])' + pr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^\\p{L}])', 'iu');
+            let hit = named.filter(e => re.test(nameOf(e)));
+            hit = hit.filter(e => !hit.some(o => o !== e && e.contains(o)));
+            if (hit.length) return [hit.sort((a, b) => dist(a) - dist(b))[0], 'words'];
+          }
+        }
+        if (!r || !(r.w > 0 && r.h > 0)) return null;
+        const at = document.elementFromPoint(r.x + r.w / 2, r.y + r.h / 2);
+        for (let e = at; e && e !== document.body; e = e.parentElement) {
+          let ok = false; try { ok = e.matches(f.anchor.sel); } catch (x) {}
+          if (!ok) continue;
+          const b = e.getBoundingClientRect();
+          if (Math.abs(b.width - r.w) <= r.w * 0.5 + 4 && Math.abs(b.height - r.h) <= r.h * 0.5 + 4) return [e, 'place'];
+        }
+        return null;
+      };
       const out = [];
       for (const f of floor || []) {
         let els = []; try { els = [...document.querySelectorAll(f.anchor.sel)]; } catch (e) {}
+        if (bare(f.anchor) && !(f.scope || []).length) { const t = trigger(f); if (t) out.push([t[0], f.id, t[1]]); continue; }
         let n = 0;
         for (const e of els) if (fmatch(e, f.anchor)) { const t = down(e, f.scope); if (t) { out.push([t, f.id, 'place']); n++; } }
         if (n) continue;
@@ -312,6 +344,31 @@
       H.ctl = e; H.ctlSpec = m;
       const r = e.getBoundingClientRect();
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), rect: rect(e), spec: specOf(e), attrs: Object.fromEntries([...e.attributes].filter(a => !/^(class|style|data-d1-.*|id)$/.test(a.name)).map(a => [a.name, a.value.slice(0, 200)])) };
+    },
+    // A recorded menu's control here (the click audit's floor): e { id, name, ctl: { sel, text?, in? }, ctlRect }. By its
+    // selector, then the same without its name attributes (an avatar whose label says a status), then by its words (a
+    // control named as recorded, numbers aside, or one name starting with the other); the nearest the recorded spot.
+    // → { found: 'place' | 'words', m } (m: markCtl's matcher for that one element), or null.
+    floorClick(e) {
+      const rc = e.ctlRect, cx = rc ? rc.x + rc.w / 2 : null, cy = rc ? rc.y + rc.h / 2 : null;
+      const near = els => { if (!els.length) return null; if (cx === null) return els[0]; let best = null, bd = Infinity; for (const x of els) { const r = x.getBoundingClientRect(), d = Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy); if (d < bd) { bd = d; best = x; } } return best; };
+      const q = sel => { try { return [...document.querySelectorAll(sel)]; } catch (err) { return []; } };
+      const c = e.ctl || {}, inOk = x => !c.in || !!x.closest(c.in), textOk = x => c.text === undefined || norm(x.innerText) === c.text;
+      const matcher = (el, m) => { const all = [...document.querySelectorAll(m.sel)].filter(x => visible(x) && (m.text === undefined || norm(x.innerText) === m.text) && (m.label === undefined || x.getAttribute('aria-label') === m.label) && (!m.in || x.closest(m.in))); return { ...m, nth: Math.max(0, all.indexOf(el)) }; };
+      let el = c.sel ? near(q(c.sel).filter(x => visible(x) && inOk(x) && textOk(x))) : null, found = el ? 'place' : null, sel = c.sel;
+      if (!el && c.sel) {
+        const relaxed = c.sel.replace(/\[(aria-label|title|aria-description)="(?:[^"\\]|\\.)*"\]/g, '');
+        if (relaxed && relaxed !== c.sel) { el = near(q(relaxed).filter(x => visible(x) && inOk(x) && textOk(x))); if (el) { found = 'place'; sel = relaxed; } }
+      }
+      if (el) return { found, m: matcher(el, { sel, ...(c.text !== undefined ? { text: c.text } : {}), ...(c.in ? { in: c.in } : {}) }) };
+      const n = x => norm(x).toLowerCase().replace(/\d+/g, '#'), want = n(e.name);
+      if (!want) return null;
+      const name = x => x.getAttribute('aria-label') || norm(x.innerText);
+      const ctls = [...document.querySelectorAll('button,[role=button],[aria-expanded],[aria-haspopup],[role=tab],[role=treeitem]')].filter(visible);
+      el = near(ctls.filter(x => n(name(x)) === want)) || near(ctls.filter(x => { const v = n(name(x)); return v.length >= 4 && want.length >= 4 && (v.startsWith(want) || want.startsWith(v)); }));
+      if (!el) return null;
+      const label = el.getAttribute('aria-label');
+      return { found: 'words', m: matcher(el, { sel: el.localName, ...(label ? { label } : { text: norm(el.innerText) }) }) };
     },
     // The marked control's point now (it may have moved since markCtl), or null when it's gone.
     ctlPos() {

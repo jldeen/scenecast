@@ -613,14 +613,16 @@ try {
   // a side pane the page no longer has, so it's found by its words), its Quiet chip, and a Removed chip that's no
   // longer there; a section recorded as a bare div whose list has since reordered and whose words held its own card's
   // ("Projects Collapse projects Add project here Recent Item A Item B"), found by most of its words and captured from
-  // its Projects button; and a section with only 2 of its 7 words on the page, still gone. Each recorded hover counts
+  // its Projects button; a section with only 2 of its 7 words on the page, still gone; and a people card recorded on a
+  // bare div with no words of its own (as Teams' avatars are), its spot moved: found by its trigger, the control named
+  // for the person on its card ("Profile picture of Pat Doe."), and captured. Each recorded hover counts
   // as captured only when its card's words are captured. Slow chip: never skipped for its kind, hovered again for 2.5 s, captured.
   // Quiet chip: missed, listed for her with a picture. Removed chip: gone. The other plain buttons: still skipped.
   { const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
     mkdirSync(dirname(HP), { recursive: true });
     const def = (id, anchor, card) => [id, { id, page: 'chips-3', anchor, anchorRect: { x: 30, y: 90, w: 90, h: 30 }, portals: [{ text: card }] }];
     const sect = (id, textStarts, card) => [id, { id, page: 'chips-3', anchor: { sel: 'div', in: 'nav', textStarts }, anchorRect: { x: 30, y: 200, w: 400, h: 40 }, scope: [0, 0, 5], portals: [{ text: card }] }];
-    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('h1', { sel: 'div', in: 'aside', text: 'Slow chip' }, 'Takes its time'), def('h2', { sel: 'button', text: 'Quiet chip' }, 'Says a lot'), def('h3', { sel: 'button', text: 'Removed chip' }, 'Long gone'), sect('h4', 'Projects Collapse projects Add project here Recent Item A Item B', 'Collapse projects'), sect('h5', 'Recent Projects Pinned Starred Shared Drafts Archive', 'Old stuff')]) }));
+    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('h1', { sel: 'div', in: 'aside', text: 'Slow chip' }, 'Takes its time'), def('h2', { sel: 'button', text: 'Quiet chip' }, 'Says a lot'), def('h3', { sel: 'button', text: 'Removed chip' }, 'Long gone'), sect('h4', 'Projects Collapse projects Add project here Recent Item A Item B', 'Collapse projects'), sect('h5', 'Recent Projects Pinned Starred Shared Drafts Archive', 'Old stuff'), ['h6', { id: 'h6', page: 'chips-3', anchor: { sel: 'div' }, anchorRect: { x: 900, y: 700, w: 32, h: 32 }, portals: [{ text: 'PD Pat Doe Engineer Profile pat@example.com' }] }]]) }));
     writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Chips\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Chips"\n  Lands on: "Chips one"\n- Click "Next"\n  Lands on: "Chips two"\n- Click "Next"\n  Lands on: "Chips three"\n');
     writeFileSync(join(DEMO, 'reset.md'), '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n');
     tasks.chips(true); tasks.seed({});
@@ -636,7 +638,9 @@ try {
     const quiet = byText('Quiet chip'), why = { code: hr.code, error: hr.error, done: hr.done && hr.done.result && hr.done.result.hovers, stopped: hj.stopped, hovers: hj.hovers && { ...hj.hovers, list: (hj.hovers.list || []).map(x => [x.text, x.status, x.why]) }, needsYou: hj.needsYou, hovered: hoveredTexts, log: ((hRec && hRec.log) || []).filter(l => /^\S+ auto /.test(l)).map(l => l.slice(0, 260)), err: String(hr.err || '').slice(-600) };
     check('a recorded hover whose place moved, found by its words; of a kind the sweep learned to skip, slower than its wait: never skipped, hovered again, its card captured', hr.code === 0 && !hj.stopped && byText('Slow chip').status === 'captured' && byText('Slow chip').found === 'words' && hoveredTexts.includes('Slow chip'), JSON.stringify(why));
     check('a recorded hover whose control is there and shows nothing: missed, listed for her with a picture', quiet.status === 'missed' && quiet.found === 'place' && quiet.picture && existsSync(quiet.picture) && (hj.needsYou || []).some(n => n.text === 'Hover over "Quiet chip" (tasks)' && n.picture === quiet.picture), JSON.stringify(why));
-    check('a recorded hover whose control is gone: gone; the summary counts captured, gone and missed', byText('Removed chip').status === 'gone' && JSON.stringify(hr.done && hr.done.result && hr.done.result.hovers) === '{"recorded":5,"captured":2,"gone":2,"missed":1}', JSON.stringify(why));
+    check('a recorded hover whose control is gone: gone; the summary counts captured, gone and missed', byText('Removed chip').status === 'gone' && JSON.stringify(hr.done && hr.done.result && hr.done.result.hovers) === '{"recorded":6,"captured":3,"gone":2,"missed":1}', JSON.stringify(why));
+    const pat = ((hj.hovers && hj.hovers.list) || []).find(x => x.sel === 'div' && x.text === '') || {};
+    check("a people card recorded on a bare div, its spot moved: found by the control named for its person, its card captured", pat.status === 'captured' && pat.found === 'words', JSON.stringify(why));
     check('a section whose list reordered and lost its own label is found by most of its words, and its hover captured from the control inside; one with under 80% of its words is still gone', byStart('Projects Collapse').status === 'captured' && byStart('Projects Collapse').found === 'words' && hoveredTexts.includes('Projects') && byStart('Recent Projects Pinned').status === 'gone', JSON.stringify(why));
     check('and the plain buttons on that screen are still skipped for their kind', !!skipLine && !hoveredTexts.some(t => /^Chip /.test(t) || t === 'Add project here'), JSON.stringify(why));
     tasks.chips(false); tasks.seed({});
@@ -655,12 +659,13 @@ try {
   // 1m · The recording's hovers and the screen's budget: their first tries don't count against it, so the kinds after
   // them (clicks here) get the time they had without them, even when they take longer than the whole budget (8 s
   // here). Those that showed nothing are tried once more after everything else, within their own cap (7 s here):
-  // the slow card captured, the rest missed or cut by the cap, each listed for her with a picture.
+  // the slow card captured, the rest missed or cut by the cap, each listed for her with a picture. Zoom (one level
+  // here) has its own time too: it runs though hovers and clicks used up the 8 s.
   { const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
     mkdirSync(dirname(HP), { recursive: true });
     const def = (id, text, card) => [id, { id, page: 'chips-3', anchor: { sel: 'button', text }, anchorRect: { x: 30, y: 90, w: 90, h: 30 }, portals: [{ text: card }] }];
     writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('m1', 'Slow chip', 'Takes its time'), def('m2', 'Quiet chip', 'Says a lot'), ...['c1', 'c2', 'c3', 'c4'].map((c, i) => def('m' + (i + 3), 'Chip ' + c, 'Card ' + c))]) }));
-    const c = JSON.parse(cfg0); Object.assign(c.record.auto, { maxS: 8, floorRetryS: 7 }); writeFileSync(cfgF, JSON.stringify(c, null, 2));
+    const c = JSON.parse(cfg0); Object.assign(c.record.auto, { maxS: 8, floorRetryS: 7, zoom: true, zooms: [125] }); writeFileSync(cfgF, JSON.stringify(c, null, 2));
     writeFileSync(join(DEMO, 'plan.md'), CHIPS_PLAN.replace('  Lands on: "Chips two"\n', '  Lands on: "Chips two"\n- Click "Next"\n  Lands on: "Chips three"\n'));
     writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
     tasks.chips(true); tasks.seed({});
@@ -676,6 +681,8 @@ try {
     const why = { code: mr.code, stopped: mj.stopped, three, did: auto3.did, tl3, again, list: list.map(x => [x.text, x.status, x.found, x.why, !!x.picture]), notes: ((mRec && mRec.notes) || []).slice(-6), err: String(mr.err || '').slice(-400) };
     check("the recorded hovers' first tries don't count against the screen's budget: the clicks after them still get their time", mr.code === 0 && !mj.stopped && !!three && auto3.did.some(d => /^clicks \d+ of \d+/.test(d)) && !auto3.did.some(d => /out of time/.test(d)), JSON.stringify(why));
     check("and the ones that showed nothing are tried again last, after the clicks: the slow card captured there", tl3.lastIndexOf('hovers-again') > tl3.indexOf('clicks') && tl3.indexOf('clicks') >= 0 && byText('Slow chip').status === 'captured', JSON.stringify(why));
+    const zooms = ((mRec && mRec.timeline) || []).filter(e => e.what === 'sweep' && e.kind === 'zoom');
+    check('zoom has its own time: it ran, outside the screen budget, though hovers and clicks used it up', zooms.length > 0 && zooms.every(e => e.own) && !(mRec.autos || []).some(a => a.did.some(d => /^zoom \(out of time/.test(d))), JSON.stringify({ zooms, did: (mRec.autos || []).map(a => [a.state, a.did]) }));
     const missed = list.filter(x => x.status === 'missed');
     check('within their own cap: reached here, said in the notes; every one still missed is listed for her with a picture', again.capped === true && ((mRec && mRec.notes) || []).some(n => /second tries reached their 7 s/.test(n)) && missed.length >= 2 && missed.every(x => x.picture && existsSync(x.picture)) && missed.some(x => /didn't fit/.test(x.why)) && missed.every(x => (mj.needsYou || []).some(n => n.picture === x.picture)), JSON.stringify(why));
     tasks.chips(false); tasks.seed({});
@@ -719,6 +726,40 @@ try {
     tasks.notice(null); tasks.chips(false); tasks.seed({});
   }
   writePack();
+
+  // 1p · The recording's menus are a floor, and each screen is put back after its side paths. Chips one has four menus
+  // and a Dud that opens nothing; the recording has those five and a sixth no longer there, and the click cap is 1:
+  // all five are clicked, four captured, the Dud missed with a picture, the sixth gone. A side section outside the
+  // chips screens collapses when Peek is hovered (put back by flipping its own control), and Chips two's Help hover
+  // opens a pane Escape doesn't close (put back by a reload). The next saved screens show neither. 'stuck': the pane
+  // comes back after the reload, and the run stops before its next save, with a picture, listed for her.
+  for (const mode of ['fix', 'stuck']) {
+    const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
+    mkdirSync(dirname(HP), { recursive: true });
+    const menu = (id, name, x) => [id, { id, name, page: 'chips-1', ctl: { sel: 'button', text: name }, ctlRect: { x, y: 80, w: 70, h: 28 }, restore: 'escape' }];
+    writeFileSync(HP, JSON.stringify({ defs: {}, clicks: Object.fromEntries([menu('k1', 'Menu A', 30), menu('k2', 'Menu B', 110), menu('k3', 'Menu C', 190), menu('k4', 'Menu D', 270), menu('k5', 'Dud menu', 350), menu('k6', 'Menu E', 430)]) }));
+    const c = JSON.parse(cfg0); Object.assign(c.record.auto, { clickMax: 1 }); writeFileSync(cfgF, JSON.stringify(c, null, 2));
+    writeFileSync(join(DEMO, 'plan.md'), CHIPS_PLAN + '- Click "Next"\n  Lands on: "Chips three"\n'); writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
+    tasks.chips(true); tasks.extras(mode); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const pr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const pj = readRun(DEMO), [pRaw, pRec] = keepRaw(`putback-${mode}-raw`);
+    const snaps = rawTexts(pRaw).filter(([f]) => f.slice(pRaw.length).split(/[\\/]/).includes('snaps'));
+    const of = h => snaps.filter(([, t]) => t.includes(h));
+    const folded = t => /<ul[^>]*xlist[^>]*>/.test(t) && /hidden/.test(/<ul[^>]*xlist[^>]*>/.exec(t)[0]);
+    const pb = (pRec && pRec.putBack) || [];
+    const ml = (pj.menus && pj.menus.list) || [], mBy = n => ml.find(x => x.name === n) || {};
+    const why = { code: pr.code, stopped: pj.stopped, menus: pj.menus && { ...pj.menus, list: ml.map(x => [x.name, x.status, x.found, !!x.picture]) }, putBack: pb.map(x => [x.state, x.after, x.how, x.found, x.left]), snaps: snaps.map(([f, t]) => [f.slice(pRaw.length), /Chips (one|two|three)/.exec(t)?.[0], t.includes('Help pane text'), folded(t)]), needsYou: pj.needsYou, notes: ((pRec && pRec.notes) || []).slice(-6), err: String(pr.err || '').slice(-400) };
+    if (mode === 'fix') {
+      check("the recording's menus are a floor: all clicked past the click cap, four captured, the one that opens nothing missed with a picture, the one no longer there gone", pr.code === 0 && !pj.stopped && JSON.stringify(pj.menus && { recorded: pj.menus.recorded, captured: pj.menus.captured, gone: pj.menus.gone, missed: pj.menus.missed }) === '{"recorded":6,"captured":4,"gone":1,"missed":1}' && mBy('Dud menu').status === 'missed' && !!mBy('Dud menu').picture && existsSync(mBy('Dud menu').picture) && (pj.needsYou || []).some(n => n.text === 'Open "Dud menu" (tasks)' && n.picture === mBy('Dud menu').picture) && mBy('Menu E').status === 'gone', JSON.stringify(why));
+      check('a section a hover collapsed is put back by its own control, and a pane Escape leaves open by a reload', pb.some(x => x.after === 'hovers' && x.how === 'closed' && /Projects/.test(x.found)) && pb.some(x => x.after === 'hovers' && x.how === 'reloaded' && /Help pane/.test(x.found)) && !pb.some(x => x.how === 'stopped'), JSON.stringify(why));
+      check('and the screens saved after them show neither', of('Chips two').length > 0 && of('Chips three').length > 0 && [...of('Chips two'), ...of('Chips three')].every(([, t]) => !t.includes('Help pane text') && !folded(t)), JSON.stringify(why));
+    } else check("a screen a reload doesn't put back: the run stops before its next save, with a picture, listed for her; nothing saved shows it", !!pj.stopped && pj.stopped.kind === 'put-back' && !!pj.stopped.picture && existsSync(pj.stopped.picture) && (pj.needsYou || []).some(n => n.picture === pj.stopped.picture) && !snaps.some(([, t]) => t.includes('Help pane text')) && !of('Chips three').length, JSON.stringify(why));
+    tasks.extras(null); tasks.chips(false); tasks.seed({});
+    writeFileSync(cfgF, cfg0);
+    if (had === null) rmSync(HP, { force: true }); else writeFileSync(HP, had);
+  }
   writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
 
