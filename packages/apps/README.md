@@ -5,7 +5,7 @@ second demo of the same apps needs no tuning. Data plus small pure helpers; no d
 
 | Pack | Apps it matches | What it holds | Where it came from |
 |---|---|---|---|
-| `teams` | teams.cloud.microsoft, teams.microsoft.com | busy markers, zoom levels, reflow part, channel stick, chat-list drag, launcher tooltip and search-hint rules, 3 themes, writes (post, theme) | inv641, spike E, spike A, demo1-reset |
+| `teams` | teams.cloud.microsoft, teams.microsoft.com | busy markers, zoom levels, reflow part, channel stick, chat-list drag, launcher tooltip and search-hint rules, 3 themes, writes (post, theme), your own status (the avatar) | inv641, spike E, spike A, demo1-reset |
 | `m365-copilot` | m365.cloud.microsoft, copilot.cloud.microsoft | busy, stream timings, step groups (selectors, status lines, grid classes), nav, workspace pane and chips, composer pin, split-pane drag, late menu item, menu CSS (`vendor/`), 2 themes, writes (task, skill, plugin switch, Chat/Cowork, theme), effects (Recent, memories) | inv641, spike E, spike A, demo1-reset |
 | `m365-admin` | admin.cloud.microsoft, admin.microsoft.com | busy, sweep budget (no step groups), nav and header breakpoints, Tools grid fit, 2 themes (with literal colors) | inv641, spike E, spike A |
 | `microsoft-iq` | iq.microsoft.com (+ Power BI frames) | frames to skip, `powerbi-access-token` stripped, sweep budget (zoom only), endorsement menu float, side-pane drag, no dark theme, writes (add to business plugin, endorse) | inv641, spike E, the recorder, demo1-reset |
@@ -192,6 +192,23 @@ are; which items is the demo's alone, never the pack's.
 
 `filtersFor(cfg)` gives a demo's: `{ "<pack>:<filter>": { ...filter, pack, app, hosts } }`.
 
+### Your own status (`ownStatus`)
+
+Where the app shows the signed-in person's own status, which a replica keeps (Teams' avatar: "Your profile, status
+Available for …"). An unattended run reads it before it saves a screen of the app, and stops rather than save
+another status (docs/recorder.md, "Your own status").
+
+```json
+"ownStatus": { "why": "…", "role": "button", "name": "/^Your profile, status (.+?) for /", "expect": ["Available"], "waitS": 90 }
+```
+
+- `name`: a /pattern/ over the control's name, by the reader's rule (`controlOf`); its group is the status. `role`:
+  the control's role.
+- `expect`: what a save may show when the recording has none (a recording's start screen of the app wins).
+- `waitS`: how long a wrong status is read again before the run stops (90 s).
+
+`ownStatusFor(cfg)` gives a demo's: `[{ app, pack, label, name, role, expect, waitS }]`.
+
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
 with `apis.<name>` naming the page that signs in (`open`), the host (`host`, or `hostPattern`) and, when the page
@@ -229,6 +246,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `guardFor(cfg)` | the read-only guard's `{ hosts, allow, stayHeld }` for a demo (its apps' packs, plus `capture.allow`) |
 | `servicesFor(cfg)` | the services a demo's apps need, from their packs (`[{ app, name, match, start, waitS }]`) |
 | `filtersFor(cfg)` | what a demo's apps can leave out, from their packs (`{ "<pack>:<filter>": filter }`) |
+| `ownStatusFor(cfg)` | where a demo's apps show the person's own status, from their packs (`[{ app, name, role, expect, waitS }]`) |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice

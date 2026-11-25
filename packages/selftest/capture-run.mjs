@@ -81,8 +81,9 @@ mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
 // the notes frame's session.
 // filters: Leave out's two kinds, a response's list (Suggested, ordered by refs) and a list the page draws from its own
 // store (Teams). taskLook: new-task's check as a machine reads it (a look, its page's words); find: its API undo finds
-// the script's own tasks by name when no run recorded them.
-const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false, taskLook = false, find = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+// the script's own tasks by name when no run recorded them. ownStatus ({ waitS }): the page's "Me" button names your
+// status, as Teams' avatar does.
+const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false, taskLook = false, find = false, ownStatus = null } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
     { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}), ...(find ? { find: { use: 'tasks', path: '/api/tasks', list: 'tasks', name: 'name', id: 'id', as: 'taskId', by: 'typed' } } : {}) }, ...(taskCheck ? { check: { api: { use: 'tasks', method: 'GET', path: '/api/tasks', made: 200 } } } : {}), ...(taskLook ? { check: { open: `http://${HOST}/`, look: { absent: '{typed}' }, lands: 'Tasks', expect: 'No task the run added.' } } : {}) },
@@ -99,6 +100,7 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHel
     { id: 'suggested', why: 'The Suggested list: GET /api/suggested, items by ref, drawn in order\'s order.', url: `*://${HOST}/api/suggested*`, match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/suggested$/`, items: 'items', fields: ['name'], refs: [{ list: 'order', by: 'ref' }], shows: 'name' },
     { id: 'team-tree', kind: 'dom', why: 'The Teams tree, drawn from the page\'s own store.', list: '[role=tree] [role=treeitem][aria-level="2"]' },
   ] } : {}),
+  ...(ownStatus ? { ownStatus: { why: 'The Me button names your status.', role: 'button', name: '/^Your profile, status (.+)$/', expect: ['Available'], waitS: ownStatus.waitS } } : {}),
 }, null, 1));
 writePack();
 
@@ -550,6 +552,57 @@ try {
     tasks.suggest(false);
     writePack();
     writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  }
+
+  // 1i · Your own status (a pack's ownStatus, as Teams' avatar). Before a screen of the app is saved, the status it
+  // shows must be what the recording shows (here none: the pack's Available). Matching: saved. Away, then Available
+  // within the wait: saved once it is, and the step's wait doesn't run out. Away throughout: that screen isn't saved,
+  // the run stops with a picture and lists it for her, and the reset after runs. ai check only notes it.
+  { const OS_PLAN = '# Tasks demo\n\n## Beat 1 · A look\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Refresh"\n  Lands on: "Up to date: 0 tasks"\n';
+    const OS_RESET = '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n';
+    const startSnap = () => { try { return JSON.parse(readFileSync(join(tmp, 'run-raw', 'snaps', 'tasks-start.json'), 'utf8')).docs.map(d => d.html).join('\n'); } catch (e) { return ''; } };
+    const SAY = `Tasks showed you as Away. Start again while you're using your ${process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer'}, with Tasks open.`;
+    const logF = join(DEMO, '.out', 'capture.log');
+    const prep = async (status, waitS) => {
+      writePack({ ownStatus: { waitS } }); tasks.status(status); tasks.seed({});
+      writeFileSync(join(DEMO, 'plan.md'), OS_PLAN); writeFileSync(join(DEMO, 'reset.md'), OS_RESET);
+      await run(['ai', 'approve', '--demo', DEMO], { env: E });
+      freshRaw();
+    };
+    // A run; onWait: called once the capture host says it's reading a save's status again.
+    const osRun = async (onWait = null) => {
+      const from = existsSync(logF) ? readFileSync(logF, 'utf8').length : 0;
+      let watching = !!onWait;
+      const watch = (async () => { while (watching) { await sleep(400); const t = existsSync(logF) ? readFileSync(logF, 'utf8').slice(from) : ''; if (/own status: tasks shows Away before saving/.test(t)) { watching = false; onWait(); } } })();
+      const r = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+      watching = false; await watch;
+      return { r, j: readRun(DEMO), log: existsSync(logF) ? readFileSync(logF, 'utf8').slice(from).split('\n').filter(l => /own status/.test(l)) : [] };
+    };
+    const brief = o => JSON.stringify({ code: o.r.code, error: o.r.error, done: o.r.done && o.r.done.result && o.r.done.result.ownStatus, stopped: o.j.stopped, needsYou: o.j.needsYou, own: o.j.ownStatus && { start: o.j.ownStatus.start, beat1: o.j.ownStatus.beat1, reads: (o.j.ownStatus.reads || []).slice(0, 8), stopped: o.j.ownStatus.stopped }, after: o.j.reset && o.j.reset.after && o.j.reset.after.ok, log: o.log.slice(0, 6), err: String(o.r.err || '').slice(-600) });
+    // Matching.
+    await prep('Available', 20);
+    let o = await osRun();
+    const okReads = (o.j.ownStatus && o.j.ownStatus.reads) || [];
+    check('your own status as the recording has it: every screen of the app saved, the summary says what the start and beat 1 showed', o.r.code === 0 && !o.j.stopped && o.j.ownStatus.start.tasks === 'Available' && o.j.ownStatus.beat1 && o.j.ownStatus.beat1.tasks === 'Available' && okReads.length >= 2 && okReads.every(x => x.ok && !x.waitedS) && /status Available/.test(startSnap()) && o.r.done.result.ownStatus.start.tasks === 'Available', brief(o));
+    // Away, then Available 4 s after the gate first reads it.
+    await prep('Away', 30);
+    o = await osRun(() => setTimeout(() => tasks.status('Available'), 4000));
+    const first = ((o.j.ownStatus && o.j.ownStatus.reads) || []).find(x => x.app === 'tasks') || {};
+    check('Away, then Available within the wait: saved once it is (nothing saved as Away), and the run goes on', o.r.code === 0 && !o.j.stopped && first.ok && first.status === 'Available' && first.waitedS >= 3 && first.waitedS <= 20 && /status Available/.test(startSnap()) && !/status Away/.test(startSnap()) && o.j.ownStatus.start.tasks === 'Available', brief(o));
+    // Away throughout: ai check notes it, then the run stops before saving.
+    await prep('Away', 6);
+    const ck = await aiProc(['check', '--demo', DEMO], DEMO, E, () => {}, 180);
+    const cks = ck.done && ck.done.result;
+    check('ai check only notes your status: Away, never a stop', ck.code === 0 && cks && cks.pass === 1 && (cks.ownStatus || []).some(x => x.app === 'tasks' && x.status === 'Away' && x.ok === false), JSON.stringify({ code: ck.code, error: ck.error, result: cks, err: String(ck.err || '').slice(-600) }));
+    o = await osRun();
+    const stp = o.j.stopped || {};
+    check('Away throughout the wait: that screen isn\'t saved, the run stops with a picture, lists it for her, and the reset after runs', stp.kind === 'own-status' && stp.why === SAY && stp.status === 'Away' && stp.waitedS >= 5 && stp.picture && existsSync(stp.picture) && (o.j.needsYou || []).some(n => n.why === SAY) && !startSnap() && !o.j.summary && o.j.reset.after && o.j.reset.after.ok, brief(o) + ' snaps: ' + JSON.stringify(existsSync(join(tmp, 'run-raw', 'snaps')) ? readdirSync(join(tmp, 'run-raw', 'snaps')) : []));
+    const st1 = json((await run(['cmd', 'recordStatus', '{}'], { env: E })).out);
+    check('and the recorder is free again for the next run', st1 && st1.recording === false, JSON.stringify(st1));
+    tasks.status(null); tasks.seed({});
+    writePack();
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
 

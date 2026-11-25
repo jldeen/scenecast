@@ -106,10 +106,10 @@ async function main() {
       const { readFileSync: rf } = await import('node:fs');
       return readyCheck({ demo: d, emit, plan: pf ? parsePlan(rf(pf, 'utf8')) : null, keep });
     }
-    case 'check': { const { checkLive } = await import('./unattended.mjs'); const c = await checkLive({ demo: demo(), emit }); return { pass: c.pass, wrong: c.wrong, cant: c.cant, secs: c.secs, lines: c.lines.map(l => ({ text: l.text, status: l.status, ...(l.why ? { why: l.why } : {}) })) }; }
+    case 'check': { const { checkLive } = await import('./unattended.mjs'); const c = await checkLive({ demo: demo(), emit }); return { pass: c.pass, wrong: c.wrong, cant: c.cant, secs: c.secs, lines: c.lines.map(l => ({ text: l.text, status: l.status, ...(l.why ? { why: l.why } : {}) })), ...(c.ownStatus ? { ownStatus: c.ownStatus } : {}) }; }
     case 'walk': {
       const d = demo();
-      if (args.includes('--live')) { const { walkLive } = await import('./unattended.mjs'); const w = await walkLive({ demo: d, emit }); return { ...(w.check && !w.check.error ? { check: { pass: w.check.pass, wrong: w.check.wrong, cant: w.check.cant } } : {}), secs: w.secs, beats: w.beats.map(b => ({ beat: b.beat, secs: b.secs, steps: b.steps.map(s => s.status) })), held: (w.guard.held || []).length, suspect: w.suspect || null }; }
+      if (args.includes('--live')) { const { walkLive } = await import('./unattended.mjs'); const w = await walkLive({ demo: d, emit }); return { ...(w.check && !w.check.error ? { check: { pass: w.check.pass, wrong: w.check.wrong, cant: w.check.cant } } : {}), ...(w.ownStatus ? { ownStatus: w.ownStatus } : {}), secs: w.secs, beats: w.beats.map(b => ({ beat: b.beat, secs: b.secs, steps: b.steps.map(s => s.status) })), held: (w.guard.held || []).length, suspect: w.suspect || null }; }
       const { walkerFromDemo } = await import('./walker.mjs'), { walkPlan } = await import('./walk.mjs'), { readPlan } = await import('./draft.mjs');
       const walker = walkerFromDemo(d);
       if (!walker) throw new Error('build the demo first: an offline walk needs its screens');

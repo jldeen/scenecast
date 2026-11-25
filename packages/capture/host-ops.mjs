@@ -51,10 +51,21 @@
 //                                    → { on, rules, dom } | { on: false, refused }
 //   capLeaveLog()                   per rule: the requests it filtered (method, host, path shape, how many it took out),
 //                                    what it took out (field, value, shows), failures; the checks run; the leak, if any
+//   capOwnStatus({ apps, shots, everyMs } | { read } | { since })   her own status (Teams' avatar: Available, Away), by
+//                                    each app's pack (ownStatus): apps { <app>: { name (a /pattern/ over the control's
+//                                    name, by the reader's rule; its group the status), role, expect, waitS, label } }.
+//                                    From here on, before the recorder saves a screen of one of them (before Leave
+//                                    out's check), its status is read; one not in expect is read again every everyMs
+//                                    for up to waitS, and then the take stops there: that screen isn't saved, nor
+//                                    anything after it, and its picture goes in shots. A screen without the control
+//                                    saves as it is. { apps: {} }: off → { on, apps }
+//                                    { read: { tab, name, role } }: the status on that tab now → { found, status? }
+//                                    { since }: what it read before each save, the one it's waiting on, the stop
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { allowedBy } from './browser.mjs';
 import { READ_DOCS_SRC } from './page-read.mjs';
+import { CONTROL_NAME_SRC } from './page-naming.mjs';
 import { cardIn, shownIn } from './cards.mjs';
 
 const LEAVE_PAGE = readFileSync(new URL('./leave-out-page.js', import.meta.url), 'utf8').replace(/^\/\/.*\n/gm, '');
@@ -82,6 +93,21 @@ const LEAVE_SCAN = words => {
   return words.some(w => w && hay.includes(w));
 };
 const unEntity = h => String(h || '').replace(/<[^>]*>/g, ' ').replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).replace(/&#x([0-9a-f]+);/gi, (m, x) => String.fromCodePoint(parseInt(x, 16))).replace(/&(amp|lt|gt|quot|apos|nbsp|#39);/g, (m, k) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" })[k]);
+// Her own status in a page (capOwnStatus): the first control of that role whose name (the reader's rule) the pattern
+// matches, its group the status; the element kept for the next read. Only the status leaves the page, never the name.
+export function ownStatusConfig(a) {
+  const m = /^\/(.+)\/([a-z]*)$/.exec(String((a && a.name) || ''));
+  if (!m) return null;
+  return { re: m[1], flags: m[2].replace(/g/g, ''), role: a.role || null, expect: [].concat(a.expect || []).map(String), waitS: a.waitS === undefined ? 90 : +a.waitS, label: a.label || 'The app' };
+}
+const OWN_READ = a => `(() => {
+${CONTROL_NAME_SRC}
+const a = ${JSON.stringify({ re: a.re, flags: a.flags, role: a.role })}, rx = new RegExp(a.re, a.flags);
+const hit = el => { try { const c = domControl(el); if (!c.control || (a.role && c.role !== a.role)) return null; const m = rx.exec(c.name); return m ? String(m[1] === undefined ? m[0] : m[1]).trim() : null; } catch (e) { return null; } };
+let el = window.__sdOwnStatusEl, s = el && el.isConnected ? hit(el) : null;
+if (s === null) { el = null; for (const e of document.querySelectorAll('*')) { s = hit(e); if (s !== null) { el = e; break; } } window.__sdOwnStatusEl = el; }
+return s === null ? { found: false } : { found: true, status: s };
+})()`;
 
 const originOf = u => { try { return new URL(u).origin; } catch (e) { return null; } };
 const hostRe = c => c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
@@ -219,6 +245,33 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     await leaveLeak(p, app, what, `"${h.value}" is on the screen (${h.role || 'text'}: "${h.text}"${h.frame !== 'main' ? `, in ${h.frame}` : ''})`, hits.slice(0, 6));
     throw new Error(`Leave out stopped the take: ${L.leak.why}`);
   };
+  // Her own status (capOwnStatus): per app, its control and what a save may show; what it read before each save; the
+  // one it's waiting on; the stop.
+  let own = null;
+  const ownRead = (p, a) => p.evaluate(OWN_READ(a)).catch(e => ({ found: false, error: String(e.message).split('\n')[0] }));
+  const ownStop = () => { throw new Error(`Own status stopped the take: ${own.stopped.why}`); };
+  const ownGate = async (p, app, what) => {
+    const O = own;
+    if (!O) return;
+    if (O.stopped) ownStop();
+    const a = O.apps[app];
+    if (!a || !p) return;
+    const t0 = Date.now(), fine = r => !r.found || a.expect.includes(r.status);
+    let r = await ownRead(p, a);
+    if (!fine(r)) {
+      O.waiting = { app, what, status: r.status, since: at() };
+      log(`own status: ${app} shows ${r.status} before saving ${what}; reading it again for up to ${a.waitS} s`);
+      try { while (!fine(r) && Date.now() - t0 < a.waitS * 1000) { await new Promise(res => setTimeout(res, O.everyMs)); r = await ownRead(p, a); } } finally { O.waiting = null; }
+    }
+    const waitedS = Math.round((Date.now() - t0) / 1000);
+    O.reads.push({ at: at(), app, what, ...(r.found ? { status: r.status } : { found: false }), ok: fine(r), ...(waitedS ? { waitedS } : {}) });
+    if (fine(r)) return;
+    let picture = null;
+    if (O.shots) { try { picture = `${O.shots}/own-status-${app}.png`; mkdirSync(O.shots, { recursive: true }); writeFileSync(picture, await p.screenshot({ timeout: 30000 })); } catch (e) { picture = null; } }
+    O.stopped = { at: at(), app, what, status: r.status, expect: a.expect, waitedS, label: a.label, why: `${a.label} showed ${r.status}, not ${a.expect.join(' or ')}, for ${waitedS} s before ${what} was saved`, picture };
+    log(`own status: stopped before saving ${what} (${app}): ${O.stopped.why}`);
+    ownStop();
+  };
   return {
     // { on: true } starts recording; { since } reads what came since.
     // { on: true, watch?: [{ name, match }] } starts recording (watch: services whose every answer is kept, tagged
@@ -349,6 +402,22 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       const marked = [];
       for (const p of cb.ctx.pages()) { let n = 0; for (const f of p.frames()) n += +(await f.evaluate(() => document.querySelectorAll('[data-d1-leaveout]').length).catch(() => 0)); if (n) marked.push({ host: hostOf(p.url()), marked: n }); }
       return { on: true, rules: leave.filter.log(), dom: marked, checks: { ...leave.checks }, leak: leave.leak };
+    },
+    async capOwnStatus(c) {
+      if (c.read) { const a = ownStatusConfig(c.read); if (!a) return { found: false, error: 'name is a /pattern/' }; return ownRead(await tabOf(c.read.tab), a); }
+      if (c.apps) {
+        const apps = {};
+        for (const [id, x] of Object.entries(c.apps)) { const a = ownStatusConfig(x); if (a && a.expect.length) apps[id] = a; }
+        if (!Object.keys(apps).length) { own = null; globalThis.__stuntdoubleOwnStatus = undefined; return { on: false }; }
+        own = { apps, shots: c.shots || null, everyMs: Math.max(200, +c.everyMs || 2000), reads: [], stopped: null, waiting: null };
+        // The recorder's hook (recorder.js): gate before it saves a screen; after for what it saves of one (a hover's
+        // parts, a stream's frame): nothing once the take has stopped; waiting for its status (a save it holds).
+        globalThis.__stuntdoubleOwnStatus = { gate: (p, app, what) => ownGate(p, app, what), after: () => { if (own && own.stopped) ownStop(); }, waiting: () => (own && own.waiting) || null };
+        log(`own status on: ${Object.entries(apps).map(([id, a]) => `${id} (${a.expect.join(', ')})`).join(', ')}`);
+        return { on: true, apps: Object.keys(apps) };
+      }
+      if (!own) return { on: false, reads: [], total: 0, stopped: null, waiting: null };
+      return { on: true, reads: own.reads.slice(c.since || 0), total: own.reads.length, stopped: own.stopped, waiting: own.waiting };
     },
     async capTab(c) {
       if (c.close) { const p = sides.get(c.close); sides.delete(c.close); if (p && !p.isClosed()) await p.close().catch(() => {}); return { closed: !!p }; }

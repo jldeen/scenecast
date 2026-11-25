@@ -86,3 +86,26 @@ test('with from, only that frame\'s session and only from that frame, never the 
   await f.ops.capGuard({});
   assert.equal((await f.ops.capApi({ tab: 'portal', open: 'x', host: 'api.example.test', from: 'frame.example.test', method: 'GET', path: '/v1/a' })).from, 'frame.example.test');
 });
+
+test('your own status before a save: as expected, saved; another, read again until it is; still another after the wait, the take stops there and refuses every save after it', async () => {
+  let status = 'Available';
+  const page = { evaluate: async src => /domControl/.test(String(src)) ? { found: true, status } : null, screenshot: async () => Buffer.from(''), on() {}, url: () => 'https://teams.example.test/', frames: () => [], isClosed: () => false };
+  const ops = hostOps({ ctx: { pages: () => [page], on() {} }, guard: async () => ({}) });
+  assert.deepEqual(await ops.capOwnStatus({ apps: { teams: { name: '/^Your profile, status (.+?) for /', role: 'button', expect: ['Available'], waitS: 1, label: 'Teams' } }, everyMs: 200 }), { on: true, apps: ['teams'] });
+  const G = globalThis.__stuntdoubleOwnStatus;
+  await G.gate(page, 'teams', 'teams-start');
+  status = 'Away';
+  await G.gate(page, 'copilot', 'cop-home');
+  setTimeout(() => { status = 'Available'; }, 450);
+  await G.gate(page, 'teams', 'teams-hover');
+  status = 'Away';
+  await assert.rejects(G.gate(page, 'teams', 'teams-2'), /^Error: Own status stopped the take: Teams showed Away, not Available, for 1 s before teams-2 was saved$/);
+  await assert.rejects(G.gate(page, 'copilot', 'cop-2'), /Own status stopped the take/);
+  assert.throws(() => G.after(), /Own status stopped the take/);
+  const log = await ops.capOwnStatus({});
+  assert.deepEqual(log.reads.map(r => [r.what, r.status, r.ok]), [['teams-start', 'Available', true], ['teams-hover', 'Available', true], ['teams-2', 'Away', false]]);
+  assert.equal(log.reads[0].waitedS, undefined);
+  assert.deepEqual([log.stopped.app, log.stopped.status, log.stopped.what], ['teams', 'Away', 'teams-2']);
+  assert.deepEqual(await ops.capOwnStatus({ apps: {} }), { on: false });
+  assert.equal(globalThis.__stuntdoubleOwnStatus, undefined);
+});

@@ -318,10 +318,12 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         suggest(true): the page also lists Suggested items from GET /api/suggested ({ items, order }: the items by ref,
 //         drawn in order's order; an order ref with no item draws an empty row) with their count, and a Teams tree it
 //         draws from its own store (localStorage, as Teams keeps its teams in IndexedDB): Leave out's two ways.
+//         status(text): the page also shows your own status on a "Me" button ("Your profile, status <text>", as Teams'
+//         avatar), and follows GET /api/status as it changes (status(null): none).
 //   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
 //         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
 //         API undo that has to go from that frame.
-const tasksPage = (port, notesPort, suggest = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+const tasksPage = (port, notesPort, suggest = false, status = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
 main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
@@ -331,6 +333,7 @@ li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;b
 textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid #d0d7de;border-radius:6px}
 </style></head><body><main>
 <h1>Tasks</h1>
+${status ? `<p><button id="me" aria-label="Your profile, status ${status}">Me</button></p>` : ''}
 <div class="bar"><button role="switch" aria-checked="false" aria-label="Sync" id="sync">Sync</button><span id="syncText">Sync is off</span>
 <button aria-label="Refresh" id="refresh">Refresh</button><button aria-label="Archive all" id="archive">Archive all</button>
 <a href="http://localhost:${port}/help" id="help">Help</a><span id="fresh" role="status"></span></div>
@@ -343,6 +346,7 @@ ${suggest ? '<h2>Suggested</h2><p id="sugCount"></p><ul id="sug" aria-label="Sug
 </main><script>
 const $ = id => document.getElementById(id);
 let AUTH = '';
+if ($('me')) setInterval(() => fetch('/api/status').then(r => r.json()).then(j => { const l = 'Your profile, status ' + j.status; if (j.status && $('me').getAttribute('aria-label') !== l) $('me').setAttribute('aria-label', l); }).catch(() => {}), 400);
 const session = fetch('/api/session').then(r => r.json()).then(j => { AUTH = 'Bearer ' + j.token; }).catch(() => {});
 const post = (u, b) => session.then(() => fetch(u, { method: 'POST', headers: { 'content-type': 'application/json', authorization: AUTH }, body: JSON.stringify(b || {}) })).then(r => r.json());
 function render(st) {
@@ -397,7 +401,7 @@ load();
 </script></body></html>`;
 
 export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
-  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false };
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null };
   const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
   const log = [];
   const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
@@ -406,8 +410,9 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
   const server = createServer(async (q, s) => {
     const path = q.url.split('?')[0];
     log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
-    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest));
+    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status));
     if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
+    if (q.method === 'GET' && path === '/api/status') return send(s, 200, 'application/json', JSON.stringify({ status: st.status }));
     if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
     if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
     if (q.method === 'GET' && path === '/api/tasks') return send(s, 200, 'application/json', JSON.stringify(view()));
@@ -462,6 +467,7 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     // lookup as you type) or 'drop' (no answer: the connection closed).
     catalog: mode => { st.catalog = mode; },
     suggest: on => { st.suggest = !!on; },
+    status: text => { st.status = text || null; },
     close: () => { server.close(); notes.close(); },
   };
 }

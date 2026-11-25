@@ -232,6 +232,20 @@ export function servicesFor(cfg, list = packs()) {
   return out;
 }
 
+// A demo's own-status controls: where an app shows the signed-in person's own status (Teams' avatar: Available, Away),
+// which a replica would keep. A pack's ownStatus: { name (a /pattern/ over the control's name, by the reader's rule,
+// whose group is the status), role, expect (what a save may show when the recording has none), waitS }.
+// → [{ app, pack, label (what people call the app), name, role, expect, waitS }]
+export function ownStatusFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id], o = p && p.ownStatus;
+    if (!o || !o.name) continue;
+    out.push({ app: a.id, pack: p.id, label: (p.names || [])[0] || p.title || p.id, name: o.name, role: o.role || null, expect: [].concat(o.expect || []), waitS: +o.waitS || 90 });
+  }
+  return out;
+}
+
 // A demo's pack filters, for reset.md's Leave out: what an app shows of the tenant's own data that a demo can leave out
 // of its replica, in the capture browser only (packages/capture/leave-out.mjs). A pack's filters: [{ id, why, and either
 // url (where its responses come from, a browser request pattern), match (a guard entry over "METHOD host/path"), items
@@ -313,6 +327,13 @@ export function checkPack(p) {
     const c = sv && sv.cards;
     if (c && (typeof c.steps !== 'string' || !/^\/.+\/[a-z]*$/.test(c.steps) || !c.list || !c.why)) out.push(`services ${sv.name}: cards has steps (a /pattern/ over a step's words), list and why`);
   }
+  // Her own status: the control by a /pattern/ over its name whose group is the status, and what a save may show.
+  { const o = p.ownStatus;
+    if (o !== undefined) {
+      if (!o || typeof o.name !== 'string' || !/^\/.*\(.+\).*\/[a-z]*$/.test(o.name)) out.push('ownStatus: name is a /pattern/ over the control\'s name, its group the status ("/^Your profile, status (.+?) for /")');
+      if (!o || ![].concat(o.expect || []).length) out.push('ownStatus: expect (what a save may show when the recording has none: "Available")');
+      if (!o || !o.why) out.push('ownStatus: why (plain words, with the evidence)');
+    } }
   // A filter (Leave out): why, and the one response it reads (a pattern over "METHOD host/path", never everything) and
   // where its items are; or a DOM list. Never which items: those are a demo's.
   for (const f of p.filters || []) {

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack } from './index.mjs';
+import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack, ownStatusFor } from './index.mjs';
 import { flowDefaults, htmlPasses } from './build.mjs';
 import { packRules } from '@stuntdouble/core/lib/text-rules.mjs';
 import { elementEnd } from '@stuntdouble/capture/compose.mjs';
@@ -136,4 +136,12 @@ test('safe steps only open a picker or a menu: never a write, never a sign-in', 
   assert.match(bad({ id: 's', on: { kind: 'click', target: 'Filter' }, what: 'Filter changes nothing' }).join(), /only opens a picker or a menu/);
   assert.match(bad({ id: 's', on: { kind: 'click', target: 'Certified' }, what: 'Certified only opens a menu' }).join(), /write endorse has the same step/);
   assert.match(bad({ id: 's', on: { kind: 'press', key: 'Enter' }, what: 'Enter only opens the menu' }).join(), /kind: 'click'/);
+});
+
+test("where an app shows your own status: Teams' avatar, from its pack; a pack's ownStatus needs a pattern with a group, expect and why", () => {
+  const cfg = { apps: [{ id: 'teams', url: 'https://teams.cloud.microsoft/' }, { id: 'admin', url: 'https://admin.cloud.microsoft/' }] };
+  assert.deepEqual(ownStatusFor(cfg).map(o => [o.app, o.label, o.role, o.expect, o.waitS]), [['teams', 'Teams', 'button', ['Available'], 90]]);
+  assert.ok(/^Your profile, status Available for x$/.test('Your profile, status Available for x') && new RegExp(ownStatusFor(cfg)[0].name.slice(1, -1)).exec('Your profile, status Available for jessica in Contoso ')[1] === 'Available');
+  const bad = checkPack({ id: 'x', match: ['x.test'], ownStatus: { name: '/status/', expect: [] } });
+  assert.deepEqual(bad.filter(b => b.startsWith('ownStatus')).map(b => b.split(' ')[1]), ['name', 'expect', 'why']);
 });

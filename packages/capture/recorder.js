@@ -27,12 +27,18 @@ const recTl = (what, t0, meta = {}) => { const e = { what, at: t0 - REC.t0, ms: 
 // what she leaves out of the replica. Each snapshot, hover's parts and stream frame is checked first; one that shows it
 // isn't saved, and the gate refuses every save after it (the run stops at its next step).
 const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
+// Her own status (the capture browser only: host-ops capOwnStatus): before a screen of an app whose pack names her
+// status control is saved, it must show what the recording does (Teams: Available); read again for a while, else the
+// take stops there. First, so Leave out's check reads the screen as it's saved.
+const recOwn = () => globalThis.__stuntdoubleOwnStatus || null;
 const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : REC.active; };
 const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
 if (!H.leaveGated) {
   const snap0 = H.snap, post0 = H.post;
-  H.snap = async (p, id, opts) => { const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
+  H.snap = async (p, id, opts) => { const O = recOwn(); if (O) await O.gate(p, recAppOfPage(p), id); const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
   H.post = async (path, data) => {
+    const O = recOwn();
+    if (O && path === '/hover') O.after();
     const L = recLeave();
     if (L && path === '/hover' && data && data.parts && data.parts.length) { const app = recAppOfState(data.page), A = (REC.apps || []).find(a => a.id === app); await L.gateHtml(data.parts.join('\n'), app, `hover ${data.page} ${data.n}`, A && A.page); }
     return post0(path, data);
@@ -200,6 +206,8 @@ async function recCapture(A, ev, trigger) {
       prev = r.html; lastHtml = Date.now();
       const L = recLeave();
       if (L) await L.gateHtml(r.html, A.id, `${name} frame ${frames.length}`, p);
+      const O = recOwn();
+      if (O) O.after();
       await fetchResources(p, [{ urls: r.urls, frame: p.mainFrame() }]);
       const t = Date.now() - t0;
       await post('/frame', { stream: name, n: frames.length, t, html: r.html, urls: r.urls, inline: r.inline, meta: r.meta });
@@ -573,7 +581,7 @@ function recTiming() {
     recorderSecs: r(start + startSweeps + screenSweeps + sideSweeps + actions + typed - product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm),
   };
 }
-OPS.recordStatus = async () => REC.on ? { recording: true, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
+OPS.recordStatus = async () => REC.on ? { recording: true, gateWait: (recOwn() && recOwn().waiting()) || undefined, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
   // What the page still holds (a click it's waiting to do: the loop picks it up a second or more later on a busy app)

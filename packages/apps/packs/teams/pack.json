@@ -225,5 +225,12 @@
       "why": "Teams draws its left rail's teams from its own store (IndexedDB), not from a response as it loads, so no response filter can leave a team out. Measured Nov 24: no response on load carried the team; Teams' conversations store did. Each team is a treeitem at aria-level 2 in the rail's tree, its channels in the group under it: a flow list, so a hidden team leaves no hole and the next moves up. Marked and hidden, never removed (React keeps its own nodes), and never in a snapshot.",
       "list": "[role=tree] [role=treeitem][aria-level=\"2\"]"
     }
-  ]
+  ],
+  "ownStatus": {
+    "why": "Teams shows your own status on your avatar at the top right of every screen, and a replica keeps it. The capture browser's Teams never reports you active (Nov 25: four variants, no activity or presence call, all read Away), so your status comes from your own Teams app: away from your computer, it turns Away.",
+    "role": "button",
+    "name": "/^Your profile, status (.+?) for /",
+    "expect": ["Available"],
+    "waitS": 90
+  }
 }

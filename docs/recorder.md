@@ -229,6 +229,15 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   the demo has refuses the run before anything runs. What it names never proves a live landing. The approval lists
   the lines apart from the writes ("Left out of the replica: …"). A live walk does the same, and checks each screen it
   keeps. run.json and walk.json: `leaveOut` (per rule, each request it filtered and what it took out; the checks).
+- **Your own status** (an app pack's `ownStatus`: Teams' avatar, Available or Away). The capture browser's Teams
+  never reports you active, so the status it shows comes from your own Teams app: away from your computer, it turns
+  Away, and the replica would keep it. Before the recorder saves a screen of that app (before Leave out's check),
+  the status is read (`capOwnStatus`): it must be what the recording's start screen shows (else the pack's
+  `expect`). If it isn't, it's read again every 2 s for up to the pack's `waitS` (90 s); a step waiting on it doesn't
+  run out of time. Still not, and that screen isn't saved, nor anything after it: the run stops with a picture, lists
+  "Teams showed you as Away. Start again while you're using your Mac, with Teams open." (PC on Windows) and runs the
+  reset after. A screen without the control saves as it is. run.json: `ownStatus` (each read, the stop); the summary
+  prints what the start screens (with their sweeps) and beat 1 showed. A live walk and `ai check` only note it.
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
   the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
   write), every host reached outside the apps', every input sent (`inputs`: what it was for, the control's name, its

@@ -33,6 +33,35 @@ import { readScreen } from '@scenecast/script/html.mjs';
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i;
 const sleepMs = ms => new Promise(r => setTimeout(r, ms));
 
+// Her own status (Teams' avatar: Available, Away), for each app the plan goes to whose pack names its control
+// (ownStatus). What a save may show: what the recording's start screen of that app shows, else the pack's expect.
+// recorded: the demo's walker (walkerFromDemo), or null for none. → [{ app, label, name, role, expect, waitS, from }]
+export function ownStatusApps(demo, packs, inPlan, recorded) {
+  const list = (packs && packs.ownStatusFor ? packs.ownStatusFor(demo.cfg) : []).filter(x => inPlan.has(x.app));
+  if (!list.length) return [];
+  const w = recorded !== undefined ? recorded : (() => { try { return walkerFromDemo(demo); } catch (e) { return null; } })();
+  return list.map(x => { const r = recordedStatus(w, x); return { ...x, ...(r ? { expect: [r], from: 'recording' } : { from: 'pack' }) }; });
+}
+// The status a recorded start screen shows: the first control of the pack's role whose name its pattern matches.
+export function recordedStatus(w, o) {
+  const m = /^\/(.+)\/([a-z]*)$/.exec(String(o.name || ''));
+  const id = w && m ? w.start(o.app) : null;
+  if (!id) return null;
+  let sc = null; try { sc = w.screen(id); } catch (e) { return null; }
+  const rx = new RegExp(m[1], m[2].replace(/g/g, ''));
+  for (const c of (sc && sc.controls) || []) {
+    if (o.role && c.role !== o.role) continue;
+    const h = rx.exec(c.name || '');
+    if (h) return String(h[1] === undefined ? h[0] : h[1]).trim();
+  }
+  return null;
+}
+const computerWord = () => process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer';
+// What she reads when a save stopped on her status.
+export const ownStatusSay = (label, status) => `${label} showed you as ${status}. Start again while you're using your ${computerWord()}, with ${label} open.`;
+// The statuses a list of reads (capOwnStatus) saw for an app, in order, each once; a screen without the control: "not shown".
+export const ownSeen = (reads, app) => { const s = [...new Set((reads || []).filter(r => r.app === app).map(r => r.found === false ? 'not shown' : r.status))]; return s.length ? s.join(', ') : null; };
+
 // A pack-named service's answers (capNet, tagged service), the latest one judged: 2xx is up; anything else (500, a
 // call with no answer: a network error, or CORS when its preflight failed) means try later. A call the page itself
 // called off (net::ERR_ABORTED: a reload) isn't an answer. → null (no answer yet) | { ok, status, why }
@@ -119,6 +148,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const inPlan = planApps(plan, demo.cfg.apps.map(a => a.id));
   const lo = leaveOutOf({ demo, packs, apps: inPlan });
   if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
+  const ownApps = ownStatusApps(demo, packs, inPlan);
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
@@ -130,6 +160,19 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const leaveNow = async () => { if (!lo.rules.length) return null; const l = await leaveLog(cmd); Object.assign(run.leaveOut, { rules: l.rules || [], dom: l.dom || [], checks: l.checks || null, leak: l.leak || null }); return l; };
   const shot = async (app, name) => { const file = join(stops, `${name}.png`); try { await cmd('capShot', { tab: appTab(demo, app), file }, 60); return file; } catch (e) { return null; } };
   const stopWith = async (app, at, kind, why) => { run.stopped = { kind, why, at, app, picture: await shot(app, `${at.beat + 1}-${at.step + 1}-${kind}`) }; emit({ event: 'stopped', ...run.stopped }); };
+  // Her own status (capOwnStatus): what it read before each save of those apps, and its stop. What Teams' start
+  // screen (with its start sweeps) and beat 1 showed go in the summary.
+  if (ownApps.length) run.ownStatus = { apps: ownApps.map(o => ({ app: o.app, expect: o.expect, from: o.from })), start: {}, beat1: {} };
+  const ownNow = async () => ownApps.length ? cmd('capOwnStatus', {}, 30).catch(() => null) : null;
+  const ownStopped = async () => { const r = ownApps.length ? await cmd('capOwnStatus', { since: 1e9 }, 30).catch(() => null) : null; return r && r.stopped ? r.stopped : null; };
+  const ownStopRun = (st, at = null) => {
+    const say = ownStatusSay(st.label, st.status);
+    run.stopped = { kind: 'own-status', why: say, app: st.app, saving: st.what, status: st.status, expect: st.expect, waitedS: st.waitedS, picture: st.picture || null, ...(at ? { at } : {}) };
+    run.needsYou.push({ text: st.label, why: say });
+    emit({ event: 'stopped', ...run.stopped });
+  };
+  let ownMark = 0;
+  const ownSummary = async key => { const r = await ownNow(); if (!r) return; const reads = (r.reads || []).slice(ownMark); ownMark = r.total || 0; for (const o of ownApps) run.ownStatus[key][o.app] = ownSeen(reads, o.app) || 'no screen saved'; };
 
   // The guard, from the first request to the last.
   const g = await guardOn(demo, cmd, packs);
@@ -229,6 +272,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const down = await startServices(homeAt, 'start');
       if (down) { run.stopped = down; emit({ event: 'stopped', ...run.stopped }); break main; }
     }
+    // Her own status, before any screen of those apps is saved: the gate on, or nothing is recorded.
+    if (ownApps.length) {
+      const on = await cmd('capOwnStatus', { apps: Object.fromEntries(ownApps.map(o => [o.app, o])), shots: stops }, 30).catch(e => ({ on: false, why: e.message }));
+      if (!on.on) { run.stopped = { kind: 'own-status', why: `couldn't watch your status in ${ownApps.map(o => o.label).join(', ')}: ${on.why || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
+    }
     const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
     let app = first && first.kind === 'app' && w.appOf(first.app) || appIds[0];
@@ -236,6 +284,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // does the run.
     try { await cmd('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: recordOpts(demo.cfg), parallel: true, zooms: demo.cfg.zooms, first: app }, 300); }
     catch (e) {
+      const os = await ownStopped();
+      if (os) { ownStopRun(os); break main; }
       const l = await leaveNow().catch(() => null);
       if (!(l && l.leak)) throw e;
       leakStop(l.leak);
@@ -243,6 +293,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     }
     recording = true;
     await settled(cmd, { maxS: 900, on: s => emit({ event: 'record', status: s }) });
+    if (ownApps.length) await ownSummary('start');
     await w.start(app);
 
     // One step: null when it's done and landed where the plan says, else why the run stops ({ kind, why }).
@@ -284,6 +335,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // stopped saving there, so the run stops at its next step.
     const leaked = async () => { const l = await leaveNow(); return l && l.leak ? { kind: 'leave-out', why: leakWhy(l.leak), leak: l.leak, beforeWrite: true } : null; };
     const doStep = async (bi, si, step, at, prev) => {
+      { const os = await ownStopped(); if (os) return { kind: 'own-status', own: os }; }
       { const lk = await leaked(); if (lk) return lk; }
       for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
       // Set before: what her script has already set when she gets here, set off camera just before the step, in a tab
@@ -382,7 +434,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const prev = app;
         if (step.kind === 'app') app = w.appOf(step.app) || app;
         const ts = Date.now();
-        const stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
+        let stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
+        // A save her status stopped during the step: that's why, whatever the step met after it.
+        if (stop && !stop.own && !stop.leak) { const os = await ownStopped(); if (os) stop = { kind: 'own-status', own: os }; }
+        if (stop && stop.own) { ownStopRun(stop.own, at); break outer; }
         if (stop) {
           await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
           // Leave out's own picture, taken as it refused the save, and where on the screen it was.
@@ -399,14 +454,31 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         emit({ event: 'step-done', beat: bi, step: si, did: lastDid.did });
       }
       run.beats.push({ beat: bi + 1, title: beat.title, secs: +((Date.now() - tb) / 1000).toFixed(1) });
+      if (bi === 0 && ownApps.length) { await settled(cmd, { maxS: 300 }).catch(() => {}); await ownSummary('beat1'); }
     }
   } } finally {
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
       // A save it refused after the last step: the take ends there, and she sees why.
+      const os = await ownStopped();
+      if (os && !run.stopped) ownStopRun(os);
       const l = await leaveNow().catch(() => null);
       if (l && l.leak && !run.stopped) leakStop(l.leak);
+    }
+    if (ownApps.length) {
+      const r = await ownNow();
+      if (r && r.on && run.ownStatus) {
+        run.ownStatus.reads = r.reads || [];
+        if (r.stopped) run.ownStatus.stopped = r.stopped;
+        const started = Object.keys(run.ownStatus.start).length > 0;
+        // Stopped at the start screens: what they showed.
+        if (!started) for (const o of ownApps) run.ownStatus.start[o.app] = ownSeen(run.ownStatus.reads, o.app) || 'no screen saved';
+        // Stopped in beat 1: what it showed until then.
+        if (started && !run.beats.length) for (const o of ownApps) { const v = ownSeen(run.ownStatus.reads.slice(ownMark), o.app); if (v) run.ownStatus.beat1[o.app] = v; }
+      }
+      if (run.ownStatus && !Object.keys(run.ownStatus.beat1).length) delete run.ownStatus.beat1;
+      await cmd('capOwnStatus', { apps: {} }, 30).catch(() => {});
     }
     // Off the app (another site): back to it, out of the recording, before the reset needs it.
     if (run.stopped && run.stopped.kind === 'offplan') await liveWalker({ demo, cmd, packs, log }).goBack(run.stopped.app).catch(() => {});
@@ -426,7 +498,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   return finish();
   function finish() {
     save();
-    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary };
+    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}) };
   }
 }
 
@@ -560,6 +632,17 @@ async function guardOff(cmd, hosts, appOf = () => null) {
   return out;
 }
 
+// Her own status on each app's tab now, for the plan's apps whose pack names its control: noted (a walk, a check),
+// never a stop. → [{ app, status, expect, ok }]
+export async function ownStatusNote({ demo, cmd, packs, plan, recorded }) {
+  const out = [];
+  for (const o of ownStatusApps(demo, packs, planApps(plan, demo.cfg.apps.map(a => a.id)), recorded)) {
+    const r = await cmd('capOwnStatus', { read: { tab: appTab(demo, o.app), name: o.name, role: o.role } }, 30).catch(e => ({ found: false, error: e.message }));
+    out.push({ app: o.app, status: r.found ? r.status : 'not shown', expect: o.expect, ok: !!r.found && o.expect.includes(r.status), ...(r.error ? { error: r.error } : {}) });
+  }
+  return out;
+}
+
 // reset.md's Check, live and read-only, in a live walker's tabs (Leave out and the guard as the caller has them):
 // each line pass, wrong or can't, with a picture of the screen it was read on (shots). → { pass, wrong, cant, lines }
 async function liveCheck({ demo, cmd, w, packs, plan, shots }) {
@@ -594,6 +677,8 @@ export async function checkLive({ demo, emit = () => {}, cmd: viaCmd, packs }) {
     emit({ event: 'stage', name: 'check', label: 'Checking the demo starts as it should' });
     const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
     out = (await liveCheck({ demo, cmd, w, packs, plan, shots })) || { pass: 0, wrong: 0, cant: 0, lines: [] };
+    const own = await ownStatusNote({ demo, cmd, packs, plan });
+    if (own.length) out.ownStatus = own;
     out.inputs = w.inputs();
   } finally {
     if (lo.rules.length) await cmd('capLeaveOut', { rules: [] }, 60).catch(() => {});
@@ -686,10 +771,11 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     return [...by.values()];
   };
   const seenAt = {};
-  let walk, checked = null;
+  let walk, checked = null, ownNote = null;
   try {
     // reset.md's Check first, as the run reads it before anything (its plan's, not one given to walk instead).
     if (!viaPlan) { emit({ event: 'stage', name: 'check', label: 'Checking the demo starts as it should' }); checked = await liveCheck({ demo, cmd, w, packs, plan, shots: join(aiDir(demo), 'check') }).catch(e => ({ error: e.message })); }
+    ownNote = await ownStatusNote({ demo, cmd, packs, plan }).catch(e => [{ error: e.message }]);
     const starts = [];
     for (const a of demo.cfg.apps) {
       const did = await w.home(a.id); const bad = did.find(d => d.why);
@@ -765,7 +851,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     }
     const off = await guardOff(cmd, g.hosts, appOfSender);
     keepBodiesOut(demo, off.bodies);
-    walk = { ...(walk || {}), ...(checked ? { check: checked } : {}), ...(leaveOut ? { leaveOut } : {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
+    walk = { ...(walk || {}), ...(checked ? { check: checked } : {}), ...(ownNote && ownNote.length ? { ownStatus: ownNote } : {}), ...(leaveOut ? { leaveOut } : {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events.map(e => ({ ...e, app: appOfSender({ tab: e.host }) })); } catch (e) {}
     walk.suspect = suspectSteps({ demo, plan, walk, screensDir, packs });
     mkdirSync(aiDir(demo), { recursive: true });

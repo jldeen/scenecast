@@ -14,7 +14,8 @@ import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
 import { stepNets } from './walk.mjs';
-import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps } from './unattended.mjs';
+import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps, ownStatusApps, ownStatusSay, ownSeen } from './unattended.mjs';
+import { settled } from './run.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -282,4 +283,26 @@ test('the apps a plan goes to: each Go to, and the first app when it starts with
   const ids = ['tasks', 'admin', 'iq'];
   assert.deepEqual([...planApps({ beats: [{ steps: [{ kind: 'click', target: 'Refresh' }] }, { steps: [{ kind: 'app', app: 'admin' }] }] }, ids)], ['tasks', 'admin']);
   assert.deepEqual([...planApps({ beats: [{ steps: [{ kind: 'app', app: 'tasks' }, { kind: 'type', target: 'New task', value: 'x' }] }] }, ids)], ['tasks']);
+});
+
+test("your own status: what a save may show is the recording's start screen's (else the pack's), and what she reads when it isn't", () => {
+  const packs = { ownStatusFor: () => [{ app: 'teams', label: 'Teams', name: '/^Your profile, status (.+?) for /', role: 'button', expect: ['Available'], waitS: 90 }] };
+  const demo = { cfg: { apps: [{ id: 'teams' }, { id: 'copilot' }] } };
+  const shows = s => ({ start: app => app === 'teams' ? 'teams-start' : null, screen: () => ({ controls: [{ role: 'link', name: 'Your profile, status Busy for x' }, { role: 'button', name: `Your profile, status ${s} for jessica in Contoso` }] }) });
+  assert.deepEqual(ownStatusApps(demo, packs, new Set(['teams']), shows('Do not disturb')).map(o => [o.app, o.expect, o.from]), [['teams', ['Do not disturb'], 'recording']]);
+  assert.deepEqual(ownStatusApps(demo, packs, new Set(['teams']), null).map(o => [o.expect, o.from]), [[['Available'], 'pack']]);
+  assert.deepEqual(ownStatusApps(demo, packs, new Set(['copilot']), null), []);
+  assert.match(ownStatusSay('Teams', 'Away'), /^Teams showed you as Away\. Start again while you're using your (Mac|PC|computer), with Teams open\.$/);
+  assert.equal(ownSeen([{ app: 'teams', status: 'Available' }, { app: 'copilot', status: 'x' }, { app: 'teams', found: false }, { app: 'teams', status: 'Available' }], 'teams'), 'Available, not shown');
+  assert.equal(ownSeen([], 'teams'), null);
+});
+
+test("a save held for her own status doesn't use up a step's time to settle", async () => {
+  let n = 0;
+  const cmd = async () => { n++; await new Promise(r => setTimeout(r, 100)); return n <= 5 ? { recording: true, busy: true, gateWait: { app: 'teams' } } : { recording: true, busy: false }; };
+  // Five polls held (about 2 s), more than maxS: it still settles.
+  const s = await settled(cmd, { maxS: 1.2 });
+  assert.equal(s.busy, false);
+  const busy = async () => { await new Promise(r => setTimeout(r, 100)); return { recording: true, busy: true }; };
+  await assert.rejects(settled(busy, { maxS: 1.2 }), /still busy after 1.2 s/);
 });
