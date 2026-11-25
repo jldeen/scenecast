@@ -322,8 +322,8 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         own address, pushed, as an app's in-page routes are): six plain buttons a screen that show
 //         nothing on hover, and on the third a "Slow chip" (in a wrapper, as a card's anchor often is) whose card
 //         shows 1.5 s after the pointer arrives and a "Quiet chip" that shows nothing: the recorded hovers' floor.
-//         slowPages(true): a "Slow page" link to /slow/1, and on it "Next slow" to /slow/2: full page loads whose answer
-//         comes 2.5 s late (longer than the recorder's settle), as a slow app or computer gives.
+//         pageLoads(true): a "Load a page" button that loads /load/1 a moment (0.8 s) after the click, and on it "Load
+//         the next" for /load/2: full page loads that start after the recorder has taken the click from the page.
 //         status(text): the page also shows your own status on a "Me" button ("Your profile, status <text>", as Teams'
 //         avatar), and follows GET /api/status as it changes (status(null): none).
 //   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
@@ -333,8 +333,9 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 const chipsPart = n => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1><p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : ''}`;
-const slowPage = n => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title></head>
-<body><main><h1>Slow page ${n === 1 ? 'one' : 'two'}</h1><p>Loaded on its own.</p>${n === 1 ? '<p><a href="/slow/2">Next slow</a></p>' : ''}</main></body></html>`;
+const loadPage = n => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title></head>
+<body><main><h1>Loaded page ${n === 1 ? 'one' : 'two'}</h1><p>A page of its own.</p>${n === 1 ? '<p><button id="loadnext">Load the next</button></p>' : ''}</main>
+<script>const b = document.getElementById('loadnext'); if (b) b.addEventListener('click', () => setTimeout(() => { location.href = '/load/2'; }, 800));</script></body></html>`;
 const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, slow = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
@@ -349,7 +350,7 @@ textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px so
 ${status ? `<p><button id="me" aria-label="Your profile, status ${status}">Me</button></p>` : ''}
 <div class="bar"><button role="switch" aria-checked="false" aria-label="Sync" id="sync">Sync</button><span id="syncText">Sync is off</span>
 <button aria-label="Refresh" id="refresh">Refresh</button><button aria-label="Archive all" id="archive">Archive all</button>
-<a href="http://localhost:${port}/help" id="help">Help</a>${chips ? '<button id="chipsbtn">Chips</button>' : ''}${slow ? '<a href="/slow/1" id="slowlink">Slow page</a>' : ''}<span id="fresh" role="status"></span></div>
+<a href="http://localhost:${port}/help" id="help">Help</a>${chips ? '<button id="chipsbtn">Chips</button>' : ''}${slow ? '<button id="loadbtn">Load a page</button>' : ''}<span id="fresh" role="status"></span></div>
 <ul id="list" aria-label="Task list"></ul>
 <p id="none">No tasks yet</p>
 <textarea aria-label="New task" id="box" rows="2" placeholder="New task"></textarea>
@@ -359,6 +360,7 @@ ${suggest ? '<h2>Suggested</h2><p id="sugCount"></p><ul id="sug" aria-label="Sug
 </main><script>
 const $ = id => document.getElementById(id);
 let AUTH = '';
+if ($('loadbtn')) $('loadbtn').addEventListener('click', () => setTimeout(() => { location.href = '/load/1'; }, 800));
 if ($('chipsbtn')) {
   // The chips screens, in place: Slow chip's card shows 1.5 s after the pointer arrives.
   const bind = () => {
@@ -437,7 +439,7 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
     if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips, st.slow));
     if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
-    if (q.method === 'GET' && /^\/slow\/[12]$/.test(path)) { await new Promise(r => setTimeout(r, 2500)); return send(s, 200, 'text/html; charset=utf-8', slowPage(+path.slice(-1))); }
+    if (q.method === 'GET' && /^\/load\/[12]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', loadPage(+path.slice(-1)));
     if (q.method === 'GET' && /^\/chips\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, true));
     if (q.method === 'GET' && /^\/chips-part\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', chipsPart(+path.slice(-1)));
     if (q.method === 'GET' && path === '/api/status') return send(s, 200, 'application/json', JSON.stringify({ status: st.status }));
@@ -497,7 +499,7 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     suggest: on => { st.suggest = !!on; },
     status: text => { st.status = text || null; },
     chips: on => { st.chips = !!on; },
-    slowPages: on => { st.slow = !!on; },
+    pageLoads: on => { st.slow = !!on; },
     close: () => { server.close(); notes.close(); },
   };
 }
