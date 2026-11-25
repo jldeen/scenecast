@@ -633,8 +633,10 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     const out = [];
     for (let i = 0; i < n; i++) {
       if (i) await sleep(gapMs);
-      const docs = await cmd('js', { tab: tab(id), code: READ_DOCS_SRC }, 90).catch(() => null);
-      out.push({ at: new Date().toISOString(), docs: Array.isArray(docs) ? docs : [] });
+      // A read that failed keeps why (its docs are empty: it proves nothing either way).
+      let error = null;
+      const docs = await cmd('js', { tab: tab(id), code: READ_DOCS_SRC }, 90).catch(e => { error = String((e && e.message) || e).split('\n')[0].slice(0, 300); return null; });
+      out.push({ at: new Date().toISOString(), docs: Array.isArray(docs) ? docs : [], ...(error || !Array.isArray(docs) ? { error: error || `not a read: ${JSON.stringify(docs).slice(0, 120)}` } : {}) });
     }
     return out;
   }

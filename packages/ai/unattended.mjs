@@ -316,7 +316,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // step and no input ran since. run.reads counts what was read and what was used again.
     const lastAfter = {};
     let stepSeq = 0;
-    run.reads = { before: { read: 0, reused: 0, changed: 0 }, after: { one: 0, two: 0 } };
+    run.reads = { before: { read: 0, reused: 0, changed: 0 }, after: { one: 0, two: 0 }, failed: [] };
     const packCheck = known => {
       const p = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(x => x && x.id === known.pack) : null;
       const pw = p && (p.writes || []).find(x => x.id === known.write);
@@ -418,6 +418,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       let lp = proofOn(afters);
       if (!byCheck && lp.strength !== 'strong') { await sleep(1000); afters = [...afters, ...await w.reads(app, { n: 1 }).catch(() => [])]; lastReads[app] = afters; lp = proofOn(afters); }
       run.reads.after[afters.length > 1 ? 'two' : 'one']++;
+      for (const r of [...afters, ...before]) if (r && r.error) run.reads.failed.push({ beat: bi + 1, step: si, text: at.text, at: r.at, error: r.error });
       // Kept for the next step with the recorder's signature, only when it was the same before and after this read.
       const sig1 = await w.sigNow(app);
       lastAfter[app] = { read: afters[afters.length - 1], seq, inputs: w.inputs().length, sig: sig0 && sig0 === sig1 ? sig1 : null };
