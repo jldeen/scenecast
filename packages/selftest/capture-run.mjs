@@ -387,7 +387,7 @@ try {
     rj = readRun(DEMO);
     const loLog = tasks.log.slice(), [loRaw, recLO] = keepRaw('lo-raw');
     const lr = ((rj.leaveOut || {}).rules || []), sug = lr.find(x => x.id === 'fixture-tasks:suggested') || {};
-    check('Leave out: the run goes to the end, the approval lists its lines apart from the writes, and run.json has what each rule took out and where', res.code === 0 && !rj.stopped && (apLO.leaveOut || []).map(x => x.label).join('|') === 'Left out of the replica: suggestion "Fabrikam Payroll"|Left out of the replica: team "Contoso Beta"' && !(apLO.reset || []).some(x => /Fabrikam|Contoso Beta/.test(x.text)) && sug.removed && sug.removed.length === 1 && sug.removed[0].value === 'Fabrikam Payroll' && sug.removed[0].field === 'name' && sug.requests.some(q => q.method === 'GET' && q.path === '/api/suggested' && q.removed === 1 && q.refs === 1) && !sug.failures.length && rj.leaveOut.checks && rj.leaveOut.checks.n > 0 && rj.leaveOut.checks.clean === rj.leaveOut.checks.n && !rj.leaveOut.leak, JSON.stringify({ code: res.code, err: res.err.slice(-800), stopped: rj.stopped, leaveOut: rj.leaveOut, approved: apLO.leaveOut }));
+    check('Leave out: the run goes to the end, the approval lists its lines apart from the writes, and run.json has what each rule took out and where', res.code === 0 && !rj.stopped && (apLO.leaveOut || []).map(x => x.label).join('|') === 'Left out of the replica: suggestion "Fabrikam Payroll"|Left out of the replica: team "Contoso Beta"' && !(apLO.reset || []).some(x => /Fabrikam|Contoso Beta/.test(x.text)) && sug.removed && sug.removed.length === 1 && sug.removed[0].value === 'Fabrikam Payroll' && sug.removed[0].field === 'name' && sug.requests.some(q => q.method === 'GET' && q.path === '/api/suggested' && q.removed === 1 && q.refs === 1) && !sug.failures.length && rj.leaveOut.checks && rj.leaveOut.checks.n > 0 && rj.leaveOut.checks.clean === rj.leaveOut.checks.n && !rj.leaveOut.leak, JSON.stringify({ code: res.code, error: res.error, err: res.err.slice(-800), stopped: rj.stopped, leaveOut: rj.leaveOut, approved: apLO.leaveOut }));
     const snapOf = (dir, id) => { try { return JSON.parse(readFileSync(join(dir, 'snaps', `${id}.json`), 'utf8')).docs.map(d => d.html).join('\n'); } catch (e) { return ''; } };
     const startLO = snapOf(loRaw, 'tasks-start'), startBase = snapOf(loBase, 'tasks-start');
     const rowsOf = h => (/<ul id="sug"[^>]*>([\s\S]*?)<\/ul>/.exec(h) || [])[1] || '';
@@ -407,15 +407,16 @@ try {
     const off = await loadNow();
     const lon = json((await run(['cmd', 'capLeaveOut', JSON.stringify({ rules: filterRules, words: { tasks: ['Fabrikam Payroll', 'Contoso Beta'] }, check: '@scenecast/ai/leave-check.mjs' })], { env: E })).out);
     const on = await loadNow();
+    const onLog = json((await run(['cmd', 'capLeaveLog', '{}'], { env: E })).out);
     await run(['cmd', 'capLeaveOut', JSON.stringify({ rules: [] })], { env: E });
     const at = (list, t) => (list || []).find(x => x.t === t) || {};
     check('and loaded with the rules on and off, the page asks the server for exactly the same things', lon.on === true && on.log.length > 3 && on.log.join('|') === off.log.join('|') && on.log.includes('GET /api/suggested'), JSON.stringify({ on: on.log, off: off.log }));
-    check('and on the live page the list is one fewer with no hole, and the team is hidden with the next one moved up into its place', on.rows.join('|') === 'Contoso Notes|Northwind Ledger' && on.count === '2 suggested' && off.rows.length === 3 && at(on.teams, 'Contoso Beta').shown === false && at(off.teams, 'Contoso Beta').shown === true && at(on.teams, 'Northwind Ops').top === at(off.teams, 'Contoso Beta').top, JSON.stringify({ lon, off: { rows: off.rows, teams: off.teams }, on: { rows: on.rows, count: on.count, teams: on.teams } }));
+    check('and on the live page the list is one fewer with no hole, and the team is hidden with the next one moved up into its place', on.rows.join('|') === 'Contoso Notes|Northwind Ledger' && on.count === '2 suggested' && off.rows.length === 3 && at(on.teams, 'Contoso Beta').shown === false && at(off.teams, 'Contoso Beta').shown === true && at(on.teams, 'Northwind Ops').top === at(off.teams, 'Contoso Beta').top, JSON.stringify({ lon, off: { rows: off.rows, teams: off.teams }, on: { rows: on.rows, count: on.count, teams: on.teams }, log: onLog }));
     // A walk has it as a run does, and checks each screen it keeps.
     res = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
     const wl = existsSync(join(DEMO, '.out', 'ai', 'walk.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')) : {};
     const wlo = wl.leaveOut || {};
-    check('and a walk leaves them out too, and checks each screen it keeps', (wlo.screens || []).length >= 2 && wlo.screens.every(x => x.ok) && (wlo.rules || []).some(x => x.id === 'fixture-tasks:suggested' && x.removed.length === 1), JSON.stringify({ code: res.code, leaveOut: wlo, err: res.err.slice(-600) }));
+    check('and a walk leaves them out too, and checks each screen it keeps', (wlo.screens || []).length >= 2 && wlo.screens.every(x => x.ok) && (wlo.rules || []).some(x => x.id === 'fixture-tasks:suggested' && x.removed.length === 1), JSON.stringify({ code: res.code, error: res.error, leaveOut: wlo, err: res.err.slice(-600) }));
     // A line whose filter no pack has: the run refuses at start, nothing run.
     writeFileSync(join(DEMO, 'reset.md'), LO({ from: 'fixture-tasks:suggestions' }));
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
@@ -432,7 +433,7 @@ try {
     rj = readRun(DEMO);
     const [leakRaw] = keepRaw('lo-leak-raw');
     const stp = rj.stopped || {};
-    check('words she leaves out on a screen: not saved, the run stops with a picture and where, listed for her, the demo put back', stp.kind === 'leave-out' && /"Sync is off" is on the screen/.test(stp.why) && stp.picture && existsSync(stp.picture) && (stp.where || []).some(h => h.value === 'Sync is off' && h.text === 'Sync is off') && (rj.needsYou || []).length === 1 && !snapOf(leakRaw, 'tasks-start') && count(tasks.log, 'POST /api/tasks') === 0 && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: stp, needsYou: rj.needsYou, snaps: existsSync(join(leakRaw, 'snaps')) ? readdirSync(join(leakRaw, 'snaps')) : [], after: rj.reset.after && rj.reset.after.why }));
+    check('words she leaves out on a screen: not saved, the run stops with a picture and where, listed for her, the demo put back', stp.kind === 'leave-out' && /"Sync is off" is on the screen/.test(stp.why) && stp.picture && existsSync(stp.picture) && (stp.where || []).some(h => h.value === 'Sync is off' && h.text === 'Sync is off') && (rj.needsYou || []).length === 1 && !snapOf(leakRaw, 'tasks-start') && count(tasks.log, 'POST /api/tasks') === 0 && rj.reset.after && rj.reset.after.ok, JSON.stringify({ code: res.code, error: res.error, stopped: stp, needsYou: rj.needsYou, snaps: existsSync(join(leakRaw, 'snaps')) ? readdirSync(join(leakRaw, 'snaps')) : [], after: rj.reset.after && rj.reset.after.why }));
     const st0 = json((await run(['cmd', 'recordStatus', '{}'], { env: E })).out);
     check('and the recorder is free again for the next run', st0 && st0.recording === false, JSON.stringify(st0));
     tasks.suggest(false);

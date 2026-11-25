@@ -656,14 +656,14 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     const st = { rules: rules.map(r => ({ id: r.id, app: r.app || null, requests: [], removed: [], failures: [] })) };
     const ruleLog = id => st.rules.find(x => x.id === id);
     const at2 = () => new Date().toISOString();
-    const remove = rules.length ? await addHook({ response: true, patterns: rules.map(r => ({ urlPattern: r.url, requestStage: 'Response' })), on: async (e) => {
+    const remove = rules.length ? await addHook({ response: true, patterns: rules.map(r => ({ urlPattern: r.url, requestStage: 'Response' })), on: async (e, from) => {
       if (e.responseStatusCode < 200 || e.responseStatusCode >= 300) return null;
       const mine = rules.filter(r => allowedBy({ method: e.request.method, url: e.request.url }, [r.match]));
       if (!mine.length) return null;
       let u = null; try { u = new URL(e.request.url); } catch (x) {}
       const where = { method: e.request.method, host: u ? u.host : '?', path: u ? pathShape(u.pathname) : '' };
       let text;
-      try { text = await e.body(); } catch (x) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: `its body couldn't be read (${String(x.message || x).split('\n')[0]})` }); return null; }
+      try { text = await from.body(); } catch (x) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: `its body couldn't be read (${String(x.message || x).split('\n')[0]})` }); return null; }
       const f = filterBody(text, mine);
       if (!f.ok) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: f.why }); log(`leave out: ${where.method} ${where.host}${where.path}: ${f.why}`); return null; }
       for (const r of mine) {
