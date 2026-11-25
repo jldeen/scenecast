@@ -7,6 +7,8 @@
 // skipKeys: controls already audited on another screen of the app ("sel|text"), not hovered again; out.keys are the
 // ones this run hovered. max: at most this many controls.
 // shard: [i, n] this window takes every n-th candidate from the i-th (twin windows of the same screen, side by side).
+// until: a function; once it says so, the audit stops before its next control (out.stopped: sweep ahead, when the
+// answer it ran during has ended).
 const p = ARGS.p || await H.pageFor(ARGS.tab);
 await p.bringToFront();
 let f = p.mainFrame();
@@ -77,6 +79,7 @@ for (let step = 0; step <= steps; step++) {
   let atRest = false;
   for (const c of todo) {
     if (ARGS.max && out.tried >= ARGS.max) { out.capped = true; break; }
+    if (ARGS.until && ARGS.until()) { out.stopped = true; break; }
     (out.keys = out.keys || []).push(c.sel + '|' + c.text);
     if (Date.now() - t0 > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
     out.tried++;
@@ -116,7 +119,7 @@ for (let step = 0; step <= steps; step++) {
     await H.post('/hover', { page: ARGS.page, n: out.n, firstMs: first, farMs, cand: c, step, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, shot, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
     out.n++;
   }
-  if (out.timedOut) break;
+  if (out.timedOut || out.stopped) break;
 }
 await move(...out.neutral); await quiet(400, 2500);
 if (ARGS.scroll && ARGS.scroll.sel !== undefined) { await ev(sel => { const e = sel ? document.querySelector(sel) : document.scrollingElement; if (e) e.scrollTop = 0; }, ARGS.scroll.sel || null); await sleep(600); }

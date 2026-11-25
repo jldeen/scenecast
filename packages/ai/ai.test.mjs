@@ -14,7 +14,7 @@ import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
 import { stepNets } from './walk.mjs';
-import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps, ownStatusApps, ownStatusSay, ownSeen, canReuse } from './unattended.mjs';
+import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps, ownStatusApps, ownStatusSay, ownSeen, canReuse, aheadScreens } from './unattended.mjs';
 import { settled } from './run.mjs';
 
 test('plan: plain words to steps and back', () => {
@@ -249,6 +249,24 @@ test("a step's read before is the last step's read after only when nothing ran a
   assert.equal(canReuse(kept, now({ seq: 6 })), false, 'not the step just before');
   assert.equal(canReuse(kept, now({ setBefore: true })), false, 'something was set off camera for this step');
   assert.equal(canReuse(null, now()), false);
+});
+
+test("sweep ahead's screens: after the answer, from the last walk of this plan, each new address once, no start screen", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sc-ahead-')), sd = join(dir, 'walk-screens');
+  mkdirSync(sd);
+  const put = (n, app, url, status = 'reached') => writeFileSync(join(sd, n + '.json'), JSON.stringify({ app, url, status }));
+  writeFileSync(join(dir, 'walk.json'), JSON.stringify({ plan: { sha256: 'p1' } }));
+  put('start-tasks', 'tasks', 'http://t/'); put('start-admin', 'admin', 'http://a/');
+  put('1-1', 'tasks', 'http://t/'); put('1-2', 'tasks', 'http://t/'); put('1-3', 'tasks', 'http://t/');
+  put('1-4', 'tasks', 'http://t/'); put('1-5', 'tasks', 'http://t/stats'); put('1-6', 'tasks', 'http://t/stats');
+  put('2-1', 'admin', 'http://a/'); put('2-2', 'admin', 'http://a/audit', 'missing'); put('2-3', 'admin', 'http://a/audit');
+  put('2-4', 'tasks', 'http://t/stats');
+  const flat = [[0, 6], [1, 4]].flatMap(([bi, n]) => Array.from({ length: n }, (x, si) => ({ bi, si, s: {} })));
+  // Step 1-2 starts the answer and 1-3 waits for it (index 2): the hover on the answer (same address) isn't a screen,
+  // Stats is, the start screen of admin isn't, a step the walk didn't reach isn't, and Stats once.
+  assert.deepEqual(aheadScreens(dir, flat, 2, 'p1'), [{ app: 'tasks', url: 'http://t/stats', step: '1-5' }, { app: 'admin', url: 'http://a/audit', step: '2-3' }]);
+  assert.deepEqual(aheadScreens(dir, flat, 2, 'p2'), [], 'a walk of another plan: nothing');
+  assert.deepEqual(aheadScreens(join(dir, 'none'), flat, 2, 'p1'), [], 'no walk: nothing');
 });
 
 test("the app a request came from: its tab's host, else its frame's, by each app's and its pack's hosts", () => {

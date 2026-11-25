@@ -32,7 +32,7 @@ const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
 // take stops there. First, so Leave out's check reads the screen as it's saved.
 const recOwn = () => globalThis.__stuntdoubleOwnStatus || null;
 const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : (REC.twinOf && REC.twinOf.get(p)) || REC.active; };
-const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
+const recAppOfState = s => { const k = String(s || '').replace(/^click-/, ''); if (REC.aheadApp && REC.aheadApp[k]) return REC.aheadApp[k]; const st = REC.states && REC.states[k.replace(/~t\d+$/, '')]; return st ? st.app : REC.active; };
 if (!H.leaveGated) {
   const snap0 = H.snap, post0 = H.post;
   H.snap = async (p, id, opts) => { const O = recOwn(); if (O) await O.gate(p, recAppOfPage(p), id); const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
@@ -196,7 +196,7 @@ async function recCapture(A, ev, trigger) {
   const p = A.page, o = REC.opts;
   const from = REC.states[A.state];
   await recSetBusy(p, true);
-  const name = `s${String(++REC.seq).padStart(3, '0')}`;
+  const name = `s${String(++REC.seq).padStart(3, '0')}`, capN = REC.capN = (REC.capN || 0) + 1;
   const frames = []; let prev = null; const t0 = Date.now();
   let lastHtml = t0;
   const grab = async () => {
@@ -245,7 +245,7 @@ async function recCapture(A, ev, trigger) {
     if (isStream) REC.streams[name] = { raw: name, frames: [0, frames.length - 1], to, timing: 'real', ms: Math.max(600, Math.min(o.streamMaxMs || 10000, last + 300)), realMs: last };
     rlogr(`${ev.kind} ${ev.desc ? '"' + ev.desc + '" ' : ''}→ ${to}${isStream ? ` (stream ${name}, ${frames.length} frames, ${(last / 1000).toFixed(1)} s)` : ''}`);
     return { changed: true, to, stream: isStream ? name : undefined };
-  } finally { await recSetBusy(p, false); recTl('action', t0, { kind: ev.kind, app: A.id, from: from.snap, to, productMs: product, frames: frames.length }); }
+  } finally { REC.capDone = Math.max(REC.capDone || 0, capN); await recSetBusy(p, false); recTl('action', t0, { kind: ev.kind, app: A.id, from: from.snap, to, productMs: product, frames: frames.length }); }
 }
 async function recEnter(A, e) {
   const fk = await recFrameKey(A.page, e.f);
@@ -374,7 +374,9 @@ function recSeen(kind, key) { const m = REC.seen[kind] = REC.seen[kind] || {}; r
 // The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen.
 // twins: n windows of the app at the screen's address (the capture browser only, off by default): a screen they show
 // alike (its signature) has its hovers shared out among them and the recorded tab, and its zoom levels, side by side.
-const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, chipWidths: [1366, 1100], twins: 0, ...(a || {}) }; };
+// ahead: sweep ahead (the capture browser only, off by default): while an answer streams in, the screens the plan goes
+// to next swept in a window of their own (recordAhead), at most aheadMax of them, for at most aheadMaxS.
+const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, chipWidths: [1366, 1100], twins: 0, ahead: false, aheadMax: 6, aheadMaxS: 300, ...(a || {}) }; };
 // Twin windows of an app at its screen's address (the host's capTwins: the capture browser only), each told apart
 // from the app's own; only those that show the same screen (its signature, once settled) are used.
 async function recTwinPages(A, st, n) {
@@ -395,6 +397,86 @@ function recShardsDone(kind, rs) {
   if (kind === 'zoom') return { state: rs[0].state, zooms: rs.flatMap(r => r.zooms || []), shards: rs.length };
   return rs[0];
 }
+// How long to wait for a hover to show, and the kinds of control that never show, as the app has learned them so far.
+function recHoverLearned(app) {
+  const hs = ((REC.hoverStats = REC.hoverStats || {})[app] = REC.hoverStats[app] || { firsts: [], kinds: {} });
+  return { hs, learned: hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900, skipSels: Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel) };
+}
+// The hover audit's candidates on a page now (its main frame), without hovering anything.
+async function recHoverCands(p) {
+  const f = p.mainFrame();
+  await f.evaluate(`(${HOVER_PAGE})()`);
+  return f.evaluate(o => { const c = window.__d1h.candidates(o); if (window.__d1h.obs) window.__d1h.obs.disconnect(); return c; }, { perSel: 8 });
+}
+// Sweep ahead (record.auto.ahead, the capture browser only, off by default). The run asks for it just before the step
+// that starts an answer (recordAhead): while the answer streams in, a window of the app's own (twin:<app>, pool ahead)
+// loads each screen the plan goes to next, at its address, and sweeps it as the run would now: its hovers, and its
+// zoom levels where its kind of screen is new (only hovers in the app that's answering, so its stream keeps its
+// frames). It stops before its next control once the answer has ended. Nothing it finds counts yet: the seen
+// controls, hover times, pages and levels are held back, by the screen's signature. The run's screen with that
+// signature uses them only as aheadFits says (ahead-rule.js), and adds them then; any other is never listed, so the
+// build never reads it.
+async function recAheadRun(c) {
+  const o = recAutoOpts();
+  if (!o || !o.ahead || !OPS.capTwins || !REC.on) return;
+  const from = REC.capN || 0, t0 = Date.now();
+  const until = () => !REC.on || (REC.capDone || 0) > from || Date.now() - t0 > (o.aheadMaxS || 300) * 1000;
+  REC.ahead = REC.ahead || { bySig: {}, n: 0 };
+  REC.sides.ahead = REC.sides.ahead || [];
+  for (const sc of (c.screens || []).slice(0, o.aheadMax || 6)) {
+    if (until()) break;
+    const A = REC.apps.find(a => a.id === sc.app);
+    if (!A || !sc.url) continue;
+    const t1 = Date.now(), page = `${A.id}~ahead${++REC.ahead.n}`;
+    const entry = { page, app: A.id, url: sc.url, step: sc.step, used: false };
+    REC.sides.ahead.push(entry);
+    REC.aheadApp = REC.aheadApp || {}; REC.aheadApp[page] = A.id;
+    let q = null;
+    try {
+      const r = await OPS.capTwins({ app: A.id, pool: 'ahead', n: 1, url: sc.url });
+      q = r && r.pages && r.pages[0];
+      if (!q) { entry.why = 'no window'; continue; }
+      REC.twinOf = REC.twinOf || new WeakMap(); REC.twinOf.set(q, A.id);
+      await recInstall(q).catch(() => {}); await recSettle(q, 900, 12000).catch(() => {});
+      const sig = await recSig(q).catch(() => null);
+      const f = await q.mainFrame().evaluate(sel => window.__rkrec ? window.__rkrec.features(sel) : null, REC.opts.groups.button).catch(() => null);
+      if (!sig || !f) { entry.why = "its screen couldn't be read"; continue; }
+      Object.assign(entry, { sig, kind: f.kind });
+      const held = { sig, kind: f.kind, page, entry };
+      if (o.hovers && !until()) {
+        const { learned, skipSels } = recHoverLearned(A.id), waitMs = o.hoverWaitMs || learned;
+        await recSetBusy(q, true);
+        try { held.hovers = { ...(await SIDE_HOVERS({ waitMs, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, skipKeys: [...recSeen('hovers', A.id)], p: q, page, until, ctx: (REC.hoverCtx || {})[A.id + '|'] })), waitMs }; }
+        catch (e) { held.hovers = { error: String(e.message || e).slice(0, 120), keys: [], waitMs }; }
+        finally { await recSetBusy(q, false); }
+      }
+      if (o.zoom && c.app !== A.id && !recSeen('kinds', A.id).has(f.kind) && !until()) {
+        const into = [];
+        const z = await recSide(A, { kind: 'zoom', on: q, as: page, into, until, zooms: o.zooms || REC.zooms }).catch(e => ({ error: String(e.message || e).slice(0, 120) }));
+        held.zoom = { kind: f.kind, complete: !z.error && z.complete, entries: into };
+      }
+      entry.hovers = held.hovers ? { n: held.hovers.n || 0, tried: held.hovers.tried || 0, stopped: held.hovers.stopped || held.hovers.timedOut || undefined } : undefined;
+      entry.zoom = held.zoom ? { levels: held.zoom.entries.length, complete: held.zoom.complete } : undefined;
+      REC.ahead.bySig[sig] = held;
+    } catch (e) { entry.why = String(e.message || e).slice(0, 120); }
+    finally {
+      entry.secs = +((Date.now() - t1) / 1000).toFixed(1);
+      recTl('ahead', t1, { app: A.id, page, n: entry.hovers ? entry.hovers.n : null });
+      rlogr(`ahead ${page} (${sc.url}): ${entry.why || `hovers ${entry.hovers ? `${entry.hovers.n} of ${entry.hovers.tried}${entry.hovers.stopped ? ', stopped' : ''}` : 'none'}${entry.zoom ? `, zoom ${entry.zoom.levels}${entry.zoom.complete ? '' : ' (stopped)'}` : ''}`}, ${entry.secs} s`);
+    }
+  }
+}
+// The run, before the step that starts an answer: { app (the one answering), screens: [{ app, url, step }] } in plan
+// order. Returns at once; the sweep runs while the answer does.
+OPS.recordAhead = async c => {
+  const o = recAutoOpts();
+  if (!REC.on) return { started: false, why: 'not recording' };
+  if (!o || !o.ahead) return { started: false, why: 'sweep ahead is off' };
+  if (!OPS.capTwins) return { started: false, why: 'the capture browser only' };
+  const prev = REC.aheadP;
+  REC.aheadP = (async () => { if (prev) await prev.catch(() => {}); await recAheadRun(c || {}); })().catch(e => rlogr('ahead: ' + String(e.message || e).slice(0, 120)));
+  return { started: true, screens: ((c && c.screens) || []).length };
+};
 async function recAuto(A) {
   const o = recAutoOpts(), state = A.state, st = REC.states[state];
   if (!o || !st || st.typedOf || REC.autoDone.has(state)) return;
@@ -434,16 +516,39 @@ async function recAuto(A) {
   const learned = hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900;
   const skipSels = Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel);
   const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...c });
+  // Swept ahead (recAheadRun) with this screen's signature: used only where the run would sweep it exactly so now
+  // (aheadFits), and only then added (the controls seen, hover times, the page, the zoom levels).
+  let ahead = null, fit = { hovers: false, zoom: false, why: [] };
+  if (o.ahead && REC.ahead && REC.aheadP && (REC.sides.ahead || []).some(e => e.sig === st.sig && e.secs === undefined)) await REC.aheadP.catch(() => {});
+  if (o.ahead && REC.ahead && REC.ahead.bySig[st.sig]) {
+    ahead = REC.ahead.bySig[st.sig]; delete REC.ahead.bySig[st.sig];
+    const cands = ahead.hovers && !ahead.hovers.error ? await recHoverCands(p).catch(() => null) : null;
+    fit = aheadFits(ahead, { cands: cands || [], seen: [...recSeen('hovers', A.id)], skipSels, max: o.hoverMax, waitMs: o.hoverWaitMs || learned, kind: f.kind, newKind });
+    if (ahead.hovers && !cands) { fit.hovers = false; fit.why.unshift("this screen's controls couldn't be read"); }
+    Object.assign(ahead.entry, { state, used: fit.hovers || fit.zoom ? state : false, hoversUsed: fit.hovers || undefined, zoomUsed: fit.zoom || undefined, why: fit.why.join('; ') || undefined });
+    rlogr(`ahead ${ahead.page} for ${state}: ${fit.hovers ? 'hovers used' : 'hovers swept here'}${ahead.zoom ? (fit.zoom ? ', zoom used' : ', zoom swept here') : ''}${fit.why.length ? ` (${fit.why.join('; ')})` : ''}`);
+  }
   const tw = twP ? await twP : [];
   const hn = tw.length + 1;
-  if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)], ...(tw.length ? { max: o.hoverMax ? Math.ceil(o.hoverMax / hn) : undefined, shards: [A.page, ...tw].map((q, i) => ({ on: i ? q : undefined, page: i ? `${state}~t${i}` : state, shard: [i, hn] })) } : {}) }));
+  if (o.hovers && fit.hovers) {
+    const h = ahead.hovers, seen = recSeen('hovers', A.id);
+    for (const k of h.keys || []) seen.add(k);
+    hs.firsts.push(...(h.firsts || []));
+    for (const [sel, k] of Object.entries(h.kinds || {})) { const t = hs.kinds[sel] = hs.kinds[sel] || { tried: 0, shown: 0 }; t.tried += k.tried; t.shown += k.shown; }
+    if (h.ctx && h.ctx.neutral) (REC.hoverCtx = REC.hoverCtx || {})[A.id + '|'] = h.ctx;
+    if (h.n) REC.sides.hovers.push({ page: ahead.page, app: A.id, base: state });
+    did.push(`hovers ${h.n} of ${h.tried}, swept ahead (${ahead.page}, ${ahead.entry.secs} s)`);
+  } else if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)], ...(tw.length ? { max: o.hoverMax ? Math.ceil(o.hoverMax / hn) : undefined, shards: [A.page, ...tw].map((q, i) => ({ on: i ? q : undefined, page: i ? `${state}~t${i}` : state, shard: [i, hn] })) } : {}) }));
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)] });
   for (const [i, fu] of f.frames.entries()) {
     const frameRe = '^' + fu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (o.hovers) await run('hovers', hv({ frameRe, page: `${state}-frame${i}`, skipKeys: [...recSeen('hovers', A.id + fu)] }));
     if (o.clicks) await run('clicks', { frameRe, page: `${state}-frame${i}`, pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id + fu)] });
   }
-  if (o.zoom && newKind) {
+  if (o.zoom && newKind && fit.zoom) {
+    for (const z of ahead.zoom.entries) REC.sides.zoom.push({ ...z, state });
+    did.push(`zoom ${ahead.zoom.entries.length}, swept ahead (${ahead.page})`);
+  } else if (o.zoom && newKind) {
     // Zoom levels in runs of neighbours, one run a window; each run starts from the level before it, so "the same
     // markup as the level below" is decided as it is in one window.
     const zs = (o.zooms || REC.zooms || []).filter(z => z !== 100), zn = Math.min(hn, zs.length), size = Math.ceil(zs.length / Math.max(zn, 1));
@@ -501,7 +606,7 @@ OPS.recordStart = async c => {
   if (REC.on) return { error: 'already recording' };
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
-  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {} });
+  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [], ahead: [] }, ahead: { bySig: {}, n: 0 }, aheadP: null, aheadApp: {}, capN: 0, capDone: 0, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {} });
   REC.parallel = !!c.parallel;
   if (c.resume) return recResume(c);
   // Every app's tab, or nothing starts: which aren't open, all at once.
@@ -610,6 +715,7 @@ function recTiming() {
     wallSecs: r(wall), startSecs: r(start), startSweepSecs: r(startSweeps), screenSweepSecs: r(screenSweeps), sideSweepSecs: r(sideSweeps),
     actionSecs: r(actions), typedSecs: r(typed), productSecs: r(product), heldSecs: r(sum(e => e.what === 'held')), stopSecs: r(stop),
     presenterSecs: r(Math.max(0, wall - busy)), sweepKinds: kinds, screens: Object.keys(REC.states || {}).length,
+    aheadSecs: r(sum(e => e.what === 'ahead')), ahead: { swept: ((REC.sides || {}).ahead || []).filter(a => a.sig).length, used: ((REC.sides || {}).ahead || []).filter(a => a.used).length },
     // As before (the app's Recorded line): the recorder's own time and the product's.
     recorderSecs: r(start + startSweeps + screenSweeps + sideSweeps + actions + typed - product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm),
   };
@@ -627,6 +733,7 @@ OPS.recordStop = async () => {
   REC.stop = true; await REC.loopP;
   recTl('stop', tStop);
   for (const A of REC.apps) { if (A.typing && !A.typing.done) await recTyped(A); await recSetBusy(A.page, false); }
+  if (REC.aheadP) await REC.aheadP.catch(() => {});
   const states = Object.fromEntries(Object.entries(REC.states).map(([k, s]) => { const { typedOf, ...rest } = s; return [k, rest]; }));
   const rec = { kit: 1, recordedAt: new Date(REC.t0).toISOString(), secs: Math.round((Date.now() - REC.t0) / 1000), opts: REC.opts,
     timing: recTiming(), apps: REC.apps.map(a => ({ id: a.id, match: a.match, start: `${a.id}-start`, end: a.state, viewport: a.viewport || undefined })),
@@ -637,7 +744,7 @@ OPS.recordStop = async () => {
   REC.on = false;
   // The recording's done: let go of every tab, so Chrome's debugging bar isn't on the stage when you rehearse or present.
   await CDPX_release();
-  return { states: Object.keys(states).length, streams: Object.keys(REC.streams).length, beats: REC.beats.length, steps: REC.path.length, notes: REC.notes, blocked: REC.blocked, secs: rec.secs, timing: rec.timing, autoSecs: REC.autos.reduce((n, a) => n + a.secs, 0), autos: REC.autos.map(a => `${a.state} ${a.secs} s: ${a.did.join('; ') || 'nothing new'}`) };
+  return { states: Object.keys(states).length, streams: Object.keys(REC.streams).length, beats: REC.beats.length, steps: REC.path.length, notes: REC.notes, blocked: REC.blocked, secs: rec.secs, timing: rec.timing, autoSecs: REC.autos.reduce((n, a) => n + a.secs, 0), autos: REC.autos.map(a => `${a.state} ${a.secs} s: ${a.did.join('; ') || 'nothing new'}`), ...((REC.sides.ahead || []).length ? { ahead: REC.sides.ahead } : {}) };
 };
 // Step groups on this screen (record side groups): each closed group is opened (the page's own click), the screen is
 // captured with them open, and they're closed again. What the build needs: a real closed/open pair (the screen's own
@@ -826,6 +933,10 @@ async function recSide(A, c) {
       return out;
     }
     if (c.kind === 'zoom') {
+      // c.as: the name it's captured under (sweep ahead's, before the run reaches the screen); c.into: where its levels go
+      // (held back until then); c.until: stop before the next level (complete: false).
+      const zst = c.as || state, into = c.into || REC.sides.zoom;
+      let complete = true;
       const base = await p.evaluate(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
       const s = await ctx.newCDPSession(p);
       const out = [], t0 = Date.now();
@@ -842,8 +953,9 @@ async function recSide(A, c) {
         }
         for (const z of c.zooms || [110, 125, 150, 175, 200]) {
           if (z === 100) continue;
+          if (c.until && c.until()) { complete = false; break; }
           // Each zoom is a full snapshot (half a minute on a heavy Power BI page): stop at the screen's budget.
-          if (c.maxS && Date.now() - t0 > c.maxS * 1000) { REC.notes.push(`${state}: zoom stopped at the screen's time budget before ${z}%; record side zoom on it if it matters`); break; }
+          if (c.maxS && Date.now() - t0 > c.maxS * 1000) { complete = false; REC.notes.push(`${state}: zoom stopped at the screen's time budget before ${z}%; record side zoom on it if it matters`); break; }
           const k = z / 100;
           const vw = Math.round(base.w / k), vh = Math.round(base.h / k);
           // The override is in the tab's own pixels, and a tab at Chrome's 110% scales them again: the page has to be
@@ -852,7 +964,7 @@ async function recSide(A, c) {
           const ov = { width: Math.round(vw * pz), height: Math.round(vh * pz), deviceScaleFactor: base.dpr * k / pz, mobile: false };
           await s.send('Emulation.setDeviceMetricsOverride', ov);
           await poll(100); await recSettle(p, 900, 12000);
-          const id = `v${z}-${state}`;
+          const id = `v${z}-${zst}`;
           // The page's markup at this size (every element, its classes and inline style): unchanged since the last
           // level captured, its snapshot is used again. The page's CSS (media queries) already lays it out at any
           // size in the replica; a capture is only needed where script changed the page. Each one took up to a
@@ -866,13 +978,13 @@ async function recSide(A, c) {
           const lm = await p.evaluate(sel => { const o = {}; for (const q of sel) o[q] = [...document.querySelectorAll(q)].map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }).filter(b => b[2] > 0 && b[3] > 0).slice(0, 3); return o; }, c.landmarks || ['nav', 'main', 'aside', 'header', '[role=navigation]', '[role=main]', '[role=dialog]', '[role=grid]', '[contenteditable=true]', 'textarea', 'input[type=search]']);
           // bw: the window's width at 100% (the bands are placed from it); pw: the width of the last level checked, whose
           // markup was still the one below (this level's band starts halfway between).
-          REC.sides.zoom.push({ app: A.id, state, z, snap: id, vw, vh, dpr: base.dpr * k, bw: base.w, pw: prevVw, ov, landmarks: lm });
+          into.push({ app: A.id, state: zst, z, snap: id, vw, vh, dpr: base.dpr * k, bw: base.w, pw: prevVw, ov, landmarks: lm });
           prevVw = vw;
           out.push(`${id} ${vw}x${vh}`);
         }
       } finally { await s.send('Emulation.clearDeviceMetricsOverride').catch(() => {}); await s.detach().catch(() => {}); await recViewport(p); await poll(100); }
       await recSettle(p, 900, 12000);
-      return { state, zooms: out };
+      return { state: zst, zooms: out, complete };
     }
     throw new Error('side kind: hovers, clicks, drags, groups, chips, list or zoom');
   } finally { await (drives ? recSetOff(p, false) : recSetBusy(p, false)); }

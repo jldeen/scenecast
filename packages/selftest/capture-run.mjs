@@ -755,6 +755,75 @@ try {
     await run(['cmd', 'goto', JSON.stringify({ tab: SPEC5, url: tasks.url })], { env: E });
     check('a twin window\'s storage is its own: its click saved a preference there, and neither the recorded tab nor the app\'s real storage changed', tw.n === 1 && clicked.clicked && own0.button && twin1.compact === true && /fx-density/.test(twin1.ls || '') && own1.compact === false && own1.ls === own0.ls && !/fx-density/.test(own1.ls || ''), JSON.stringify({ tw, clicked, own0, twin1, own1 }));
   }
+  // 5d · Sweep ahead (record.auto.ahead): before the step an answer follows, the screens the plan goes to after it
+  // (the last walk of this plan's addresses) are swept in a window of their own while the answer streams in, and used
+  // where the run would sweep them exactly so. The same screens, steps, hovers, menus and zoom levels with it off and
+  // on; the answer keeps its frames; the times for the record. The answer's app (tasks) gets hovers only; admin's
+  // Audit log gets its zoom levels too.
+  {
+    const AHEAD_PLAN = `# Tasks demo
+
+## Beat 1 · A summary
+
+- Go to tasks
+  Lands on: "No tasks yet"
+- Click "Summarize"
+  Lands on: "Summary:"
+- Wait for the answer
+- Click "Stats"
+  Lands on: "Task stats"
+
+## Beat 2 · The audit log
+
+- Go to admin
+  Lands on: "Fixture Admin"
+- Click "Audit log"
+  Lands on: "Tool alpha-0 turned on"
+`;
+    const AHEAD_RESET = `# Reset: Tasks demo
+
+## Set first
+
+- tasks: "Sync" is off
+  Set: "Sync" · fixture-tasks:sync
+
+## Check
+
+- tasks: "Sync" is off
+- tasks: shows "No tasks yet"
+`;
+    const withAhead = on => { const c = JSON.parse(cfg0); c.apps = c.apps.map(a => a.id === 'tasks' ? { ...a, url: `${tasks.url}?answer=40` } : a.id === 'admin' ? { ...a, url: `${fx.admin}?audit=1` } : a); c.zooms = [110, 125]; c.record.auto = { ...c.record.auto, zoom: true, maxS: 120, zoomMinS: 5, ahead: on }; writeFileSync(cfgFile, JSON.stringify(c, null, 2)); };
+    writeFileSync(join(DEMO, 'plan.md'), AHEAD_PLAN); writeFileSync(join(DEMO, 'reset.md'), AHEAD_RESET);
+    withAhead(false);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    const wk = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
+    const shot = n => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk-screens', n + '.json'), 'utf8')); } catch (e) { return null; } };
+    const aheadRun = async (on, name) => {
+      withAhead(on); freshRaw();
+      const t = Date.now();
+      const r = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+      const [dir, rec] = keepRaw(name);
+      const sides = (rec && rec.sides) || {};
+      // Hovers by the screen they're listed for (a page swept ahead counts only once it's listed).
+      const hovers = (sides.hovers || []).flatMap(h => { const d = join(dir, 'hovers', h.page); return existsSync(d) ? readdirSync(d).filter(f => f.endsWith('.json')).map(f => { const x = JSON.parse(readFileSync(join(d, f), 'utf8')); return `${h.base} ${x.cand && x.cand.sel}|${x.cand && x.cand.text}`; }) : []; }).sort();
+      const clicks = (sides.clicks || []).flatMap(c => (c.results || []).map(x => `${c.page} ${x.name}`)).sort();
+      const zooms = (sides.zoom || []).map(z => `${z.state} ${z.z} ${z.vw} ${z.pw}`).sort();
+      const streams = Object.values((rec && rec.streams) || {}).map(s => ({ frames: s.frames[1] + 1, secs: +((s.realMs || 0) / 1000).toFixed(1) }));
+      const tm = (rec && rec.timing) || {}, rj = (() => { try { return readRun(DEMO); } catch (e) { return {}; } })();
+      return { r, rec, dir, hovers, clicks, zooms, streams, secs: Math.round((Date.now() - t) / 1000), sweeps: +((tm.startSweepSecs || 0) + (tm.screenSweepSecs || 0)).toFixed(1), aheadSecs: tm.aheadSecs || 0, ahead: sides.ahead || [], asked: rj.ahead, log: ((rec && rec.log) || []).filter(l => /^ahead /.test(l)) };
+    };
+    const off = await aheadRun(false, 'ahead-off'), on = await aheadRun(true, 'ahead-on');
+    writeFileSync(cfgFile, cfg0); writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+    const dA = compareRaw(off.dir, on.dir, off.rec, on.rec);
+    const used = on.ahead.filter(a => a.used), fr = x => x.streams[0] ? +(x.streams[0].frames / Math.max(x.streams[0].secs, 0.1)).toFixed(2) : null;
+    times.ahead = { off: { run: off.secs, sweeps: off.sweeps, stream: off.streams[0], fps: fr(off) }, on: { run: on.secs, sweeps: on.sweeps, aheadSecs: on.aheadSecs, stream: on.streams[0], fps: fr(on), used: used.map(a => `${a.page} → ${a.state}${a.hoversUsed ? ' hovers' : ''}${a.zoomUsed ? ' zoom' : ''}`) } };
+    console.log('ahead: ' + JSON.stringify({ ...times.ahead, log: on.log, asked: on.asked, missed: on.ahead.filter(a => !a.used).map(a => `${a.page}: ${a.why || 'not reached'}`) }));
+    const stats = shot('1-4'), audit = shot('2-2');
+    check('sweep ahead: the walk gives the screens after the answer their addresses (Stats, the Audit log)', wk.code === 0 && stats && /\/stats\?answer=40$/.test(stats.url) && audit && /\/audit\?audit=1$/.test(audit.url), JSON.stringify({ code: wk.code, stats: stats && stats.url, audit: audit && audit.url, err: wk.err && wk.err.slice(-800) }));
+    check('sweep ahead: asked for before the answer\'s step with those two screens, swept while it streamed, and used where they matched', !off.r.done?.result?.stopped && !on.r.done?.result?.stopped && (on.asked || []).length === 1 && on.asked[0].started === true && JSON.stringify(on.asked[0].screens) === '["1-4","2-2"]' && on.ahead.length >= 1 && used.length >= 1 && !(off.ahead || []).length && off.asked === undefined, JSON.stringify({ asked: on.asked, ahead: on.ahead, offAhead: off.ahead, stopped: [off.r.done?.result?.stopped, on.r.done?.result?.stopped] }));
+    check('sweep ahead: the same screens, steps, hovers, menus and zoom levels as without it', dA.sameSteps && JSON.stringify(Object.keys(off.rec.states).sort()) === JSON.stringify(Object.keys(on.rec.states).sort()) && JSON.stringify(off.hovers) === JSON.stringify(on.hovers) && JSON.stringify(off.clicks) === JSON.stringify(on.clicks) && JSON.stringify(off.zooms) === JSON.stringify(on.zooms) && off.hovers.some(h => /stats/.test(h)) && off.zooms.some(z => /audit/.test(z)), JSON.stringify({ steps: dA.steps, states: [Object.keys(off.rec.states), Object.keys(on.rec.states)], hovers: [off.hovers.filter(h => !on.hovers.includes(h)), on.hovers.filter(h => !off.hovers.includes(h)), off.hovers.length], clicks: [off.clicks, on.clicks], zooms: [off.zooms, on.zooms] }));
+    check('sweep ahead: the answer streams in with the same frames (the answer\'s app only hovered ahead)', off.streams.length === 1 && on.streams.length === 1 && on.streams[0].frames >= Math.floor(0.9 * off.streams[0].frames) && !on.ahead.some(a => a.app === 'tasks' && a.zoom), JSON.stringify({ off: off.streams, on: on.streams, ahead: on.ahead.map(a => ({ page: a.page, zoom: a.zoom })) }));
+  }
   await run(['capture', 'stop', '--demo', DEMO], { env: E });
 
   // ---- 6 · The same plan through the recorder extension: the same screens -------------------------------------------

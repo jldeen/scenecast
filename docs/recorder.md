@@ -92,7 +92,22 @@ recorded tab. A screen they show alike (its signature) has its hovers shared out
 neighbours, one run a window, each starting from the level before it. Any other screen, and clicks, groups, chips,
 lists and drags, are swept in the recorded tab as before. The windows are marked `twin:<app>`, so no lookup takes
 them for the app's own, and close once the recording is saved. A twin's storage writes stay in that window
-(`twin-storage.js`: localStorage and cookies in a shadow, IndexedDB and Cache API writes made harmless,
+
+**Sweep ahead** (`record.auto.ahead: true`, the capture browser only, off by default) uses the time an answer
+streams in. Before a step that "Wait for the answer" follows, Record for me hands the recorder the screens the plan
+goes to after it: those the last walk of this same plan reached at an address of their own, never a start screen,
+at most `aheadMax` (6). While the answer streams, a window of each app's own loads each one there and sweeps it as
+the run would now: its hovers, and its zoom levels where its kind of screen is new. The app that's answering gets
+hovers only, so its stream keeps its frames. The sweep stops before its next control once the answer has ended, or
+after `aheadMaxS` (300 s).
+
+Nothing it finds counts yet. When the run reaches a screen with the same signature, it uses that screen's hovers only
+if they're exactly the controls it would hover now (less those hovered on another screen since), with the same wait,
+and its zoom levels only if that kind of screen is still new and every level was done. Anything else it sweeps
+itself, as before. So every screen's hovers, menus and zoom levels are the same with sweep ahead on or off; a miss
+costs only the window's time. What was swept ahead, and whether it was used and why not, is in the recording's
+`sides.ahead` and in run.json (`ahead`, `summary.ahead`, `summary.timing.aheadSecs`). Clicks, groups, chips, lists
+and drags are never swept ahead. A twin's storage writes stay in that window(`twin-storage.js`: localStorage and cookies in a shadow, IndexedDB and Cache API writes made harmless,
 BroadcastChannel silent), so a click there that saves UI state never reaches the recorded tab.
 
 ### Checkpoint and resume
