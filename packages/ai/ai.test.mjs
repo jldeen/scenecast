@@ -253,11 +253,13 @@ test("a step's failed requests run to the next step's first input; the last step
   assert.deepEqual(stepNets(steps, net, T('0:45')).map(l => l.map(n => n.status || n.failed)), [[404], [500], ['x']]);
 });
 
-test("a pack-named service's latest answer: 2xx is up; a 500 or a failed request means try later", () => {
+test("a pack-named service's latest answer: 2xx is up; a 500 or a call with no answer means try later; a call the page called off isn't one", () => {
   const N = "Contoso's catalog";
   assert.equal(serviceAnswer([], N), null);
   assert.equal(serviceAnswer([{ service: 'other', status: 500 }], N), null);
   assert.deepEqual(serviceAnswer([{ service: N, status: 500 }, { service: N, status: 200 }], N).ok, true);
   assert.equal(serviceAnswer([{ service: N, status: 200 }, { service: N, status: 503 }], N).why, "Contoso's catalog is failing (503). Try again later.");
-  assert.equal(serviceAnswer([{ service: N, failed: 'net::ERR_FAILED' }], N).why, "Contoso's catalog is failing (net::ERR_FAILED). Try again later.");
+  assert.equal(serviceAnswer([{ service: N, failed: 'net::ERR_FAILED' }], N).why, "Contoso's catalog didn't answer (net::ERR_FAILED). Try again later.");
+  assert.equal(serviceAnswer([{ service: N, failed: 'net::ERR_ABORTED' }], N), null);
+  assert.equal(serviceAnswer([{ service: N, status: 200 }, { service: N, failed: 'net::ERR_ABORTED' }], N).ok, true);
 });

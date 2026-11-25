@@ -34,15 +34,19 @@ const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i;
 const sleepMs = ms => new Promise(r => setTimeout(r, ms));
 
 // A pack-named service's answers (capNet, tagged service), the latest one judged: 2xx is up; anything else (500, a
-// failed request) means try later. → null (no answer yet) | { ok, status, why }
+// call with no answer: a network error, or CORS when its preflight failed) means try later. A call the page itself
+// called off (net::ERR_ABORTED: a reload) isn't an answer. → null (no answer yet) | { ok, status, why }
+const aborted = n => /ERR_ABORTED/.test(n.failed || '');
 export function serviceAnswer(answers, name) {
-  const mine = (answers || []).filter(n => n.service === name);
+  const mine = (answers || []).filter(n => n.service === name && !aborted(n));
   if (!mine.length) return null;
   const last = mine[mine.length - 1], status = last.status || last.failed || 'no answer';
   const ok = typeof last.status === 'number' && last.status >= 200 && last.status < 300;
-  return { ok, status, at: last.at, why: ok ? null : `${name} is failing (${status}). Try again later.` };
+  return { ok, status, at: last.at, why: ok ? null : typeof last.status === 'number' ? `${name} is failing (${status}). Try again later.` : `${name} didn't answer (${status}). Try again later.` };
 }
-const serviceFailing = n => !!n.service && (n.failed || (typeof n.status === 'number' && n.status >= 500));
+const serviceFailing = n => !!n.service && !aborted(n) && (n.failed || (typeof n.status === 'number' && n.status >= 500));
+// How a failing call went, for a beat's stop: "answered 500", or "didn't answer (net::ERR_FAILED)".
+const serviceWent = n => typeof n.status === 'number' ? `answered ${n.status}` : `didn't answer (${n.failed || 'no answer'})`;
 
 // The capture browser, holding every request that isn't a read from its first one (capture.guard "hold"): what the
 // apps send while they load, before a run turns its own guard on, is held too.
@@ -108,6 +112,22 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     return got;
   };
   const homeAt = {};
+  // Each start service: the page's own call to it, after its app's start (at: when, and how many answers before),
+  // must answer 2xx (waitS for it to come). → null, or the stop.
+  const startServices = async (at, stage) => {
+    for (const sv of svcs.filter(x => x.start && at[x.app])) {
+      let v = null;
+      for (;;) {
+        await serviceNews();
+        v = serviceAnswer(run.services.slice(at[sv.app].n), sv.name);
+        if (v || Date.now() - at[sv.app].t > sv.waitS * 1000) break;
+        await sleepMs(1000);
+      }
+      if (!v) v = { ok: false, why: `${sv.name} didn't answer in ${sv.waitS} s. Try again later.` };
+      if (!v.ok) return { kind: 'service', why: v.why, service: sv.name, status: v.status || null, app: sv.app, stage, picture: await shot(sv.app, `${stage}-${sv.app}-service`) };
+    }
+    return null;
+  };
   let recording = false, wRun = null;
   const ran = [], results = {};
   try { main: {
@@ -117,9 +137,25 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       emit({ event: 'stage', name: 'leave-out', label: 'Leaving out what the demo leaves out' });
       const r = await leaveOn(cmd, lo, { shots: stops }).catch(e => ({ on: false, refused: e.message }));
       if (!r.on) { run.stopped = { kind: 'leave-out', why: `Leave out couldn't start: ${r.refused || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
-      const h = liveWalker({ demo, cmd, packs, log });
-      for (const id of leaveApps(lo)) await h.home(id);
     }
+    // The apps that need it opened first, before anything runs: each with a Leave out line (what it shows comes
+    // filtered from here on, and its filters work) and each with a start service (it answers). Either failing stops
+    // the run here: the tenant untouched, nothing to put back.
+    { const ids = demo.cfg.apps.map(a => a.id), need = new Set([...leaveApps(lo), ...svcs.filter(x => x.start).map(x => x.app)]);
+      const early = ids.filter(id => need.has(id)), at = {};
+      if (early.length) {
+        emit({ event: 'stage', name: 'services', label: 'Checking the apps are working' });
+        const h = liveWalker({ demo, cmd, packs, log });
+        for (const id of early) {
+          await serviceNews();
+          at[id] = { t: Date.now(), n: run.services.length };
+          await h.home(id);
+          const lf = lo.rules.length ? leaveFailure(await leaveNow(), id) : null;
+          if (lf) { run.stopped = { kind: 'leave-out', why: `${id}: Leave out: ${lf}`, app: id, stage: 'before-reset', picture: await shot(id, `before-reset-${id}`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
+        }
+        const down = await startServices(at, 'before-reset');
+        if (down) { run.stopped = down; emit({ event: 'stopped', ...run.stopped }); break main; }
+      } }
     // Before: the tenant as the demo starts, or nothing is recorded.
     emit({ event: 'stage', name: 'reset-before', label: 'Checking the demo starts as it should' });
     run.reset.before = await runReset({ demo, cmd, walker: liveWalker({ demo, cmd, packs, log }), phase: 'before', approval: ap, emit });
@@ -141,18 +177,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         run.starts.push({ app: id, did, ...sc });
         if (!sc.ok) { run.stopped = { kind: sc.leaveOut ? 'leave-out' : 'start', why: `${id}: ${sc.why}`, app: id, picture: await shot(id, `start-${id}`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
       }
-      // Each start service: the page's own call to it, after its app's start, must answer 2xx (waitS for it to come).
-      for (const sv of svcs.filter(x => x.start && homeAt[x.app])) {
-        let v = null;
-        for (;;) {
-          await serviceNews();
-          v = serviceAnswer(run.services.slice(homeAt[sv.app].n), sv.name);
-          if (v || Date.now() - homeAt[sv.app].t > sv.waitS * 1000) break;
-          await sleepMs(1000);
-        }
-        if (!v) v = { ok: false, why: `${sv.name} didn't answer in ${sv.waitS} s. Try again later.` };
-        if (!v.ok) { run.stopped = { kind: 'service', why: v.why, service: sv.name, status: v.status || null, app: sv.app, picture: await shot(sv.app, `start-${sv.app}-service`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
-      } }
+      // And again as the recording begins (the reset before opened the apps again).
+      const down = await startServices(homeAt, 'start');
+      if (down) { run.stopped = down; emit({ event: 'stopped', ...run.stopped }); break main; }
+    }
     const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
     let app = first && first.kind === 'app' && w.appOf(first.app) || appIds[0];
@@ -217,7 +245,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (sb) {
         if (doubt) return { kind: 'unprovable', why: `the step before it (${doubt.text}) couldn't be proven (${doubt.why}), and what's set off camera before it is a write`, beforeWrite: true };
         const down = failingIn[bi];
-        if (down) return { kind: 'service', why: `${down.service} answered ${down.status || down.failed} during this beat: what's set off camera waits until the service works. Try again later.`, beforeWrite: true };
+        if (down) return { kind: 'service', why: `${down.service} ${serviceWent(down)} during this beat: what's set off camera waits until the service works. Try again later.`, beforeWrite: true };
         for (const id of new Set(sb.items.map(x => (/^([\w-]+)\s*:/.exec(x.what) || [])[1]).filter(Boolean))) {
           const gate = writeGate(run.landings, id);
           if (!gate.ok) return { kind: 'gate', why: `${gate.why}: what's set off camera is a write, and runs only after strong landings in its app`, beforeWrite: true };
@@ -252,7 +280,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (!known.ok) return { kind: 'unknown-write', why: known.why, beforeWrite: true };
         for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
         const down = failingIn[bi];
-        if (down) return { kind: 'service', why: `${down.service} answered ${down.status || down.failed} during this beat: its write waits until the service works. Try again later.`, beforeWrite: true };
+        if (down) return { kind: 'service', why: `${down.service} ${serviceWent(down)} during this beat: its write waits until the service works. Try again later.`, beforeWrite: true };
         const gate = writeGate(run.landings, app);
         if (!gate.ok) return { kind: 'gate', why: `${gate.why}: a write runs on its own only after strong landings in its app`, beforeWrite: true };
         const pc = packCheck(known);

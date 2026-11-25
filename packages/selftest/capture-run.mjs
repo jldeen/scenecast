@@ -295,15 +295,20 @@ try {
   writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
   writeFileSync(join(DEMO, 'reset.md'), RESET);
 
-  // 1f · A service the app needs: failing as the app starts, nothing is captured ("try again later"); failing during a
-  // beat (the lookup as you type), the run stops before that beat's write, lists it for her, and the reset after runs.
+  // 1f · A service the app needs: not answering as the app first opens (no status at all), the run stops before the
+  // reset before: nothing captured, nothing written, what an earlier run left still there ("try again later"); failing
+  // during a beat (the lookup as you type), the run stops before that beat's write, lists it for her, and the reset
+  // after runs.
   writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
-  tasks.catalog('fail');
+  tasks.catalog('drop');
+  tasks.seed({ tasks: ['Call Kestrel'], sync: true });
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
   rj = readRun(DEMO);
-  check('a named service failing as its app starts: no capture, "try again later"', rj.stopped && rj.stopped.kind === 'service' && rj.stopped.why === "Tasks' catalog service is failing (500). Try again later." && !rj.summary && count(tasks.log, 'POST /api/tasks') === 0 && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: rj.stopped, summary: rj.summary, after: rj.reset.after && rj.reset.after.ok }));
+  const untouched = tasks.state().tasks.map(t => t.name).join('|') === 'Call Kestrel' && tasks.state().sync === true && !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry');
+  check('a named service not answering as its app first opens: the run stops before the reset, nothing written, "try again later"', rj.stopped && rj.stopped.kind === 'service' && rj.stopped.stage === 'before-reset' && /^Tasks' catalog service didn't answer \(net::ERR_[A-Z_]+\)\. Try again later\.$/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture) && !rj.summary && !rj.reset.before && !rj.reset.after && untouched, JSON.stringify({ stopped: rj.stopped, summary: rj.summary, reset: rj.reset, state: tasks.state(), log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  tasks.seed({});
   tasks.catalog('fail-on-type');
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);

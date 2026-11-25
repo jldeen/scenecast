@@ -144,8 +144,9 @@ service: answering 500, its add picker says "Plugins could not be loaded").
 - `name`: what people read ("IQ's plugin service is failing (500). Try again later.").
 - `match`: the one call, as a guard entry over `METHOD host/path`. The capture never calls it: it watches the page's
   own calls, and keeps every answer (run.json `services`).
-- `start`: the page asks for it as the app starts. An unattended capture waits up to `waitS` (90 s) after the app's
-  start for that call, and captures nothing unless it answers 2xx.
+- `start`: the page asks for it as the app starts. An unattended capture opens the app first, before the reset before,
+  and again at its start screen; each time it waits up to `waitS` (90 s) for that call, and captures nothing unless it
+  answers 2xx. A call with no answer at all reads "didn't answer (net::ERR_FAILED)".
 - During a run, a 500 or a failed call to it stops the run before that beat's next write, and lists the step.
 
 `servicesFor(cfg)` gives a demo's: `[{ app, name, match, start, waitS }]`.

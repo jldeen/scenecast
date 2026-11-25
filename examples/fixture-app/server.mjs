@@ -414,6 +414,8 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     if (q.method === 'GET' && path === '/api/suggested') return send(s, 200, 'application/json', JSON.stringify({ items: [{ ref: 'r1', name: 'Contoso Notes' }, { ref: 'r2', name: 'Fabrikam Payroll' }, { ref: 'r3', name: 'Northwind Ledger' }], order: [{ ref: 'r2' }, { ref: 'r1' }, { ref: 'r3' }] }));
     if (q.method === 'GET' && path === '/api/catalog') {
       const from = new URLSearchParams(q.url.split('?')[1] || '').get('from');
+      // 'drop': the connection closed with no answer at all (a call with no status, as a failed CORS preflight is).
+      if (st.catalog === 'drop') { q.socket.destroy(); return; }
       const down = st.catalog === 'fail' || (st.catalog === 'fail-on-type' && from === 'type');
       return send(s, down ? 500 : 200, 'application/json', down ? '{"error":"catalog unavailable"}' : '{"items":[]}');
     }
@@ -455,7 +457,8 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     // The notes panel posts /api/seen every 150 ms while it's open, and Unpin takes 1.5 s: the app's own non-reads to
     // a host while an API undo's call to it is open.
     notePing: on => { st.ping = !!on; st.seen = []; st.unpins = []; },
-    // Its catalog service: 'ok', 'fail' (500 always) or 'fail-on-type' (500 for the lookup as you type).
+    // Its catalog service: 'ok', 'fail' (500 always), 'fail-on-type' (500 for the lookup as you type) or 'drop' (no
+    // answer: the connection closed).
     catalog: mode => { st.catalog = mode; },
     suggest: on => { st.suggest = !!on; },
     close: () => { server.close(); notes.close(); },

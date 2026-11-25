@@ -158,9 +158,12 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
   app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
   for that one step. A write that isn't approved stops the run before it, with a picture.
-- **Services the apps need** (a pack's `services`: IQ's plugin service). At the start, after each app's start
-  screen, the page's own call to each one has to answer 2xx (it waits up to 90 s for it), or nothing is captured:
-  "IQ's plugin service is failing (500). Try again later." During a run, one answering 500 or failing stops the run
+- **Services the apps need** (a pack's `services`: IQ's plugin service). First, before the reset before (so a
+  failing service costs nothing: no write, nothing to put back), each app with one is opened and the page's own call
+  has to answer 2xx (it waits up to 90 s for it); again once the reset is done, at its start screen. Else nothing is
+  captured: "IQ's plugin service is failing (500). Try again later.", or "didn't answer (net::ERR_FAILED)" for a call
+  with no answer at all (a network error, or CORS when its preflight failed). A call the page called off (a reload)
+  isn't an answer. During a run, one answering 500 or failing stops the run
   before that beat's next write, runs the reset after, and lists the step in `needsYou`. Every answer is in
   run.json's `services`.
 - **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json, each with
