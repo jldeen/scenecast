@@ -232,6 +232,24 @@ export function servicesFor(cfg, list = packs()) {
   return out;
 }
 
+// A demo's pack filters, for reset.md's Leave out: what an app shows of the tenant's own data that a demo can leave out
+// of its replica, in the capture browser only (packages/capture/leave-out.mjs). A pack's filters: [{ id, why, and either
+// url (where its responses come from, a browser request pattern), match (a guard entry over "METHOD host/path"), items
+// (where the items are), fields (any of which names one), refs?, shows?, or kind "dom" and list (a CSS selector of a
+// list's items the app draws from its own store) }]. The values (which items) are the demo's own, never the pack's.
+// → { "<pack>:<filter>": { ...filter, pack, app, hosts } }, for the demo's apps
+export function filtersFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = {};
+  const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https://${s}`).host; } catch (e) { return null; } };
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id];
+    if (!p) continue;
+    const hosts = [...new Set([a.url, a.match, ...(p.match || [])].map(hostOf).filter(h => h && !h.includes('*')))];
+    for (const f of p.filters || []) if (f && f.id && !out[`${p.id}:${f.id}`]) out[`${p.id}:${f.id}`] = { ...f, pack: p.id, app: a.id, hosts };
+  }
+  return out;
+}
+
 // Problems with a pack's shape (the tests and the drafting tool check every pack with it).
 export function checkPack(p) {
   const out = [];
@@ -286,6 +304,21 @@ export function checkPack(p) {
   for (const sv of p.services || []) {
     if (!sv || !sv.name) out.push('services: every service has a name ("IQ\'s plugin service")');
     else if (typeof sv.match !== 'string' || !/^\/\^[A-Z]+ .+\/[a-z]*$/.test(sv.match)) out.push(`services ${sv.name}: match is a /^METHOD host\\/path$/ pattern`);
+  }
+  // A filter (Leave out): why, and the one response it reads (a pattern over "METHOD host/path", never everything) and
+  // where its items are; or a DOM list. Never which items: those are a demo's.
+  for (const f of p.filters || []) {
+    const at = `filters ${(f && f.id) || '?'}`;
+    if (!f || !f.id || !/^[a-z0-9][a-z0-9-]*$/.test(f.id)) out.push('filters: every filter has an id (lowercase letters, digits and dashes)');
+    if (!f || !f.why) out.push(`${at}: why (plain words, with the evidence)`);
+    if (f && f.values) out.push(`${at}: no values: which items is the demo's (reset.md's Leave out)`);
+    if (f && f.kind === 'dom') { if (typeof f.list !== 'string' || !f.list.trim()) out.push(`${at}: list (a CSS selector of the list's items)`); continue; }
+    if (f && f.kind !== undefined) out.push(`${at}: kind is "dom", or none (a response)`);
+    if (!f || typeof f.match !== 'string' || !/^\/\^[A-Z]+ .+\/[a-z]*$/.test(f.match) || /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(f.match)) out.push(`${at}: match is a /^METHOD host\\/path$/ pattern`);
+    if (!f || typeof f.url !== 'string' || !/^\*?:?\/\/|^https?:|^\*:\/\//.test(f.url) || f.url === '*') out.push(`${at}: url is where its responses come from ("*://host/path*")`);
+    if (!f || typeof f.items !== 'string' || !f.items) out.push(`${at}: items (where the item list is: "plugins", "Groups[Type=Message].Suggestions")`);
+    if (!f || ![].concat(f.fields || []).length) out.push(`${at}: fields (the item's fields that name it)`);
+    for (const r of (f && f.refs) || []) if (!r || !r.list || !r.by) out.push(`${at}: refs are { list, by }`);
   }
   const text = JSON.stringify(p, (k, v) => k.startsWith('_') ? undefined : v);
   if (SECRET.test(text)) out.push('looks like a credential or token: packs never hold them (an API undo uses the browser\'s signed-in session)');

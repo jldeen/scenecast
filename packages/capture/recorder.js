@@ -23,6 +23,23 @@ const recApp = id => { const A = REC.apps.find(a => a.id === id); if (!A) throw 
 // waits), held (the presenter's action waiting for the recorder), stop. The rest of the take is the presenter's.
 const recTl = (what, t0, meta = {}) => { const e = { what, at: t0 - REC.t0, ms: Date.now() - t0, ...meta }; (REC.tl = REC.tl || []).push(e); if (REC.tl.length > 5000) REC.tl.shift(); return e; };
 
+// Leave out (the capture browser only: host-ops capLeaveOut puts its gate in globalThis): nothing is saved that shows
+// what she leaves out of the replica. Each snapshot, hover's parts and stream frame is checked first; one that shows it
+// isn't saved, and the gate refuses every save after it (the run stops at its next step).
+const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
+const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : REC.active; };
+const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
+if (!H.leaveGated) {
+  const snap0 = H.snap, post0 = H.post;
+  H.snap = async (p, id, opts) => { const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
+  H.post = async (path, data) => {
+    const L = recLeave();
+    if (L && path === '/hover' && data && data.parts && data.parts.length) { const app = recAppOfState(data.page), A = (REC.apps || []).find(a => a.id === app); await L.gateHtml(data.parts.join('\n'), app, `hover ${data.page} ${data.n}`, A && A.page); }
+    return post0(path, data);
+  };
+  H.leaveGated = true;
+}
+
 async function recFrameKey(p, f) { if (f === p.mainFrame()) return null; const keys = await frameKeys(p); return keys.get(f) || null; }
 const withFrame = (m, fk) => fk ? { frame: fk, ...m } : m;
 // The recorder's own small calls into each frame: one with no script context yet is skipped (it's asked again next
@@ -181,6 +198,8 @@ async function recCapture(A, ev, trigger) {
       const r = await p.mainFrame().evaluate(SERX({ body: true, css: false }));
       if (r.html === prev) return;
       prev = r.html; lastHtml = Date.now();
+      const L = recLeave();
+      if (L) await L.gateHtml(r.html, A.id, `${name} frame ${frames.length}`, p);
       await fetchResources(p, [{ urls: r.urls, frame: p.mainFrame() }]);
       const t = Date.now() - t0;
       await post('/frame', { stream: name, n: frames.length, t, html: r.html, urls: r.urls, inline: r.inline, meta: r.meta });
@@ -456,17 +475,20 @@ OPS.recordStart = async c => {
   // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
   // reload), and Nov 20's second take began with a click made between takes.
   for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); A.viewport = await A.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100 })).catch(() => null); if (A.viewport) { A.viewport.zoom = Math.round(((A.page.zoom ? await A.page.zoom() : 1) || 1) * 1000) / 1000; A.viewport.browser = await A.page.evaluate(() => { const b = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map(x => x.brand).join(' '); return /Microsoft Edge/.test(b) ? 'msedge' : /Google Chrome/.test(b) ? 'chrome' : 'chromium'; }).catch(() => 'chromium'); const ts = A.page.tabSize ? await A.page.tabSize() : null; if (ts) { A.viewport.tabWidth = ts.width; A.viewport.tabHeight = ts.height; } } recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
-  for (const A of REC.apps) {
-    const t1 = Date.now();
-    rlogr(`start: ${A.id}: capturing its start screen`);
-    await A.page.bringToFront();
-    if (c.neutral) await A.page.mouse.move(c.neutral[0], c.neutral[1]);
-    const sig = await recSettle(A.page, 800, 15000);
-    await recSetBusy(A.page, true);
-    try { await recAddState(A, `${A.id}-start`, sig); } finally { await recSetBusy(A.page, false); }
-    A.state = `${A.id}-start`;
-    recTl('start.capture', t1, { app: A.id, state: A.state });
-  }
+  // A start screen that can't be saved (Leave out refused it) ends the take before it begins: nothing to stop after.
+  try {
+    for (const A of REC.apps) {
+      const t1 = Date.now();
+      rlogr(`start: ${A.id}: capturing its start screen`);
+      await A.page.bringToFront();
+      if (c.neutral) await A.page.mouse.move(c.neutral[0], c.neutral[1]);
+      const sig = await recSettle(A.page, 800, 15000);
+      await recSetBusy(A.page, true);
+      try { await recAddState(A, `${A.id}-start`, sig); } finally { await recSetBusy(A.page, false); }
+      A.state = `${A.id}-start`;
+      recTl('start.capture', t1, { app: A.id, state: A.state });
+    }
+  } catch (e) { REC.on = false; await CDPX_release().catch(() => {}); throw e; }
   const first = c.first ? recApp(c.first) : REC.apps[0];
   await first.page.bringToFront();
   REC.active = first.id;

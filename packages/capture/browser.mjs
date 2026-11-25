@@ -37,6 +37,7 @@ import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
 import { fetchEveryTarget } from './fetch-all.mjs';
+import { filterBody } from './leave-out.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -541,23 +542,33 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
 
   // One Fetch dispatcher on every target (fetch-all.mjs: each page, frame and worker, now and new): the read-only
   // guard and the pinned account each add a hook with the requests it wants; a hook may change the address or fail
-  // the request.
+  // the request. A response hook (response: true, Leave out) sees what comes back and may give the page another body.
   const hooks = new Set();
   let everyTarget = null;
   const onPaused = async (e, from = {}) => {
     let url = e.request.url;
     for (const h of hooks) {
+      if (h.response) continue;
       const r = await h.on(e.request, url, from).catch(() => null);
       if (r && r.fail) return { fail: true };
       if (r && r.url) url = r.url;
     }
     return url !== e.request.url ? { url } : null;
   };
+  const onResponse = async (e, from = {}) => {
+    for (const h of hooks) {
+      if (!h.response) continue;
+      const r = await h.on(e, from);
+      if (r && typeof r.body === 'string') return r;
+    }
+    return null;
+  };
   const refetch = async () => {
-    const pats = [...hooks].flatMap(h => h.patterns);
-    if (!pats.length) { if (everyTarget) await everyTarget.set(null); return; }
-    if (!everyTarget) everyTarget = await fetchEveryTarget(at, { onPaused, log });
-    await everyTarget.set(pats.some(p => p.urlPattern === '*' && !p.resourceType) ? [{ urlPattern: '*', requestStage: 'Request' }] : pats);
+    const req = [...hooks].filter(h => !h.response).flatMap(h => h.patterns), res = [...hooks].filter(h => h.response).flatMap(h => h.patterns);
+    if (!req.length && !res.length) { if (everyTarget) await everyTarget.set(null); return; }
+    if (!everyTarget) everyTarget = await fetchEveryTarget(at, { onPaused, onResponse, log });
+    // A request that matches both is paused twice: before it goes (the guard), and at its response (Leave out).
+    await everyTarget.set([...(req.some(p => p.urlPattern === '*' && !p.resourceType) ? [{ urlPattern: '*', requestStage: 'Request' }] : req), ...res]);
   };
   const addHook = async h => { hooks.add(h); await refetch(); return async () => { hooks.delete(h); await refetch(); }; };
 
@@ -635,6 +646,40 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     return out;
   }
 
+  // Leave out (reset.md, leave-out.mjs): each rule's responses (url: where they come from, for the browser; match: as a
+  // guard entry over "METHOD host/path") filtered before the page has them, in every tab, frame and worker. The request
+  // goes as it was; the page gets the body without the items. One that can't be read or no longer has its list goes on
+  // as it came, and is logged as a failure (the run stops before that app's screens). A new set replaces the one on.
+  let leaving = null;
+  async function leaveOut(rules = []) {
+    const prev = leaving;
+    const st = { rules: rules.map(r => ({ id: r.id, app: r.app || null, requests: [], removed: [], failures: [] })) };
+    const ruleLog = id => st.rules.find(x => x.id === id);
+    const at2 = () => new Date().toISOString();
+    const remove = rules.length ? await addHook({ response: true, patterns: rules.map(r => ({ urlPattern: r.url, requestStage: 'Response' })), on: async (e) => {
+      if (e.responseStatusCode < 200 || e.responseStatusCode >= 300) return null;
+      const mine = rules.filter(r => allowedBy({ method: e.request.method, url: e.request.url }, [r.match]));
+      if (!mine.length) return null;
+      let u = null; try { u = new URL(e.request.url); } catch (x) {}
+      const where = { method: e.request.method, host: u ? u.host : '?', path: u ? pathShape(u.pathname) : '' };
+      let text;
+      try { text = await e.body(); } catch (x) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: `its body couldn't be read (${String(x.message || x).split('\n')[0]})` }); return null; }
+      const f = filterBody(text, mine);
+      if (!f.ok) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: f.why }); log(`leave out: ${where.method} ${where.host}${where.path}: ${f.why}`); return null; }
+      for (const r of mine) {
+        const gone = f.removed.filter(x => x.rule === r.id), l = ruleLog(r.id);
+        l.requests.push({ at: at2(), ...where, removed: gone.length, ...(gone.length ? { refs: f.refs } : {}) });
+        for (const x of gone) if (!l.removed.some(y => y.value === x.value && y.field === x.field && y.shows === x.shows)) l.removed.push({ field: x.field, value: x.value, shows: x.shows });
+      }
+      if (f.removed.length) log(`leave out: ${where.method} ${where.host}${where.path}: ${f.removed.length} left out${f.refs ? `, ${f.refs} references` : ''}`);
+      return f.removed.length ? { body: f.body } : null;
+    } }) : async () => {};
+    leaving = { log: () => JSON.parse(JSON.stringify(st.rules)), async stop() { await remove(); if (leaving === me) leaving = null; } };
+    const me = leaving;
+    if (prev) await prev.stop();
+    return me;
+  }
+
   // The demo's account, pinned at Entra's sign-in (pinnedAuthorizeUrl): no account picker, whatever else the
   // profile holds. Counts how often it pinned.
   async function pinAccount({ loginHint = null, domainHint = null } = {}) {
@@ -670,7 +715,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     killAll('SIGKILL');
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
-  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, pinAccount, denyNotifications, tenantsOf, info, cpu, close, dir };
+  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, leaveOut, pinAccount, denyNotifications, tenantsOf, info, cpu, close, dir };
 }
 
 // The one window that shows on her screen: the capture profile, visible, on the first app that needs a sign-in. She

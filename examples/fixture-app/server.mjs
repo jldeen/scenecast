@@ -315,10 +315,13 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         (GET /api/session) and sends it as Authorization; deleting a task without it is refused (401), so an undo by
 //         the API has to use the page's own session. ?signin=<ms>&tid=<tenant id>: the page keeps a sign-in library's
 //         account key for that tenant (MSAL's shape) after that many ms (never: none), for the capture start's wait.
+//         suggest(true): the page also lists Suggested items from GET /api/suggested ({ items, order }: the items by ref,
+//         drawn in order's order; an order ref with no item draws an empty row) with their count, and a Teams tree it
+//         draws from its own store (localStorage, as Teams keeps its teams in IndexedDB): Leave out's two ways.
 //   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
 //         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
 //         API undo that has to go from that frame.
-const tasksPage = (port, notesPort) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+const tasksPage = (port, notesPort, suggest = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
 main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
@@ -336,6 +339,7 @@ textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px so
 <textarea aria-label="New task" id="box" rows="2" placeholder="New task"></textarea>
 <p id="saved" role="status"></p>
 <iframe title="Notes" src="http://127.0.0.1:${notesPort}/" style="width:100%;height:90px;border:1px solid #d0d7de;border-radius:6px"></iframe>
+${suggest ? '<h2>Suggested</h2><p id="sugCount"></p><ul id="sug" aria-label="Suggested"></ul><h2>Teams</h2><div role="tree" aria-label="Teams" id="teams"></div>' : ''}
 </main><script>
 const $ = id => document.getElementById(id);
 let AUTH = '';
@@ -366,6 +370,15 @@ fetch('/api/catalog?from=load').catch(() => {});
 let lookup = null;
 $('box').addEventListener('input', () => { clearTimeout(lookup); lookup = setTimeout(() => fetch('/api/catalog?from=type').catch(() => {}), 300); });
 load();
+if ($('sug')) {
+  fetch('/api/suggested').then(r => r.json()).then(j => {
+    const by = new Map(j.items.map(i => [i.ref, i]));
+    $('sug').innerHTML = j.order.map(o => by.has(o.ref) ? '<li><span>' + by.get(o.ref).name + '</span></li>' : '<li class="blank"></li>').join('');
+    $('sugCount').textContent = j.order.length + ' suggested';
+  }).catch(() => {});
+  if (!localStorage.getItem('fx-teams')) localStorage.setItem('fx-teams', JSON.stringify(['Contoso Alpha', 'Contoso Beta', 'Northwind Ops']));
+  $('teams').innerHTML = JSON.parse(localStorage.getItem('fx-teams')).map(t => '<div role="treeitem" aria-level="2" aria-expanded="true">' + t + '</div><div role="group"><div role="treeitem" aria-level="3">General</div></div>').join('');
+}
 { const q = new URLSearchParams(location.search), ms = q.get('signin'), tid = q.get('tid');
   if (ms && ms !== 'never' && tid) setTimeout(() => localStorage.setItem('00000000-0000-0000-0000-0000000000aa.' + tid + '-login.windows.net-idtoken-fixture-' + tid + '---', '1'), +ms); }
 </script></body></html>`;
@@ -384,7 +397,7 @@ load();
 </script></body></html>`;
 
 export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
-  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok' };
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false };
   const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
   const log = [];
   const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
@@ -393,11 +406,12 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
   const server = createServer(async (q, s) => {
     const path = q.url.split('?')[0];
     log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
-    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort));
+    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest));
     if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
     if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
     if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
     if (q.method === 'GET' && path === '/api/tasks') return send(s, 200, 'application/json', JSON.stringify(view()));
+    if (q.method === 'GET' && path === '/api/suggested') return send(s, 200, 'application/json', JSON.stringify({ items: [{ ref: 'r1', name: 'Contoso Notes' }, { ref: 'r2', name: 'Fabrikam Payroll' }, { ref: 'r3', name: 'Northwind Ledger' }], order: [{ ref: 'r2' }, { ref: 'r1' }, { ref: 'r3' }] }));
     if (q.method === 'GET' && path === '/api/catalog') {
       const from = new URLSearchParams(q.url.split('?')[1] || '').get('from');
       const down = st.catalog === 'fail' || (st.catalog === 'fail-on-type' && from === 'type');
@@ -443,6 +457,7 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     notePing: on => { st.ping = !!on; st.seen = []; st.unpins = []; },
     // Its catalog service: 'ok', 'fail' (500 always) or 'fail-on-type' (500 for the lookup as you type).
     catalog: mode => { st.catalog = mode; },
+    suggest: on => { st.suggest = !!on; },
     close: () => { server.close(); notes.close(); },
   };
 }

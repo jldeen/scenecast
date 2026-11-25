@@ -79,7 +79,9 @@ const HOST = `127.0.0.1:${TASKS}`, NOTES_HOST = `127.0.0.1:${NOTES}`;
 mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
 // apiPath: new-task's API undo (as a private pack's), on the page's own session; null: none. notesApi: pin-note's, on
 // the notes frame's session.
-const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+// filters: Leave out's two kinds, a response's list (Suggested, ordered by refs) and a list the page draws from its own
+// store (Teams).
+const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
     { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}) }, ...(taskCheck ? { check: { api: { use: 'tasks', method: 'GET', path: '/api/tasks', made: 200 } } } : {}) },
@@ -91,6 +93,10 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHel
   guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}), ...(stayHeld ? { stayHeld } : {}) },
   apis: { tasks: { open: `http://${HOST}/`, host: HOST }, notes: { open: `http://${HOST}/`, host: NOTES_HOST, from: NOTES_HOST } },
   services: [{ name: "Tasks' catalog service", match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/catalog$/`, start: true, waitS: 20 }],
+  ...(filters ? { filters: [
+    { id: 'suggested', why: 'The Suggested list: GET /api/suggested, items by ref, drawn in order\'s order.', url: `*://${HOST}/api/suggested*`, match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/suggested$/`, items: 'items', fields: ['name'], refs: [{ list: 'order', by: 'ref' }], shows: 'name' },
+    { id: 'team-tree', kind: 'dom', why: 'The Teams tree, drawn from the page\'s own store.', list: '[role=tree] [role=treeitem][aria-level="2"]' },
+  ] } : {}),
 }, null, 1));
 writePack();
 
@@ -356,6 +362,84 @@ try {
   check('a Set before line whose pack lacks its write: the run refuses before anything runs', res.code !== 0 && /Set before beat 2, Click "Refresh": tasks: "Sync" is on: the fixture-tasks pack has no "sync-all" write/.test(sbErr) && !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry'), JSON.stringify({ code: res.code, error: sbErr, log: tasks.log.filter(l => !l.startsWith('GET')) }));
   writePack();
   writeFileSync(join(DEMO, 'reset.md'), RESET);
+
+  // 1h · Leave out: a Suggested item (from a response, with an order list that names it by ref) and a team (drawn from
+  // the page's own store) left out of the replica, in the capture browser only. The page draws itself without them
+  // (no hole, one fewer), the raw recording has no trace of them, and the server sees the same requests as without the
+  // rule. A line naming a filter no pack has refuses at start; one whose words are on a screen stops the take before
+  // that screen is saved.
+  {
+    tasks.suggest(true);
+    writePack({ filters: true });
+    const LO = ({ from = 'fixture-tasks:suggested', shows = null } = {}) => RESET.replace('## Check', `## Leave out\n\n- tasks: suggestion "Fabrikam Payroll"\n  From: ${from}\n${shows ? `  Shows: "${shows}"\n` : ''}- tasks: team "Contoso Beta"\n  From: fixture-tasks:team-tree\n\n## Check`);
+    const freshAll = () => { freshRaw(); rmSync(join(tmp, 'run-raw', 'hovers'), { recursive: true, force: true }); };
+    const reqs = log => [...new Set(log)].sort().join('\n');
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshAll(); tasks.log.length = 0;
+    await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const baseLog = tasks.log.slice(), [loBase] = keepRaw('lo-base-raw');
+    writeFileSync(join(DEMO, 'reset.md'), LO());
+    r = await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    const apLO = JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'approved.json'), 'utf8'));
+    freshAll(); tasks.log.length = 0;
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    rj = readRun(DEMO);
+    const loLog = tasks.log.slice(), [loRaw, recLO] = keepRaw('lo-raw');
+    const lr = ((rj.leaveOut || {}).rules || []), sug = lr.find(x => x.id === 'fixture-tasks:suggested') || {};
+    check('Leave out: the run goes to the end, the approval lists its lines apart from the writes, and run.json has what each rule took out and where', res.code === 0 && !rj.stopped && (apLO.leaveOut || []).map(x => x.label).join('|') === 'Left out of the replica: suggestion "Fabrikam Payroll"|Left out of the replica: team "Contoso Beta"' && !(apLO.reset || []).some(x => /Fabrikam|Contoso Beta/.test(x.text)) && sug.removed && sug.removed.length === 1 && sug.removed[0].value === 'Fabrikam Payroll' && sug.removed[0].field === 'name' && sug.requests.some(q => q.method === 'GET' && q.path === '/api/suggested' && q.removed === 1 && q.refs === 1) && !sug.failures.length && rj.leaveOut.checks && rj.leaveOut.checks.n > 0 && rj.leaveOut.checks.clean === rj.leaveOut.checks.n && !rj.leaveOut.leak, JSON.stringify({ code: res.code, err: res.err.slice(-800), stopped: rj.stopped, leaveOut: rj.leaveOut, approved: apLO.leaveOut }));
+    const snapOf = (dir, id) => { try { return JSON.parse(readFileSync(join(dir, 'snaps', `${id}.json`), 'utf8')).docs.map(d => d.html).join('\n'); } catch (e) { return ''; } };
+    const startLO = snapOf(loRaw, 'tasks-start'), startBase = snapOf(loBase, 'tasks-start');
+    const rowsOf = h => (/<ul id="sug"[^>]*>([\s\S]*?)<\/ul>/.exec(h) || [])[1] || '';
+    check('and the page drew itself without them: one fewer row, in order, no hole (the order list\'s ref went too), the count right', /Fabrikam Payroll/.test(rowsOf(startBase)) && (rowsOf(startLO).match(/<li/g) || []).length === 2 && !/class="blank"/.test(rowsOf(startLO)) && /Contoso Notes[\s\S]*Northwind Ledger/.test(rowsOf(startLO)) && /2 suggested/.test(startLO), JSON.stringify({ lo: rowsOf(startLO).slice(0, 600), base: rowsOf(startBase).slice(0, 600) }));
+    check('and the team drawn from its own store: hidden, never in a snapshot, the next team there', /Contoso Beta/.test(startBase) && !/Contoso Beta/.test(startLO) && /Contoso Alpha[\s\S]*Northwind Ops/.test(startLO), JSON.stringify({ lo: (/<div role="tree"[\s\S]{0,800}/.exec(startLO) || [''])[0] }));
+    check('and the raw recording has no trace of either (screens, hovers, frames, the recording)', recLO && !/Fabrikam Payroll|Contoso Beta/.test(allRaw(loRaw)) && /Fabrikam Payroll/.test(allRaw(loBase)), JSON.stringify({ states: recLO && Object.keys(recLO.states) }));
+    check('and the run asked the server for the same things as without it', reqs(loLog) === reqs(baseLog) && count(loLog, 'GET /api/suggested') > 0, JSON.stringify({ lo: reqs(loLog), base: reqs(baseLog) }));
+    // On the live page, the tab loaded with the rules on and with them off: the same requests, each one (the browser's
+    // own icon fetch aside: it's cached); the list one fewer with no hole; the team hidden and the next one moved up
+    // into its place (no gap).
+    const MEASURE = "return await page.evaluate(() => ({ teams: [...document.querySelectorAll('#teams [aria-level=\"2\"]')].map(e => ({ t: e.textContent, top: Math.round(e.getBoundingClientRect().top), shown: getComputedStyle(e).display !== 'none' })), rows: [...document.querySelectorAll('#sug li')].map(e => e.textContent), count: (document.getElementById('sugCount') || {}).textContent }))";
+    const loadNow = async () => { tasks.log.length = 0; await run(['cmd', 'goto', JSON.stringify({ tab: SPEC, url: tasks.url })], { env: E }); await sleep(3000); return { log: tasks.log.filter(l => !/icon\.png|favicon/.test(l)).sort(), ...json((await run(['cmd', 'js', JSON.stringify({ tab: SPEC, code: MEASURE })], { env: E })).out) }; };
+    const filterRules = [
+      { id: 'fixture-tasks:suggested', app: 'tasks', kind: 'response', url: `*://${HOST}/api/suggested*`, match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/suggested$/`, items: 'items', fields: ['name'], refs: [{ list: 'order', by: 'ref' }], shows: 'name', values: ['Fabrikam Payroll'] },
+      { id: 'fixture-tasks:team-tree', app: 'tasks', kind: 'dom', hosts: [HOST], list: '[role=tree] [role=treeitem][aria-level="2"]', values: ['Contoso Beta'] },
+    ];
+    const off = await loadNow();
+    const lon = json((await run(['cmd', 'capLeaveOut', JSON.stringify({ rules: filterRules, words: { tasks: ['Fabrikam Payroll', 'Contoso Beta'] }, check: '@scenecast/ai/leave-check.mjs' })], { env: E })).out);
+    const on = await loadNow();
+    await run(['cmd', 'capLeaveOut', JSON.stringify({ rules: [] })], { env: E });
+    const at = (list, t) => (list || []).find(x => x.t === t) || {};
+    check('and loaded with the rules on and off, the page asks the server for exactly the same things', lon.on === true && on.log.length > 3 && on.log.join('|') === off.log.join('|') && on.log.includes('GET /api/suggested'), JSON.stringify({ on: on.log, off: off.log }));
+    check('and on the live page the list is one fewer with no hole, and the team is hidden with the next one moved up into its place', on.rows.join('|') === 'Contoso Notes|Northwind Ledger' && on.count === '2 suggested' && off.rows.length === 3 && at(on.teams, 'Contoso Beta').shown === false && at(off.teams, 'Contoso Beta').shown === true && at(on.teams, 'Northwind Ops').top === at(off.teams, 'Contoso Beta').top, JSON.stringify({ lon, off: { rows: off.rows, teams: off.teams }, on: { rows: on.rows, count: on.count, teams: on.teams } }));
+    // A walk has it as a run does, and checks each screen it keeps.
+    res = await aiProc(['walk', '--demo', DEMO, '--live'], DEMO, E);
+    const wl = existsSync(join(DEMO, '.out', 'ai', 'walk.json')) ? JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'walk.json'), 'utf8')) : {};
+    const wlo = wl.leaveOut || {};
+    check('and a walk leaves them out too, and checks each screen it keeps', (wlo.screens || []).length >= 2 && wlo.screens.every(x => x.ok) && (wlo.rules || []).some(x => x.id === 'fixture-tasks:suggested' && x.removed.length === 1), JSON.stringify({ code: res.code, leaveOut: wlo, err: res.err.slice(-600) }));
+    // A line whose filter no pack has: the run refuses at start, nothing run.
+    writeFileSync(join(DEMO, 'reset.md'), LO({ from: 'fixture-tasks:suggestions' }));
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    tasks.log.length = 0;
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const loErr = res.error ? (res.error.error || res.error.message || res.error.text || JSON.stringify(res.error)) : res.err;
+    check('a Leave out line naming a filter no pack has: the run refuses before anything runs', res.code !== 0 && /Leave out: "suggestion "Fabrikam Payroll"" is left out by fixture-tasks:suggestions, and no app pack of this demo has that filter/.test(loErr) && !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry'), JSON.stringify({ code: res.code, error: loErr, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+    // Words of hers on a screen no filter covers (here the start screen's own "Sync is off"): that screen isn't saved,
+    // the run stops with a picture and where it was, lists it for her, and the reset after still runs.
+    writeFileSync(join(DEMO, 'reset.md'), LO({ shows: 'Sync is off' }));
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshAll(); tasks.log.length = 0;
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    rj = readRun(DEMO);
+    const [leakRaw] = keepRaw('lo-leak-raw');
+    const stp = rj.stopped || {};
+    check('words she leaves out on a screen: not saved, the run stops with a picture and where, listed for her, the demo put back', stp.kind === 'leave-out' && /"Sync is off" is on the screen/.test(stp.why) && stp.picture && existsSync(stp.picture) && (stp.where || []).some(h => h.value === 'Sync is off' && h.text === 'Sync is off') && (rj.needsYou || []).length === 1 && !snapOf(leakRaw, 'tasks-start') && count(tasks.log, 'POST /api/tasks') === 0 && rj.reset.after && rj.reset.after.ok, JSON.stringify({ stopped: stp, needsYou: rj.needsYou, snaps: existsSync(join(leakRaw, 'snaps')) ? readdirSync(join(leakRaw, 'snaps')) : [], after: rj.reset.after && rj.reset.after.why }));
+    const st0 = json((await run(['cmd', 'recordStatus', '{}'], { env: E })).out);
+    check('and the recorder is free again for the next run', st0 && st0.recording === false, JSON.stringify(st0));
+    tasks.suggest(false);
+    writePack();
+    writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  }
 
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
   // tenant check, and still refuses when it never does.

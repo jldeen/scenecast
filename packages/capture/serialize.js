@@ -7,6 +7,7 @@
 // Every resource URL becomes a "d1res://N" token; urls[N] is its absolute URL, so the capture driver can fetch it
 // and the processor can point it at a local asset. Child frames marked data-d1-frame="K" become "d1frame://K".
 // opts: { body: true } serializes only <body> (streaming frames); { css: false } leaves <style> bodies empty.
+// An element marked data-d1-leaveout (reset.md's Leave out, leave-out-page.js) is left out, with all that's in it.
 async (opts) => {
   opts = opts || {};
   const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
@@ -139,6 +140,8 @@ async (opts) => {
     if (node.nodeType !== 1) return '';
     const el = node, tag = el.localName;
     if (DROP.has(tag)) return '';
+    // Left out of the replica (leave-out-page.js marks it, and its stylesheet hides it): never in a snapshot.
+    if (el.hasAttribute('data-d1-leaveout')) return '';
     if (tag === 'link') {
       const rel = (el.getAttribute('rel') || '').toLowerCase();
       if (/stylesheet/.test(rel)) {

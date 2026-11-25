@@ -3,14 +3,19 @@
 // Fetch.enable isn't enough: it only catches targets made after it, and none once it's been turned off and on (Nov 23:
 // a guard turned on for a second walk saw nothing, and a page's POST went out).
 // Its own DevTools connection, beside Playwright's: this one only intercepts.
-//   const tf = await fetchEveryTarget(port, { onPaused: async (e, { page, target }) => null | { fail: true } | { url } })
+//   const tf = await fetchEveryTarget(port, { onPaused: async (e, { page, target }) => null | { fail: true } | { url },
+//     onResponse: async (e, { page, target, body }) => null | { body: text } })
 //   page: the address of the tab the request came from (its page target); target: the target that sent it
+//   onResponse: a request paused at its response (a pattern's requestStage 'Response'): body() → its text; { body }
+//     gives the page that body instead (headers as they came, less the encoding and length), else it goes on as is
 //   await tf.set(patterns | null)     intercept these (Fetch.enable on every target), or nothing
 //   tf.targets()                      how many targets it has
 //   await tf.close()
 const KINDS = new Set(['page', 'iframe', 'worker', 'shared_worker', 'service_worker']);
 
-export async function fetchEveryTarget(port, { onPaused = async () => null, log = () => {} } = {}) {
+const DROP_HEADERS = /^(content-encoding|content-length|transfer-encoding)$/i;
+
+export async function fetchEveryTarget(port, { onPaused = async () => null, onResponse = async () => null, log = () => {} } = {}) {
   const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
   const ws = new WebSocket(webSocketDebuggerUrl);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error(`no DevTools connection on ${port}`)); });
@@ -36,7 +41,18 @@ export async function fetchEveryTarget(port, { onPaused = async () => null, log 
   }
   async function paused(sessionId, e) {
     const t = info.get(sessionId);
-    const r = await onPaused(e, { page: topOf(sessionId), target: t ? { type: t.type, url: urlOf.get(t.targetId) || t.url } : null }).catch(() => null);
+    const from = { page: topOf(sessionId), target: t ? { type: t.type, url: urlOf.get(t.targetId) || t.url } : null };
+    // At its response: only its body can change (the request already went as it was).
+    if (e.responseStatusCode !== undefined || e.responseErrorReason !== undefined) {
+      const body = async () => { const b = await send('Fetch.getResponseBody', { requestId: e.requestId }, sessionId); return b.base64Encoded ? Buffer.from(b.body, 'base64').toString('utf8') : b.body; };
+      const r = e.responseErrorReason === undefined ? await onResponse(e, { ...from, body }).catch(err => { log(`response filter: ${String(err.message || err).split('\n')[0]}`); return null; }) : null;
+      if (r && typeof r.body === 'string') {
+        const responseHeaders = (e.responseHeaders || []).filter(h => !DROP_HEADERS.test(h.name));
+        return send('Fetch.fulfillRequest', { requestId: e.requestId, responseCode: e.responseStatusCode, responseHeaders, body: Buffer.from(r.body, 'utf8').toString('base64') }, sessionId).catch(() => {});
+      }
+      return send('Fetch.continueResponse', { requestId: e.requestId }, sessionId).catch(() => send('Fetch.continueRequest', { requestId: e.requestId }, sessionId)).catch(() => {});
+    }
+    const r = await onPaused(e, from).catch(() => null);
     if (r && r.fail) return send('Fetch.failRequest', { requestId: e.requestId, errorReason: 'BlockedByClient' }, sessionId).catch(() => {});
     return send('Fetch.continueRequest', { requestId: e.requestId, ...(r && r.url && r.url !== e.request.url ? { url: r.url } : {}) }, sessionId).catch(() => {});
   }

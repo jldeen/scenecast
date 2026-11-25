@@ -204,5 +204,42 @@
       "waitS": 90,
       "why": "IQ's page asks it for the plugins its add picker lists, as it starts (Nov 24: 3 of 3 starts, 8 to 47 s after IQ's address opened). Answering 500, the picker says \"Plugins could not be loaded\" and the demo's plugin card isn't there (walks 11 and 14)."
     }
+  ],
+  "filters": [
+    {
+      "id": "peek-messages",
+      "why": "IQ's add-content picker lists the account's recent mail from one response, asked for by IQ's frame as it starts: substrate's suggestions (Copilot_Peek). A demo leaves out mail from a sender (security and service notices keep arriving in a shared tenant) without deleting anyone's mail. Measured Nov 24: POST substrate.office.com/search/api/v1/suggestions, Groups[] by Type, the mail in the Message group's Suggestions, each with From.EmailAddress.Address and Subject; LayoutHints.BestMatchSuggestions orders the mixed list by ReferenceId, so a removed mail's entry goes too. Some responses carry one type only: only Groups must be a list. Filtered by sender, all 26 left the picker over 2 responses; no local store had them.",
+      "url": "*://substrate.office.com/search/api/v1/suggestions*",
+      "match": "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/",
+      "items": "Groups[Type=Message].Suggestions",
+      "fields": [
+        "From.EmailAddress.Address"
+      ],
+      "refs": [
+        {
+          "list": "LayoutHints.BestMatchSuggestions",
+          "by": "ReferenceId"
+        }
+      ],
+      "shows": "Subject"
+    },
+    {
+      "id": "peek-team",
+      "why": "The same response carries Teams items: a team (Name), its channels (TeamName) and its SharePoint site (Title). With mail left out, lower-ranked items move up into the picker's rows, so a team left out of Teams is left out here too. Measured Nov 24: one team, five channels and one site in the response, none on the picker's screen that day.",
+      "url": "*://substrate.office.com/search/api/v1/suggestions*",
+      "match": "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/",
+      "items": "Groups[*].Suggestions",
+      "fields": [
+        "Name",
+        "TeamName",
+        "Title"
+      ],
+      "refs": [
+        {
+          "list": "LayoutHints.BestMatchSuggestions",
+          "by": "ReferenceId"
+        }
+      ]
+    }
   ]
 }

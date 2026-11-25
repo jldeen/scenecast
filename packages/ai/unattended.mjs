@@ -24,6 +24,7 @@ import { readPlan, readGoal } from './draft.mjs';
 import { approval as approvalOf } from './make.mjs';
 import { liveWalker, walkerPacks } from './live.mjs';
 import { runReset, fillApi, setBefore, setBeforeProblem, claimScreen, checkClaim } from './reset-run.mjs';
+import { leaveOutOf, leaveOn, leaveLog, leftFor, leaveApps, leaveFailure } from './leave-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
@@ -73,11 +74,19 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (bad) throw new Error(`reset.md's Set before beat ${b.beat}, ${b.text}: ${bad}`);
       setBeforeAt.set(`${b.beat - 1}-${si}`, b);
     } } }
+  // reset.md's Leave out: each line's filter, its app pack's. One no pack of the demo has stops the run before anything
+  // runs.
+  const lo = leaveOutOf({ demo, packs });
+  if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
-  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [] };
+  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [], ...(lo.rules.length ? { leaveOut: { lines: lo.lines.map(l => ({ app: l.app, what: l.what, from: l.from, shows: l.shows })) } } : {}) };
   const save = () => writeFileSync(join(out, 'run.json'), JSON.stringify(run, null, 1));
+  // Leave out's record (per rule: the requests it filtered and what it took out; the checks before each save; a leak).
+  const leakWhy = leak => `left out of the replica, and ${leak.why}: nothing after it was saved`;
+  const leakStop = leak => { run.stopped = { kind: 'leave-out', why: leakWhy(leak), app: leak.app, saving: leak.what, picture: leak.picture || null, ...(leak.hits ? { where: leak.hits } : {}) }; run.needsYou.push({ text: leak.what, why: run.stopped.why }); emit({ event: 'stopped', ...run.stopped }); };
+  const leaveNow = async () => { if (!lo.rules.length) return null; const l = await leaveLog(cmd); Object.assign(run.leaveOut, { rules: l.rules || [], dom: l.dom || [], checks: l.checks || null, leak: l.leak || null }); return l; };
   const shot = async (app, name) => { const file = join(stops, `${name}.png`); try { await cmd('capShot', { tab: appTab(demo, app), file }, 60); return file; } catch (e) { return null; } };
   const stopWith = async (app, at, kind, why) => { run.stopped = { kind, why, at, app, picture: await shot(app, `${at.beat + 1}-${at.step + 1}-${kind}`) }; emit({ event: 'stopped', ...run.stopped }); };
 
@@ -102,6 +111,15 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   let recording = false, wRun = null;
   const ran = [], results = {};
   try { main: {
+    // Leave out, from the start: the apps that have a line opened again, so what they show comes filtered. Before the
+    // reset, so nothing reads them unfiltered.
+    if (lo.rules.length) {
+      emit({ event: 'stage', name: 'leave-out', label: 'Leaving out what the demo leaves out' });
+      const r = await leaveOn(cmd, lo, { shots: stops }).catch(e => ({ on: false, refused: e.message }));
+      if (!r.on) { run.stopped = { kind: 'leave-out', why: `Leave out couldn't start: ${r.refused || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
+      const h = liveWalker({ demo, cmd, packs, log });
+      for (const id of leaveApps(lo)) await h.home(id);
+    }
     // Before: the tenant as the demo starts, or nothing is recorded.
     emit({ event: 'stage', name: 'reset-before', label: 'Checking the demo starts as it should' });
     run.reset.before = await runReset({ demo, cmd, walker: liveWalker({ demo, cmd, packs, log }), phase: 'before', approval: ap, emit });
@@ -118,8 +136,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const did = await h.home(id);
         const bad = did.find(d => d.why);
         const sc = bad ? { ok: false, why: `its start step "${bad.step}": ${bad.why}` } : await h.startCheck(id, plan);
+        // A filter of this app whose response couldn't be read, or had lost its list: its screens wait.
+        if (sc.ok && lo.rules.length) { const lf = leaveFailure(await leaveNow(), id); if (lf) Object.assign(sc, { ok: false, why: `Leave out: ${lf}`, leaveOut: true }); }
         run.starts.push({ app: id, did, ...sc });
-        if (!sc.ok) { run.stopped = { kind: 'start', why: `${id}: ${sc.why}`, app: id, picture: await shot(id, `start-${id}`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
+        if (!sc.ok) { run.stopped = { kind: sc.leaveOut ? 'leave-out' : 'start', why: `${id}: ${sc.why}`, app: id, picture: await shot(id, `start-${id}`) }; emit({ event: 'stopped', ...run.stopped }); break main; }
       }
       // Each start service: the page's own call to it, after its app's start, must answer 2xx (waitS for it to come).
       for (const sv of svcs.filter(x => x.start && homeAt[x.app])) {
@@ -136,7 +156,15 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
     let app = first && first.kind === 'app' && w.appOf(first.app) || appIds[0];
-    await cmd('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: recordOpts(demo.cfg), parallel: true, zooms: demo.cfg.zooms, first: app }, 300);
+    // Leave out can refuse a start screen's save (what she leaves out was on it): the take ends before it begins, and so
+    // does the run.
+    try { await cmd('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: recordOpts(demo.cfg), parallel: true, zooms: demo.cfg.zooms, first: app }, 300); }
+    catch (e) {
+      const l = await leaveNow().catch(() => null);
+      if (!(l && l.leak)) throw e;
+      leakStop(l.leak);
+      break main;
+    }
     recording = true;
     await settled(cmd, { maxS: 900, on: s => emit({ event: 'record', status: s }) });
     await w.start(app);
@@ -153,7 +181,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const recWalker = (() => { try { return walkerFromDemo(demo); } catch (e) { return null; } })();
     const flat = plan.beats.flatMap((b, bi) => b.steps.map((s, si) => ({ bi, si, s })));
     const nextActing = (bi, si) => { const i = flat.findIndex(x => x.bi === bi && x.si === si); return ((flat.slice(i + 1).find(x => x.s.target && /^(click|type|press|hover)$/.test(x.s.kind))) || {}).s || null; };
-    const screensOf = reads => (reads || []).map(r => { try { return readScreen(r.docs); } catch (e) { return null; } }).filter(Boolean);
+    // Each read in the reader's shape, what she leaves out of the replica marked left (never a proof).
+    const screensOf = (reads, id) => (reads || []).map(r => { try { return leftFor(lo, id, readScreen(r.docs)); } catch (e) { return null; } }).filter(Boolean);
     const typedSoFar = [], lastReads = {};
     const packCheck = known => {
       const p = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(x => x && x.id === known.pack) : null;
@@ -175,7 +204,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const lastDid = {};
     let doubt = null;
     const failingIn = {};
+    // A save Leave out refused (what she leaves out was on the screen, or a filter couldn't do its work): the take
+    // stopped saving there, so the run stops at its next step.
+    const leaked = async () => { const l = await leaveNow(); return l && l.leak ? { kind: 'leave-out', why: leakWhy(l.leak), leak: l.leak, beforeWrite: true } : null; };
     const doStep = async (bi, si, step, at, prev) => {
+      { const lk = await leaked(); if (lk) return lk; }
       for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
       // Set before: what her script has already set when she gets here, set off camera just before the step, in a tab
       // of its own, as approved writes under the write gate (reset-run.mjs setBefore). The step's screen must show it.
@@ -238,7 +271,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const afters = await w.reads(app).catch(() => []);
       lastReads[app] = afters;
       if (!c.ok) return { kind: c.kind, why: c.why };
-      const lp = liveProof(step, { before: screensOf(before), afters: screensOf(afters), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
+      const lp = liveProof(step, { before: screensOf(before, step.kind === 'app' ? prev : app), afters: screensOf(afters, app), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
       const byCheck = !!(checked && checked.ok);
       const strength = byCheck ? 'strong' : lp.strength;
       const url = (await w.controls(app).catch(() => ({}))).url || null;
@@ -276,6 +309,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
         if (stop) {
           await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
+          // Leave out's own picture, taken as it refused the save, and where on the screen it was.
+          if (stop.leak) Object.assign(run.stopped, { app: stop.leak.app, saving: stop.leak.what, ...(stop.leak.picture ? { picture: stop.leak.picture } : {}), ...(stop.leak.hits ? { where: stop.leak.hits } : {}) });
           // Before a write: both reads of the page as it was, and the step for her (the reset after still runs).
           if (stop.beforeWrite) {
             const reads = lastReads[app];
@@ -293,6 +328,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
+      // A save it refused after the last step: the take ends there, and she sees why.
+      const l = await leaveNow().catch(() => null);
+      if (l && l.leak && !run.stopped) leakStop(l.leak);
     }
     // Off the app (another site): back to it, out of the recording, before the reset needs it.
     if (run.stopped && run.stopped.kind === 'offplan') await liveWalker({ demo, cmd, packs, log }).goBack(run.stopped.app).catch(() => {});
@@ -303,6 +341,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       emit({ event: 'stage', name: 'reset-after', label: 'Putting the demo back as it started' });
       try { run.reset.after = await runReset({ demo, cmd, walker: liveWalker({ demo, cmd, packs, log }), phase: 'after', approval: ap, ran, results, emit }); } catch (e) { run.reset.after = { ok: false, why: e.message }; }
     }
+    if (lo.rules.length) { await leaveNow().catch(() => {}); await cmd('capLeaveOut', { rules: [] }, 60).catch(() => {}); }
     { const off = await guardOff(cmd, g.hosts, senderApps(demo.cfg, packs)); keepBodiesOut(demo, off.bodies); Object.assign(run.guard, off); }
     if (wRun) run.inputs = wRun.inputs();
     try { const appOf = senderApps(demo.cfg, packs); run.events = (await cmd('capEvents', {}, 30)).events.filter(e => e.kind !== 'navigated').map(e => ({ ...e, app: appOf({ tab: e.host }) })); } catch (e) {}
@@ -407,10 +446,19 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   if (!plan || !stepCount(plan)) throw new Error('make the plan first');
   packs = packs === undefined ? await walkerPacks() : packs;
   const { walkPlan, stepNets } = await import('./walk.mjs');
+  // Leave out as a run has it, so a look-only walk shows what the capture will (and checks each screen it keeps).
+  const lo = leaveOutOf({ demo, packs });
+  if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
   const g = await guardOn(demo, cmd, packs);
   const t0 = Date.now();
   const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
   const shots = join(aiDir(demo), 'walk');
+  if (lo.rules.length) {
+    const r = await leaveOn(cmd, lo, { shots }).catch(e => ({ on: false, refused: e.message }));
+    if (!r.on) { await guardOff(cmd, g.hosts); throw new Error(`Leave out couldn't start: ${r.refused || 'the capture browser said no'}`); }
+  }
+  const leaveChecks = [];
+  const { leaveHits } = lo.rules.length ? await import('./leave-check.mjs') : {};
   // Every screen it lands on, and each app's start screen, as it is today (local only, under .out): for re-grounding a
   // plan on the product now. <beat>-<step>.json and start-<app>.json: its app, address, title, words and controls;
   // <name>.reads.json.gz: the screen in the reader's shape, read twice about a second apart
@@ -424,6 +472,17 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const keepReads = async (name, app) => {
     const r = await w.reads(app).catch(() => null);
     if (r) writeFileSync(join(screensDir, `${name}.reads.json.gz`), gzipSync(JSON.stringify(r)));
+    // The negative check a run makes before it saves a screen: her words, and what the filters took out so far.
+    const id = w.appOf(app) || app;
+    if (r && lo.rules.length) {
+      const l = await leaveLog(cmd), words = lo.words[id] || [];
+      const exact = [...new Set(((l && l.rules) || []).filter(x => x.app === id).flatMap(x => x.removed.map(y => y.shows)).filter(Boolean))];
+      if (words.length || exact.length) {
+        const hits = [];
+        for (const x of r) { try { hits.push(...leaveHits(x.docs, { words, exact })); } catch (e) { hits.push({ by: 'error', value: e.message }); } }
+        leaveChecks.push({ screen: name, app: id, ok: !hits.length, ...(hits.length ? { hits: hits.slice(0, 6) } : {}) });
+      }
+    }
   };
   // Each step's window, from its first input to its last read, and what the guard held in it (Rule 2: a held read
   // can change what a page shows).
@@ -526,9 +585,15 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     const nets = stepNets(walked.map(s => ({ from: s.window.from, app: s.app })), netAll, new Date().toISOString());
     walked.forEach((s, i) => { if (nets[i].length) s.net = nets[i]; });
     if (walk) walk.starts = seenAt.starts || [];
+    let leaveOut;
+    if (lo.rules.length) {
+      const l = await leaveLog(cmd);
+      leaveOut = { lines: lo.lines.map(x => ({ app: x.app, what: x.what, from: x.from, shows: x.shows })), rules: l.rules || [], dom: l.dom || [], screens: leaveChecks };
+      await cmd('capLeaveOut', { rules: [] }, 60).catch(() => {});
+    }
     const off = await guardOff(cmd, g.hosts, appOfSender);
     keepBodiesOut(demo, off.bodies);
-    walk = { ...(walk || {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
+    walk = { ...(walk || {}), ...(leaveOut ? { leaveOut } : {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events.map(e => ({ ...e, app: appOfSender({ tab: e.host }) })); } catch (e) {}
     walk.suspect = suspectSteps({ demo, plan, walk, screensDir, packs });
     mkdirSync(aiDir(demo), { recursive: true });

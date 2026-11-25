@@ -213,6 +213,19 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   opens. Once the step lands, each line is checked on that screen as drawn: one that reads the old way (a cached
   list) stops the run there, before the beat's next write, with a picture. Lookups by an app's tab find its own by
   its mark first (`pickTab`), so a second tab at the same address never stands in for it. run.json: `setBefore`.
+- **Leave out** (reset.md's `## Leave out`): from the run's start, before anything reads the apps, the capture
+  browser filters what each line names out of what the page is given (`capLeaveOut`), in every tab, frame and worker,
+  the Set before tab included; the apps with a line are opened again so what they show comes filtered. A response
+  filter (its app pack's `filters` entry) takes the items out of the app's own response at its response stage: the
+  request goes as it was, and the page draws itself without them (no hole, counts right). A list the app draws from
+  its own store (Teams' teams) is marked and hidden instead, never removed, and the snapshot leaves it out. Before the
+  recorder saves anything (a screen, a hover's parts, a stream's frame), the negative check: her lines' words, and
+  each item the filters took out by its own text, on no part of it, in any frame. A hit isn't saved: the take stops
+  there, with a picture and where it was, and the run stops at its next step and lists it for her. So does a filter
+  whose response can't be read or has lost its list, before that app's next save. A line naming a filter no pack of
+  the demo has refuses the run before anything runs. What it names never proves a live landing. The approval lists
+  the lines apart from the writes ("Left out of the replica: …"). A live walk does the same, and checks each screen it
+  keeps. run.json and walk.json: `leaveOut` (per rule, each request it filtered and what it took out; the checks).
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
   the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
   write), every host reached outside the apps', every input sent (`inputs`: what it was for, the control's name, its

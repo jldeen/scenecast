@@ -217,5 +217,13 @@
       "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchShortProfile$/": "Reads display names for user ids. Held, a post's author shows as 'Unknown user' (Nov 23).",
       "/^POST teams\\.microsoft\\.com\\/api\\/authsvc\\/v1\\.0\\/authzcore$/": "Teams' auth service: turns the sign-in into a Teams session; held on a cold start, Teams stays on its sign-in splash (Nov 23)."
     }
-  }
+  },
+  "filters": [
+    {
+      "id": "team-tree",
+      "kind": "dom",
+      "why": "Teams draws its left rail's teams from its own store (IndexedDB), not from a response as it loads, so no response filter can leave a team out. Measured Nov 24: no response on load carried the team; Teams' conversations store did. Each team is a treeitem at aria-level 2 in the rail's tree, its channels in the group under it: a flow list, so a hidden team leaves no hole and the next moves up. Marked and hidden, never removed (React keeps its own nodes), and never in a snapshot.",
+      "list": "[role=tree] [role=treeitem][aria-level=\"2\"]"
+    }
+  ]
 }

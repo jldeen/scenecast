@@ -32,9 +32,49 @@
 //                                    address never takes it for the app's own tab; its events say side: mark
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
 //                                    user is active and the screen unlocked (the capture browser has no person)
-import { writeFileSync, mkdirSync } from 'node:fs';
+//   capLeaveOut({ rules, words, check, shots })   reset.md's Leave out, from here on, in every tab, frame and worker:
+//                                    response rules (leave-out.mjs) filter what the page is given; DOM rules
+//                                    (leave-out-page.js) mark and hide a list's items the app draws from its own store,
+//                                    in each document from its start and now in what's open. And before the recorder
+//                                    saves anything (a screen, a hover's parts, a stream's frame), the negative check:
+//                                    words ({ app: [...] }: her lines' words) and the items the filters took out, by
+//                                    their own text, nowhere on it (check: the module that reads a screen for it, by
+//                                    package name, its leaveHits). One that shows them stops the take there: nothing
+//                                    more is saved, and its picture goes in shots. A filter whose response can't be read
+//                                    or has lost its list stops it too, before that app's next save. { rules: [] }: off
+//                                    → { on, rules, dom } | { on: false, refused }
+//   capLeaveLog()                   per rule: the requests it filtered (method, host, path shape, how many it took out),
+//                                    what it took out (field, value, shows), failures; the checks run; the leak, if any
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { allowedBy } from './browser.mjs';
+import { READ_DOCS_SRC } from './page-read.mjs';
+
+const LEAVE_PAGE = readFileSync(new URL('./leave-out-page.js', import.meta.url), 'utf8').replace(/^\/\/.*\n/gm, '');
+const AsyncFn = Object.getPrototypeOf(async () => {}).constructor;
+const readDocs = new AsyncFn('page', READ_DOCS_SRC);
+// The negative check's first pass, in each frame: is any of the words (letters and digits only, lower case) in its
+// text or a name-like attribute, outside what's marked left out? Looser than the reader, so it never misses what the
+// reader would find; only a hit is read as the reader reads it (leaveHits).
+const loose = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const LEAVE_SCAN = words => {
+  const lo = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const parts = [];
+  const walk = root => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, { acceptNode: n => n.nodeType === 1 && (n.hasAttribute('data-d1-leaveout') || /^(SCRIPT|NOSCRIPT|TEMPLATE|STYLE)$/.test(n.tagName)) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (n.nodeType === 3) { parts.push(n.nodeValue); continue; }
+      for (const a of ['aria-label', 'aria-description', 'title', 'alt', 'placeholder', 'value']) { const v = n.getAttribute(a); if (v) parts.push(v); }
+      if (typeof n.value === 'string' && n.value) parts.push(n.value);
+      const sr = n.shadowRoot || (window.__scShadow && window.__scShadow.get && window.__scShadow.get(n));
+      if (sr) walk(sr);
+    }
+  };
+  if (document.documentElement) walk(document.documentElement);
+  const hay = lo(parts.join(' '));
+  return words.some(w => w && hay.includes(w));
+};
+const unEntity = h => String(h || '').replace(/<[^>]*>/g, ' ').replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).replace(/&#x([0-9a-f]+);/gi, (m, x) => String.fromCodePoint(parseInt(x, 16))).replace(/&(amp|lt|gt|quot|apos|nbsp|#39);/g, (m, k) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" })[k]);
 
 const originOf = u => { try { return new URL(u).origin; } catch (e) { return null; } };
 const hostRe = c => c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
@@ -113,6 +153,50 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     });
   };
   const active = new Map();
+  // Leave out (capLeaveOut): the filters on, the DOM rules' script, the words per app, and what the checks found.
+  let leave = null;
+  const leaveStop = async () => {
+    if (!leave) return;
+    globalThis.__stuntdoubleLeaveOut = undefined;
+    await leave.filter.stop().catch(() => {});
+    if (leave.script) await leave.script.dispose().catch(() => {});
+    for (const p of cb.ctx.pages()) for (const f of p.frames()) await f.evaluate(`window.__d1lo && window.__d1lo.set([])`).catch(() => {});
+    leave = null;
+  };
+  // What a save of this app must not show: her lines' words, and what the filters took out of its responses so far.
+  const leaveWords = app => {
+    const words = (leave.words[app] || []).slice();
+    const exact = [...new Set(leave.filter.log().filter(r => r.app === app).flatMap(r => r.removed.map(x => x.shows)).filter(Boolean))];
+    return { words, exact };
+  };
+  const leaveLeak = async (p, app, what, why, hits) => {
+    let picture = null;
+    if (p && leave.shots) { try { picture = `${leave.shots}/leave-out-${app}-${leave.checks.n}.png`; mkdirSync(leave.shots, { recursive: true }); writeFileSync(picture, await p.screenshot({ timeout: 30000 })); } catch (e) { picture = null; } }
+    leave.leak = { at: at(), app, what, why, ...(hits ? { hits } : {}), picture };
+    log(`leave out: stopped before saving ${what} (${app}): ${why}`);
+  };
+  const leaveGate = async (p, app, what, html = null) => {
+    const L = leave;
+    if (!L) return;
+    if (L.leak) throw new Error(`Leave out stopped the take: ${L.leak.why}`);
+    // A filter of this app that couldn't do its work: its response may have reached the page as it came.
+    const bad = L.filter.log().find(r => r.app === app && r.failures.length);
+    if (bad) { await leaveLeak(p, app, what, `${bad.id}: ${bad.failures[0].why}`); throw new Error(`Leave out stopped the take: ${L.leak.why}`); }
+    const { words, exact } = leaveWords(app);
+    if (!words.length && !exact.length) return;
+    const lw = [...words, ...exact].map(loose).filter(Boolean);
+    L.checks.n++;
+    let seen = false;
+    if (html !== null) seen = lw.some(w => loose(unEntity(html)).includes(w));
+    else for (const f of p.frames()) { if (await f.evaluate(LEAVE_SCAN, lw).catch(() => false)) { seen = true; break; } }
+    if (!seen) { L.checks.clean++; return; }
+    const docs = html !== null ? [{ key: 'main', html: `<html><body>${html}</body></html>` }] : await readDocs(p);
+    const hits = L.check(docs, { words, exact });
+    if (!hits.length) { L.checks.clean++; L.checks.read++; return; }
+    const h = hits[0];
+    await leaveLeak(p, app, what, `"${h.value}" is on the screen (${h.role || 'text'}: "${h.text}"${h.frame !== 'main' ? `, in ${h.frame}` : ''})`, hits.slice(0, 6));
+    throw new Error(`Leave out stopped the take: ${L.leak.why}`);
+  };
   return {
     // { on: true } starts recording; { since } reads what came since.
     // { on: true, watch?: [{ name, match }] } starts recording (watch: services whose every answer is kept, tagged
@@ -204,6 +288,37 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       if (!active.has(p)) active.set(p, await cb.ctx.newCDPSession(p));
       await active.get(p).send('Emulation.setIdleOverride', { isUserActive: true, isScreenUnlocked: true });
       return { perms, active: true };
+    },
+    async capLeaveOut(c) {
+      const rules = Array.isArray(c.rules) ? c.rules : [];
+      let check = null;
+      if (rules.length) {
+        // The negative check reads a screen as the reader does: a module by its package name, never a path.
+        if (!/^@[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+\.mjs$/.test(String(c.check || ''))) return { on: false, refused: 'Leave out needs its negative check: a module by package name' };
+        try { check = (await import(c.check)).leaveHits; } catch (e) { return { on: false, refused: `its negative check (${c.check}) didn't load: ${String(e.message).split('\n')[0]}` }; }
+        if (typeof check !== 'function') return { on: false, refused: `${c.check} has no leaveHits` };
+      }
+      await leaveStop();
+      if (!rules.length) return { on: false };
+      const dom = rules.filter(r => r.kind === 'dom').map(({ id, hosts, list, values }) => ({ id, hosts, list, values }));
+      const filter = await cb.leaveOut(rules.filter(r => r.kind !== 'dom'));
+      let script = null;
+      if (dom.length) {
+        const src = `(${LEAVE_PAGE.trim()})(${JSON.stringify(dom)})`;
+        script = await cb.ctx.addInitScript(src);
+        for (const p of cb.ctx.pages()) for (const f of p.frames()) await f.evaluate(src).catch(() => {});
+      }
+      leave = { filter, script, words: c.words || {}, check, shots: c.shots || null, checks: { n: 0, clean: 0, read: 0 }, leak: null };
+      // The recorder's hook (recorder.js): it calls these before it saves anything.
+      globalThis.__stuntdoubleLeaveOut = { gate: (p, app, what) => leaveGate(p, app, what), gateHtml: (html, app, what, p = null) => leaveGate(p, app, what, String(html || '')) };
+      log(`leave out on: ${rules.map(r => `${r.id} (${r.values.length})`).join(', ')}`);
+      return { on: true, rules: rules.length - dom.length, dom: dom.length };
+    },
+    async capLeaveLog() {
+      if (!leave) return { on: false, rules: [], checks: null, leak: null };
+      const marked = [];
+      for (const p of cb.ctx.pages()) { let n = 0; for (const f of p.frames()) n += +(await f.evaluate(() => document.querySelectorAll('[data-d1-leaveout]').length).catch(() => 0)); if (n) marked.push({ host: hostOf(p.url()), marked: n }); }
+      return { on: true, rules: leave.filter.log(), dom: marked, checks: { ...leave.checks }, leak: leave.leak };
     },
     async capTab(c) {
       if (c.close) { const p = sides.get(c.close); sides.delete(c.close); if (p && !p.isClosed()) await p.close().catch(() => {}); return { closed: !!p }; }

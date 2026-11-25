@@ -83,7 +83,10 @@ export function writeList(demo) {
   const writes = writesOf(parsePlan(text)).map(w => ({ beat: w.beat, step: w.step, text: w.text, writes: w.writes }));
   const rf = join(demo.dir, RESET), resetText = existsSync(rf) ? readFileSync(rf, 'utf8') : null;
   const reset = resetText ? resetSteps(resetText) : [];
-  return { text, writes, resetText, reset };
+  // What she leaves out of the replica: listed apart from the writes (it changes nothing in the tenant); reset256 binds
+  // its text.
+  const leaveOut = resetText ? (parseReset(resetText).leaveOut || []).map(l => ({ app: l.app, what: l.what, from: l.from, label: `Left out of the replica: ${l.what}` })) : [];
+  return { text, writes, resetText, reset, leaveOut };
 }
 // The reset's steps that change something: each undo step (but Go to, which only switches), each set first, and each
 // set before.
@@ -101,8 +104,8 @@ export function resetSteps(resetText) {
 }
 const listSha = (writes, reset) => sha(JSON.stringify({ writes, reset }));
 export function approve(demo) {
-  const { text, writes, resetText, reset } = writeList(demo);
-  const a = { at: new Date().toISOString(), sha256: sha(text), writes, ...(resetText ? { reset256: sha(resetText), reset } : {}), list256: listSha(writes, reset) };
+  const { text, writes, resetText, reset, leaveOut } = writeList(demo);
+  const a = { at: new Date().toISOString(), sha256: sha(text), writes, ...(resetText ? { reset256: sha(resetText), reset } : {}), ...(leaveOut.length ? { leaveOut } : {}), list256: listSha(writes, reset) };
   mkdirSync(aiDir(demo), { recursive: true });
   writeFileSync(join(aiDir(demo), 'approved.json'), JSON.stringify(a, null, 1) + '\n');
   return a;

@@ -28,6 +28,7 @@ import { CONTROL_NAME_SRC } from '@stuntdouble/capture/page-naming.mjs';
 import { READ_DOCS_SRC } from '@stuntdouble/capture/page-read.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 import { holds, pageWords, pnorm } from './landing.mjs';
+import { leaveOutOf, leftFor } from './leave-run.mjs';
 
 // The words of an app showing an error instead of what it should.
 // A step's proof that it landed (plan.mjs parseLands, docs/engine/plan-format.md "What proves a step"): words on the
@@ -108,6 +109,9 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   const apps = demo.cfg.apps || [];
   const appOf = name => { const ids = apps.map(a => a.id); return ids.find(a => a === name) || ids.find(a => a.startsWith(name) || name.startsWith(a)) || null; };
   const tab = id => (tabs && tabs[id]) || appTab(demo, id);
+  // What she leaves out of the replica (reset.md's Leave out): marked left on every read, so it never proves a step.
+  let leave = null;
+  const leftOf = (id, sc) => { if (leave === null) { try { leave = leaveOutOf({ demo, packs }); } catch (e) { leave = false; } } return leave ? leftFor(leave, id, sc) : sc; };
   // An app's own hosts: its address, its match, its pack's.
   const hostsOf = id => {
     const a = apps.find(x => x.id === id) || {};
@@ -379,7 +383,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   // One proof against the page now: { ok, why, words? }.
   // The page now as the reader reads a recorded screen (the recorder's serialization, every frame): a plan's proof
   // is checked on it with the reader's own rule (landing.mjs holds), so marks and invisible characters count alike.
-  const readNow = async id => { const docs = await cmd('js', { tab: tab(id), code: READ_DOCS_SRC }, 90).catch(() => null); try { return Array.isArray(docs) ? readScreen(docs) : null; } catch (e) { return null; } };
+  const readNow = async id => { const docs = await cmd('js', { tab: tab(id), code: READ_DOCS_SRC }, 90).catch(() => null); try { return Array.isArray(docs) ? leftOf(id, readScreen(docs)) : null; } catch (e) { return null; } };
   const hasWords = (sc, t) => !!pnorm(t) && pageWords(sc).includes(pnorm(t));
   async function proofHolds(id, p, step) {
     if (p.kind === 'words' || p.kind === 'control' || p.kind === 'box') {

@@ -150,6 +150,35 @@ service: answering 500, its add picker says "Plugins could not be loaded").
 
 `servicesFor(cfg)` gives a demo's: `[{ app, name, match, start, waitS }]`.
 
+### What a demo can leave out (`filters`)
+
+An app's own data a demo can leave out of its replica without changing the tenant (reset.md's `## Leave out`): the
+capture browser filters it before the page draws it (`packages/capture/leave-out.mjs`). A pack names where the items
+are; which items is the demo's alone, never the pack's.
+
+```json
+"filters": [
+  { "id": "peek-messages", "why": "…", "url": "*://substrate.office.com/search/api/v1/suggestions*",
+    "match": "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/",
+    "items": "Groups[Type=Message].Suggestions", "fields": ["From.EmailAddress.Address"],
+    "refs": [{ "list": "LayoutHints.BestMatchSuggestions", "by": "ReferenceId" }], "shows": "Subject" },
+  { "id": "team-tree", "kind": "dom", "why": "…", "list": "[role=tree] [role=treeitem][aria-level=\"2\"]" }
+]
+```
+
+- `url`: where its responses come from, as the browser's request patterns write it; `match`: the one call, as a guard
+  entry over `METHOD host/path`.
+- `items`: where the item lists are, dotted keys, each optionally `[*]` (every element) or `[Key=Value]`. Its first
+  key must be a list, or the response isn't the one the pack knows (the run stops before that app's screens).
+- `fields`: the item's fields, any of which equal to a demo's value (exact, case aside) leaves it out.
+- `refs`: other lists that name items (`by` a field): a left-out item's entries go too, so nothing dangles.
+- `shows`: the item's field whose text must then be on no saved screen (else the value).
+- `kind: "dom"`: a list the app draws from its own store (no response carries it): `list` selects its items, each
+  matched by its own name; matching ones (and what's under them) are marked and hidden, never removed. Flow lists
+  only, where a hidden item leaves no hole.
+
+`filtersFor(cfg)` gives a demo's: `{ "<pack>:<filter>": { ...filter, pack, app, hosts } }`.
+
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
 with `apis.<name>` naming the page that signs in (`open`), the host (`host`, or `hostPattern`) and, when the page
@@ -182,6 +211,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `safeFor(pack, step, field)` | the safe entry for a plan step (it only opens a picker or menu), or null |
 | `guardFor(cfg)` | the read-only guard's `{ hosts, allow, stayHeld }` for a demo (its apps' packs, plus `capture.allow`) |
 | `servicesFor(cfg)` | the services a demo's apps need, from their packs (`[{ app, name, match, start, waitS }]`) |
+| `filtersFor(cfg)` | what a demo's apps can leave out, from their packs (`{ "<pack>:<filter>": filter }`) |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice
