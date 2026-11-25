@@ -672,7 +672,7 @@ try {
     const dr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
     const dj = readRun(DEMO), [dRaw, dRec] = keepRaw('dead-raw');
     const snapText = id => { try { return JSON.parse(readFileSync(join(dRaw, 'snaps', `${(dRec.states[id] || {}).snap || id}.json`), 'utf8')).docs.map(d => d.html).join('\n'); } catch (e) { return ''; } };
-    const states = Object.keys((dRec && dRec.states) || {}), acts = ((dRec && dRec.tl) || []).filter(x => x.what === 'action');
+    const states = Object.keys((dRec && dRec.states) || {}), acts = ((dRec && (dRec.timeline || dRec.tl)) || []).filter(x => x.what === 'action');
     const ms = d => (acts.find(x => (x.desc || '').trim() === d) || {}).ms;
     const one = states.filter(id => /Chips one/.test(snapText(id))), two = states.filter(id => /Chips two/.test(snapText(id)));
     const clicks = ((dRec && dRec.path) || []).filter(x => x.click).map(x => x.checkpoint);
