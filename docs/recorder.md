@@ -257,13 +257,14 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
   screen's cap or time: while any is left, the next one hovered is theirs. Their first tries don't count against the
   screen's budget (`auto.maxS`): clicks, zoom, lists and drags get the time they had without them (Nov 25: Teams' 47
-  recorded hovers took 208 s on its start screen and left the rest of it out of time). One that shows nothing, shows
-  another card, or whose controls couldn't be pointed at is tried once more for 2.5 s, last, after the screen's other side states, its control found again from scratch,
+  recorded hovers took 208 s on its start screen and left the rest of it out of time). One that shows nothing, or whose
+  controls couldn't be pointed at, is tried once more for 2.5 s, last, after the screen's other side states, its control found again from scratch,
   within `auto.floorRetryS` (45 s a screen; reaching it is said in the notes and the timeline's `hovers-again`)
   (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
   shows its card: the same words, numbers aside, or most of them in another order; `hover-card.mjs`), missed (its anchor was there and its card wasn't
   captured) or gone (its anchor's words were on no screen the run swept): a missed one goes under Needs you with a
-  picture of the screen (only a missed one keeps its picture; those the cap cut share one). run.json: `hovers` (the
+  picture of the screen (only a missed one keeps its picture; those the cap cut share one, and so do those whose
+  controls showed other cards: a firm answer, not tried again, since a container's every control is the hover's). run.json: `hovers` (the
   list, how each anchor was found, and the three counts the summary prints). A live walk and `ai check` don't sweep
   hovers.
 - **A page that moves while it's swept** (a banner on top, a list that loads): every hover and every click reads its

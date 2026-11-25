@@ -53,8 +53,9 @@ const fresh = async c => {
 };
 if (entries.size) out.floorFound = await ev(fl0 => window.__d1h.floorFound(fl0), ARGS.floor).catch(() => ({}));
 
-// Nothing new to hover on this screen (every control was hovered on another): done, before any waiting.
-if (!ARGS.scroll && !ARGS.only) {
+// Nothing new to hover on this screen (every control was hovered on another): done, before any waiting (not the
+// recorded hovers' second tries: each still missed gets its picture).
+if (!ARGS.scroll && !ARGS.only && !ARGS.floorRetry) {
   const skip0 = new Set(ARGS.skipKeys || []);
   const c0 = await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
   if (!c0.some(c => !skip0.has(c.sel + '|' + c.text))) return { page: ARGS.page, n: 0, tried: 0, skipped: c0.length, ...(out.floorFound ? { floorFound: out.floorFound, floor: {}, floorTries: [], cards: [] } : {}), steps: [0], keys: [], frameUrl: f === p.mainFrame() ? null : f.url().split('?')[0], secs: Math.round((Date.now() - t0) / 1000) };
@@ -205,22 +206,17 @@ for (let step = 0; step <= steps; step++) {
           if (same) { out.floor[id] = { shown: true, retried }; floorShown.add(id); }
           else if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why: 'it showed another card' };
         }
-        const other = !Object.values(results).includes('card');
-        // Another card (the pointer on the wrong control, or the card not what it was): tried again last
-        // (floorDefer), else a picture of what it showed.
-        if (other && ARGS.floorDefer && !retried) {
-          for (const id of c.floor) if (!floorShown.has(id)) { deferred.add(id); out.floor[id] = { ...out.floor[id], deferred: true }; }
-          out.floorTries.push({ key, ids: c.floor, results, result: 'other card', retried, deferred: true });
-        } else {
-          const picture = other && ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${out.tried}`).catch(() => null) : null;
-          out.floorTries.push({ key, ids: c.floor, results, result: other ? 'other card' : 'card', retried, ...(picture ? { picture } : {}) });
-        }
+        out.floorTries.push({ key, ids: c.floor, results, result: Object.values(results).includes('card') ? 'card' : 'other card', retried });
       }
     } finally { if (inFloor && !ARGS.floorRetry) out.floorMs += Date.now() - tc; }
   }
   for (const c of todo) for (const id of c.floor || []) if (!out.floor[id]) out.floor[id] = { tried: false };
   if (out.timedOut) break;
 }
+// A recorded hover whose controls showed other cards only (a firm answer: a real card, not the recorded one; a
+// container's every control is its, so trying them again costs a pass): one picture of the screen between them.
+{ const other = Object.entries(out.floor).filter(([id, v]) => v && v.shown === false && v.why === 'it showed another card' && !floorShown.has(id)).map(([id]) => id);
+  if (other.length && ARGS.floorShot) { const picture = await ARGS.floorShot(`${ARGS.page}-other`).catch(() => null); if (picture) out.floorTries.push({ key: 'other', ids: other, result: 'other card', retried: !!ARGS.floorRetry, picture }); } }
 // Found here but never hovered (none of its controls could be pointed at): tried again last too.
 if (ARGS.floorDefer) for (const id of Object.keys(out.floorFound || {})) if (!floorShown.has(id) && !out.floorTries.some(t => (t.ids || []).includes(id))) deferred.add(id);
 out.floorDeferred = [...deferred].filter(id => !floorShown.has(id));

@@ -407,7 +407,7 @@ async function recAuto(A) {
     let n = null, r = null;
     try {
       r = await recSide(A, { kind, ...c });
-      if (kind === 'hovers') { floorMs += r.floorMs || 0; if ((r.floorDeferred || []).length) again.push({ frameRe: c.frameRe, page: c.page || state, ids: r.floorDeferred }); }
+      if (kind === 'hovers') { floorMs += r.floorMs || 0; if ((r.floorDeferred || []).length) again.push({ frameRe: c.frameRe, page: c.page || state, ids: r.floorDeferred, firm: (r.floorTries || []).filter(t => t.result === 'other card' && t.key !== 'other').map(t => t.key) }); }
       const what = r.error ? 'failed: ' + r.error : kind === 'hovers' ? `${r.n} of ${r.tried}${r.skipped ? ` (${r.skipped} seen before)` : ''}${r.skippedKinds ? ` (${r.skippedKinds} of kinds that never show)` : ''}, waits ${c.waitMs} ms` : kind === 'clicks' ? `${(r.clicks || []).length} of ${(r.controls || []).length}` : kind === 'groups' ? `${(r.groups || []).length}` : kind === 'chips' ? (r.rule ? 'found' : 'none') : kind === 'drags' ? `${(r.rules || []).length}` : kind === 'zoom' ? `${(r.zooms || []).length}` : kind === 'list' ? `${r.list && r.list.seen} rows` : 'done';
       n = kind === 'hovers' ? r.n : kind === 'clicks' ? (r.clicks || []).length : kind === 'groups' ? (r.groups || []).length : kind === 'zoom' ? (r.zooms || []).length : kind === 'drags' ? (r.rules || []).length : kind === 'chips' ? (r.rule ? 1 : 0) : null;
       did.push(`${kind}${c.frameRe ? ' (frame)' : ''} ${what}, ${((Date.now() - t1) / 1000).toFixed(1)} s (${((SLEPT.ms - s1) / 1000).toFixed(1)} s fixed waits)`);
@@ -437,7 +437,8 @@ async function recAuto(A) {
   // Last: the drag audit moves panes (and puts them back).
   if (o.drags && newKind && f.handles) await run('drags', { range: 240, step: 40 });
   // The recorded hovers that showed nothing the first time: each once more, last, its control found again from
-  // scratch (the page may have moved), waiting 2.5 s, within floorRetryS for the screen. Those still missed, or not
+  // scratch (the page may have moved), waiting 2.5 s, within floorRetryS for the screen; not the controls that
+  // showed another card (a firm answer). Those still missed, or not
   // tried again, go to her with a picture (the run's hover outcomes).
   if (again.length) {
     const tA = Date.now(), byId = new Map(floor.map(e => [e.id, e]));
@@ -449,7 +450,7 @@ async function recAuto(A) {
       const t1 = Date.now();
       let shown = 0, capped = false;
       try {
-        const r = await recSide(A, { kind: 'hovers', ...hv({ frameRe: d.frameRe, page: `${d.page}-again`, floor: entries, floorDefer: false, floorRetry: true, floorWaitMs: 2500, maxS: capS, skipKeys: [] }) });
+        const r = await recSide(A, { kind: 'hovers', ...hv({ frameRe: d.frameRe, page: `${d.page}-again`, floor: entries, floorDefer: false, floorRetry: true, floorWaitMs: 2500, maxS: capS, skipKeys: d.firm || [] }) });
         shown = entries.filter(e => r.floor && r.floor[e.id] && r.floor[e.id].shown).length; capped = !!r.floorCapped;
         if (capped) { REC.floorRetryCapped = (REC.floorRetryCapped || 0) + 1; REC.notes.push(`${state}: the recorded hovers' second tries reached their ${o.floorRetryS} s before all were tried`); }
         did.push(`recorded hovers again${d.frameRe ? ' (frame)' : ''} ${shown} of ${entries.length}${capped ? ` (stopped at ${o.floorRetryS} s)` : ''}, ${((Date.now() - t1) / 1000).toFixed(1)} s`);
