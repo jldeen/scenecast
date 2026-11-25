@@ -464,7 +464,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (aheadOn && flat[fi + 1] && flat[fi + 1].s.kind === 'wait') {
           const screens = aheadScreens(aiDir(demo), flat, fi + 1, planSha);
           const r = screens.length ? await cmd('recordAhead', { app, screens }, 30).catch(e => ({ started: false, why: e.message })) : { started: false, why: "the last walk of this plan gives no screens after the answer" };
-          run.ahead.push({ beat: bi + 1, step: si, app, screens: screens.map(x => x.step), ...r });
+          run.ahead.push({ beat: bi + 1, step: si, app, ...r, screens: screens.map(x => x.step) });
         }
         let stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
         // A save her status stopped during the step: that's why, whatever the step met after it.

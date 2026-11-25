@@ -940,7 +940,7 @@ async function recSide(A, c) {
       const base = await p.evaluate(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio }));
       const s = await ctx.newCDPSession(p);
       const out = [], t0 = Date.now();
-      const domOf = () => p.mainFrame().evaluate(() => { let h = 0; const add = s => { for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; }; for (const e of document.body.getElementsByTagName('*')) { add(e.localName); add(e.getAttribute('class') || ''); add(e.getAttribute('style') || ''); add(e.childElementCount + ''); } return h; }).catch(() => null);
+      const domOf = () => p.mainFrame().evaluate(() => { let h = 0; const add = s => { for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; }; for (const e of [document.documentElement, document.body, ...document.body.getElementsByTagName('*')]) { add(e.localName); add(e.getAttribute('class') || ''); add(e.getAttribute('style') || ''); add(e.childElementCount + ''); } return h; }).catch(() => null);
       // The 100% page's markup: a level that matches it needs no capture either.
       let lastDom = await domOf(), prevVw = base.w;
       try {
@@ -965,7 +965,7 @@ async function recSide(A, c) {
           await s.send('Emulation.setDeviceMetricsOverride', ov);
           await poll(100); await recSettle(p, 900, 12000);
           const id = `v${z}-${zst}`;
-          // The page's markup at this size (every element, its classes and inline style): unchanged since the last
+          // The page's markup at this size (every element, <html> and <body> too, its classes and inline style): unchanged since the last
           // level captured, its snapshot is used again. The page's CSS (media queries) already lays it out at any
           // size in the replica; a capture is only needed where script changed the page. Each one took up to a
           // minute on a heavy page (Copilot, Nov 20: 279 s for one screen's five levels).
