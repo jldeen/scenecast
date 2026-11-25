@@ -94,6 +94,8 @@ for (let step = 0; step <= steps; step++) {
   while (todo.length) {
     const next = todo.findIndex(fl), c = todo.splice(next < 0 ? 0 : next, 1)[0];
     const key = c.sel + '|' + c.text, inFloor = fl(c);
+    // In the list only for a recorded hover that's since been captured: its kind's learned skip applies again.
+    if (!inFloor && skipSels.has(c.sel)) { out.skippedKinds = (out.skippedKinds || 0) + 1; continue; }
     if (ARGS.max && out.tried >= ARGS.max && !inFloor) { out.capped = true; break; }
     (out.keys = out.keys || []).push(key);
     if (Date.now() - t0 > (ARGS.maxS || 900) * 1000 && !inFloor) { out.timedOut = true; break; }
