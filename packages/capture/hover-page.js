@@ -128,6 +128,22 @@
         const near = all.filter(e => (e.getAttribute('aria-label') || '').length || (e.textContent || '').includes(w0));
         let hit = near.filter(e => shown(e) && (own(e) === t || words(e) === t));
         if (!hit.length) hit = near.filter(e => shown(e) && (own(e).startsWith(t) || words(e).startsWith(t)));
+        // A part of the page whose list was reordered or lost a label: an anchor of four words or more whose words are
+        // mostly (80%) in the element's, in any order, numbers aside; first without its own card's words, when the card
+        // was inside it as recorded (a tooltip in the sidebar section it labels).
+        if (!hit.length && text) {
+          const setOf = s => new Set(norm(String(s || '').replace(/\d+(?:[.,:]\d+)*%?/g, ' ')).toLowerCase().split(/[^\p{L}]+/u).filter(x => x.length > 1));
+          let rec = norm(text).toLowerCase();
+          const card = norm(f.card || '').toLowerCase();
+          if (card && rec.includes(card)) rec = rec.replace(card, ' ');
+          const want = setOf(rec);
+          if (want.size >= 4) {
+            // Its words text node by text node (inline parts with no space between them run together in innerText).
+            const textIn = e => { const parts = [], tw = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); while (tw.nextNode()) { const p = tw.currentNode.parentElement; if (!p || !/^(script|style|noscript|template)$/.test(p.localName)) parts.push(tw.currentNode.data); } return parts.join(' '); };
+            const cover = e => { const it = textIn(e); if (it.length > 5000) return 0; const have = setOf(it); let n = 0; for (const x of want) if (have.has(x)) n++; return n / want.size; };
+            hit = near.filter(e => shown(e) && (e.textContent || '').length <= 20000 && cover(e) >= 0.8);
+          }
+        }
         hit = hit.filter(e => !hit.some(o => o !== e && e.contains(o)));
         if (!hit.length) return null;
         const r = f.rect, dist = e => { if (!r) return 0; const b = e.getBoundingClientRect(); return Math.hypot(b.x + b.width / 2 - (r.x + r.w / 2), b.y + b.height / 2 - (r.y + r.h / 2)); };

@@ -321,7 +321,8 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         chips(true): a Chips button that draws Chips one in the page (/chips/1), then two and three (Next; each its
 //         own address, pushed, as an app's in-page routes are): six plain buttons a screen that show
 //         nothing on hover, and on the third a "Slow chip" (in a wrapper, as a card's anchor often is) whose card
-//         shows 1.5 s after the pointer arrives and a "Quiet chip" that shows nothing: the recorded hovers' floor.
+//         shows 1.5 s after the pointer arrives, a "Quiet chip" that shows nothing, and a sidebar-like section (Projects,
+//         whose card "Collapse projects" shows after 0.3 s; Add project here; a Recent list): the recorded hovers' floor.
 //         status(text): the page also shows your own status on a "Me" button ("Your profile, status <text>", as Teams'
 //         avatar), and follows GET /api/status as it changes (status(null): none).
 //   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
@@ -330,7 +331,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 // The chips screens (main's markup), drawn in place by the tasks page, as an app's in-page routes are.
 const chipsPart = n => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1><p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
-</p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : ''}`;
+</p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
 const tasksPage = (port, notesPort, suggest = false, status = null, chips = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
@@ -359,8 +360,9 @@ if ($('chipsbtn')) {
   // The chips screens, in place: Slow chip's card shows 1.5 s after the pointer arrives.
   const bind = () => {
     const nx = $('next'); if (nx) nx.addEventListener('click', () => show(+nx.dataset.n));
-    const slow = $('slow');
-    if (slow) { let t = null, card = null; slow.addEventListener('mouseenter', () => { t = setTimeout(() => { const r = slow.getBoundingClientRect(); card = document.createElement('div'); card.className = 'card'; card.setAttribute('role', 'tooltip'); card.textContent = 'Takes its time'; card.style.left = r.x + 'px'; card.style.top = (r.bottom + 6) + 'px'; document.body.appendChild(card); }, 1500); }); slow.addEventListener('mouseleave', () => { clearTimeout(t); if (card) card.remove(); card = null; }); }
+    const cardOn = (el, text, ms) => { if (!el) return; let t = null, card = null; el.addEventListener('mouseenter', () => { t = setTimeout(() => { const r = el.getBoundingClientRect(); card = document.createElement('div'); card.className = 'card'; card.setAttribute('role', 'tooltip'); card.textContent = text; card.style.left = r.x + 'px'; card.style.top = (r.bottom + 6) + 'px'; document.body.appendChild(card); }, ms); }); el.addEventListener('mouseleave', () => { clearTimeout(t); if (card) card.remove(); card = null; }); };
+    cardOn($('slow'), 'Takes its time', 1500);
+    cardOn($('proj'), 'Collapse projects', 300);
   };
   const show = (n, push = true) => fetch('/chips-part/' + n).then(r => r.text()).then(h => { document.querySelector('main').innerHTML = h; if (push) history.pushState({}, '', '/chips/' + n); bind(); });
   $('chipsbtn').addEventListener('click', () => show(1));

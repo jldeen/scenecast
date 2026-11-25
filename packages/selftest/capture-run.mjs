@@ -610,12 +610,16 @@ try {
   // routes are; the first two show nothing on hover, so the sweep learns to skip plain buttons. The demo's recording (its build's hovers, as written here) has a hover on
   // the third screen's Slow chip (its card shows after 1.5 s, past the 900 ms learned wait; recorded on a bare div in
   // a side pane the page no longer has, so it's found by its words), its Quiet chip, and a Removed chip that's no
-  // longer there. Each recorded hover counts as captured only when its card's words are captured. Slow chip: never skipped for its kind, hovered again for 2.5 s, captured.
+  // longer there; a section recorded as a bare div whose list has since reordered and whose words held its own card's
+  // ("Projects Collapse projects Add project here Recent Item A Item B"), found by most of its words and captured from
+  // its Projects button; and a section with only 2 of its 7 words on the page, still gone. Each recorded hover counts
+  // as captured only when its card's words are captured. Slow chip: never skipped for its kind, hovered again for 2.5 s, captured.
   // Quiet chip: missed, listed for her with a picture. Removed chip: gone. The other plain buttons: still skipped.
   { const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
     mkdirSync(dirname(HP), { recursive: true });
     const def = (id, anchor, card) => [id, { id, page: 'chips-3', anchor, anchorRect: { x: 30, y: 90, w: 90, h: 30 }, portals: [{ text: card }] }];
-    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('h1', { sel: 'div', in: 'aside', text: 'Slow chip' }, 'Takes its time'), def('h2', { sel: 'button', text: 'Quiet chip' }, 'Says a lot'), def('h3', { sel: 'button', text: 'Removed chip' }, 'Long gone')]) }));
+    const sect = (id, textStarts, card) => [id, { id, page: 'chips-3', anchor: { sel: 'div', in: 'nav', textStarts }, anchorRect: { x: 30, y: 200, w: 400, h: 40 }, scope: [0, 0, 5], portals: [{ text: card }] }];
+    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('h1', { sel: 'div', in: 'aside', text: 'Slow chip' }, 'Takes its time'), def('h2', { sel: 'button', text: 'Quiet chip' }, 'Says a lot'), def('h3', { sel: 'button', text: 'Removed chip' }, 'Long gone'), sect('h4', 'Projects Collapse projects Add project here Recent Item A Item B', 'Collapse projects'), sect('h5', 'Recent Projects Pinned Starred Shared Drafts Archive', 'Old stuff')]) }));
     writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Chips\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Chips"\n  Lands on: "Chips one"\n- Click "Next"\n  Lands on: "Chips two"\n- Click "Next"\n  Lands on: "Chips three"\n');
     writeFileSync(join(DEMO, 'reset.md'), '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n');
     tasks.chips(true); tasks.seed({});
@@ -625,12 +629,14 @@ try {
     const hj = readRun(DEMO), [hRaw, hRec] = keepRaw('floor-raw');
     const byText = t => ((hj.hovers && hj.hovers.list) || []).find(x => x.text === t) || {};
     const hoveredTexts = existsSync(join(hRaw, 'hovers')) ? readdirSync(join(hRaw, 'hovers')).flatMap(d => readdirSync(join(hRaw, 'hovers', d)).filter(f => f.endsWith('.json')).map(f => (JSON.parse(readFileSync(join(hRaw, 'hovers', d, f), 'utf8')).cand || {}).text)) : [];
-    const skipLine = ((hRec && hRec.log) || []).find(l => /hovers 1 of 2 .*\(4 of kinds that never show\)/.test(l));
+    const skipLine = ((hRec && hRec.log) || []).find(l => /hovers 2 of 3 .*\(5 of kinds that never show\)/.test(l));
+    const byStart = t => ((hj.hovers && hj.hovers.list) || []).find(x => x.text.startsWith(t)) || {};
     const quiet = byText('Quiet chip'), why = { code: hr.code, error: hr.error, done: hr.done && hr.done.result && hr.done.result.hovers, stopped: hj.stopped, hovers: hj.hovers && { ...hj.hovers, list: (hj.hovers.list || []).map(x => [x.text, x.status, x.why]) }, needsYou: hj.needsYou, hovered: hoveredTexts, log: ((hRec && hRec.log) || []).filter(l => /^\S+ auto /.test(l)).map(l => l.slice(0, 260)), err: String(hr.err || '').slice(-600) };
     check('a recorded hover whose place moved, found by its words; of a kind the sweep learned to skip, slower than its wait: never skipped, hovered again, its card captured', hr.code === 0 && !hj.stopped && byText('Slow chip').status === 'captured' && byText('Slow chip').found === 'words' && hoveredTexts.includes('Slow chip'), JSON.stringify(why));
     check('a recorded hover whose control is there and shows nothing: missed, listed for her with a picture', quiet.status === 'missed' && quiet.found === 'place' && quiet.picture && existsSync(quiet.picture) && (hj.needsYou || []).some(n => n.text === 'Hover over "Quiet chip" (tasks)' && n.picture === quiet.picture), JSON.stringify(why));
-    check('a recorded hover whose control is gone: gone; the summary counts captured, gone and missed', byText('Removed chip').status === 'gone' && JSON.stringify(hr.done && hr.done.result && hr.done.result.hovers) === '{"recorded":3,"captured":1,"gone":1,"missed":1}', JSON.stringify(why));
-    check('and the plain buttons on that screen are still skipped for their kind', !!skipLine && !hoveredTexts.some(t => /^Chip /.test(t)), JSON.stringify(why));
+    check('a recorded hover whose control is gone: gone; the summary counts captured, gone and missed', byText('Removed chip').status === 'gone' && JSON.stringify(hr.done && hr.done.result && hr.done.result.hovers) === '{"recorded":5,"captured":2,"gone":2,"missed":1}', JSON.stringify(why));
+    check('a section whose list reordered and lost its own label is found by most of its words, and its hover captured from the control inside; one with under 80% of its words is still gone', byStart('Projects Collapse').status === 'captured' && byStart('Projects Collapse').found === 'words' && hoveredTexts.includes('Projects') && byStart('Recent Projects Pinned').status === 'gone', JSON.stringify(why));
+    check('and the plain buttons on that screen are still skipped for their kind', !!skipLine && !hoveredTexts.some(t => /^Chip /.test(t) || t === 'Add project here'), JSON.stringify(why));
     tasks.chips(false); tasks.seed({});
     if (had === null) rmSync(HP, { force: true }); else writeFileSync(HP, had);
     writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);

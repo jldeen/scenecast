@@ -243,7 +243,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   900 ms; on a busy computer a slow card would read as none. Each recorded hover is found on the live page as the
   replica finds it (its anchor by selector, place and words, then its scope); when its place has moved (a bare `div`
   whose surroundings changed), by its words, numbers aside (an element whose own name or words are the anchor's, else
-  start with them; the innermost, nearest the recorded spot; an anchor with no words, by the name in its selector).
+  start with them; else, for an anchor of four words or more, one holding 80% of them in any order, without its own
+  card's words when the card was inside it; the innermost, nearest the recorded spot; an anchor with no words, by the
+  name in its selector).
   The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
   screen's cap or time: while any is left, the next one hovered is theirs. When nothing shows, each is hovered once
   more for 2.5 s, until one shows its card (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
