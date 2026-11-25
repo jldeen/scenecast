@@ -637,6 +637,29 @@ try {
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
 
+  // 1k · A click that loads a new page, slowly (its answer comes 2.5 s late, longer than the recorder's settle): the
+  // page as it was stays on screen until the new one comes, and the recorder took it as the click's result ("changed
+  // nothing"), so the new page had no screen of its own and wasn't swept (macOS, Nov 25). Each page now gets its own
+  // screen, its sweep, and the click a step to it.
+  { writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Slow pages\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Slow page"\n  Lands on: "Slow page one"\n- Click "Next slow"\n  Lands on: "Slow page two"\n');
+    writeFileSync(join(DEMO, 'reset.md'), '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n');
+    tasks.slowPages(true); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const sr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const sj = readRun(DEMO), [sRaw, sRec] = keepRaw('slow-raw');
+    const snapText = id => { try { return JSON.parse(readFileSync(join(sRaw, 'snaps', `${(sRec.states[id] || {}).snap || id}.json`), 'utf8')).docs.map(d => d.html).join('\n'); } catch (e) { return ''; } };
+    const states = Object.keys((sRec && sRec.states) || {}), log = (sRec && sRec.log) || [];
+    const one = states.find(id => /Slow page one/.test(snapText(id))), two = states.find(id => /Slow page two/.test(snapText(id)));
+    const clicks = ((sRec && sRec.path) || []).filter(x => x.click).map(x => x.checkpoint);
+    const why = { code: sr.code, error: sr.error, stopped: sj.stopped, states, one, two, clicks, notes: ((sRec && sRec.notes) || []).slice(-6), log: log.filter(l => /auto |click |loaded a new page/.test(l)).map(l => l.slice(0, 200)), err: String(sr.err || '').slice(-600) };
+    check('a click that loads a new page slowly: each page gets a screen of its own, and each click a step to it', sr.code === 0 && !sj.stopped && one && two && one !== two && clicks.includes(one) && clicks.includes(two) && !((sRec && sRec.notes) || []).some(n => /changed nothing/.test(n)), JSON.stringify(why));
+    check('and each new page is swept', log.some(l => new RegExp(`auto ${one} `).test(l)) && log.some(l => new RegExp(`auto ${two} `).test(l)), JSON.stringify(why));
+    tasks.slowPages(false);
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  }
+
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
   // tenant check, and still refuses when it never does.
   const TID = '11111111-2222-3333-4444-555555555555';
