@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack, ownStatusFor } from './index.mjs';
+import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack, ownStatusFor, noticesFor } from './index.mjs';
 import { flowDefaults, htmlPasses } from './build.mjs';
 import { packRules } from '@stuntdouble/core/lib/text-rules.mjs';
 import { elementEnd } from '@stuntdouble/capture/compose.mjs';
@@ -146,4 +146,12 @@ test("where an app shows your own status: Teams' avatar, from its pack; a pack's
   assert.deepEqual(['Your profile, status Available for jessica@contoso.test in Contoso ', 'Your profile, status Away', 'Your profile, status Do not disturb'].map(n => (rx.exec(n) || [])[1]), ['Available', 'Away', 'Do not disturb']);
   const bad = checkPack({ id: 'x', match: ['x.test'], ownStatus: { name: '/status/', expect: [] } });
   assert.deepEqual(bad.filter(b => b.startsWith('ownStatus')).map(b => b.split(' ')[1]), ['name', 'expect', 'why']);
+});
+
+test("a notice a replica never keeps: Teams' \"Loading latest updates\", by its words, with its close button and wait", () => {
+  const cfg = { apps: [{ id: 'teams', url: 'https://teams.cloud.microsoft/' }, { id: 'admin', url: 'https://admin.cloud.microsoft/' }] };
+  assert.deepEqual(noticesFor(cfg).map(o => [o.app, o.label, o.notices.map(n => [n.words, n.waitS])]), [['teams', 'Teams', [['Loading latest updates', 60]]]]);
+  assert.ok(new RegExp(...noticesFor(cfg)[0].notices[0].close.slice(1).split(/\/(?=[a-z]*$)/)).test('Close'));
+  const bad = checkPack({ id: 'x', match: ['x.test'], notices: [{ words: '', close: 'Close' }] });
+  assert.deepEqual(bad.filter(b => b.startsWith('notices')).map(b => b.split(' ')[1]), ['words', 'close', 'why']);
 });

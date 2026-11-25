@@ -83,7 +83,7 @@ mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
 // store (Teams). taskLook: new-task's check as a machine reads it (a look, its page's words); find: its API undo finds
 // the script's own tasks by name when no run recorded them. ownStatus ({ waitS }): the page's "Me" button names your
 // status, as Teams' avatar does.
-const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false, taskLook = false, find = false, ownStatus = null } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false, taskLook = false, find = false, ownStatus = null, notices = null } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
     { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}), ...(find ? { find: { use: 'tasks', path: '/api/tasks', list: 'tasks', name: 'name', id: 'id', as: 'taskId', by: 'typed' } } : {}) }, ...(taskCheck ? { check: { api: { use: 'tasks', method: 'GET', path: '/api/tasks', made: 200 } } } : {}), ...(taskLook ? { check: { open: `http://${HOST}/`, look: { absent: '{typed}' }, lands: 'Tasks', expect: 'No task the run added.' } } : {}) },
@@ -101,6 +101,7 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHel
     { id: 'team-tree', kind: 'dom', why: 'The Teams tree, drawn from the page\'s own store.', list: '[role=tree] [role=treeitem][aria-level="2"]' },
   ] } : {}),
   ...(ownStatus ? { ownStatus: { why: 'The Me button names your status.', role: 'button', name: '/^Your profile, status (.+)$/', expect: ['Available'], waitS: ownStatus.waitS } } : {}),
+  ...(notices ? { notices: [{ words: 'Loading latest updates', why: "The page's notice while it catches up, as Teams'.", close: '/^close/i', waitS: notices.waitS }] } : {}),
 }, null, 1));
 writePack();
 
@@ -642,6 +643,83 @@ try {
     writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
+
+  // The run's files that hold what a screen showed: its snapshots, hovers, clicks and streams (not its log, which
+  // names what it met).
+  const rawTexts = dir => { const out = []; const walk = d => { for (const f of existsSync(d) ? readdirSync(d, { withFileTypes: true }) : []) { const q = join(d, f.name); if (f.isDirectory()) walk(q); else if (/\.(json|html)$/.test(f.name)) out.push([q, readFileSync(q, 'utf8')]); } }; for (const sub of ['snaps', 'hovers', 'streams']) walk(join(dir, sub)); return out; };
+  const CHIPS_PLAN = '# Tasks demo\n\n## Beat 1 · Chips\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Chips"\n  Lands on: "Chips one"\n- Click "Next"\n  Lands on: "Chips two"\n';
+  const CHIPS_RESET = '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n';
+  const cfgF = join(DEMO, 'demo.json'), cfg0 = readFileSync(cfgF, 'utf8');
+
+  // 1m · The recording's hovers and the screen's budget: their first tries don't count against it, so the kinds after
+  // them (clicks here) get the time they had without them, even when they take longer than the whole budget (8 s
+  // here). Those that showed nothing are tried once more after everything else, within their own cap (7 s here):
+  // the slow card captured, the rest missed or cut by the cap, each listed for her with a picture.
+  { const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
+    mkdirSync(dirname(HP), { recursive: true });
+    const def = (id, text, card) => [id, { id, page: 'chips-3', anchor: { sel: 'button', text }, anchorRect: { x: 30, y: 90, w: 90, h: 30 }, portals: [{ text: card }] }];
+    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('m1', 'Slow chip', 'Takes its time'), def('m2', 'Quiet chip', 'Says a lot'), ...['c1', 'c2', 'c3', 'c4'].map((c, i) => def('m' + (i + 3), 'Chip ' + c, 'Card ' + c))]) }));
+    const c = JSON.parse(cfg0); Object.assign(c.record.auto, { maxS: 8, floorRetryS: 7 }); writeFileSync(cfgF, JSON.stringify(c, null, 2));
+    writeFileSync(join(DEMO, 'plan.md'), CHIPS_PLAN.replace('  Lands on: "Chips two"\n', '  Lands on: "Chips two"\n- Click "Next"\n  Lands on: "Chips three"\n'));
+    writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
+    tasks.chips(true); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const mr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const mj = readRun(DEMO), [, mRec] = keepRaw('budget-raw');
+    const list = (mj.hovers && mj.hovers.list) || [], byText = t => list.find(x => x.text === t) || {};
+    const three = Object.keys((mRec && mRec.states) || {}).find(id => (mRec.autos || []).some(a => a.state === id && a.did.some(d => /^recorded hovers again/.test(d))));
+    const auto3 = (mRec.autos || []).find(a => a.state === three) || { did: [] };
+    const tl3 = ((mRec && mRec.timeline) || []).filter(e => e.what === 'sweep' && e.state === three).map(e => e.kind);
+    const again = ((mRec && mRec.timeline) || []).find(e => e.kind === 'hovers-again' && e.state === three) || {};
+    const why = { code: mr.code, stopped: mj.stopped, three, did: auto3.did, tl3, again, list: list.map(x => [x.text, x.status, x.found, x.why, !!x.picture]), notes: ((mRec && mRec.notes) || []).slice(-6), err: String(mr.err || '').slice(-400) };
+    check("the recorded hovers' first tries don't count against the screen's budget: the clicks after them still get their time", mr.code === 0 && !mj.stopped && !!three && auto3.did.some(d => /^clicks \d+ of \d+/.test(d)) && !auto3.did.some(d => /out of time/.test(d)), JSON.stringify(why));
+    check("and the ones that showed nothing are tried again last, after the clicks: the slow card captured there", tl3.lastIndexOf('hovers-again') > tl3.indexOf('clicks') && tl3.indexOf('clicks') >= 0 && byText('Slow chip').status === 'captured', JSON.stringify(why));
+    const missed = list.filter(x => x.status === 'missed');
+    check('within their own cap: reached here, said in the notes; every one still missed is listed for her with a picture', again.capped === true && ((mRec && mRec.notes) || []).some(n => /second tries reached their 7 s/.test(n)) && missed.length >= 2 && missed.every(x => x.picture && existsSync(x.picture)) && missed.some(x => /didn't fit/.test(x.why)) && missed.every(x => (mj.needsYou || []).some(n => n.picture === x.picture)), JSON.stringify(why));
+    tasks.chips(false); tasks.seed({});
+    writeFileSync(cfgF, cfg0);
+    if (had === null) rmSync(HP, { force: true }); else writeFileSync(HP, had);
+  }
+
+  // 1n · A page that moves while it's swept (a banner comes on top as the pointer leaves the first tip, and another
+  // just after the recorder picks Details to click): every hover and click reads its control's point again just
+  // before it goes there, so each still lands.
+  { writeFileSync(join(DEMO, 'plan.md'), CHIPS_PLAN); writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
+    tasks.chips(true); tasks.moving(true); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const vr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const vj = readRun(DEMO), [vRaw] = keepRaw('moving-raw');
+    const recs = existsSync(join(vRaw, 'hovers')) ? readdirSync(join(vRaw, 'hovers')).flatMap(d => readdirSync(join(vRaw, 'hovers', d)).filter(f => f.endsWith('.json')).map(f => ({ dir: d, j: JSON.parse(readFileSync(join(vRaw, 'hovers', d, f), 'utf8')) }))) : [];
+    const cards = recs.flatMap(r => ((r.j.res || {}).portals || []).map(q => q.text || ''));
+    const details = recs.find(r => /^click-/.test(r.dir) && (r.j.cand || {}).text === 'Details');
+    const why = { code: vr.code, stopped: vj.stopped, cards, clicks: recs.filter(r => /^click-/.test(r.dir)).map(r => [(r.j.cand || {}).text, ((r.j.res || {}).ops || []).length]), err: String(vr.err || '').slice(-400) };
+    check('a page that moves mid-sweep: every tip hovered where it is now, its card captured', vr.code === 0 && !vj.stopped && ['one', 'two', 'three'].every(w => cards.some(t => t === `Tip ${w} card`)), JSON.stringify(why));
+    check('and the click on Details lands where Details is, its panel captured', !!details && (((details.j.res || {}).ops || []).length > 0 || ((details.j.res || {}).portals || []).length > 0), JSON.stringify(why));
+    tasks.moving(false); tasks.chips(false); tasks.seed({});
+  }
+
+  // 1o · A notice that comes mid-run (Teams' "Loading latest updates…"): never saved. A save waits for it to go (2 s
+  // here), then closes it with its own button and saves; with no close button, the run stops before saving, with a
+  // picture, listed for her. Nothing the run saved shows it.
+  for (const mode of ['close', 'stuck']) {
+    writePack({ notices: { waitS: 2 } });
+    writeFileSync(join(DEMO, 'plan.md'), CHIPS_PLAN); writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
+    tasks.chips(true); tasks.notice(mode); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const nr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const nj = readRun(DEMO), [nRaw] = keepRaw(`notice-${mode}-raw`);
+    const kept = rawTexts(nRaw).filter(([, t]) => /Loading latest updates/.test(t)).map(([f]) => f.slice(nRaw.length));
+    const why = { code: nr.code, stopped: nj.stopped, notices: nj.notices, needsYou: nj.needsYou, kept, err: String(nr.err || '').slice(-400) };
+    if (mode === 'close') check('a notice that comes mid-run is closed with its own button after its wait, the run goes on, and nothing saved shows it', nr.code === 0 && !nj.stopped && !kept.length && ((nj.notices || {}).seen || []).some(x => x.closed && x.ok), JSON.stringify(why));
+    else check("one that can't be closed stops the run before it's saved: a picture, listed for her; nothing saved shows it", !!nj.stopped && nj.stopped.kind === 'notice' && !!nj.stopped.picture && existsSync(nj.stopped.picture) && (nj.needsYou || []).some(n => /Loading latest updates/.test(n.why)) && !kept.length, JSON.stringify(why));
+    tasks.notice(null); tasks.chips(false); tasks.seed({});
+  }
+  writePack();
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
 
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
   // tenant check, and still refuses when it never does.

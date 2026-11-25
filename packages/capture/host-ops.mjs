@@ -118,6 +118,23 @@ if (s === null) { el = null; for (const e of document.querySelectorAll('*')) { s
 return s === null ? { found: false } : { found: true, status: s };
 })()`;
 
+// A notice an app shows for a while (capNotices; a pack's notices): in a page's own text, or a saved part's.
+export const noticeIn = (text, words) => { const n = x => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase(); return !!n(words) && n(text).includes(n(words)); };
+// Its own close button: the smallest element whose text has the notice's words, then up to four parents for a
+// visible button whose name (aria-label, title, else its text) the pattern matches. → { x, y } or null.
+const NOTICE_CLOSE = `([words, re, flags]) => {
+  const n = x => String(x || '').replace(/\\s+/g, ' ').trim().toLowerCase(), w = n(words), rx = new RegExp(re, flags);
+  let box = null;
+  for (const e of document.body ? document.body.querySelectorAll('*') : []) { const t = n(e.innerText); if (t.includes(w) && (!box || t.length < n(box.innerText).length)) box = e; }
+  const shown = e => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && getComputedStyle(e).visibility !== 'hidden'; };
+  for (let a = box, i = 0; a && i < 5; a = a.parentElement, i++) {
+    for (const b of a.querySelectorAll('button,[role=button]')) {
+      const name = b.getAttribute('aria-label') || b.getAttribute('title') || n(b.innerText);
+      if (shown(b) && rx.test(name)) { const r = b.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; }
+    }
+  }
+  return null;
+}`;
 const originOf = u => { try { return new URL(u).origin; } catch (e) { return null; } };
 const hostRe = c => c.hostPattern ? new RegExp(c.hostPattern) : new RegExp(`^${String(c.host || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 // An API undo's address: path on origin, only when it's a plain path there that a URL parser leaves as it is (no dot
@@ -259,6 +276,48 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   let own = null;
   // The recorded hovers (capHoverFloor): per app, their controls; how each went.
   let floor = null;
+  // Notices a replica never keeps (capNotices): per app, their words and close buttons; what each save found; the stop.
+  let notices = null;
+  const pageText = p => p.mainFrame().evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
+  const noticeStop = () => { throw new Error(`A notice stopped the take: ${notices.stopped.why}`); };
+  const noticeGate = async (p, app, what, html = null) => {
+    const S = notices;
+    if (!S) return;
+    if (S.stopped) noticeStop();
+    const a = S.apps[app];
+    if (!a || !p) return;
+    const showing = t => a.notices.find(x => noticeIn(t, x.words)) || null;
+    let hit = showing(html !== null ? unEntity(html) : await pageText(p));
+    if (!hit) return;
+    const was = hit, t0 = Date.now();
+    let closed = false;
+    S.waiting = { app, what, notice: hit.words, since: at() };
+    log(`notice: ${app} shows "${hit.words}" before saving ${what}; waiting up to ${hit.waitS} s for it to go`);
+    try {
+      while (hit && Date.now() - t0 < hit.waitS * 1000) { await new Promise(res => setTimeout(res, 1000)); hit = showing(await pageText(p)); }
+      // Still there: its own close button, pressed as a person would (nothing the guard doesn't allow is sent).
+      const m = hit && hit.close ? /^\/(.+)\/([a-z]*)$/.exec(hit.close) : null;
+      const pt = m ? await p.mainFrame().evaluate(`(${NOTICE_CLOSE})(${JSON.stringify([hit.words, m[1], m[2].replace(/g/g, '')])})`).catch(() => null) : null;
+      if (pt) {
+        // Past the recorder's page script (it holds clicks while a screen is captured, and records the rest): this
+        // click isn't hers.
+        await p.mainFrame().evaluate(() => { if (window.__rkrec) window.__rkrec.pass++; }).catch(() => {});
+        await p.mouse.click(pt.x, pt.y);
+        closed = true;
+        for (let i = 0; i < 6 && hit; i++) { await new Promise(res => setTimeout(res, 500)); hit = showing(await pageText(p)); }
+        log(`notice: closed "${was.words}" in ${app} with its own button${hit ? ', and it stayed' : ''}`);
+      }
+    } finally { S.waiting = null; }
+    const waitedS = Math.round((Date.now() - t0) / 1000);
+    S.seen.push({ at: at(), app, what, notice: was.words, waitedS, closed, ok: !hit });
+    // Gone (waited out, or closed): true, so a caller holding the page as it was reads it again.
+    if (!hit) return true;
+    let picture = null;
+    if (S.shots) { try { picture = `${S.shots}/notice-${app}.png`; mkdirSync(S.shots, { recursive: true }); writeFileSync(picture, await p.screenshot({ timeout: 30000 })); } catch (e) { picture = null; } }
+    S.stopped = { at: at(), app, what, notice: hit.words, waitedS, closed, label: a.label, why: `${a.label} showed "${hit.words}…" for ${waitedS} s before ${what} was saved${closed ? ', and closing it didn\'t take it away' : hit.close ? ', and its close button wasn\'t found' : ''}`, picture };
+    log(`notice: stopped before saving ${what} (${app}): ${S.stopped.why}`);
+    noticeStop();
+  };
   const ownRead = (p, a) => p.evaluate(OWN_READ(a)).catch(e => ({ found: false, error: String(e.message).split('\n')[0] }));
   const ownStop = () => { throw new Error(`Own status stopped the take: ${own.stopped.why}`); };
   const ownGate = async (p, app, what) => {
@@ -429,6 +488,23 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       }
       if (!own) return { on: false, reads: [], total: 0, stopped: null, waiting: null };
       return { on: true, reads: own.reads.slice(c.since || 0), total: own.reads.length, stopped: own.stopped, waiting: own.waiting };
+    },
+    // { apps: { <app>: { label, notices: [{ words, close, waitS }] } }, shots } arms the gate the recorder calls before
+    // each save; { apps: {} } disarms it; { read: { tab, notices } } says which shows on a tab now (a walk, a check:
+    // noted, never a stop); {} reads what each save found, and the stop.
+    async capNotices(c) {
+      if (c.read) { const t = await pageText(await tabOf(c.read.tab)); return { showing: [].concat(c.read.notices || []).filter(x => noticeIn(t, x.words)).map(x => x.words) }; }
+      if (c.apps) {
+        const apps = Object.fromEntries(Object.entries(c.apps).filter(([, a]) => a && (a.notices || []).length).map(([id, a]) => [id, { label: a.label || id, notices: a.notices.map(x => ({ words: String(x.words), close: x.close || null, waitS: x.waitS === undefined ? 60 : +x.waitS })) }]));
+        if (!Object.keys(apps).length) { notices = null; globalThis.__stuntdoubleNotices = undefined; return { on: false }; }
+        notices = { apps, shots: c.shots || null, seen: [], stopped: null, waiting: null };
+        // The recorder's hook (recorder.js): before it saves a screen, or a stream's frame, of one of these apps.
+        globalThis.__stuntdoubleNotices = { gate: (p, app, what) => noticeGate(p, app, what), gateHtml: (html, app, what, p = null) => noticeGate(p, app, what, String(html || '')), waiting: () => (notices && notices.waiting) || null };
+        log(`notices on: ${Object.entries(apps).map(([id, a]) => `${id} (${a.notices.map(x => `"${x.words}"`).join(', ')})`).join(', ')}`);
+        return { on: true, apps: Object.keys(apps) };
+      }
+      if (!notices) return { on: false, seen: [], stopped: null, waiting: null };
+      return { on: true, seen: notices.seen.slice(c.since || 0), total: notices.seen.length, stopped: notices.stopped, waiting: notices.waiting };
     },
     async capHoverFloor(c) {
       if (c.apps) {

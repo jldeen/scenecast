@@ -209,6 +209,22 @@ another status (docs/recorder.md, "Your own status").
 
 `ownStatusFor(cfg)` gives a demo's: `[{ app, pack, label, name, role, expect, waitS }]`.
 
+### Notices (`notices`)
+
+What the app shows for a while that a replica must never keep (Teams' "Loading latest updates… in the meantime, you
+can still send and respond to messages"). An unattended run waits for one before it saves a screen of the app, closes
+it with its own button, and stops rather than save it (docs/recorder.md, "Notices a replica never keeps").
+
+```json
+"notices": [{ "words": "Loading latest updates", "why": "…", "close": "/^(close|dismiss)/i", "waitS": 60 }]
+```
+
+- `words`: the notice's own, as the page shows them (in its text).
+- `close`: a /pattern/ over its close button's name (aria-label, title, else its text).
+- `waitS`: how long a save waits for it to go before closing it (60 s).
+
+`noticesFor(cfg)` gives a demo's: `[{ app, pack, label, notices: [{ words, close, waitS }] }]`.
+
 **Public and private.** Product behavior goes in these public packs. Tenant values (organization, plugin and item
 names, IDs) never do. An API undo goes in a private pack: `{ "api": { "use": "<apis name>", "method", "path" } }`,
 with `apis.<name>` naming the page that signs in (`open`), the host (`host`, or `hostPattern`) and, when the page
@@ -247,6 +263,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `servicesFor(cfg)` | the services a demo's apps need, from their packs (`[{ app, name, match, start, waitS }]`) |
 | `filtersFor(cfg)` | what a demo's apps can leave out, from their packs (`{ "<pack>:<filter>": filter }`) |
 | `ownStatusFor(cfg)` | where a demo's apps show the person's own status, from their packs (`[{ app, name, role, expect, waitS }]`) |
+| `noticesFor(cfg)` | the notices a demo's apps show that a replica never keeps, from their packs (`[{ app, label, notices }]`) |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice

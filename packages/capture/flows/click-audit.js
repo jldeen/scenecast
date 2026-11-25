@@ -89,6 +89,15 @@ for (const c of controls) {
     if (!ctl) { r.skip = 'not on screen'; out.results.push(r); continue; }
     await sleep(100);
     await ev(() => window.__d1h.takeRest());
+    // Its point now, just before the press: a page that moved since (a banner on top) is clicked where the control
+    // is. Gone from the screen: found once more.
+    const now = await ev(() => window.__d1h.ctlPos());
+    if (!now) {
+      const again = await ev(m => window.__d1h.markCtl(m), c);
+      if (!again) { r.skip = 'left the screen'; out.results.push(r); continue; }
+      await sleep(100); await ev(() => window.__d1h.takeRest());
+      Object.assign(ctl, again); r.refound = true; out.refound = (out.refound || 0) + 1;
+    } else if (now.x !== ctl.x || now.y !== ctl.y) { Object.assign(ctl, now); r.moved = true; out.moved = (out.moved || 0) + 1; }
     const urlBefore = p.url();
     await move(ctl.x, ctl.y, 3); await sleep(120);
     await p.mouse.down(); await sleep(60); await p.mouse.up();

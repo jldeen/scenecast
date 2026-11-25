@@ -238,6 +238,14 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   "Teams showed you as Away. Start again while you're using your Mac, with Teams open." (PC on Windows) and runs the
   reset after. A screen without the control saves as it is. run.json: `ownStatus` (each read, the stop); the summary
   prints what the start screens (with their sweeps) and beat 1 showed. A live walk and `ai check` only note it.
+- **Notices a replica never keeps** (an app pack's `notices`: Teams' "Loading latest updates… in the meantime, you can
+  still send and respond to messages", which comes across the top of a channel while Teams catches up and moves the
+  whole page down). Before the recorder saves a screen, or a stream's frame, of that app, it looks for the notice's
+  words (`capNotices`). Showing: it waits up to the pack's `waitS` (60 s) for it to go, then presses the notice's own
+  close button (a pointer click past the recorder's page script: not a step of hers), and saves once it's gone. Still
+  there, and the run stops before that save, with a picture, and lists it for her. A frame taken while it showed is
+  never kept. run.json: `notices` (each save that met one: waited, closed, the stop). A live walk and `ai check` only
+  note it (`notices`).
 - **The recording's hovers are a floor** (a demo built from an earlier recording: its `data/snaps/hovers-<app>.json`).
   The hovers sweep learns to stop trying a kind of control that never shows anything (10 tries), and waits at most
   900 ms; on a busy computer a slow card would read as none. Each recorded hover is found on the live page as the
@@ -247,12 +255,20 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   card's words when the card was inside it; the innermost, nearest the recorded spot; an anchor with no words, by the
   name in its selector).
   The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
-  screen's cap or time: while any is left, the next one hovered is theirs. When nothing shows, each is hovered once
-  more for 2.5 s, until one shows its card (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
+  screen's cap or time: while any is left, the next one hovered is theirs. Their first tries don't count against the
+  screen's budget (`auto.maxS`): clicks, zoom, lists and drags get the time they had without them (Nov 25: Teams' 47
+  recorded hovers took 208 s on its start screen and left the rest of it out of time). One that shows nothing is
+  hovered once more for 2.5 s, last, after the screen's other side states, its control found again from scratch,
+  within `auto.floorRetryS` (45 s a screen; reaching it is said in the notes and the timeline's `hovers-again`)
+  (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
   shows its card: the same words, numbers aside, or most of them in another order; `hover-card.mjs`), missed (its anchor was there and its card wasn't
   captured) or gone (its anchor's words were on no screen the run swept): a missed one goes under Needs you with a
-  picture of the screen (only a missed one keeps its picture). run.json: `hovers` (the list, how each anchor was
-  found, and the three counts the summary prints). A live walk and `ai check` don't sweep hovers.
+  picture of the screen (only a missed one keeps its picture; those the cap cut share one). run.json: `hovers` (the
+  list, how each anchor was found, and the three counts the summary prints). A live walk and `ai check` don't sweep
+  hovers.
+- **A page that moves while it's swept** (a banner on top, a list that loads): every hover and every click reads its
+  control's point again just before the pointer goes there, and uses where it is now; one that has gone from there is
+  found once more by its kind and words (`hover-page.js` `pos`, `ctlPos`).
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
   the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
   write), every host reached outside the apps', every input sent (`inputs`: what it was for, the control's name, its

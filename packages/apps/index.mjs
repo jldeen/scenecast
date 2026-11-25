@@ -246,6 +246,20 @@ export function ownStatusFor(cfg, list = packs()) {
   return out;
 }
 
+// Notices an app shows for a while that a replica must never keep (Teams' "Loading latest updates…"), for each of a
+// demo's apps whose pack names them (notices: [{ words, close, waitS }]): words, the notice's own (it shows when the
+// page's text has them); close, a /pattern/ over the name of its own close button; waitS, how long a save waits for it
+// to go before closing it (60 s). → [{ app, pack, label, notices: [{ words, close, waitS }] }]
+export function noticesFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id], ns = ((p && p.notices) || []).filter(n => n && typeof n.words === 'string' && n.words.trim());
+    if (!ns.length) continue;
+    out.push({ app: a.id, pack: p.id, label: (p.names || [])[0] || p.title || p.id, notices: ns.map(n => ({ words: n.words.trim(), close: n.close || null, waitS: n.waitS === undefined ? 60 : +n.waitS })) });
+  }
+  return out;
+}
+
 // A demo's pack filters, for reset.md's Leave out: what an app shows of the tenant's own data that a demo can leave out
 // of its replica, in the capture browser only (packages/capture/leave-out.mjs). A pack's filters: [{ id, why, and either
 // url (where its responses come from, a browser request pattern), match (a guard entry over "METHOD host/path"), items
@@ -334,6 +348,16 @@ export function checkPack(p) {
       if (!o || ![].concat(o.expect || []).length) out.push('ownStatus: expect (what a save may show when the recording has none: "Available")');
       if (!o || !o.why) out.push('ownStatus: why (plain words, with the evidence)');
     } }
+  // Notices a replica must never keep: each by its own words, with why, and its close button by a /pattern/.
+  if (p.notices !== undefined) {
+    if (!Array.isArray(p.notices)) out.push('notices: a list ([{ words, close, waitS, why }])');
+    else for (const n of p.notices) {
+      if (!n || typeof n.words !== 'string' || !n.words.trim()) out.push('notices: words (the notice\'s own, as the page shows them)');
+      if (n && n.close !== undefined && n.close !== null && !/^\/.+\/[a-z]*$/.test(String(n.close))) out.push('notices: close is a /pattern/ over its close button\'s name');
+      if (n && n.waitS !== undefined && !(+n.waitS >= 0)) out.push('notices: waitS (seconds a save waits for it to go)');
+      if (!n || !n.why) out.push('notices: why (plain words, with the evidence)');
+    }
+  }
   // A filter (Leave out): why, and the one response it reads (a pattern over "METHOD host/path", never everything) and
   // where its items are; or a DOM list. Never which items: those are a demo's.
   for (const f of p.filters || []) {

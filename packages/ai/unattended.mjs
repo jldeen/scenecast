@@ -57,6 +57,11 @@ export function recordedStatus(w, o) {
   }
   return null;
 }
+// Notices a replica never keeps, for each app the plan goes to whose pack names them (noticesFor).
+// → [{ app, label, notices: [{ words, close, waitS }] }]
+export const noticeApps = (demo, packs, inPlan) => (packs && packs.noticesFor ? packs.noticesFor(demo.cfg) : []).filter(x => inPlan.has(x.app));
+// What she reads when a save stopped on one.
+export const noticeSay = st => `${st.label} showed "${st.notice}…" for ${st.waitedS} s${st.closed ? ' and kept it after its close button' : ''}, and a replica can't keep it. Start again once ${st.label} has finished loading.`;
 const computerWord = () => process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer';
 // What she reads when a save stopped on her status.
 export const ownStatusSay = (label, status) => `${label} showed you as ${status}. Start again while you're using your ${computerWord()}, with ${label} open.`;
@@ -96,8 +101,16 @@ export function hoverOutcomes(recorded, sweeps) {
     if (status !== 'missed') return out;
     const tries = mine.flatMap(e => (e.tries || []).filter(t => (t.ids || []).includes(h.id)).map(t => ({ ...t, state: e.state })));
     const res = t => (t.results && t.results[h.id]) || t.result;
-    const other = tries.find(t => res(t) === 'other card'), none = tries.find(t => res(t) === 'nothing'), odd = tries.find(t => res(t) === 'unreadable');
-    const why = other ? 'it was on the screen and showed another card' : none ? 'it was on the screen and showed nothing, hovered twice (the second time for 2.5 s)' : odd ? "it was on the screen and what it showed couldn't be read" : "it was on the screen and wasn't hovered (out of time, or none of its controls could be pointed at)";
+    const is = r => t => res(t) === r;
+    const other = tries.find(is('other card')), twice = tries.find(t => res(t) === 'nothing' && t.retried), odd = tries.find(is('unreadable'));
+    const capped = tries.find(is('capped')), left = tries.find(is('left')), once = tries.find(is('nothing'));
+    const why = other ? 'it was on the screen and showed another card'
+      : twice ? 'it was on the screen and showed nothing, hovered twice (the second time for 2.5 s, after the screen\'s other side states)'
+      : odd ? "it was on the screen and what it showed couldn't be read"
+      : capped ? 'it was on the screen and showed nothing the first time; its second try didn\'t fit in the time for second tries'
+      : left ? 'it was on the screen, and its control had gone from it when it was hovered (again)'
+      : once ? 'it was on the screen and showed nothing (hovered once)'
+      : "it was on the screen and wasn't hovered (out of time, or none of its controls could be pointed at)";
     const pic = tries.find(t => t.picture);
     return { ...out, why, picture: pic ? pic.picture : null, screen: (pic || tries[0] || at[0] || {}).state || null };
   });
@@ -193,6 +206,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const lo = leaveOutOf({ demo, packs, apps: inPlan });
   if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
   const ownApps = ownStatusApps(demo, packs, inPlan);
+  const notApps = noticeApps(demo, packs, inPlan);
   const recHovers = recordedHovers(demo, [...inPlan]);
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
@@ -217,6 +231,14 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     emit({ event: 'stopped', ...run.stopped });
   };
   let ownMark = 0;
+  // Notices (capNotices): a save that waits for one, closes it, or stops before it's kept.
+  const noticeStopped = async () => { const r = notApps.length ? await cmd('capNotices', { since: 1e9 }, 30).catch(() => null) : null; return r && r.stopped ? r.stopped : null; };
+  const noticeStopRun = (st, at = null) => {
+    const say = noticeSay(st);
+    run.stopped = { kind: 'notice', why: say, app: st.app, saving: st.what, notice: st.notice, waitedS: st.waitedS, closed: st.closed, picture: st.picture || null, ...(at ? { at } : {}) };
+    run.needsYou.push({ text: st.label, why: say });
+    emit({ event: 'stopped', ...run.stopped });
+  };
   const ownSummary = async key => { const r = await ownNow(); if (!r) return; const reads = (r.reads || []).slice(ownMark); ownMark = r.total || 0; for (const o of ownApps) run.ownStatus[key][o.app] = ownSeen(reads, o.app) || 'no screen saved'; };
 
   // The guard, from the first request to the last.
@@ -322,6 +344,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const on = await cmd('capOwnStatus', { apps: Object.fromEntries(ownApps.map(o => [o.app, o])), shots: stops }, 30).catch(e => ({ on: false, why: e.message }));
       if (!on.on) { run.stopped = { kind: 'own-status', why: `couldn't watch your status in ${ownApps.map(o => o.label).join(', ')}: ${on.why || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
     }
+    // Notices a replica never keeps (Teams' "Loading latest updates"), before any screen of those apps is saved.
+    if (notApps.length) {
+      const on = await cmd('capNotices', { apps: Object.fromEntries(notApps.map(n => [n.app, { label: n.label, notices: n.notices }])), shots: stops }, 30).catch(e => ({ on: false, why: e.message }));
+      if (!on.on) { run.stopped = { kind: 'notice', why: `couldn't watch for ${notApps.map(n => n.label).join(', ')}'s notices: ${on.why || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
+    }
     // The recording's hovers as a floor: never skipped by what the sweep learns, each tried twice.
     if (recHovers.length) {
       const byApp = {};
@@ -338,6 +365,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     catch (e) {
       const os = await ownStopped();
       if (os) { ownStopRun(os); break main; }
+      const ns = await noticeStopped();
+      if (ns) { noticeStopRun(ns); break main; }
       const l = await leaveNow().catch(() => null);
       if (!(l && l.leak)) throw e;
       leakStop(l.leak);
@@ -388,6 +417,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const leaked = async () => { const l = await leaveNow(); return l && l.leak ? { kind: 'leave-out', why: leakWhy(l.leak), leak: l.leak, beforeWrite: true } : null; };
     const doStep = async (bi, si, step, at, prev) => {
       { const os = await ownStopped(); if (os) return { kind: 'own-status', own: os }; }
+      { const ns = await noticeStopped(); if (ns) return { kind: 'notice', notice: ns }; }
       { const lk = await leaked(); if (lk) return lk; }
       for (const n of await serviceNews()) if (serviceFailing(n) && !failingIn[bi]) failingIn[bi] = n;
       // Set before: what her script has already set when she gets here, set off camera just before the step, in a tab
@@ -489,7 +519,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         let stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
         // A save her status stopped during the step: that's why, whatever the step met after it.
         if (stop && !stop.own && !stop.leak) { const os = await ownStopped(); if (os) stop = { kind: 'own-status', own: os }; }
+        if (stop && !stop.own && !stop.leak && !stop.notice) { const ns = await noticeStopped(); if (ns) stop = { kind: 'notice', notice: ns }; }
         if (stop && stop.own) { ownStopRun(stop.own, at); break outer; }
+        if (stop && stop.notice) { noticeStopRun(stop.notice, at); break outer; }
         if (stop) {
           await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
           // Leave out's own picture, taken as it refused the save, and where on the screen it was.
@@ -515,6 +547,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       // A save it refused after the last step: the take ends there, and she sees why.
       const os = await ownStopped();
       if (os && !run.stopped) ownStopRun(os);
+      const ns = await noticeStopped();
+      if (ns && !run.stopped) noticeStopRun(ns);
       const l = await leaveNow().catch(() => null);
       if (l && l.leak && !run.stopped) leakStop(l.leak);
     }
@@ -545,6 +579,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       }
       if (run.ownStatus && !Object.keys(run.ownStatus.beat1).length) delete run.ownStatus.beat1;
       await cmd('capOwnStatus', { apps: {} }, 30).catch(() => {});
+    }
+    if (notApps.length) {
+      const r = await cmd('capNotices', {}, 30).catch(() => null);
+      if (r && r.on) run.notices = { apps: notApps.map(n => ({ app: n.app, words: n.notices.map(x => x.words) })), seen: r.seen || [], ...(r.stopped ? { stopped: r.stopped } : {}) };
+      await cmd('capNotices', { apps: {} }, 30).catch(() => {});
     }
     // Off the app (another site): back to it, out of the recording, before the reset needs it.
     if (run.stopped && run.stopped.kind === 'offplan') await liveWalker({ demo, cmd, packs, log }).goBack(run.stopped.app).catch(() => {});
@@ -709,6 +748,17 @@ export async function ownStatusNote({ demo, cmd, packs, plan, recorded }) {
   return out;
 }
 
+// Notices showing on each app's tab now, for the plan's apps whose pack names them: noted (a walk, a check), never a
+// stop. → [{ app, showing: [words] }], only the apps showing one
+export async function noticeNote({ demo, cmd, packs, plan }) {
+  const out = [];
+  for (const n of noticeApps(demo, packs, planApps(plan, demo.cfg.apps.map(a => a.id)))) {
+    const r = await cmd('capNotices', { read: { tab: appTab(demo, n.app), notices: n.notices } }, 30).catch(e => ({ showing: [], error: e.message }));
+    if ((r.showing || []).length || r.error) out.push({ app: n.app, showing: r.showing || [], ...(r.error ? { error: r.error } : {}) });
+  }
+  return out;
+}
+
 // reset.md's Check, live and read-only, in a live walker's tabs (Leave out and the guard as the caller has them):
 // each line pass, wrong or can't, with a picture of the screen it was read on (shots). → { pass, wrong, cant, lines }
 async function liveCheck({ demo, cmd, w, packs, plan, shots }) {
@@ -745,6 +795,8 @@ export async function checkLive({ demo, emit = () => {}, cmd: viaCmd, packs }) {
     out = (await liveCheck({ demo, cmd, w, packs, plan, shots })) || { pass: 0, wrong: 0, cant: 0, lines: [] };
     const own = await ownStatusNote({ demo, cmd, packs, plan });
     if (own.length) out.ownStatus = own;
+    const nt = await noticeNote({ demo, cmd, packs, plan }).catch(e => [{ error: e.message }]);
+    if (nt.length) out.notices = nt;
     out.inputs = w.inputs();
   } finally {
     if (lo.rules.length) await cmd('capLeaveOut', { rules: [] }, 60).catch(() => {});
@@ -837,11 +889,12 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     return [...by.values()];
   };
   const seenAt = {};
-  let walk, checked = null, ownNote = null;
+  let walk, checked = null, ownNote = null, noticeNoteW = null;
   try {
     // reset.md's Check first, as the run reads it before anything (its plan's, not one given to walk instead).
     if (!viaPlan) { emit({ event: 'stage', name: 'check', label: 'Checking the demo starts as it should' }); checked = await liveCheck({ demo, cmd, w, packs, plan, shots: join(aiDir(demo), 'check') }).catch(e => ({ error: e.message })); }
     ownNote = await ownStatusNote({ demo, cmd, packs, plan }).catch(e => [{ error: e.message }]);
+    noticeNoteW = await noticeNote({ demo, cmd, packs, plan }).catch(e => [{ error: e.message }]);
     const starts = [];
     for (const a of demo.cfg.apps) {
       const did = await w.home(a.id); const bad = did.find(d => d.why);
@@ -917,7 +970,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     }
     const off = await guardOff(cmd, g.hosts, appOfSender);
     keepBodiesOut(demo, off.bodies);
-    walk = { ...(walk || {}), ...(checked ? { check: checked } : {}), ...(ownNote && ownNote.length ? { ownStatus: ownNote } : {}), ...(leaveOut ? { leaveOut } : {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
+    walk = { ...(walk || {}), ...(checked ? { check: checked } : {}), ...(ownNote && ownNote.length ? { ownStatus: ownNote } : {}), ...(noticeNoteW && noticeNoteW.length ? { notices: noticeNoteW } : {}), ...(leaveOut ? { leaveOut } : {}), ...(planSha ? { plan: { file: 'plan.md', sha256: planSha } } : {}), net: netAll, secs: +((Date.now() - t0) / 1000).toFixed(1), inputs: w.inputs(), guard: { hosts: g.hosts, allow: g.allow.length, ...off } };
     try { walk.events = (await cmd('capEvents', {}, 30)).events.map(e => ({ ...e, app: appOfSender({ tab: e.host }) })); } catch (e) {}
     walk.suspect = suspectSteps({ demo, plan, walk, screensDir, packs });
     mkdirSync(aiDir(demo), { recursive: true });

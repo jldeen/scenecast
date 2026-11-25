@@ -323,16 +323,21 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         nothing on hover, and on the third a "Slow chip" (in a wrapper, as a card's anchor often is) whose card
 //         shows 1.5 s after the pointer arrives, a "Quiet chip" that shows nothing, and a sidebar-like section (Projects,
 //         whose card "Collapse projects" shows after 0.3 s; Add project here; a Recent list): the recorded hovers' floor.
+//         moving(true): Chips one also has three buttons with a card each (Tip one, two, three) and a Details expander,
+//         and the page moves while it's swept: a 90 px banner comes on top as the pointer leaves the first tip it
+//         hovered, and another just after the recorder picks Details to click (a page that moves mid-sweep).
+//         notice('close' | 'stuck'): 0.3 s after Chips is clicked, Teams' "Loading latest updates…" notice comes on top
+//         of the page and stays, with its own Close button ('close') or none ('stuck').
 //         status(text): the page also shows your own status on a "Me" button ("Your profile, status <text>", as Teams'
 //         avatar), and follows GET /api/status as it changes (status(null): none).
 //   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
 //         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
 //         API undo that has to go from that frame.
 // The chips screens (main's markup), drawn in place by the tasks page, as an app's in-page routes are.
-const chipsPart = n => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1><p>
+const chipsPart = (n, moving = false) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false" aria-controls="dpanel">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
-const tasksPage = (port, notesPort, suggest = false, status = null, chips = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
 main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
@@ -363,9 +368,20 @@ if ($('chipsbtn')) {
     const cardOn = (el, text, ms) => { if (!el) return; let t = null, card = null; el.addEventListener('mouseenter', () => { t = setTimeout(() => { const r = el.getBoundingClientRect(); card = document.createElement('div'); card.className = 'card'; card.setAttribute('role', 'tooltip'); card.textContent = text; card.style.left = r.x + 'px'; card.style.top = (r.bottom + 6) + 'px'; document.body.appendChild(card); }, ms); }); el.addEventListener('mouseleave', () => { clearTimeout(t); if (card) card.remove(); card = null; }); };
     cardOn($('slow'), 'Takes its time', 1500);
     cardOn($('proj'), 'Collapse projects', 300);
+    ['one', 'two', 'three'].forEach((w, i) => cardOn($('tip' + (i + 1)), 'Tip ' + w + ' card', 200));
+    const d = $('details');
+    if (d) d.addEventListener('click', () => { const open = d.getAttribute('aria-expanded') !== 'true'; d.setAttribute('aria-expanded', String(open)); $('dpanel').hidden = !open; });
+    if (document.querySelector('[data-moving]')) {
+      const banner = id => { if ($(id)) return; const b = document.createElement('div'); b.id = id; b.style.cssText = 'height:90px;background:#ddf4ff'; b.textContent = 'Catching up'; document.body.prepend(b); };
+      ['tip1', 'tip2', 'tip3'].forEach(t => $(t).addEventListener('mouseleave', () => banner('banner1')));
+      new MutationObserver(() => { if (d.hasAttribute('data-d1-ctl')) setTimeout(() => banner('banner2'), 40); }).observe(d, { attributes: true, attributeFilter: ['data-d1-ctl'] });
+    }
   };
   const show = (n, push = true) => fetch('/chips-part/' + n).then(r => r.text()).then(h => { document.querySelector('main').innerHTML = h; if (push) history.pushState({}, '', '/chips/' + n); bind(); });
   $('chipsbtn').addEventListener('click', () => show(1));
+  // Teams' notice, a moment after the click, on top of the page; its own Close button takes it away.
+  const NOTICE = ${JSON.stringify(notice)};
+  if (NOTICE) $('chipsbtn').addEventListener('click', () => setTimeout(() => { if ($('notice')) return; const b = document.createElement('div'); b.id = 'notice'; b.setAttribute('role', 'status'); b.style.cssText = 'padding:8px;background:#fff8c5'; b.innerHTML = 'Loading latest updates… in the meantime, you can still send and respond to messages' + (NOTICE === 'close' ? ' <button aria-label="Close" id="nclose">×</button>' : ''); document.body.prepend(b); const c = $('nclose'); if (c) c.addEventListener('click', () => b.remove()); }, 300));
   const at = new RegExp('^/chips/([123])$').exec(location.pathname); if (at) show(+at[1], false);
 }
 if ($('me')) setInterval(() => fetch('/api/status').then(r => r.json()).then(j => { const l = 'Your profile, status ' + j.status; if (j.status && $('me').getAttribute('aria-label') !== l) $('me').setAttribute('aria-label', l); }).catch(() => {}), 400);
@@ -424,7 +440,7 @@ load();
 </script></body></html>`;
 
 export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
-  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null, chips: false };
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null, chips: false, moving: false, notice: null };
   const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
   const log = [];
   const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
@@ -433,10 +449,10 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
   const server = createServer(async (q, s) => {
     const path = q.url.split('?')[0];
     log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
-    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips));
+    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips, st.notice));
     if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
     if (q.method === 'GET' && /^\/chips\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, true));
-    if (q.method === 'GET' && /^\/chips-part\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', chipsPart(+path.slice(-1)));
+    if (q.method === 'GET' && /^\/chips-part\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', chipsPart(+path.slice(-1), st.moving));
     if (q.method === 'GET' && path === '/api/status') return send(s, 200, 'application/json', JSON.stringify({ status: st.status }));
     if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
     if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
@@ -494,6 +510,8 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     suggest: on => { st.suggest = !!on; },
     status: text => { st.status = text || null; },
     chips: on => { st.chips = !!on; },
+    moving: on => { st.moving = !!on; },
+    notice: mode => { st.notice = mode || null; },
     close: () => { server.close(); notes.close(); },
   };
 }

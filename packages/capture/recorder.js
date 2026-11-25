@@ -31,6 +31,7 @@ const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
 // status control is saved, it must show what the recording does (Teams: Available); read again for a while, else the
 // take stops there. First, so Leave out's check reads the screen as it's saved.
 const recOwn = () => globalThis.__stuntdoubleOwnStatus || null;
+const recNotice = () => globalThis.__stuntdoubleNotices || null;
 // The recording's own hovers (the capture browser only: host-ops capHoverFloor): per app, the controls the demo's
 // recording has a hover for. The hovers sweep never skips them for their kind, tries them twice, and says how each went.
 const recFloor = () => globalThis.__stuntdoubleHoverFloor || null;
@@ -38,7 +39,7 @@ const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); 
 const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
 if (!H.leaveGated) {
   const snap0 = H.snap, post0 = H.post;
-  H.snap = async (p, id, opts) => { const O = recOwn(); if (O) await O.gate(p, recAppOfPage(p), id); const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
+  H.snap = async (p, id, opts) => { const N = recNotice(); if (N) await N.gate(p, recAppOfPage(p), id); const O = recOwn(); if (O) await O.gate(p, recAppOfPage(p), id); const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
   H.post = async (path, data) => {
     const O = recOwn();
     if (O && path === '/hover') O.after();
@@ -209,6 +210,9 @@ async function recCapture(A, ev, trigger) {
       prev = r.html; lastHtml = Date.now();
       const L = recLeave();
       if (L) await L.gateHtml(r.html, A.id, `${name} frame ${frames.length}`, p);
+      // A notice on it (waited out or closed by now): not this frame, as it was; the next one, as it is.
+      const N = recNotice();
+      if (N && await N.gateHtml(r.html, A.id, `${name} frame ${frames.length}`, p)) { prev = null; return; }
       const O = recOwn();
       if (O) O.after();
       await fetchResources(p, [{ urls: r.urls, frame: p.mainFrame() }]);
@@ -374,8 +378,10 @@ function recSeen(kind, key) { const m = REC.seen[kind] = REC.seen[kind] || {}; r
 //   hovers  controls not hovered on another screen          clicks  expanders and menus not clicked before
 //   drags   resize handles, once per kind of screen         zoom    once per kind of screen
 //   list    a list with more rows than it shows (all of them, last: it changes the page)
-// The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen.
-const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, chipWidths: [1366, 1100], ...(a || {}) }; };
+// The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen, not
+// counting the recording's own hovers (the floor): their first tries are outside it, and the ones that showed nothing
+// are tried once more after everything else, within auto.floorRetryS of their own.
+const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, floorRetryS: 45, chipWidths: [1366, 1100], ...(a || {}) }; };
 async function recAuto(A) {
   const o = recAutoOpts(), state = A.state, st = REC.states[state];
   if (!o || !st || st.typedOf || REC.autoDone.has(state)) return;
@@ -385,22 +391,28 @@ async function recAuto(A) {
   const f = await p.mainFrame().evaluate(sel => window.__rkrec ? window.__rkrec.features(sel) : null, REC.opts.groups.button).catch(() => null);
   if (!f) return;
   const kinds = recSeen('kinds', A.id), newKind = !kinds.has(f.kind); kinds.add(f.kind);
+  let floorMs = 0;
+  const again = [];
   const run = async (kind, c = {}) => {
     // One budget for the whole screen (the presenter waits for it): each kind gets what's left, and zoom, which can't
     // stop part way, only starts with zoomMinS left. On real apps a screen's sweep ran 9 to 13 minutes before this.
-    const left = o.maxS - (Date.now() - t0) / 1000;
-    if (left < 5 || (kind === 'zoom' && left < o.zoomMinS)) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return; }
-    if (kind === 'hovers' || kind === 'clicks' || kind === 'zoom') c = { ...c, maxS: Math.min(c.maxS || left, left) };
+    // The recorded hovers' time isn't in it: the kinds after them get what they had without them.
+    const left = o.maxS - (Date.now() - t0 - floorMs) / 1000;
+    // The recording's own hovers are never out of time (only the rest of the hovers are).
+    const floorHere = kind === 'hovers' && (c.floor || []).length > 0;
+    if ((left < 5 && !floorHere) || (kind === 'zoom' && left < o.zoomMinS)) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return; }
+    if (kind === 'hovers' || kind === 'clicks' || kind === 'zoom') c = { ...c, maxS: Math.max(0.1, Math.min(c.maxS || left, left)) };
     REC.side = `${kind} on ${state}`;
     const t1 = Date.now(), s1 = SLEPT.ms;
-    let n = null;
+    let n = null, r = null;
     try {
-      const r = await recSide(A, { kind, ...c });
+      r = await recSide(A, { kind, ...c });
+      if (kind === 'hovers') { floorMs += r.floorMs || 0; if ((r.floorDeferred || []).length) again.push({ frameRe: c.frameRe, page: c.page || state, ids: r.floorDeferred }); }
       const what = r.error ? 'failed: ' + r.error : kind === 'hovers' ? `${r.n} of ${r.tried}${r.skipped ? ` (${r.skipped} seen before)` : ''}${r.skippedKinds ? ` (${r.skippedKinds} of kinds that never show)` : ''}, waits ${c.waitMs} ms` : kind === 'clicks' ? `${(r.clicks || []).length} of ${(r.controls || []).length}` : kind === 'groups' ? `${(r.groups || []).length}` : kind === 'chips' ? (r.rule ? 'found' : 'none') : kind === 'drags' ? `${(r.rules || []).length}` : kind === 'zoom' ? `${(r.zooms || []).length}` : kind === 'list' ? `${r.list && r.list.seen} rows` : 'done';
       n = kind === 'hovers' ? r.n : kind === 'clicks' ? (r.clicks || []).length : kind === 'groups' ? (r.groups || []).length : kind === 'zoom' ? (r.zooms || []).length : kind === 'drags' ? (r.rules || []).length : kind === 'chips' ? (r.rule ? 1 : 0) : null;
       did.push(`${kind}${c.frameRe ? ' (frame)' : ''} ${what}, ${((Date.now() - t1) / 1000).toFixed(1)} s (${((SLEPT.ms - s1) / 1000).toFixed(1)} s fixed waits)`);
     } catch (e) { did.push(`${kind} failed: ${String(e.message || e).slice(0, 120)}`); REC.notes.push(`${state}: the automatic ${kind} failed (${String(e.message || e).slice(0, 120)}); record side ${kind} on it if it matters`); }
-    finally { recTl('sweep', t1, { why: REC.sweepWhy || 'screen', kind, app: A.id, state, frame: !!c.frameRe || undefined, n, waits: SLEPT.ms - s1 }); }
+    finally { recTl('sweep', t1, { why: REC.sweepWhy || 'screen', kind, app: A.id, state, frame: !!c.frameRe || undefined, n, waits: SLEPT.ms - s1, ...(kind === 'hovers' && r ? { floorMs: r.floorMs || 0 } : {}) }); }
   };
   const gseen = recSeen('groups', A.id);
   if (o.groups && f.groups.some(id => !gseen.has(id))) { await run('groups'); f.groups.forEach(id => gseen.add(id)); }
@@ -412,7 +424,7 @@ async function recAuto(A) {
   const learned = hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900;
   const skipSels = Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel);
   const F = recFloor(), floor = F ? F.keys(A.id) : [];
-  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorShot: name => F.shot(A.page, name), floorMatch: F.match } : {}), ...c });
+  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorDefer: true, floorShot: name => F.shot(A.page, name), floorMatch: F.match } : {}), ...c });
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)] });
   for (const [i, fu] of f.frames.entries()) {
@@ -424,6 +436,27 @@ async function recAuto(A) {
   if (o.lists && f.list) await run('list');
   // Last: the drag audit moves panes (and puts them back).
   if (o.drags && newKind && f.handles) await run('drags', { range: 240, step: 40 });
+  // The recorded hovers that showed nothing the first time: each once more, last, its control found again from
+  // scratch (the page may have moved), waiting 2.5 s, within floorRetryS for the screen. Those still missed, or not
+  // tried again, go to her with a picture (the run's hover outcomes).
+  if (again.length) {
+    const tA = Date.now(), byId = new Map(floor.map(e => [e.id, e]));
+    for (const d of again) {
+      const entries = d.ids.map(id => byId.get(id)).filter(Boolean);
+      if (!entries.length) continue;
+      const capS = Math.max(1, o.floorRetryS - (Date.now() - tA) / 1000);
+      REC.side = `recorded hovers again on ${state}`;
+      const t1 = Date.now();
+      let shown = 0, capped = false;
+      try {
+        const r = await recSide(A, { kind: 'hovers', ...hv({ frameRe: d.frameRe, page: `${d.page}-again`, floor: entries, floorDefer: false, floorRetry: true, floorWaitMs: 2500, maxS: capS, skipKeys: [] }) });
+        shown = entries.filter(e => r.floor && r.floor[e.id] && r.floor[e.id].shown).length; capped = !!r.floorCapped;
+        if (capped) { REC.floorRetryCapped = (REC.floorRetryCapped || 0) + 1; REC.notes.push(`${state}: the recorded hovers' second tries reached their ${o.floorRetryS} s before all were tried`); }
+        did.push(`recorded hovers again${d.frameRe ? ' (frame)' : ''} ${shown} of ${entries.length}${capped ? ` (stopped at ${o.floorRetryS} s)` : ''}, ${((Date.now() - t1) / 1000).toFixed(1)} s`);
+      } catch (e) { did.push(`recorded hovers again failed: ${String(e.message || e).slice(0, 120)}`); }
+      finally { recTl('sweep', t1, { why: REC.sweepWhy || 'screen', kind: 'hovers-again', app: A.id, state, frame: !!d.frameRe || undefined, n: shown, tried: entries.length, capped }); }
+    }
+  }
   REC.side = null;
   const tRest = Date.now();
   await recSetBusy(p, true); await recSettle(p, 700, 8000); await recSetBusy(p, false);
@@ -585,7 +618,7 @@ function recTiming() {
     recorderSecs: r(start + startSweeps + screenSweeps + sideSweeps + actions + typed - product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm),
   };
 }
-OPS.recordStatus = async () => REC.on ? { recording: true, gateWait: (recOwn() && recOwn().waiting()) || undefined, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
+OPS.recordStatus = async () => REC.on ? { recording: true, gateWait: (recOwn() && recOwn().waiting()) || (recNotice() && recNotice().waiting()) || undefined, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
   // What the page still holds (a click it's waiting to do: the loop picks it up a second or more later on a busy app)

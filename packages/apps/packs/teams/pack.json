@@ -232,5 +232,13 @@
     "name": "/^Your profile, status (.+?)(?: for |$)/",
     "expect": ["Available"],
     "waitS": 90
-  }
+  },
+  "notices": [
+    {
+      "words": "Loading latest updates",
+      "why": "Teams shows \"Loading latest updates\u2026 in the meantime, you can still send and respond to messages\" across the top of a channel while it catches up, and the whole page moves down under it. It came in the capture browser on Nov 25 and never in a recording, a walk or a check: a replica must never keep it. A save waits for it to go, closes it with its own button, and stops if it's still there.",
+      "close": "/^(close|dismiss)/i",
+      "waitS": 60
+    }
+  ]
 }

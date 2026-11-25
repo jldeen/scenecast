@@ -12,6 +12,9 @@
   const norm = s => (s || '').replace(/\s+/g, ' ').trim();
   const ids = new WeakMap(); let nextId = 0;
   const idOf = n => { if (!ids.has(n)) ids.set(n, ++nextId); return ids.get(n); };
+  // Each candidate's element (and the recorded target it's hovered on), so its position can be read again just
+  // before the pointer goes there: a page that moved since (a banner on top) would otherwise be hovered off target.
+  const byId = new Map();
   // Attributes that change with focus and keyboard bookkeeping, not with what's on screen.
   const IGN = /^(aria-describedby|aria-labelledby|aria-owns|aria-controls|aria-activedescendant|tabindex|data-tabster|data-tabster-dummy|data-keyboard-nav|data-fui-focus-visible|data-fui-focus-within|data-focus-visible-added|data-is-focusable|data-d1-.+)$/;
   const SKIP = new Set(['script', 'style', 'link', 'noscript', 'template', 'meta']);
@@ -196,12 +199,40 @@
         // A control that holds a recorded hover's target is hovered on that target (a pane around the words recorded).
         let px = x, py = y;
         const held = mine.map(([t]) => t).find(t => t !== owner && owner.contains(t));
-        if (held && !mine.some(([t]) => t === owner || t.contains(owner))) { const r2 = held.getBoundingClientRect(); const hx = Math.round(r2.x + Math.min(r2.width / 2, 40)), hy = Math.round(r2.y + r2.height / 2); if (r2.width > 0 && hx > 0 && hy > 0 && hx < innerWidth - 1 && hy < innerHeight - 1 && owner.contains(document.elementFromPoint(hx, hy))) { px = hx; py = hy; } }
+        let on = null;
+        if (held && !mine.some(([t]) => t === owner || t.contains(owner))) { const r2 = held.getBoundingClientRect(); const hx = Math.round(r2.x + Math.min(r2.width / 2, 40)), hy = Math.round(r2.y + r2.height / 2); if (r2.width > 0 && hx > 0 && hy > 0 && hx < innerWidth - 1 && hy < innerHeight - 1 && owner.contains(document.elementFromPoint(hx, hy))) { px = hx; py = hy; on = held; } }
+        byId.set(id, { el: new WeakRef(owner), on: on ? new WeakRef(on) : null });
         out.push({ x: px, y: py, id, sel: s.sel, text, ...(fl.length ? { floor: fl } : {}) });
       }
       return out;
     },
     markDone(id) { H.done.add(id); },
+    // Where candidate c ({ id, sel, text, x, y }) is now: its element's point if it's still there and on top, else
+    // once the nearest visible control of the same kind and words. { x, y, how: same | moved | refound } or null.
+    pos(c) {
+      const at = el => {
+        if (!el || !el.isConnected || !visible(el)) return null;
+        const r = el.getBoundingClientRect(), x = Math.round(r.x + Math.min(r.width / 2, 40)), y = Math.round(r.y + r.height / 2);
+        if (x < 1 || y < 1 || x > innerWidth - 2 || y > innerHeight - 2) return null;
+        const hit = document.elementFromPoint(x, y);
+        return hit && (el === hit || el.contains(hit)) ? { x, y } : null;
+      };
+      const ent = byId.get(c.id);
+      const now = (ent && ent.on && at(ent.on.deref())) || (ent && at(ent.el.deref()));
+      if (now) return { ...now, how: now.x === c.x && now.y === c.y ? 'same' : 'moved' };
+      let best = null, bd = Infinity;
+      for (const el of document.querySelectorAll(INTERACTIVE)) {
+        const sp = specOf(el);
+        if (sp.sel !== c.sel || (sp.text || sp.textStarts || '').slice(0, 60) !== c.text) continue;
+        const q = at(el);
+        if (!q) continue;
+        const d = Math.hypot(q.x - c.x, q.y - c.y);
+        if (d < bd) { bd = d; best = { ...q, el }; }
+      }
+      if (!best) return null;
+      byId.set(c.id, { el: new WeakRef(best.el), on: null });
+      return { x: best.x, y: best.y, how: 'refound' };
+    },
     // What the hover at (x, y) changed, split into in-place changes and portals. Parts to serialize get
     // data-d1-hpart="N"; unmark() takes the marks off again.
     result(x, y) {
@@ -278,9 +309,16 @@
       if (!e) return null;
       e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       e.setAttribute('data-d1-ctl', '');
-      H.ctl = e;
+      H.ctl = e; H.ctlSpec = m;
       const r = e.getBoundingClientRect();
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), rect: rect(e), spec: specOf(e), attrs: Object.fromEntries([...e.attributes].filter(a => !/^(class|style|data-d1-.*|id)$/.test(a.name)).map(a => [a.name, a.value.slice(0, 200)])) };
+    },
+    // The marked control's point now (it may have moved since markCtl), or null when it's gone.
+    ctlPos() {
+      const e = H.ctl;
+      if (!e || !e.isConnected || !visible(e)) return null;
+      const r = e.getBoundingClientRect();
+      return r.width > 2 ? { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), rect: rect(e) } : null;
     },
     // What's on screen that wasn't at rest (ignoring things that aren't visible).
     visibleOpsList() { const keep = H._vis(); return keep.map(o => o.kind + ' ' + (o.host && o.host.nodeType === 1 ? o.host.localName + '.' + (o.host.getAttribute('role') || '') + (o.host.getAttribute('data-tid') ? '[' + o.host.getAttribute('data-tid') + ']' : '') : '') + ' ' + (o.set ? JSON.stringify(o.set).slice(0, 160) : o.kind === 'add' && o.host.nodeType === 1 ? o.host.outerHTML.slice(0, 200) : o.rest ? (o.rest.outerHTML || o.rest.data || '').slice(0, 160) : o.host && o.host.data)); },
