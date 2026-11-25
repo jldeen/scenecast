@@ -626,7 +626,7 @@ OPS.recordStart = async c => {
   if (REC.on) return { error: 'already recording' };
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
-  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {} });
+  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {}, openFp: {}, putBack: [], unrestored: null });
   REC.parallel = !!c.parallel;
   if (c.resume) return recResume(c);
   // Every app's tab, or nothing starts: which aren't open, all at once.

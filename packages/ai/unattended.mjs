@@ -302,7 +302,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const restoreStopRun = (u, at = null) => {
     const say = `${u.state}: after its ${u.after}, the screen wasn't as saved (${u.found}), and a reload didn't put it back (${u.left}). Check that app's tab, then start again.`;
     run.stopped = { kind: 'put-back', why: say, app: u.app || null, saving: null, picture: u.pictureAfter || u.picture || null, ...(at ? { at } : {}) };
-    run.needsYou.push({ text: u.state, why: say, picture: run.stopped.picture });
+    run.needsYou.push({ text: `${u.app || 'An app'}: a screen its side paths changed`, why: say, picture: run.stopped.picture });
     emit({ event: 'stopped', ...run.stopped });
   };
   // Notices (capNotices): a save that waits for one, closes it, or stops before it's kept.
