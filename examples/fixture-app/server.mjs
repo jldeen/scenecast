@@ -329,7 +329,10 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         extras('fix' | 'stuck'): a side section outside the chips screens (Projects, expanded, with its list) whose
 //         Peek button collapses it on hover; Chips one also has four menus (Menu A–D, each opening a menu that Escape
 //         closes) and a Dud menu that opens nothing; Chips two has a Help button whose hover opens a Help pane that
-//         Escape doesn't close ('stuck': it's kept in the tab's session, so a reload draws it again).
+//         Escape doesn't close ('stuck': it's kept in the tab's session, so a reload draws it again). Each chips
+//         screen has its own title ("Chips one | Fixture Tasks"), the side section a "Chips one" button that goes
+//         back there, and Chips one an "Elsewhere" menu that swaps the screen for another at the same address (as
+//         Teams' conversations do).
 //         Chips three always has an avatar ("Profile picture of Pat Doe.") whose people card shows after 0.3 s.
 //         notice('close' | 'stuck'): 0.3 s after Chips is clicked, Teams' "Loading latest updates…" notice comes on top
 //         of the page and stays, with its own Close button ('close') or none ('stuck').
@@ -339,7 +342,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
 //         API undo that has to go from that frame.
 // The chips screens (main's markup), drawn in place by the tasks page, as an app's in-page routes are.
-const chipsPart = (n, moving = false, extras = null) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && extras ? `<p class="menus">${['A', 'B', 'C', 'D'].map(x => `<button class="mb" aria-haspopup="menu" aria-expanded="false">Menu ${x}</button>`).join('')}<button aria-haspopup="menu">Dud menu</button></p>` : ''}${n === 2 && extras ? '<p><button id="helpb">Help</button></p>' : ''}${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
+const chipsPart = (n, moving = false, extras = null) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && extras ? `<p class="menus">${['A', 'B', 'C', 'D'].map(x => `<button class="mb" aria-haspopup="menu" aria-expanded="false">Menu ${x}</button>`).join('')}<button aria-haspopup="menu">Dud menu</button><button aria-haspopup="menu" id="away">Elsewhere</button></p>` : ''}${n === 2 && extras ? '<p><button id="helpb">Help</button></p>' : ''}${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button><button id="pat" aria-label="Profile picture of Pat Doe.">PD</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
 const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null, extras = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
@@ -379,13 +382,15 @@ if ($('chipsbtn')) {
     if (EXTRAS) {
       // The side section, outside the chips screens (it stays as they change), and what each extra does.
       if (!$('xside')) {
-        document.body.insertAdjacentHTML('afterbegin', '<aside aria-label="Side" id="xside"><button id="peek">Peek</button> <button id="fold" aria-expanded="true">Projects</button><ul id="xlist"><li>Alpha</li><li>Beta</li></ul></aside>');
+        document.body.insertAdjacentHTML('afterbegin', '<aside aria-label="Side" id="xside"><button id="peek">Peek</button> <button id="fold" aria-expanded="true">Projects</button><ul id="xlist"><li>Alpha</li><li>Beta</li></ul><button id="goone">Chips one</button></aside>');
+        $('goone').addEventListener('click', () => show(1));
         $('peek').addEventListener('mouseenter', () => { $('fold').setAttribute('aria-expanded', 'false'); $('xlist').hidden = true; });
         $('fold').addEventListener('click', () => { const open = $('fold').getAttribute('aria-expanded') !== 'true'; $('fold').setAttribute('aria-expanded', String(open)); $('xlist').hidden = !open; });
       }
       const pane = () => { if ($('xpane')) return; document.body.insertAdjacentHTML('beforeend', '<section aria-label="Help pane" id="xpane">Help pane text</section>'); if (EXTRAS === 'stuck') sessionStorage.setItem('fx-pane', '1'); };
       if (EXTRAS === 'stuck' && sessionStorage.getItem('fx-pane')) pane();
       if ($('helpb')) $('helpb').addEventListener('mouseenter', pane);
+      if ($('away')) $('away').addEventListener('click', () => { document.querySelector('main').innerHTML = '<h1>Elsewhere</h1><p>Somewhere else</p>'; document.title = 'Elsewhere | Fixture Tasks'; });
       document.querySelectorAll('.mb').forEach(b => b.addEventListener('click', () => {
         const open = b.getAttribute('aria-expanded') === 'true';
         document.querySelectorAll('.fxm').forEach(m => m.remove()); document.querySelectorAll('.mb').forEach(x => x.setAttribute('aria-expanded', 'false'));
@@ -405,7 +410,7 @@ if ($('chipsbtn')) {
       new MutationObserver(() => { if (d.hasAttribute('data-d1-ctl')) setTimeout(() => banner('banner2'), 40); }).observe(d, { attributes: true, attributeFilter: ['data-d1-ctl'] });
     }
   };
-  const show = (n, push = true) => fetch('/chips-part/' + n).then(r => r.text()).then(h => { document.querySelector('main').innerHTML = h; if (push) history.pushState({}, '', '/chips/' + n); bind(); });
+  const show = (n, push = true) => fetch('/chips-part/' + n).then(r => r.text()).then(h => { document.querySelector('main').innerHTML = h; if (push && location.pathname !== '/chips/' + n) history.pushState({}, '', '/chips/' + n); if (EXTRAS) document.title = 'Chips ' + ['', 'one', 'two', 'three'][n] + ' | Fixture Tasks'; bind(); });
   $('chipsbtn').addEventListener('click', () => show(1));
   // Teams' notice, a moment after the click, on top of the page; its own Close button takes it away.
   const NOTICE = ${JSON.stringify(notice)};

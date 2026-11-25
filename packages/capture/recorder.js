@@ -140,7 +140,44 @@ const OPEN_STATE = () => {
   const panes = uniq([...document.querySelectorAll('aside,[role=complementary],[role=region][aria-label],section[aria-label]')].filter(vis).map(e => (e.getAttribute('role') || e.localName) + ': ' + (e.getAttribute('aria-label') || '').replace(/\d+/g, '#')));
   const expanded = uniq([...document.querySelectorAll('[aria-expanded]')].filter(vis).map(e => nm(e) + '=' + e.getAttribute('aria-expanded')));
   const h = document.querySelector('h1,[role=heading][aria-level="1"]');
-  return { overlays, panes, expanded, title: document.title, heading: h ? (h.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80) : null };
+  return { overlays, panes, expanded, title: document.title, heading: h ? (h.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80) : null, path: location.origin + location.pathname, href: location.href };
+};
+// A screen's title as a key: an unread count in front and numbers aside ("(3) Chat | Procurement | Supply alerts").
+const titleKey = t => String(t || '').replace(/^\(\d+\)\s*/, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+// Back on a saved screen (want: OPEN_STATE's path, href and title) after a side path left it, or a reload landed
+// elsewhere (Teams opens its last conversation; its address never changes): its address again when that's what
+// differs, then the control its title names, most specific part first ("Supply alerts" for "Chat | Procurement |
+// Supply alerts | Microsoft Teams"), clicked as a person would. The recorder steps aside. → true once it's there.
+H.reland = async (p, want) => {
+  if (!want || !want.title) return true;
+  const here = () => p.mainFrame().evaluate(() => ({ path: location.origin + location.pathname, title: document.title })).catch(() => null);
+  const there = h => !!h && titleKey(h.title) === titleKey(want.title) && (!want.path || h.path === want.path);
+  let h = await here();
+  if (there(h)) return true;
+  if (h && want.path && h.path !== want.path && want.href) {
+    await p.goto(want.href, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    await recInstall(p); await recSetOff(p, true); await recSettle(p, 900, 20000);
+    h = await here();
+    if (there(h)) return true;
+  }
+  const parts = String(want.title).replace(/^\(\d+\)\s*/, '').split(/\s+[|·–—]\s+/).map(x => x.trim()).filter(Boolean);
+  for (const part of parts.slice(0, -1).reverse()) {
+    for (let i = 0; i < 10; i++) {
+      const pt = await p.mainFrame().evaluate(name => {
+        const vis = e => { const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > innerHeight) return null; const cs = getComputedStyle(e); return cs.visibility !== 'hidden' && cs.display !== 'none' ? r : null; };
+        const own = e => (e.getAttribute('aria-label') || (e.innerText || '')).replace(/\s+/g, ' ').trim();
+        for (const sel of ['[role=treeitem]', '[role=tab],[role=option]', 'a[href],[role=link]', 'button,[role=button]']) for (const e of document.querySelectorAll(sel)) { if (own(e) !== name) continue; const r = vis(e); if (r) return { x: r.x + Math.min(r.width / 2, 60), y: r.y + r.height / 2 }; }
+        return null;
+      }, part).catch(() => null);
+      if (!pt) { await sleep(1000); continue; }
+      await p.mouse.click(pt.x, pt.y);
+      await sleep(1500); await recSettle(p, 900, 15000);
+      h = await here();
+      if (there(h)) { rlogr(`back on "${want.title}" (by "${part}")`); return true; }
+      break;
+    }
+  }
+  return there(await here());
 };
 // What a screen has now that its saved state didn't: overlays opened, panes opened or closed, controls whose
 // expanded state flipped (only ones on both). null when it's as saved.
@@ -149,9 +186,10 @@ function recOpenDiff(want, now) {
   const opened = now.overlays.filter(x => !want.overlays.includes(x));
   const panesIn = now.panes.filter(x => !want.panes.includes(x)), panesOut = want.panes.filter(x => !now.panes.includes(x));
   const was = new Map(want.expanded.map(x => [x.replace(/=(true|false)$/, ''), x])), flipped = now.expanded.filter(x => { const k = x.replace(/=(true|false)$/, ''); return was.has(k) && was.get(k) !== x; });
-  return opened.length || panesIn.length || panesOut.length || flipped.length ? { opened, panesIn, panesOut, flipped } : null;
+  const moved = (want.path && now.path && want.path !== now.path) || (want.title !== undefined && titleKey(want.title) !== titleKey(now.title)) ? [`${want.title} → ${now.title}`] : [];
+  return moved.length || opened.length || panesIn.length || panesOut.length || flipped.length ? { moved, opened, panesIn, panesOut, flipped } : null;
 }
-const recOpenSay = d => [d.opened.length ? `open: ${d.opened.join('; ')}` : '', d.panesIn.length ? `pane opened: ${d.panesIn.join('; ')}` : '', d.panesOut.length ? `pane closed: ${d.panesOut.join('; ')}` : '', d.flipped.length ? `changed: ${d.flipped.join('; ')}` : ''].filter(Boolean).join(' | ');
+const recOpenSay = d => [(d.moved || []).length ? `another screen: ${d.moved.join('; ')}` : '', d.opened.length ? `open: ${d.opened.join('; ')}` : '', d.panesIn.length ? `pane opened: ${d.panesIn.join('; ')}` : '', d.panesOut.length ? `pane closed: ${d.panesOut.join('; ')}` : '', d.flipped.length ? `changed: ${d.flipped.join('; ')}` : ''].filter(Boolean).join(' | ');
 // After a side path, and at the end of a screen's sweep: the screen must be as it was saved. Closed (Escape, then each
 // control whose expanded state flipped, flipped back), else the tab reloaded and the screen landed again (its title and
 // first heading), else nothing more is saved: the next save stops (REC.unrestored, with a picture).
@@ -171,6 +209,8 @@ async function recPutBack(A, state, after) {
 }
 async function recPutBackOff(A, state, after, want, d, first, fix, now, pic) {
   const p = A.page;
+  // Another screen: back on it first (its address, else the control its title names).
+  if (d && d.moved.length) { await H.reland(p, want); d = recOpenDiff(want, await now()); }
   for (let i = 0; i < 2 && d && (d.opened.length || d.panesIn.length); i++) { await p.keyboard.press('Escape').catch(() => {}); await sleep(500); d = recOpenDiff(want, await now()); }
   if (d && d.flipped.length) {
     await p.mainFrame().evaluate(keys => { const nm = e => (e.getAttribute('aria-label') || e.getAttribute('title') || (e.innerText || '').replace(/\s+/g, ' ').trim()).replace(/\d+/g, '#').slice(0, 60); for (const e of document.querySelectorAll('[aria-expanded]')) if (keys.includes(nm(e) + '=' + e.getAttribute('aria-expanded'))) e.click(); }, d.flipped).catch(() => {});
@@ -179,9 +219,10 @@ async function recPutBackOff(A, state, after, want, d, first, fix, now, pic) {
   if (!d) { fix.how = 'closed'; (REC.putBack = REC.putBack || []).push(fix); rlogr(`${state}: after ${after}, put back (${first})`); return true; }
   await p.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
   await recInstall(p); await recSetOff(p, true); await recSettle(p, 900, 20000);
+  await H.reland(p, want);
   const n2 = await now();
   d = recOpenDiff(want, n2);
-  if (!d && n2 && n2.title === want.title && n2.heading === want.heading) { fix.how = 'reloaded'; (REC.putBack = REC.putBack || []).push(fix); rlogr(`${state}: after ${after}, put back by a reload (${first})`); return true; }
+  if (!d && n2) { fix.how = 'reloaded'; (REC.putBack = REC.putBack || []).push(fix); rlogr(`${state}: after ${after}, put back by a reload (${first})`); return true; }
   fix.how = 'stopped'; fix.left = d ? recOpenSay(d) : `it landed elsewhere (${n2 ? n2.title : 'no page'})`; fix.after = after; fix.pictureAfter = await pic('after-reload');
   (REC.putBack = REC.putBack || []).push(fix);
   REC.unrestored = fix;
@@ -502,11 +543,13 @@ async function recAuto(A) {
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
   // The recording's menus are a floor too: clicked whatever the cap or the time, before the ones the audit picks.
   const fc = inFrame => F && F.clicks ? { floorClicks: F.clicks(A.id, inFrame), floorShot: name => F.shot(A.page, name) } : {};
-  if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)], ...fc(false) });
+  // The clicks the demo's build dropped (its flow's clickPages drop: a click that goes elsewhere): never clicked again.
+  const dropped = () => F && F.dropped ? F.dropped(A.id) : [];
+  if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id), ...dropped()], reland: (REC.openFp || {})[state] || null, ...fc(false) });
   for (const [i, fu] of f.frames.entries()) {
     const frameRe = '^' + fu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (o.hovers) await run('hovers', hv({ frameRe, page: `${state}-frame${i}`, skipKeys: [...recSeen('hovers', A.id + fu)] }));
-    if (o.clicks) await run('clicks', { frameRe, page: `${state}-frame${i}`, pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id + fu)], ...fc(true) });
+    if (o.clicks) await run('clicks', { frameRe, page: `${state}-frame${i}`, pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id + fu), ...dropped()], reland: (REC.openFp || {})[state] || null, ...fc(true) });
   }
   if (o.zoom && need('zoom') && await run('zoom', { zooms: o.zooms || REC.zooms })) ran('zoom');
   if (o.lists && f.list) await run('list');

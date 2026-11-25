@@ -74,13 +74,26 @@ async function settle(maxMs = 3000) {
   while (Date.now() - s < maxMs) { await H.poll(150); const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500) break; }
 }
 const vis = () => ev(() => window.__d1h.visibleOps());
+// Back on the screen the audit is on (ARGS.reland, the saved screen: its address and title) after a reload or a click
+// that went elsewhere (Teams opens its last conversation, its address unchanged): out.relanded / out.lost.
+const reland = async () => {
+  if (!ARGS.reland || !H.reland) return true;
+  const ok = await H.reland(p, ARGS.reland).catch(() => false);
+  if (ok) out.relanded = (out.relanded || 0) + 1; else out.lost = (out.lost || 0) + 1;
+  return ok;
+};
+const titleKey = t => String(t || '').replace(/^\(\d+\)\s*/, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+const titleNow = () => p.mainFrame().evaluate(() => document.title).catch(() => '');
+// After a reload, a new page helper: the page's own churn learned again (else every click after it reads as stuck).
+const relearn = async () => { await move(...NEUTRAL); await quiet(400, 3000); await ev(() => window.__d1h.takeRest()); await sleep(1000); await ev(() => window.__d1h.noise()); };
 async function backToRest() {
   // Reload as a last resort (the page's own state, nothing in the tenant).
   await p.goto(url0, { waitUntil: 'domcontentloaded' }); await sleep(ARGS.reloadWaitMs || 9000);
   // Teams opens the last conversation after a reload: back to the channel the audit was on.
   if (ARGS.reopenText) { for (let i = 0; i < 30; i++) { const el = p.getByText(ARGS.reopenText, { exact: true }).first(); if (await el.isVisible().catch(() => false)) { const b = await el.boundingBox(); await p.mouse.click(b.x + b.width / 2, b.y + b.height / 2); await sleep(5000); break; } await sleep(1000); } }
+  await reland();
   f = await pickFrame(); off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox();
-  await install(); await move(...NEUTRAL); await quiet(400, 3000);
+  await install(); await relearn();
 }
 
 const floorShot = async name => ARGS.floorShot ? ARGS.floorShot(`click-${ARGS.page}-${name}`).catch(() => null) : null;
@@ -110,13 +123,15 @@ for (const c of controls) {
       await sleep(100); await ev(() => window.__d1h.takeRest());
       Object.assign(ctl, again); r.refound = true; out.refound = (out.refound || 0) + 1;
     } else if (now.x !== ctl.x || now.y !== ctl.y) { Object.assign(ctl, now); r.moved = true; out.moved = (out.moved || 0) + 1; }
-    const urlBefore = p.url();
+    const urlBefore = p.url(), titleBefore = titleKey(await titleNow());
     await move(ctl.x, ctl.y, 3); await sleep(120);
     await p.mouse.down(); await sleep(60); await p.mouse.up();
     const tc = Date.now();
     await sleep(150); await move(...NEUTRAL); await settle(c.settleMs || 3000);
     r.ms = Date.now() - tc;
-    if (p.url() !== urlBefore) { r.navigated = p.url().slice(0, 120); await p.goto(urlBefore, { waitUntil: 'domcontentloaded' }); await sleep(8000); f = await pickFrame(); await install(); out.results.push(r); continue; }
+    if (p.url() !== urlBefore) { r.navigated = p.url().slice(0, 120); if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'it went to another screen', picture: await floorShot(`${c.floor.id}-elsewhere`) }; await p.goto(urlBefore, { waitUntil: 'domcontentloaded' }); await sleep(8000); await reland(); f = await pickFrame(); off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox(); await install(); await relearn(); out.results.push(r); continue; }
+    // Another screen at the same address (an app's own route: its title says where): back where the audit was.
+    { const tn = await titleNow(); if (ARGS.reland && titleKey(tn) !== titleBefore) { r.navigated = 'title: ' + String(tn).slice(0, 120); if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'it went to another screen', picture: await floorShot(`${c.floor.id}-elsewhere`) }; if (!(await reland())) await backToRest(); else { f = await pickFrame(); off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox(); await install(); await relearn(); } out.results.push(r); continue; } }
     r.visible = await vis();
     const res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
     if (!res || !r.visible) { r.effect = 'none'; if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'nothing opened', picture: await floorShot(c.floor.id) }; await ev(() => window.__d1h.unmark()); out.results.push(r); continue; }

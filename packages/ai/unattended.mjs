@@ -109,17 +109,33 @@ export function reachedPages(demo, plan, steps, apps) {
   try { w = walkerFromDemo(demo); } catch (e) { return null; }
   if (!w) return null;
   const reached = new Set(), cur = {};
-  for (const app of apps) { try { const s0 = w.start(app); if (s0 && s0.sig) { cur[app] = s0; reached.add(s0.sig); } } catch (e) {} }
+  for (const app of apps) { try { const s0 = w.start(app), id = typeof s0 === 'string' ? s0 : s0 && s0.sig; if (id) { cur[app] = id; reached.add(id); } } catch (e) {} }
   for (const st of steps || []) {
     const step = (((plan.beats || [])[st.beat] || {}).steps || [])[st.step], app = st.app;
     if (!step || !app || !cur[app] || step.kind === 'app') continue;
     try { const r = w.recorded(cur[app], step); if (r && r.screen && r.screen.sig && r.landed !== false) { cur[app] = r.screen; reached.add(r.screen.sig); } } catch (e) {}
   }
-  return { reached, known: new Set(w.states || []) };
+  // A hover or click page is its screen's (the flow's hoverPages and clickPages: a page's base is a snapshot, the
+  // state whose snapshot it is): "cop-task" → cop-payoff-1 → cop-payoff.
+  const flow = w.flow || {}, bySnap = {};
+  for (const [id, st] of Object.entries(flow.states || {})) bySnap[(st && st.snap) || id] = id;
+  const state = {};
+  for (const hp of [...(flow.hoverPages || []), ...(flow.clickPages || [])]) if (hp && hp.page) state[hp.page] = bySnap[hp.base] || hp.base;
+  return { reached, known: new Set(w.states || []), state };
 }
 const pageBase = p => String(p || '').replace(/-(frame\d+|again)$/, '');
+const pageState = (p, reach) => { const b = pageBase(p); return (reach.state && reach.state[b]) || b; };
 // Recorded only on screens the recording knows and the run never reached.
-const unreached = (pages, reach) => !!reach && pages.length > 0 && pages.every(p => reach.known.has(pageBase(p)) && !reach.reached.has(pageBase(p)));
+const unreached = (pages, reach) => !!reach && pages.length > 0 && pages.every(p => reach.known.has(pageState(p, reach)) && !reach.reached.has(pageState(p, reach)));
+// The clicks the demo's build dropped, per app (its flow's clickPages drop: a click that goes elsewhere, as Teams'
+// " Bot Available"). → { <app>: [name] }
+export function droppedClicks(demo, apps) {
+  let flow = null;
+  try { flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8')); } catch (e) { return {}; }
+  const out = {};
+  for (const cp of (flow && flow.clickPages) || []) if (cp && apps.includes(cp.app)) for (const n of [].concat(cp.drop || [])) if (typeof n === 'string' && n && !(out[cp.app] = out[cp.app] || []).includes(n)) out[cp.app].push(n);
+  return out;
+}
 // Each recorded menu after a run, from its app's click audits (capHoverFloor's clickLog): captured (a sweep opened it),
 // missed (it was on a screen and nothing opened, or it couldn't be clicked), not reached (its screen never was), or
 // gone (on no screen the run swept). → [{ app, id, name, page, status, found?, why?, picture?, screen? }]
@@ -409,11 +425,12 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     }
     // The recording's hovers as a floor: never skipped by what the sweep learns, each tried twice.
     // And its menus: clicked whatever the cap or the time, put back their recorded way.
-    if (recHovers.length || recClicks.length) {
+    const drops = droppedClicks(demo, [...inPlan]);
+    if (recHovers.length || recClicks.length || Object.keys(drops).length) {
       const byApp = {}, menus = {};
       for (const h of recHovers) (byApp[h.app] = byApp[h.app] || []).push({ id: h.id, anchor: h.anchor, scope: h.scope, rect: h.rect, card: h.card });
       for (const m of recClicks) (menus[m.app] = menus[m.app] || []).push(m);
-      const on = await cmd('capHoverFloor', { apps: byApp, clicks: menus, shots: stops }, 30).catch(() => ({ on: false }));
+      const on = await cmd('capHoverFloor', { apps: byApp, clicks: menus, drop: drops, shots: stops }, 30).catch(() => ({ on: false }));
       if (on.on && recHovers.length) run.hovers = { recorded: recHovers.length };
       if (on.on && recClicks.length) run.menus = { recorded: recClicks.length };
     }

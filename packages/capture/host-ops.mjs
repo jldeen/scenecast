@@ -513,8 +513,10 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
         // The recording's menus (c.clicks: { <app>: [{ id, name, ctl, ctlRect, restore, frame }] }): a floor too.
         const okc = f => f && typeof f.id === 'string' && typeof f.name === 'string' && f.ctl && typeof f.ctl.sel === 'string';
         const menus = Object.fromEntries(Object.entries(c.clicks || {}).map(([id, fs]) => [id, [].concat(fs || []).filter(okc).map(f => ({ id: f.id, name: f.name, ctl: f.ctl, ...(f.ctlRect ? { ctlRect: f.ctlRect } : {}), restore: f.restore || null, frame: f.frame || null }))]).filter(([, fs]) => fs.length));
-        if (!Object.keys(apps).length && !Object.keys(menus).length) { floor = null; globalThis.__stuntdoubleHoverFloor = undefined; return { on: false }; }
-        floor = { apps, menus, shots: c.shots || null, log: [], clickLog: [] };
+        // The clicks the demo's build dropped (c.drop: { <app>: [name] }): the sweep's own picks leave them out.
+        const drop = Object.fromEntries(Object.entries(c.drop || {}).map(([id, ns]) => [id, [].concat(ns || []).filter(n => typeof n === 'string' && n)]).filter(([, ns]) => ns.length));
+        if (!Object.keys(apps).length && !Object.keys(menus).length && !Object.keys(drop).length) { floor = null; globalThis.__stuntdoubleHoverFloor = undefined; return { on: false }; }
+        floor = { apps, menus, drop, shots: c.shots || null, log: [], clickLog: [] };
         const shot = async (p, name) => {
           if (!floor || !floor.shots || !p) return null;
           try { const f = `${floor.shots}/hover-missed-${String(name).replace(/[^\w.-]+/g, '-')}.png`; mkdirSync(floor.shots, { recursive: true }); writeFileSync(f, await p.screenshot({ timeout: 30000 })); return f; } catch (e) { return null; }
@@ -534,7 +536,8 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
         };
         // A picture of a screen by name (the recorder's put-back: what was left open).
         const pic = async (p, name) => { if (!floor || !floor.shots || !p) return null; try { const f = `${floor.shots}/${String(name).replace(/[^\w.-]+/g, '-')}.png`; mkdirSync(floor.shots, { recursive: true }); writeFileSync(f, await p.screenshot({ timeout: 30000 })); return f; } catch (e) { return null; } };
-        globalThis.__stuntdoubleHoverFloor = { keys, clicks, pic, seen: e => { if (floor) floor.log.push({ at: at(), ...e }); }, seenClicks: e => { if (floor) floor.clickLog.push({ at: at(), ...e }); }, shot, match: cardMatch };
+        const dropped = app => (floor && floor.drop[app]) || [];
+        globalThis.__stuntdoubleHoverFloor = { keys, clicks, dropped, pic, seen: e => { if (floor) floor.log.push({ at: at(), ...e }); }, seenClicks: e => { if (floor) floor.clickLog.push({ at: at(), ...e }); }, shot, match: cardMatch };
         log(`hover floor on: ${Object.entries(apps).map(([id, ks]) => `${id} ${ks.length}`).join(', ')}${Object.keys(menus).length ? `; menus: ${Object.entries(menus).map(([id, ks]) => `${id} ${ks.length}`).join(', ')}` : ''}`);
         return { on: true, apps: Object.fromEntries(Object.entries(apps).map(([id, ks]) => [id, ks.length])), menus: Object.fromEntries(Object.entries(menus).map(([id, ks]) => [id, ks.length])) };
       }
