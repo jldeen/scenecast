@@ -279,16 +279,22 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   Each is found as a hover is (its selector, then without the name its label holds, as Teams' profile button's status
   changes, then by its name, nearest the recorded spot; its point read again just before the click), clicked whatever
   `auto.clickMax` or the time, captured, and put back its recorded way. The heuristic picks that aren't recorded keep
-  the cap and what's left of the budget. After the run each is captured, missed (it was there and nothing opened, or
-  it couldn't be clicked: under Needs you, "Open "<name>" (<app>)", with a picture), gone or not reached. run.json:
-  `menus` (the list and the counts, next to `hovers`).
+  the cap and what's left of the budget, and leave out the clicks the demo's build dropped (its flow's `clickPages`
+  `drop`: Teams' " Bot Available" opens a chat). After the run each is captured, missed (it was there and nothing
+  opened, it went to another screen, or it couldn't be clicked: under Needs you, "Open "<name>" (<app>)", with a
+  picture), gone or not reached. run.json: `menus` (the list and the counts, next to `hovers`).
 - **Each screen put back.** After each kind of side path, and at the end of a screen's sweep, the screen must be as it
-  was saved: no menu, dialog, listbox or popover opened, no pane (an aside, a complementary or named region or section)
-  opened or closed, no expander flipped (Copilot's "Collapse sidebar", admin's Cloud Shell pane). Not a raw signature:
-  admin's grid order changes on every load. What differs is closed (Escape, then each flipped control flipped back,
-  the recorder stepping aside so neither is a step of hers), else the tab is reloaded and the screen lands again (its
-  title and first heading), else nothing more is saved: the run stops before its next save, with pictures before and
-  after, and lists it for her. The recording: `putBack` (each screen, after what, what it found, and how it was put
+  was saved: the same screen (its address, and its title, an unread count and numbers aside: Teams' address never
+  changes, its title names the conversation), no menu, dialog, listbox or popover opened, no pane (an aside, a
+  complementary or named region or section) opened or closed, no expander flipped (Copilot's "Collapse sidebar",
+  admin's Cloud Shell pane). Not a raw signature: admin's grid order changes on every load. Another screen is left
+  first: its address again, else the control its title names, most specific part first ("Supply alerts" for "Chat |
+  Procurement | Supply alerts | Microsoft Teams"). What else differs is closed (Escape, then each flipped control
+  flipped back, the recorder stepping aside so neither is a step of hers), else the tab is reloaded and gets back on
+  the screen the same way, else nothing more is saved: the run stops before its next save, with pictures before and
+  after, and lists it for her. The click audit does the same after each reload and after a click that changes the
+  title at the same address, and learns the page's own churn again after a reload (else every click after it reads
+  as stuck). The recording: `putBack` (each screen, after what, what it found, and how it was put
   back); run.json: `stopped.kind: 'put-back'`.
 - **A page that moves while it's swept** (a banner on top, a list that loads): every hover and every click reads its
   control's point again just before the pointer goes there, and uses where it is now; one that has gone from there is
