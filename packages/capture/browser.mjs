@@ -35,7 +35,7 @@ import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSyn
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
-import { fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
+import { fencePath, fenced } from '@stuntdouble/core/lib/test-fence.mjs';
 import { fetchEveryTarget } from './fetch-all.mjs';
 import { filterBody } from './leave-out.mjs';
 
@@ -285,6 +285,8 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     writeFileSync(join(dir, 'Default', 'Preferences'), JSON.stringify({
       browser: { has_seen_welcome_page: true, check_default_browser: false },
       ...(throwaway && zoom !== 1 ? { partition: { default_zoom_level: { x: Math.log(zoom) / Math.log(1.2) } } } : {}),
+      // A test's downloads (a fixture's download link) stay in its own profile, never in a person's Downloads.
+      ...(throwaway || fenced() ? { download: { default_directory: join(dir, 'Downloads'), prompt_for_download: false } } : {}),
     }));
   }
   // macOS single sign-on (Chrome's Extensible Enterprise SSO). It offers the Mac's own work accounts to every sign-in

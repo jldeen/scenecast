@@ -660,6 +660,30 @@ try {
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
 
+  // 1l · Links that leave the page but load nothing: a download and a link answering 204. The page says it's being
+  // left (beforeunload) and stays, so the recorder waited navWaitS (30 s) for a page that never came, and, the page
+  // still marked, again on every later step on it. Each now settles on the page as it is, and the in-page click
+  // after it in normal time, with no screen lost or duplicated.
+  { writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Links that load nothing\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Get the file"\n  Lands on: "No tasks yet"\n- Click "Chips"\n  Lands on: "Chips one"\n- Click "Nothing new"\n  Lands on: "Chips one"\n- Click "Next"\n  Lands on: "Chips two"\n');
+    writeFileSync(join(DEMO, 'reset.md'), '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n');
+    tasks.deadLinks(true); tasks.chips(true); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const dr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const dj = readRun(DEMO), [dRaw, dRec] = keepRaw('dead-raw');
+    const snapText = id => { try { return JSON.parse(readFileSync(join(dRaw, 'snaps', `${(dRec.states[id] || {}).snap || id}.json`), 'utf8')).docs.map(d => d.html).join('\n'); } catch (e) { return ''; } };
+    const states = Object.keys((dRec && dRec.states) || {}), acts = ((dRec && dRec.tl) || []).filter(x => x.what === 'action');
+    const ms = d => (acts.find(x => (x.desc || '').trim() === d) || {}).ms;
+    const one = states.filter(id => /Chips one/.test(snapText(id))), two = states.filter(id => /Chips two/.test(snapText(id)));
+    const clicks = ((dRec && dRec.path) || []).filter(x => x.click).map(x => x.checkpoint);
+    const why = { code: dr.code, error: dr.error, stopped: dj.stopped, acts: acts.map(x => [x.desc, x.ms, x.to || null, x.stayed || null]), one, two, clicks, log: ((dRec && dRec.log) || []).filter(l => /click |no new page|loaded a new page|page loads/.test(l)).map(l => l.slice(0, 200)), err: String(dr.err || '').slice(-600) };
+    check('a link that leaves the page but loads nothing (a download, a 204) settles on the page well under navWaitS', dr.code === 0 && !dj.stopped && ['Get the file', 'Nothing new'].every(d => ms(d) !== undefined && ms(d) < 10000), JSON.stringify(why));
+    check('and the in-page click after each settles in normal time, with no screen lost or duplicated', ['Chips', 'Next'].every(d => ms(d) !== undefined && ms(d) < 10000) && one.length === 1 && two.length === 1 && clicks.includes(one[0]) && clicks.includes(two[0]), JSON.stringify(why));
+    tasks.deadLinks(false); tasks.chips(false); tasks.seed({});
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  }
+
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
   // tenant check, and still refuses when it never does.
   const TID = '11111111-2222-3333-4444-555555555555';
