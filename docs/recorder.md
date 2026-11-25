@@ -242,10 +242,11 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   The hovers sweep learns to stop trying a kind of control that never shows anything (10 tries), and waits at most
   900 ms; on a busy computer a slow card would read as none. Each recorded hover is found on the live page as the
   replica finds it (its anchor by selector, place and words, then its scope); when its place has moved (a bare `div`
-  whose surroundings changed), by its words (an element whose own name or words are the anchor's, else start with
-  them; the innermost, nearest the recorded spot). The controls that are, hold or sit inside it are never skipped that
-  way, nor by a screen's cap or time, are hovered first, and when nothing shows are hovered once more for 2.5 s, until
-  one shows its card (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
+  whose surroundings changed), by its words, numbers aside (an element whose own name or words are the anchor's, else
+  start with them; the innermost, nearest the recorded spot; an anchor with no words, by the name in its selector).
+  The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
+  screen's cap or time: while any is left, the next one hovered is theirs. When nothing shows, each is hovered once
+  more for 2.5 s, until one shows its card (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
   shows its card: the same words, numbers aside; `hover-card.mjs`), missed (its anchor was there and its card wasn't
   captured) or gone (its anchor's words were on no screen the run swept): a missed one goes under Needs you with a
   picture of the screen (only a missed one keeps its picture). run.json: `hovers` (the list, how each anchor was

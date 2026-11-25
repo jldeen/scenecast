@@ -113,13 +113,18 @@
       const down = (e, scope) => (scope || []).reduce((x, i) => x && ekids(x)[i], e);
       const shown = e => e.getClientRects().length > 0;
       let all = null;
+      // Its words: the anchor's text, else the name its selector gives it (aria-label), compared with names only.
+      // Numbers aside ("Credits in use, 99% remaining", "Notifications, 1 unread items").
+      const nameIn = sel => { const m = /\[aria-label="((?:[^"\\]|\\.)*)"\]/.exec(sel || ''); return m ? m[1].replace(/\\(.)/g, '$1') : ''; };
+      const nw = s => norm(String(s || '').replace(/\d+(?:[.,:]\d+)*%?/g, ' '));
       const byWords = f => {
-        const t = norm(f.anchor.text !== undefined ? f.anchor.text : f.anchor.textStarts || '');
+        const text = f.anchor.text !== undefined && f.anchor.text !== '' ? f.anchor.text : f.anchor.textStarts || '';
+        const t = nw(text || nameIn(f.anchor.sel));
         if (!t) return null;
         all = all || [...document.body.querySelectorAll('*')].filter(e => !/^(script|style|noscript|template)$/.test(e.localName));
-        const own = e => norm(e.getAttribute('aria-label') || ''), words = e => norm(e.innerText);
+        const own = e => nw(e.getAttribute('aria-label') || ''), words = e => text ? nw(e.innerText) : '';
         // A cheap first cut (its first word anywhere in the element's text, or a name of its own), then the words.
-        const w0 = t.split(' ')[0];
+        const w0 = norm(text || nameIn(f.anchor.sel)).split(' ')[0];
         const near = all.filter(e => (e.getAttribute('aria-label') || '').length || (e.textContent || '').includes(w0));
         let hit = near.filter(e => shown(e) && (own(e) === t || words(e) === t));
         if (!hit.length) hit = near.filter(e => shown(e) && (own(e).startsWith(t) || words(e).startsWith(t)));
@@ -151,7 +156,8 @@
       const out = []; const seen = new Set();
       const perSel = {};
       // The recording's hovers (opt.floor), each a control's or controls' here (floorTargets). A control that is that
-      // element, holds it or is inside it is theirs (c.floor: their ids).
+      // element or is inside it is theirs, and one that holds it when it's that element's nearest control (a button
+      // around a recorded label; never a pane around the controls in it) (c.floor: their ids).
       const targets = opt.floor && opt.floor.length ? H.floorTargets(opt.floor) : [];
       for (const e of root.querySelectorAll(opt.sel || INTERACTIVE)) {
         if (!visible(e)) continue;
@@ -166,7 +172,7 @@
         seen.add(id);
         const s = specOf(owner);
         const k = s.sel + '|' + (s.in || ''), text = (s.text || s.textStarts || '').slice(0, 60);
-        const fl = targets.length ? [...new Set(targets.filter(([t]) => t === owner || t.contains(owner) || owner.contains(t)).map(([, fid]) => fid))] : [];
+        const fl = targets.length ? [...new Set(targets.filter(([t]) => t === owner || t.contains(owner) || (owner.contains(t) && t.closest(INTERACTIVE) === owner)).map(([, fid]) => fid))] : [];
         perSel[k] = (perSel[k] || 0) + 1;
         // A control the recording has a hover for is never left out for its kind's count.
         if (perSel[k] > (opt.perSel || 14) && !fl.length) continue;

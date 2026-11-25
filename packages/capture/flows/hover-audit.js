@@ -83,15 +83,16 @@ for (let step = 0; step <= steps; step++) {
     : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
   const skip = new Set(ARGS.skipKeys || []), skipSels = new Set(ARGS.skipSels || []);
   const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && (!skipSels.has(c.sel) || fl(c)));
-  // The recording's own hovers first, so a screen's cap or time never cuts them.
-  todo.sort((a, b) => +fl(b) - +fl(a));
+  // The recording's own hovers first (the next one is always one of theirs while any is left), so a screen's cap or
+  // time never cuts them.
   out.skippedKinds = (out.skippedKinds || 0) + cands.filter(c => skipSels.has(c.sel) && !fl(c)).length;
   out.skipped = (out.skipped || 0) + cands.length - todo.length;
   out.steps.push(todo.length);
   // After a control that showed nothing (not one change in the page since the rest copy), the page is still at
   // rest: straight on to the next one, without the trip back to the neutral spot.
   let atRest = false;
-  for (const c of todo) {
+  while (todo.length) {
+    const next = todo.findIndex(fl), c = todo.splice(next < 0 ? 0 : next, 1)[0];
     const key = c.sel + '|' + c.text, inFloor = fl(c);
     if (ARGS.max && out.tried >= ARGS.max && !inFloor) { out.capped = true; break; }
     (out.keys = out.keys || []).push(key);
@@ -116,7 +117,7 @@ for (let step = 0; step <= steps; step++) {
     const floorMiss = async why => {
       const picture = ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${out.tried}`).catch(() => null) : null;
       for (const id of c.floor || []) if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why };
-      out.floorTries.push({ key, ids: c.floor, result: 'nothing', retried, picture });
+      out.floorTries.push({ key, ids: c.floor, result: why === 'nothing showed' ? 'nothing' : 'unreadable', retried, picture });
       out.floorMissKeys.push(key);
     };
     // Per kind of control (its selector), how often it was tried and showed something: the recorder stops trying a
