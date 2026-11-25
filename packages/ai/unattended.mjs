@@ -59,6 +59,36 @@ export function recordedStatus(w, o) {
 const computerWord = () => process.platform === 'darwin' ? 'Mac' : process.platform === 'win32' ? 'PC' : 'computer';
 // What she reads when a save stopped on her status.
 export const ownStatusSay = (label, status) => `${label} showed you as ${status}. Start again while you're using your ${computerWord()}, with ${label} open.`;
+// The demo's recorded hovers (its build's data/snaps/hovers-<app>.json), for the apps the plan goes to: each control,
+// by the key the hovers sweep names it by ("sel|text", its anchor's), with the screens it was recorded on.
+// → [{ app, key, sel, text, pages }]
+export function recordedHovers(demo, apps) {
+  const out = new Map();
+  for (const app of apps) {
+    let d = null;
+    try { d = JSON.parse(readFileSync(join(demo.dir, 'data', 'snaps', `hovers-${app}.json`), 'utf8')); } catch (e) { continue; }
+    for (const h of Object.values((d && d.defs) || {})) {
+      const a = h && h.anchor;
+      if (!a || !a.sel) continue;
+      const text = String(a.text || a.textStarts || '').slice(0, 60), key = `${a.sel}|${text}`, k = `${app}\n${key}`;
+      if (!out.has(k)) out.set(k, { app, key, sel: a.sel, text, pages: [] });
+      if (h.page && !out.get(k).pages.includes(h.page)) out.get(k).pages.push(h.page);
+    }
+  }
+  return [...out.values()];
+}
+// Each recorded hover after a run, from what the hovers sweep said (capHoverFloor's log): captured (it showed, on any
+// screen of its app), missed (its control was there and showed nothing, or wasn't hovered), or gone (its control was on
+// no screen the run swept). → [{ app, key, text, pages, status, why?, picture? }]
+export function hoverOutcomes(recorded, log) {
+  return recorded.map(h => {
+    const seen = (log || []).filter(e => e.app === h.app && e.key === h.key);
+    const status = seen.some(e => e.shown) ? 'captured' : seen.length ? 'missed' : 'gone';
+    const miss = status === 'missed' ? seen.find(e => e.picture) || seen[0] : null;
+    return { app: h.app, key: h.key, text: h.text, pages: h.pages, status, ...(miss ? { why: miss.tried === false ? "it was on the screen and wasn't hovered (out of time)" : `it was on the screen and ${miss.why || 'nothing showed'}, hovered twice (the second time for 2.5 s)`, picture: miss.picture || null, screen: miss.state } : {}) };
+  });
+}
+
 // The statuses a list of reads (capOwnStatus) saw for an app, in order, each once; a screen without the control: "not shown".
 export const ownSeen = (reads, app) => { const s = [...new Set((reads || []).filter(r => r.app === app).map(r => r.found === false ? 'not shown' : r.status))]; return s.length ? s.join(', ') : null; };
 
@@ -149,6 +179,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const lo = leaveOutOf({ demo, packs, apps: inPlan });
   if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
   const ownApps = ownStatusApps(demo, packs, inPlan);
+  const recHovers = recordedHovers(demo, [...inPlan]);
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
@@ -276,6 +307,13 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     if (ownApps.length) {
       const on = await cmd('capOwnStatus', { apps: Object.fromEntries(ownApps.map(o => [o.app, o])), shots: stops }, 30).catch(e => ({ on: false, why: e.message }));
       if (!on.on) { run.stopped = { kind: 'own-status', why: `couldn't watch your status in ${ownApps.map(o => o.label).join(', ')}: ${on.why || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
+    }
+    // The recording's hovers as a floor: never skipped by what the sweep learns, each tried twice.
+    if (recHovers.length) {
+      const byApp = {};
+      for (const h of recHovers) (byApp[h.app] = byApp[h.app] || []).push(h.key);
+      const on = await cmd('capHoverFloor', { apps: byApp, shots: stops }, 30).catch(() => ({ on: false }));
+      if (on.on) run.hovers = { recorded: recHovers.length };
     }
     const w = wRun = liveWalker({ demo, cmd, packs, recording: true, log });
     const first = plan.beats.flatMap(b => b.steps)[0];
@@ -466,6 +504,17 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const l = await leaveNow().catch(() => null);
       if (l && l.leak && !run.stopped) leakStop(l.leak);
     }
+    // Each recorded hover: captured, gone or missed; a missed one is listed for her, with its picture.
+    if (run.hovers) {
+      const fl = await cmd('capHoverFloor', {}, 30).catch(() => null);
+      if (fl && fl.on) {
+        const list = hoverOutcomes(recHovers, fl.log);
+        const n = k => list.filter(x => x.status === k).length;
+        Object.assign(run.hovers, { captured: n('captured'), gone: n('gone'), missed: n('missed'), list, ...(run.stopped ? { partial: true } : {}) });
+        for (const x of list.filter(x => x.status === 'missed')) run.needsYou.push({ text: `Hover over "${x.text || x.key.split('|')[0]}" (${x.app})`, why: `${x.why}. The replica won't show its hover.`, picture: x.picture });
+      }
+      await cmd('capHoverFloor', { apps: {} }, 30).catch(() => {});
+    }
     if (ownApps.length) {
       const r = await ownNow();
       if (r && r.on && run.ownStatus) {
@@ -498,7 +547,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   return finish();
   function finish() {
     save();
-    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}) };
+    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}), ...(run.hovers && run.hovers.list ? { hovers: { recorded: run.hovers.recorded, captured: run.hovers.captured, gone: run.hovers.gone, missed: run.hovers.missed } } : {}) };
   }
 }
 

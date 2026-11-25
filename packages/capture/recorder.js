@@ -31,6 +31,9 @@ const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
 // status control is saved, it must show what the recording does (Teams: Available); read again for a while, else the
 // take stops there. First, so Leave out's check reads the screen as it's saved.
 const recOwn = () => globalThis.__stuntdoubleOwnStatus || null;
+// The recording's own hovers (the capture browser only: host-ops capHoverFloor): per app, the controls the demo's
+// recording has a hover for. The hovers sweep never skips them for their kind, tries them twice, and says how each went.
+const recFloor = () => globalThis.__stuntdoubleHoverFloor || null;
 const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : REC.active; };
 const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
 if (!H.leaveGated) {
@@ -408,7 +411,8 @@ async function recAuto(A) {
   const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
   const learned = hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900;
   const skipSels = Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel);
-  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...c });
+  const F = recFloor(), floor = F ? F.keys(A.id) : [];
+  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorShot: name => F.shot(A.page, name) } : {}), ...c });
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)] });
   for (const [i, fu] of f.frames.entries()) {
@@ -776,7 +780,11 @@ async function recSide(A, c) {
       if (out.ctx && out.ctx.neutral) REC.hoverCtx[hk] = out.ctx;
       let frame = null;
       if (out.frameUrl) { const f = p.frames().find(x => x.url().split('?')[0] === out.frameUrl); if (f) frame = await recFrameKey(p, f); }
-      const seen = recSeen('hovers', A.id + (out.frameUrl || '')); for (const k of out.keys || []) seen.add(k);
+      // A recorded hover that showed nothing here is tried again on the app's next screens.
+      const missed = k => out.floor && out.floor[k] && !out.floor[k].shown;
+      const seen = recSeen('hovers', A.id + (out.frameUrl || '')); for (const k of out.keys || []) if (!missed(k)) seen.add(k);
+      const F = recFloor();
+      if (F) for (const [key, x] of Object.entries(out.floor || {})) F.seen({ app: A.id, state, page: c.page || state, key, ...x });
       const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
       hs.firsts.push(...(out.firsts || []));
       for (const [sel, k] of Object.entries(out.kinds || {})) { const t = hs.kinds[sel] = hs.kinds[sel] || { tried: 0, shown: 0 }; t.tried += k.tried; t.shown += k.shown; }

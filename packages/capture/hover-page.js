@@ -121,10 +121,11 @@
         if (seen.has(id) || H.done.has(id)) continue;
         seen.add(id);
         const s = specOf(owner);
-        const k = s.sel + '|' + (s.in || '');
+        const k = s.sel + '|' + (s.in || ''), text = (s.text || s.textStarts || '').slice(0, 60);
         perSel[k] = (perSel[k] || 0) + 1;
-        if (perSel[k] > (opt.perSel || 14)) continue;
-        out.push({ x, y, id, sel: s.sel, text: (s.text || s.textStarts || '').slice(0, 60) });
+        // A control the recording has a hover for (opt.floor, "sel|text") is never left out for its kind's count.
+        if (perSel[k] > (opt.perSel || 14) && !(opt.floor || []).includes(s.sel + '|' + text)) continue;
+        out.push({ x, y, id, sel: s.sel, text });
       }
       return out;
     },

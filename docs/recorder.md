@@ -238,6 +238,13 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   "Teams showed you as Away. Start again while you're using your Mac, with Teams open." (PC on Windows) and runs the
   reset after. A screen without the control saves as it is. run.json: `ownStatus` (each read, the stop); the summary
   prints what the start screens (with their sweeps) and beat 1 showed. A live walk and `ai check` only note it.
+- **The recording's hovers are a floor** (a demo built from an earlier recording: its `data/snaps/hovers-<app>.json`).
+  The hovers sweep learns to stop trying a kind of control that never shows anything (10 tries), and waits at most
+  900 ms; on a busy computer a slow card would read as none. A control the recording has a hover for is never skipped
+  that way, nor by a screen's cap or time, is hovered first, and when nothing shows is hovered once more for 2.5 s
+  (`capHoverFloor`). After the run each recorded hover is captured, gone (its control was on no screen the run swept)
+  or missed (it was there and showed nothing): a missed one goes under Needs you with a picture of the screen. run.json:
+  `hovers` (the list, and the three counts the summary prints). A live walk and `ai check` don't sweep hovers.
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
   the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
   write), every host reached outside the apps', every input sent (`inputs`: what it was for, the control's name, its

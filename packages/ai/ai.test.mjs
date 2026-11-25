@@ -14,7 +14,7 @@ import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
 import { stepNets } from './walk.mjs';
-import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps, ownStatusApps, ownStatusSay, ownSeen } from './unattended.mjs';
+import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps, ownStatusApps, ownStatusSay, ownSeen, recordedHovers, hoverOutcomes } from './unattended.mjs';
 import { settled } from './run.mjs';
 
 test('plan: plain words to steps and back', () => {
@@ -305,4 +305,18 @@ test("a save held for her own status doesn't use up a step's time to settle", as
   assert.equal(s.busy, false);
   const busy = async () => { await new Promise(r => setTimeout(r, 100)); return { recording: true, busy: true }; };
   await assert.rejects(settled(busy, { maxS: 1.2 }), /still busy after 1.2 s/);
+});
+
+test("the recording's hovers: each control once per app with its screens; after a run captured, missed or gone", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'floor-'));
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  const def = (page, sel, text) => ({ page, anchor: { sel, text } });
+  writeFileSync(join(dir, 'data', 'snaps', 'hovers-chat.json'), JSON.stringify({ defs: { a: def('home', 'button', 'Share'), b: def('task', 'button', 'Share'), c: def('home', 'a[aria-label="Docs"]', 'Docs'), d: def('home', 'button', 'Old') } }));
+  const rec = recordedHovers({ dir }, ['chat', 'admin']);
+  assert.deepEqual(rec.map(h => [h.app, h.key, h.pages]), [['chat', 'button|Share', ['home', 'task']], ['chat', 'a[aria-label="Docs"]|Docs', ['home']], ['chat', 'button|Old', ['home']]]);
+  const log = [{ app: 'chat', key: 'button|Share', shown: false, retried: true, why: 'nothing showed', picture: '/x.png', state: 's1' }, { app: 'chat', key: 'button|Share', shown: true, retried: false }, { app: 'chat', key: 'a[aria-label="Docs"]|Docs', shown: false, retried: true, why: 'nothing showed', picture: '/d.png', state: 's2' }];
+  const out = hoverOutcomes(rec, log);
+  assert.deepEqual(out.map(x => [x.text, x.status, x.picture || null]), [['Share', 'captured', null], ['Docs', 'missed', '/d.png'], ['Old', 'gone', null]]);
+  assert.match(out[1].why, /on the screen and nothing showed, hovered twice/);
+  assert.equal(hoverOutcomes(rec, [{ app: 'chat', key: 'button|Old', tried: false }])[2].why, "it was on the screen and wasn't hovered (out of time)");
 });

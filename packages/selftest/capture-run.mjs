@@ -606,6 +606,36 @@ try {
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
 
+  // 1j · The recording's hovers are a floor. Three screens of plain buttons; the first two show nothing on hover, so
+  // the sweep learns to skip plain buttons. The demo's recording (its build's hovers, as written here) has a hover on
+  // the third screen's Slow chip (its card shows after 1.5 s, past the 900 ms learned wait), its Quiet chip, and a
+  // Removed chip that's no longer there. Slow chip: never skipped for its kind, hovered again for 2.5 s, captured.
+  // Quiet chip: missed, listed for her with a picture. Removed chip: gone. The other plain buttons: still skipped.
+  { const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
+    mkdirSync(dirname(HP), { recursive: true });
+    const def = (id, text) => [id, { id, page: 'chips-3', anchor: { sel: 'button', text } }];
+    writeFileSync(HP, JSON.stringify({ defs: Object.fromEntries([def('h1', 'Slow chip'), def('h2', 'Quiet chip'), def('h3', 'Removed chip')]) }));
+    writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Chips\n\n- Go to tasks\n  Lands on: "No tasks yet"\n- Click "Chips"\n  Lands on: "Chips one"\n- Click "Next"\n  Lands on: "Chips two"\n- Click "Next"\n  Lands on: "Chips three"\n');
+    writeFileSync(join(DEMO, 'reset.md'), '# Reset: Tasks demo\n\n## Check\n\n- tasks: shows "No tasks yet"\n');
+    tasks.chips(true); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw(); rmSync(join(tmp, 'run-raw', 'hovers'), { recursive: true, force: true });
+    const hr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const hj = readRun(DEMO), [hRaw, hRec] = keepRaw('floor-raw');
+    const byText = t => ((hj.hovers && hj.hovers.list) || []).find(x => x.text === t) || {};
+    const hoveredTexts = existsSync(join(hRaw, 'hovers')) ? readdirSync(join(hRaw, 'hovers')).flatMap(d => readdirSync(join(hRaw, 'hovers', d)).filter(f => f.endsWith('.json')).map(f => (JSON.parse(readFileSync(join(hRaw, 'hovers', d, f), 'utf8')).cand || {}).text)) : [];
+    const skipLine = ((hRec && hRec.log) || []).find(l => /hovers 1 of 2 .*\(4 of kinds that never show\)/.test(l));
+    const quiet = byText('Quiet chip'), why = { code: hr.code, error: hr.error, done: hr.done && hr.done.result && hr.done.result.hovers, stopped: hj.stopped, hovers: hj.hovers && { ...hj.hovers, list: (hj.hovers.list || []).map(x => [x.text, x.status, x.why]) }, needsYou: hj.needsYou, hovered: hoveredTexts, log: ((hRec && hRec.log) || []).filter(l => /^\S+ auto /.test(l)).map(l => l.slice(0, 260)), err: String(hr.err || '').slice(-600) };
+    check('a recorded hover of a kind the sweep learned to skip, slower than its wait: never skipped, hovered again, captured', hr.code === 0 && !hj.stopped && byText('Slow chip').status === 'captured' && hoveredTexts.includes('Slow chip'), JSON.stringify(why));
+    check('a recorded hover whose control is there and shows nothing: missed, listed for her with a picture', quiet.status === 'missed' && quiet.picture && existsSync(quiet.picture) && (hj.needsYou || []).some(n => n.text === 'Hover over "Quiet chip" (tasks)' && n.picture === quiet.picture), JSON.stringify(why));
+    check('a recorded hover whose control is gone: gone; the summary counts captured, gone and missed', byText('Removed chip').status === 'gone' && JSON.stringify(hr.done && hr.done.result && hr.done.result.hovers) === '{"recorded":3,"captured":1,"gone":1,"missed":1}', JSON.stringify(why));
+    check('and the plain buttons on that screen are still skipped for their kind', !!skipLine && !hoveredTexts.some(t => /^Chip /.test(t)), JSON.stringify(why));
+    tasks.chips(false); tasks.seed({});
+    if (had === null) rmSync(HP, { force: true }); else writeFileSync(HP, had);
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  }
+
   // 1e · The capture start waits for each app's sign-in to settle (capture.signInSettleS, 60 s by default) before the
   // tenant check, and still refuses when it never does.
   const TID = '11111111-2222-3333-4444-555555555555';

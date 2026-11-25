@@ -61,6 +61,12 @@
 //                                    saves as it is. { apps: {} }: off → { on, apps }
 //                                    { read: { tab, name, role } }: the status on that tab now → { found, status? }
 //                                    { since }: what it read before each save, the one it's waiting on, the stop
+//   capHoverFloor({ apps, shots } | {})   the demo's recorded hovers as a floor: apps { <app>: ["sel|text", …] }, the
+//                                    controls its recording has a hover for. From here on the recorder's hovers sweep
+//                                    never skips them for their kind, tries each twice (the second time for 2.5 s), and
+//                                    says how each went; a picture of the screen when one showed nothing goes in shots.
+//                                    { apps: {} }: off → { on, apps }. {}: → { on, log: [{ app, state, page, key, shown,
+//                                    retried, why?, picture?, tried? }] }
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { allowedBy } from './browser.mjs';
@@ -248,6 +254,8 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   // Her own status (capOwnStatus): per app, its control and what a save may show; what it read before each save; the
   // one it's waiting on; the stop.
   let own = null;
+  // The recorded hovers (capHoverFloor): per app, their controls; how each went.
+  let floor = null;
   const ownRead = (p, a) => p.evaluate(OWN_READ(a)).catch(e => ({ found: false, error: String(e.message).split('\n')[0] }));
   const ownStop = () => { throw new Error(`Own status stopped the take: ${own.stopped.why}`); };
   const ownGate = async (p, app, what) => {
@@ -418,6 +426,21 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       }
       if (!own) return { on: false, reads: [], total: 0, stopped: null, waiting: null };
       return { on: true, reads: own.reads.slice(c.since || 0), total: own.reads.length, stopped: own.stopped, waiting: own.waiting };
+    },
+    async capHoverFloor(c) {
+      if (c.apps) {
+        const apps = Object.fromEntries(Object.entries(c.apps).map(([id, ks]) => [id, [...new Set([].concat(ks || []).map(String))]]).filter(([, ks]) => ks.length));
+        if (!Object.keys(apps).length) { floor = null; globalThis.__stuntdoubleHoverFloor = undefined; return { on: false }; }
+        floor = { apps, shots: c.shots || null, log: [] };
+        const shot = async (p, name) => {
+          if (!floor || !floor.shots || !p) return null;
+          try { const f = `${floor.shots}/hover-missed-${String(name).replace(/[^\w.-]+/g, '-')}.png`; mkdirSync(floor.shots, { recursive: true }); writeFileSync(f, await p.screenshot({ timeout: 30000 })); return f; } catch (e) { return null; }
+        };
+        globalThis.__stuntdoubleHoverFloor = { keys: app => (floor && floor.apps[app]) || [], seen: e => { if (floor) floor.log.push({ at: at(), ...e }); }, shot };
+        log(`hover floor on: ${Object.entries(apps).map(([id, ks]) => `${id} ${ks.length}`).join(', ')}`);
+        return { on: true, apps: Object.fromEntries(Object.entries(apps).map(([id, ks]) => [id, ks.length])) };
+      }
+      return floor ? { on: true, log: floor.log.slice() } : { on: false, log: [] };
     },
     async capTab(c) {
       if (c.close) { const p = sides.get(c.close); sides.delete(c.close); if (p && !p.isClosed()) await p.close().catch(() => {}); return { closed: !!p }; }

@@ -6,6 +6,10 @@
 //         neutral?: [[x, y]], waitMs?, maxS?, snapId?, skipKeys?: [key], max? }
 // skipKeys: controls already audited on another screen of the app ("sel|text"), not hovered again; out.keys are the
 // ones this run hovered. max: at most this many controls.
+// floor: the controls the demo's recording has a hover for ("sel|text"): hovered first, never skipped for their kind
+// (skipSels) or past max, maxS or perSel, and when nothing shows in waitMs, hovered once more for floorWaitMs (2.5 s).
+// out.floor: each one hovered, { shown, retried, picture? } (floorShot(name): a picture of the screen as it showed
+// nothing), or { tried: false } when it was there and not hovered.
 const p = ARGS.p || await H.pageFor(ARGS.tab);
 await p.bringToFront();
 let f = p.mainFrame();
@@ -21,13 +25,14 @@ const ev = (fn, a) => f.evaluate(fn, a);
 const move = (x, y, steps = 2) => p.mouse.move(off.x + x, off.y + y, { steps });
 const quiet = async (ms, max) => { const s = Date.now(); while (Date.now() - s < max) { if ((await ev(() => window.__d1h.quietFor())) >= ms) return true; await H.poll(60); } return false; };
 const t0 = Date.now();
-const out = { page: ARGS.page, n: 0, tried: 0, steps: [], neutral: null };
+const out = { page: ARGS.page, n: 0, tried: 0, steps: [], neutral: null, floor: {} };
+const floor = new Set(ARGS.floor || []);
 const vw = await ev(() => [innerWidth, innerHeight]);
 
 // Nothing new to hover on this screen (every control was hovered on another): done, before any waiting.
 if (!ARGS.scroll && !ARGS.only) {
   const skip0 = new Set(ARGS.skipKeys || []);
-  const c0 = await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel });
+  const c0 = await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
   if (!c0.some(c => !skip0.has(c.sel + '|' + c.text))) return { page: ARGS.page, n: 0, tried: 0, skipped: c0.length, steps: [0], keys: [], frameUrl: f === p.mainFrame() ? null : f.url().split('?')[0], secs: Math.round((Date.now() - t0) / 1000) };
 }
 // ARGS.ctx: the neutral spot and the noise this app showed on its last screen (the recorder keeps them): the spot is
@@ -65,33 +70,44 @@ for (let step = 0; step <= steps; step++) {
   }
   const cands = ARGS.only
     ? await ev(only => only.map(m => { const els = [...document.querySelectorAll(m.sel)].filter(e => { const t = (e.innerText || '').replace(/\s+/g, ' ').trim(); return (m.text === undefined || t === m.text) && (m.textStarts === undefined || t.startsWith(m.textStarts)); }); const e = els[m.nth || 0]; if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(r.width / 2, 40)), y: Math.round(r.y + r.height / 2), id: -1, sel: m.sel, text: m.text || m.textStarts || '' }; }).filter(Boolean), ARGS.only)
-    : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel });
+    : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
   const skip = new Set(ARGS.skipKeys || []), skipSels = new Set(ARGS.skipSels || []);
-  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && !skipSels.has(c.sel));
-  out.skippedKinds = (out.skippedKinds || 0) + cands.filter(c => skipSels.has(c.sel)).length;
+  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && (!skipSels.has(c.sel) || floor.has(c.sel + '|' + c.text)));
+  // The recording's own hovers first, so a screen's cap or time never cuts them.
+  todo.sort((a, b) => +floor.has(b.sel + '|' + b.text) - +floor.has(a.sel + '|' + a.text));
+  out.skippedKinds = (out.skippedKinds || 0) + cands.filter(c => skipSels.has(c.sel) && !floor.has(c.sel + '|' + c.text)).length;
   out.skipped = (out.skipped || 0) + cands.length - todo.length;
   out.steps.push(todo.length);
   // After a control that showed nothing (not one change in the page since the rest copy), the page is still at
   // rest: straight on to the next one, without the trip back to the neutral spot.
   let atRest = false;
   for (const c of todo) {
-    if (ARGS.max && out.tried >= ARGS.max) { out.capped = true; break; }
-    (out.keys = out.keys || []).push(c.sel + '|' + c.text);
-    if (Date.now() - t0 > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
+    const key = c.sel + '|' + c.text, inFloor = floor.has(key);
+    if (ARGS.max && out.tried >= ARGS.max && !inFloor) { out.capped = true; break; }
+    (out.keys = out.keys || []).push(key);
+    if (Date.now() - t0 > (ARGS.maxS || 900) * 1000 && !inFloor) { out.timedOut = true; break; }
     out.tried++;
     if (!atRest) { await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest()); }
     atRest = false;
     if (c.id > 0) await ev(id => window.__d1h.markDone(id), c.id);
     await move(c.x, c.y);
-    const s = Date.now(); let first = null;
-    while (Date.now() - s < (ARGS.waitMs || 1300)) {
-      await sleep(70);
-      if ((await ev(() => window.__d1h.count())) > 0 && (await ev(() => window.__d1h.sig()))) { first = Date.now() - s; break; }
+    let s = Date.now(), first = null, retried = false;
+    const waitShow = async ms => { while (Date.now() - s < ms) { await sleep(70); if ((await ev(() => window.__d1h.count())) > 0 && (await ev(() => window.__d1h.sig()))) return Date.now() - s; } return null; };
+    first = await waitShow(ARGS.waitMs || 1300);
+    // A recorded hover that showed nothing: once more, from the neutral spot, waiting longer (a slow card on a busy
+    // computer).
+    if (first === null && inFloor) {
+      retried = true;
+      await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest());
+      await move(c.x, c.y);
+      s = Date.now();
+      first = await waitShow(ARGS.floorWaitMs || 2500);
     }
+    const floorMiss = async why => { out.floor[key] = { shown: false, retried, why, picture: ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${out.tried}`).catch(() => null) : null }; };
     // Per kind of control (its selector), how often it was tried and showed something: the recorder stops trying a
     // kind that never shows anything in this app (sweep by sweep, ARGS.skipSels).
     const kind = (out.kinds = out.kinds || {})[c.sel] = (out.kinds || {})[c.sel] || { tried: 0, shown: 0 }; kind.tried++;
-    if (first === null) { atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
+    if (first === null) { if (inFloor) await floorMiss('nothing showed'); atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
     kind.shown++; (out.firsts = out.firsts || []).push(first);
     let last = await ev(() => window.__d1h.sig()), stable = Date.now(), farMs = null;
     while (Date.now() - s < (ARGS.settleMaxMs || 4000)) {
@@ -100,7 +116,7 @@ for (let step = 0; step <= steps; step++) {
       const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500 && (farMs !== null || Date.now() - s > 1500)) break;
     }
     const res = await ev(([x, y]) => window.__d1h.result(x, y), [c.x, c.y]);
-    if (!res) continue;
+    if (!res) { if (inFloor) await floorMiss("what it showed couldn't be read"); continue; }
     const ser = await f.evaluate(H.SERX({ parts: '[data-d1-hpart]' }));
     await ev(() => window.__d1h.unmark());
     try { await H.fetchResources(p, [{ urls: ser.urls, frame: f }]); } catch (e) {}
@@ -114,7 +130,9 @@ for (let step = 0; step <= steps; step++) {
     }
     await H.post('/hover', { page: ARGS.page, n: out.n, firstMs: first, farMs, cand: c, step, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, shot, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
     out.n++;
+    if (inFloor) out.floor[key] = { shown: true, retried };
   }
+  for (const c of todo) { const key = c.sel + '|' + c.text; if (floor.has(key) && !out.floor[key]) out.floor[key] = { tried: false }; }
   if (out.timedOut) break;
 }
 await move(...out.neutral); await quiet(400, 2500);
