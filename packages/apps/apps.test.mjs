@@ -141,7 +141,9 @@ test('safe steps only open a picker or a menu: never a write, never a sign-in', 
 test("where an app shows your own status: Teams' avatar, from its pack; a pack's ownStatus needs a pattern with a group, expect and why", () => {
   const cfg = { apps: [{ id: 'teams', url: 'https://teams.cloud.microsoft/' }, { id: 'admin', url: 'https://admin.cloud.microsoft/' }] };
   assert.deepEqual(ownStatusFor(cfg).map(o => [o.app, o.label, o.role, o.expect, o.waitS]), [['teams', 'Teams', 'button', ['Available'], 90]]);
-  assert.ok(/^Your profile, status Available for x$/.test('Your profile, status Available for x') && new RegExp(ownStatusFor(cfg)[0].name.slice(1, -1)).exec('Your profile, status Available for jessica in Contoso ')[1] === 'Available');
+  // Its name with the account after the status (Nov 19), and without (Nov 25).
+  const rx = new RegExp(ownStatusFor(cfg)[0].name.slice(1, -1));
+  assert.deepEqual(['Your profile, status Available for jessica@contoso.test in Contoso ', 'Your profile, status Away', 'Your profile, status Do not disturb'].map(n => (rx.exec(n) || [])[1]), ['Available', 'Away', 'Do not disturb']);
   const bad = checkPack({ id: 'x', match: ['x.test'], ownStatus: { name: '/status/', expect: [] } });
   assert.deepEqual(bad.filter(b => b.startsWith('ownStatus')).map(b => b.split(' ')[1]), ['name', 'expect', 'why']);
 });

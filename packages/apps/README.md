@@ -199,7 +199,7 @@ Available for …"). An unattended run reads it before it saves a screen of the 
 another status (docs/recorder.md, "Your own status").
 
 ```json
-"ownStatus": { "why": "…", "role": "button", "name": "/^Your profile, status (.+?) for /", "expect": ["Available"], "waitS": 90 }
+"ownStatus": { "why": "…", "role": "button", "name": "/^Your profile, status (.+?)(?: for |$)/", "expect": ["Available"], "waitS": 90 }
 ```
 
 - `name`: a /pattern/ over the control's name, by the reader's rule (`controlOf`); its group is the status. `role`:

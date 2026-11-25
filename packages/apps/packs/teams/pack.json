@@ -227,9 +227,9 @@
     }
   ],
   "ownStatus": {
-    "why": "Teams shows your own status on your avatar at the top right of every screen, and a replica keeps it. The capture browser's Teams never reports you active (Nov 25: four variants, no activity or presence call, all read Away), so your status comes from your own Teams app: away from your computer, it turns Away.",
+    "why": "Teams shows your own status on your avatar at the top right of every screen, and a replica keeps it. The capture browser's Teams never reports you active (Nov 25: four variants, no activity or presence call, all read Away), so your status comes from your own Teams app: away from your computer, it turns Away. Its name ends \"for <account> in <organization>\" in the Nov 19 recording, and at the status itself on Nov 25 (\"Your profile, status Away\").",
     "role": "button",
-    "name": "/^Your profile, status (.+?) for /",
+    "name": "/^Your profile, status (.+?)(?: for |$)/",
     "expect": ["Available"],
     "waitS": 90
   }
