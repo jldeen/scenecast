@@ -85,6 +85,11 @@ Side states are swept in the presenter's tab, not in parallel hidden tabs: a bac
 browser doesn't paint and its timers are throttled to about a second, so hovers, layouts that follow the window
 size, and animations would come out wrong there.
 
+A click or Enter that loads a new page (not an in-page route) leaves the old page on screen, unchanged, until the new
+one comes; on a slow app or computer that's longer than the settle time. The page script marks a page being left, so
+the recorder doesn't take the old page as what the action led to: it waits for the new document (up to `navWaitS`,
+30 s), puts its page script there, and settles on the new page, which then gets its screen and its sweep.
+
 ### Checkpoint and resume
 
 The recording is checkpointed to the receiver after every step (`raw/recording-partial.json`). MV3 lets the browser

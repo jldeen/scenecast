@@ -218,10 +218,26 @@ async function recCapture(A, ev, trigger) {
     } catch (e) { rlogr('frame: ' + String(e.message || e).slice(0, 120)); }
   };
   await grab();
+  // A click or Enter that loads a new page: the page as it was stays on screen until the new one comes (on a slow
+  // computer, longer than settleMs), so this document is marked, and while it's being left nothing counts as settled;
+  // a new document gets the recorder's page script and is settled on its own (up to navWaitS, 30 s, for it to come).
+  const doc = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  await p.mainFrame().evaluate(t => { window.__rkDoc = t; }, doc).catch(() => {});
   if (trigger) await trigger();
-  let sig = await recSig(p), since = Date.now(), first = null, last = null;
+  let sig = await recSig(p), since = Date.now(), first = null, last = null, navSince = null, loaded = false;
   for (;;) {
     await sleep(o.everyMs);
+    const nav = await p.mainFrame().evaluate(t => ({ same: window.__rkDoc === t, leaving: !!(window.__rkrec && window.__rkrec.leaving), rec: !!window.__rkrec, ready: document.readyState }), doc).catch(() => null);
+    if (nav === null || (nav.same && nav.leaving) || (!nav.same && nav.ready === 'loading')) {
+      navSince = navSince || Date.now();
+      if (Date.now() - navSince < (o.navWaitS || 30) * 1000) { since = Date.now(); continue; }
+    } else if (!nav.same && !loaded) {
+      loaded = true;
+      if (!nav.rec) await recInstall(p);
+      await recSetBusy(p, true);
+      rlogr(`${ev.kind}${ev.desc ? ` "${ev.desc}"` : ''} loaded a new page (${Math.round((Date.now() - (navSince || t0)) / 100) / 10} s)`);
+      since = Date.now();
+    }
     await grab();
     const s = await recSig(p);
     const now = Date.now();
