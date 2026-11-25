@@ -324,7 +324,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         shows 1.5 s after the pointer arrives, a "Quiet chip" that shows nothing, and a sidebar-like section (Projects,
 //         whose card "Collapse projects" shows after 0.3 s; Add project here; a Recent list): the recorded hovers' floor.
 //         moving(true): Chips one also has three buttons with a card each (Tip one, two, three) and a Details expander,
-//         and the page moves while it's swept: a 90 px banner comes on top as the pointer leaves the first tip it
+//         (no aria-controls: a click's, not a step group's), and the page moves while it's swept: a 90 px banner comes on top as the pointer leaves the first tip it
 //         hovered, and another just after the recorder picks Details to click (a page that moves mid-sweep).
 //         notice('close' | 'stuck'): 0.3 s after Chips is clicked, Teams' "Loading latest updates…" notice comes on top
 //         of the page and stays, with its own Close button ('close') or none ('stuck').
@@ -334,7 +334,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
 //         API undo that has to go from that frame.
 // The chips screens (main's markup), drawn in place by the tasks page, as an app's in-page routes are.
-const chipsPart = (n, moving = false) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false" aria-controls="dpanel">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
+const chipsPart = (n, moving = false) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
 const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>

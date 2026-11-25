@@ -205,20 +205,33 @@ for (let step = 0; step <= steps; step++) {
           if (same) { out.floor[id] = { shown: true, retried }; floorShown.add(id); }
           else if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why: 'it showed another card' };
         }
-        out.floorTries.push({ key, ids: c.floor, results, result: Object.values(results).includes('card') ? 'card' : 'other card', retried });
+        const other = !Object.values(results).includes('card');
+        // Another card (the pointer on the wrong control, or the card not what it was): tried again last
+        // (floorDefer), else a picture of what it showed.
+        if (other && ARGS.floorDefer && !retried) {
+          for (const id of c.floor) if (!floorShown.has(id)) { deferred.add(id); out.floor[id] = { ...out.floor[id], deferred: true }; }
+          out.floorTries.push({ key, ids: c.floor, results, result: 'other card', retried, deferred: true });
+        } else {
+          const picture = other && ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${out.tried}`).catch(() => null) : null;
+          out.floorTries.push({ key, ids: c.floor, results, result: other ? 'other card' : 'card', retried, ...(picture ? { picture } : {}) });
+        }
       }
     } finally { if (inFloor && !ARGS.floorRetry) out.floorMs += Date.now() - tc; }
   }
   for (const c of todo) for (const id of c.floor || []) if (!out.floor[id]) out.floor[id] = { tried: false };
   if (out.timedOut) break;
 }
+// Found here but never hovered (none of its controls could be pointed at): tried again last too.
+if (ARGS.floorDefer) for (const id of Object.keys(out.floorFound || {})) if (!floorShown.has(id) && !out.floorTries.some(t => (t.ids || []).includes(id))) deferred.add(id);
 out.floorDeferred = [...deferred].filter(id => !floorShown.has(id));
-// The second tries: those not tried again (the cap, or no longer on the screen), one picture between them.
+// The second tries: those not tried again (the cap, or none of their controls could be pointed at), one picture
+// between them.
 if (ARGS.floorRetry) {
   const untried = (ARGS.floor || []).map(e => e.id).filter(id => !floorShown.has(id) && !out.floorTries.some(t => (t.ids || []).includes(id)));
   if (untried.length) {
-    const picture = ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${out.floorCapped ? 'cap' : 'left'}`).catch(() => null) : null;
-    out.floorTries.push({ key: out.floorCapped ? 'cap' : 'left', ids: untried, result: out.floorCapped ? 'capped' : 'left', retried: true, picture });
+    const why = out.floorCapped ? 'capped' : 'unpointed';
+    const picture = ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${why}`).catch(() => null) : null;
+    out.floorTries.push({ key: why, ids: untried, result: why, retried: true, picture });
   }
 }
 await move(...out.neutral); await quiet(400, 2500);

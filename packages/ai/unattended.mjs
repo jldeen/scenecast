@@ -103,12 +103,13 @@ export function hoverOutcomes(recorded, sweeps) {
     const res = t => (t.results && t.results[h.id]) || t.result;
     const is = r => t => res(t) === r;
     const other = tries.find(is('other card')), twice = tries.find(t => res(t) === 'nothing' && t.retried), odd = tries.find(is('unreadable'));
-    const capped = tries.find(is('capped')), left = tries.find(is('left')), once = tries.find(is('nothing'));
+    const capped = tries.find(is('capped')), left = tries.find(is('left')), unpointed = tries.find(is('unpointed')), once = tries.find(is('nothing'));
     const why = other ? 'it was on the screen and showed another card'
       : twice ? 'it was on the screen and showed nothing, hovered twice (the second time for 2.5 s, after the screen\'s other side states)'
       : odd ? "it was on the screen and what it showed couldn't be read"
       : capped ? 'it was on the screen and showed nothing the first time; its second try didn\'t fit in the time for second tries'
       : left ? 'it was on the screen, and its control had gone from it when it was hovered (again)'
+      : unpointed ? 'it was on the screen, and none of its controls could be pointed at (twice)'
       : once ? 'it was on the screen and showed nothing (hovered once)'
       : "it was on the screen and wasn't hovered (out of time, or none of its controls could be pointed at)";
     const pic = tries.find(t => t.picture);

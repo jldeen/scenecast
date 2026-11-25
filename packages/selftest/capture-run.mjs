@@ -630,7 +630,8 @@ try {
     const hj = readRun(DEMO), [hRaw, hRec] = keepRaw('floor-raw');
     const byText = t => ((hj.hovers && hj.hovers.list) || []).find(x => x.text === t) || {};
     const hoveredTexts = existsSync(join(hRaw, 'hovers')) ? readdirSync(join(hRaw, 'hovers')).flatMap(d => readdirSync(join(hRaw, 'hovers', d)).filter(f => f.endsWith('.json')).map(f => (JSON.parse(readFileSync(join(hRaw, 'hovers', d, f), 'utf8')).cand || {}).text)) : [];
-    const skipLine = ((hRec && hRec.log) || []).find(l => /hovers 2 of 3 .*\(5 of kinds that never show\)/.test(l));
+    // The chips-3 sweep's line: its plain chips skipped for their kind (the slow card shows in the second tries, last).
+    const skipLine = ((hRec && hRec.log) || []).find(l => +((/hovers \d+ of 3 .*\((\d+) of kinds that never show\)/.exec(l) || [])[1] || 0) >= 4);
     const byStart = t => ((hj.hovers && hj.hovers.list) || []).find(x => x.text.startsWith(t)) || {};
     const quiet = byText('Quiet chip'), why = { code: hr.code, error: hr.error, done: hr.done && hr.done.result && hr.done.result.hovers, stopped: hj.stopped, hovers: hj.hovers && { ...hj.hovers, list: (hj.hovers.list || []).map(x => [x.text, x.status, x.why]) }, needsYou: hj.needsYou, hovered: hoveredTexts, log: ((hRec && hRec.log) || []).filter(l => /^\S+ auto /.test(l)).map(l => l.slice(0, 260)), err: String(hr.err || '').slice(-600) };
     check('a recorded hover whose place moved, found by its words; of a kind the sweep learned to skip, slower than its wait: never skipped, hovered again, its card captured', hr.code === 0 && !hj.stopped && byText('Slow chip').status === 'captured' && byText('Slow chip').found === 'words' && hoveredTexts.includes('Slow chip'), JSON.stringify(why));
