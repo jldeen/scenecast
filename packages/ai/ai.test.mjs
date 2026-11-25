@@ -14,7 +14,7 @@ import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
 import { stepNets } from './walk.mjs';
-import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict } from './unattended.mjs';
+import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps } from './unattended.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -276,4 +276,10 @@ test("a service's list: the plan's rows of it, by the pack's pattern, in its app
   assert.deepEqual(no.shown, ['Contoso Notes']);
   assert.equal(cardsVerdict(sv, texts, { status: 200, unread: "its body isn't JSON" }).why, "Contoso's catalog: its body isn't JSON. Try again later.");
   assert.equal(cardsVerdict(sv, [], { status: 200 }), null);
+});
+
+test('the apps a plan goes to: each Go to, and the first app when it starts without one; never one it never visits', () => {
+  const ids = ['tasks', 'admin', 'iq'];
+  assert.deepEqual([...planApps({ beats: [{ steps: [{ kind: 'click', target: 'Refresh' }] }, { steps: [{ kind: 'app', app: 'admin' }] }] }, ids)], ['tasks', 'admin']);
+  assert.deepEqual([...planApps({ beats: [{ steps: [{ kind: 'app', app: 'tasks' }, { kind: 'type', target: 'New task', value: 'x' }] }] }, ids)], ['tasks']);
 });

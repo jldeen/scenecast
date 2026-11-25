@@ -35,7 +35,12 @@ test('leave out: one rule per filter with every line\'s values, the words per ap
   assert.deepEqual(lo.words, { mail: ['From: Fabrikam Alerts', 'From: Fabrikam Notices'], chat: ['Contoso Beta'] });
   assert.match(leaveOutOf({ demo, packs, text: RESET.replace('chat-app:team-tree', 'chat-app:team-list') }).problems[0], /chat-app:team-list, and no app pack of this demo has that filter/);
   assert.match(leaveOutOf({ demo, packs, text: RESET.replace('- chat: team', '- mail: team') }).problems[0], /is for mail, and chat-app:team-tree is chat's/);
-  assert.deepEqual(leaveOutOf({ demo, packs, text: '# Reset: Mail\n' }), { lines: [], rules: [], words: {}, problems: [] });
+  assert.deepEqual(leaveOutOf({ demo, packs, text: '# Reset: Mail\n' }), { lines: [], rules: [], words: {}, problems: [], skipped: [] });
+  // An app the plan never goes to: its lines skipped, never applied (and never refused).
+  const mailOnly = leaveOutOf({ demo, packs, text: RESET, apps: new Set(['mail']) });
+  assert.deepEqual(mailOnly.rules.map(r => r.id), ['mail-app:hide-sender']);
+  assert.deepEqual(Object.keys(mailOnly.words), ['mail']);
+  assert.deepEqual(mailOnly.skipped, [{ app: 'chat', what: 'team "Contoso Beta"', from: 'chat-app:team-tree', why: 'the plan never goes to chat' }]);
 });
 
 test('leave out\'s negative check: her words in a row, where it is; a removed item by its own text anywhere; a clean screen', () => {

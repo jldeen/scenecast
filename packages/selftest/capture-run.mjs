@@ -336,6 +336,31 @@ try {
     writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
+  // 1f3 · An app the plan never goes to: its services aren't checked and its Leave out lines are skipped, so a demo app
+  // left out of the story can't stop the run. Admin gets a pack here with a start service nobody calls (it would wait
+  // and fail) and a Leave out filter. The tasks-only plan runs to the end; one that goes to admin stops before the reset
+  // on that service.
+  { const AP = join(tmp, 'packs', 'fixture-admin'), AHOST = `127.0.0.1:${ADMIN}`;
+    mkdirSync(AP, { recursive: true });
+    writeFileSync(join(AP, 'pack.json'), JSON.stringify({ kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-admin', title: 'Fixture Admin', names: ['Admin'], match: [AHOST],
+      services: [{ name: "Admin's tools service", match: `/^GET ${AHOST.replace(/\./g, '\\.')}\\/api\\/never$/`, start: true, waitS: 8, why: 'Called by nobody: it fails whenever it is checked.' }],
+      filters: [{ id: 'tools', kind: 'dom', why: 'A list the page draws.', list: '[role=row]' }] }, null, 1));
+    const LO_ADMIN = RESET.replace('## Check', '## Leave out\n\n- admin: tool "Zeta Tool"\n  From: fixture-admin:tools\n\n## Check');
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), LO_ADMIN);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    rj = readRun(DEMO);
+    const lo1 = rj.leaveOut || {};
+    check('an app the plan never goes to: its service isn\'t checked and its Leave out line is skipped; the run goes to the end', res.code === 0 && !rj.stopped && JSON.stringify(rj.apps) === '["tasks"]' && (lo1.skipped || []).length === 1 && lo1.skipped[0].app === 'admin' && !(lo1.rules || []).length && !(rj.services || []).some(n => n.app === 'admin'), JSON.stringify({ code: res.code, error: res.error, stopped: rj.stopped, apps: rj.apps, leaveOut: lo1, services: (rj.services || []).map(n => [n.app, n.service, n.status || n.failed]) }));
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('- Go to admin\n'));
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    rj = readRun(DEMO);
+    check('and once the plan goes to it, its service is checked: not answering, the run stops before the reset', rj.stopped && rj.stopped.kind === 'service' && rj.stopped.stage === 'before-reset' && rj.stopped.service === "Admin's tools service" && /didn't answer in 8 s/.test(rj.stopped.why) && !rj.reset.before, JSON.stringify({ code: res.code, error: res.error, stopped: rj.stopped, apps: rj.apps }));
+    rmSync(AP, { recursive: true, force: true });
+    writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  }
   tasks.catalog('fail-on-type');
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);

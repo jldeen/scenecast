@@ -44,6 +44,15 @@ export function serviceAnswer(answers, name) {
   const ok = typeof last.status === 'number' && last.status >= 200 && last.status < 300;
   return { ok, status, at: last.at, entry: last, why: ok ? null : typeof last.status === 'number' ? `${name} is failing (${status}). Try again later.` : `${name} didn't answer (${status}). Try again later.` };
 }
+// The apps a plan goes to: each "Go to", and the demo's first app when the plan starts without one. A service or a
+// Leave out line of any other app (one in demo.json the plan never visits) is none of the run's business.
+export function planApps(plan, appIds) {
+  const appOf = name => appIds.find(a => a === name) || appIds.find(a => a.startsWith(name) || name.startsWith(a)) || null;
+  const steps = (plan.beats || []).flatMap(b => b.steps), out = new Set();
+  if (steps.length && steps[0].kind !== 'app' && appIds[0]) out.add(appIds[0]);
+  for (const st of steps) if (st.kind === 'app') { const a = appOf(st.app); if (a) out.add(a); }
+  return out;
+}
 // The rows of a service's list the plan clicks (its pack's cards.steps over each click step's words, in the service's
 // app): the plan's own words, so the approval binds them. → [text]
 const reOf = s => { const m = /^\/(.+)\/([a-z]*)$/.exec(String(s || '')); try { return m ? new RegExp(m[1], m[2]) : null; } catch (e) { return null; } };
@@ -105,14 +114,15 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (bad) throw new Error(`reset.md's Set before beat ${b.beat}, ${b.text}: ${bad}`);
       setBeforeAt.set(`${b.beat - 1}-${si}`, b);
     } } }
-  // reset.md's Leave out: each line's filter, its app pack's. One no pack of the demo has stops the run before anything
-  // runs.
-  const lo = leaveOutOf({ demo, packs });
+  // reset.md's Leave out: each line's filter, its app pack's, for the apps the plan goes to. One no pack of the demo has
+  // stops the run before anything runs.
+  const inPlan = planApps(plan, demo.cfg.apps.map(a => a.id));
+  const lo = leaveOutOf({ demo, packs, apps: inPlan });
   if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
-  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [], ...(lo.rules.length ? { leaveOut: { lines: lo.lines.map(l => ({ app: l.app, what: l.what, from: l.from, shows: l.shows })) } } : {}) };
+  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [], ...(lo.rules.length || lo.skipped.length ? { leaveOut: { lines: lo.lines.map(l => ({ app: l.app, what: l.what, from: l.from, shows: l.shows })), ...(lo.skipped.length ? { skipped: lo.skipped } : {}) } } : {}), apps: [...inPlan] };
   const save = () => writeFileSync(join(out, 'run.json'), JSON.stringify(run, null, 1));
   // Leave out's record (per rule: the requests it filtered and what it took out; the checks before each save; a leak).
   const leakWhy = leak => `left out of the replica, and ${leak.why}: nothing after it was saved`;
@@ -125,8 +135,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const g = await guardOn(demo, cmd, packs);
   run.guard = { hosts: g.hosts, allow: g.allow.length };
   // The apps' pack-named services, every answer watched (run.services): one failing at the start means no capture;
-  // during a beat, the run stops before that beat's next write.
-  const svcs = packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : [];
+  // during a beat, the run stops before that beat's next write. Only the apps the plan goes to.
+  const svcs = (packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : []).filter(x => inPlan.has(x.app));
   // A service whose list the plan clicks a row of: each 2xx answer read for those rows.
   const cardsOf = Object.fromEntries(svcs.map(sv => [sv.name, cardSteps(plan, sv, demo.cfg.apps.map(a => a.id))]));
   await cmd('capNet', { on: true, watch: svcs.map(({ name, match, cards }) => ({ name, match, ...(cardsOf[name].length ? { cards: { texts: cardsOf[name], suffix: cards.suffix || '' } } : {}) })) }, 30).catch(() => {});
@@ -423,9 +433,10 @@ export async function readyCheck({ demo, cmd: viaCmd, packs, plan: viaPlan = nul
   const plan = viaPlan || readPlan(demo);
   if (!plan || !stepCount(plan)) throw new Error('make the plan first');
   packs = packs === undefined ? await walkerPacks() : packs;
-  const lo = leaveOutOf({ demo, packs });
+  const inPlan = planApps(plan, demo.cfg.apps.map(a => a.id));
+  const lo = leaveOutOf({ demo, packs, apps: inPlan });
   if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
-  const svcs = (packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : []).filter(x => x.start);
+  const svcs = (packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : []).filter(x => x.start && inPlan.has(x.app));
   const ids = demo.cfg.apps.map(a => a.id), cardsOf = Object.fromEntries(svcs.map(sv => [sv.name, cardSteps(plan, sv, ids)]));
   const g = await guardOn(demo, cmd, packs);
   const out = [];
@@ -554,7 +565,8 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   packs = packs === undefined ? await walkerPacks() : packs;
   const { walkPlan, stepNets } = await import('./walk.mjs');
   // Leave out as a run has it, so a look-only walk shows what the capture will (and checks each screen it keeps).
-  const lo = leaveOutOf({ demo, packs });
+  const inPlan = planApps(plan, demo.cfg.apps.map(a => a.id));
+  const lo = leaveOutOf({ demo, packs, apps: inPlan });
   if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
   const g = await guardOn(demo, cmd, packs);
   const t0 = Date.now();
@@ -596,7 +608,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
   const stepAt = {};
   let lastEnd = Date.now(), heldSince = 0;
   const appOfSender = senderApps(demo.cfg, packs);
-  await cmd('capNet', { on: true, watch: (packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : []).map(({ name, match }) => ({ name, match })) }, 30).catch(() => {});
+  await cmd('capNet', { on: true, watch: (packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : []).filter(x => inPlan.has(x.app)).map(({ name, match }) => ({ name, match })) }, 30).catch(() => {});
   let netSince = ((await cmd('capNet', {}, 30).catch(() => ({}))).total) || 0;
   const netAll = [];
   // Failed requests (not the guard's) and answers ≥ 400 so far, each with its app; given to the steps at the end
