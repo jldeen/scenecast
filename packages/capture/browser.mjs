@@ -668,7 +668,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       if (!f.ok) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: f.why }); log(`leave out: ${where.method} ${where.host}${where.path}: ${f.why}`); return null; }
       for (const r of mine) {
         const gone = f.removed.filter(x => x.rule === r.id), l = ruleLog(r.id);
-        l.requests.push({ at: at2(), ...where, removed: gone.length, ...(gone.length ? { refs: f.refs } : {}) });
+        l.requests.push({ at: at2(), ...where, removed: gone.length, kept: f.kept[r.id] || 0, ...(gone.length ? { refs: f.refs } : {}) });
         for (const x of gone) if (!l.removed.some(y => y.value === x.value && y.field === x.field && y.shows === x.shows)) l.removed.push({ field: x.field, value: x.value, shows: x.shows });
       }
       if (f.removed.length) log(`leave out: ${where.method} ${where.host}${where.path}: ${f.removed.length} left out${f.refs ? `, ${f.refs} references` : ''}`);

@@ -1,7 +1,8 @@
 // Leave out (reset.md "## Leave out"): items a demo's tenant has that the capture leaves out, filtered from what the
 // page is given, in the capture browser only. Requests go out as they are; only the response's body changes, so the
 // app draws itself without the item (no hole, counts right) and nothing reaches the tenant.
-//   filterBody(text, rules) → { ok, body, removed: [{ rule, field, value, shows }], refs } | { ok: false, why }
+//   filterBody(text, rules) → { ok, body, removed: [{ rule, field, value, shows }], refs, kept: { rule: items left } }
+//     | { ok: false, why }
 // A rule: { id, items, fields, values, refs?, shows? } from a pack's filters entry and the demo's Leave out lines:
 //   items   where the item arrays are: dotted keys, each optionally [*] (every element) or [Key=Value] (the elements
 //           whose Key is Value): "plugins", "Groups[Type=Message].Suggestions", "Groups[*].Suggestions". The first key
@@ -44,7 +45,7 @@ export function hasShape(root, items) {
 export function filterBody(text, rules) {
   let root;
   try { root = JSON.parse(text); } catch (e) { return { ok: false, why: "the response isn't JSON" }; }
-  const removed = [];
+  const removed = [], kept = {};
   let refs = 0;
   for (const r of rules) {
     if (!hasShape(root, r.items)) return { ok: false, why: `the response has no ${String(r.items).split('.')[0].replace(/\[.*$/, '')} list (${r.id})` };
@@ -60,6 +61,7 @@ export function filterBody(text, rules) {
         removed.push({ rule: r.id, field, value: hit, shows: String((r.shows && get(it, r.shows)) || hit) });
       }
       if (keep.length !== arr.length) arr.splice(0, arr.length, ...keep);
+      kept[r.id] = (kept[r.id] || 0) + keep.length;
     }
     for (const ref of r.refs || []) {
       const keys = new Set(gone.map(it => get(it, ref.by)).filter(v => v != null).map(String));
@@ -67,7 +69,7 @@ export function filterBody(text, rules) {
       for (const arr of arraysAt(root, ref.list)) for (let i = arr.length - 1; i >= 0; i--) if (keys.has(String(get(arr[i], ref.by)))) { arr.splice(i, 1); refs++; }
     }
   }
-  return { ok: true, body: removed.length ? JSON.stringify(root) : text, removed, refs };
+  return { ok: true, body: removed.length ? JSON.stringify(root) : text, removed, refs, kept };
 }
 
 // A filter's rule from its pack entry and the demo's values for it.

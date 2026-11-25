@@ -8,6 +8,7 @@ test('leave out: a catalog item by name, and nothing else changes', () => {
   assert.equal(r.ok, true);
   assert.deepEqual(JSON.parse(r.body).plugins.map(p => p.name), ['Contoso Ledger', 'Contoso Notes']);
   assert.deepEqual(r.removed, [{ rule: 'catalog', field: 'name', value: 'Fabrikam Payroll', shows: 'Fabrikam Payroll' }]);
+  assert.deepEqual(r.kept, { catalog: 2 });
   // Nothing to leave out: the body as it came.
   assert.equal(filterBody(body, [ruleOf({ id: 'catalog', items: 'plugins', field: 'name' }, ['Northwind'])]).body, body);
 });
