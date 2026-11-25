@@ -31,7 +31,7 @@ const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
 // status control is saved, it must show what the recording does (Teams: Available); read again for a while, else the
 // take stops there. First, so Leave out's check reads the screen as it's saved.
 const recOwn = () => globalThis.__stuntdoubleOwnStatus || null;
-const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : REC.active; };
+const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : (REC.twinOf && REC.twinOf.get(p)) || REC.active; };
 const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
 if (!H.leaveGated) {
   const snap0 = H.snap, post0 = H.post;
@@ -382,6 +382,9 @@ async function recTwinPages(A, st, n) {
   const pages = await OPS.capTwins({ app: A.id, n, url: A.page.url() }).then(r => (r && r.pages) || [], e => { rlogr('twins: ' + String(e.message || e).slice(0, 120)); return []; });
   const same = await Promise.all(pages.map(async q => { await recInstall(q).catch(() => {}); await recSettle(q, 900, 12000).catch(() => {}); return (await recSig(q).catch(() => null)) === st.sig; }));
   const ok = pages.filter((q, i) => same[i]);
+  // Whose window each is (Leave out's check before a twin's save reads that app's words).
+  REC.twinOf = REC.twinOf || new WeakMap();
+  for (const q of pages) REC.twinOf.set(q, A.id);
   rlogr(`twins for ${A.state}: ${ok.length} of ${pages.length} show the same screen`);
   return ok;
 }
