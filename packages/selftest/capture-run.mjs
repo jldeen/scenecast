@@ -606,8 +606,8 @@ try {
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
 
-  // 1j · The recording's hovers are a floor. Three screens of plain buttons; the first two show nothing on hover, so
-  // the sweep learns to skip plain buttons. The demo's recording (its build's hovers, as written here) has a hover on
+  // 1j · The recording's hovers are a floor. Three screens of plain buttons, drawn in the page as an app's in-page
+  // routes are; the first two show nothing on hover, so the sweep learns to skip plain buttons. The demo's recording (its build's hovers, as written here) has a hover on
   // the third screen's Slow chip (its card shows after 1.5 s, past the 900 ms learned wait; recorded on a bare div in
   // a side pane the page no longer has, so it's found by its words), its Quiet chip, and a Removed chip that's no
   // longer there. Each recorded hover counts as captured only when its card's words are captured. Slow chip: never skipped for its kind, hovered again for 2.5 s, captured.
