@@ -240,11 +240,16 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   prints what the start screens (with their sweeps) and beat 1 showed. A live walk and `ai check` only note it.
 - **The recording's hovers are a floor** (a demo built from an earlier recording: its `data/snaps/hovers-<app>.json`).
   The hovers sweep learns to stop trying a kind of control that never shows anything (10 tries), and waits at most
-  900 ms; on a busy computer a slow card would read as none. A control the recording has a hover for is never skipped
-  that way, nor by a screen's cap or time, is hovered first, and when nothing shows is hovered once more for 2.5 s
-  (`capHoverFloor`). After the run each recorded hover is captured, gone (its control was on no screen the run swept)
-  or missed (it was there and showed nothing): a missed one goes under Needs you with a picture of the screen. run.json:
-  `hovers` (the list, and the three counts the summary prints). A live walk and `ai check` don't sweep hovers.
+  900 ms; on a busy computer a slow card would read as none. Each recorded hover is found on the live page as the
+  replica finds it (its anchor by selector, place and words, then its scope); when its place has moved (a bare `div`
+  whose surroundings changed), by its words (an element whose own name or words are the anchor's, else start with
+  them; the innermost, nearest the recorded spot). The controls that are, hold or sit inside it are never skipped that
+  way, nor by a screen's cap or time, are hovered first, and when nothing shows are hovered once more for 2.5 s, until
+  one shows its card (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
+  shows its card: the same words, numbers aside; `hover-card.mjs`), missed (its anchor was there and its card wasn't
+  captured) or gone (its anchor's words were on no screen the run swept): a missed one goes under Needs you with a
+  picture of the screen (only a missed one keeps its picture). run.json: `hovers` (the list, how each anchor was
+  found, and the three counts the summary prints). A live walk and `ai check` don't sweep hovers.
 - **run.json**: each step and its time, each write and what it made (ids, the page, what was typed, for the undos),
   the time per beat, the reset, what the guard held, every non-read it let through and why (allowed, or a planned
   write), every host reached outside the apps', every input sent (`inputs`: what it was for, the control's name, its

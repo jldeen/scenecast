@@ -310,14 +310,19 @@ test("a save held for her own status doesn't use up a step's time to settle", as
 test("the recording's hovers: each control once per app with its screens; after a run captured, missed or gone", () => {
   const dir = mkdtempSync(join(tmpdir(), 'floor-'));
   mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
-  const def = (page, sel, text, scope) => ({ page, anchor: { sel, text, count: 1 }, ...(scope ? { scope } : {}) });
-  writeFileSync(join(dir, 'data', 'snaps', 'hovers-chat.json'), JSON.stringify({ defs: { a: def('home', 'button', 'Share'), b: def('task', 'button', 'Share'), c: def('home', 'nav', 'Docs', [1, 0]), d: def('home', 'button', 'Old') } }));
+  const def = (page, sel, text, card, scope) => ({ page, anchor: { sel, text, count: 1 }, anchorRect: { x: 1, y: 2, w: 3, h: 4 }, ...(card ? { portals: [{ text: card }] } : { ops: [{ kind: 'attr', path: [], set: { class: 'on' } }] }), ...(scope ? { scope } : {}) });
+  writeFileSync(join(dir, 'data', 'snaps', 'hovers-chat.json'), JSON.stringify({ defs: { a: def('home', 'button', 'Share', 'Share with 3 people'), b: def('task', 'button', 'Share', 'Share with 3 people'), c: def('home', 'nav', 'Docs', 'Open the docs', [1, 0]), d: def('home', 'button', 'Old', 'Gone now'), e: def('home', 'button', 'Plain', null) } }));
   const rec = recordedHovers({ dir }, ['chat', 'admin']);
-  assert.deepEqual(rec.map(h => [h.app, h.anchor, h.scope, h.pages]), [['chat', { sel: 'button', text: 'Share' }, [], ['home', 'task']], ['chat', { sel: 'nav', text: 'Docs' }, [1, 0], ['home']], ['chat', { sel: 'button', text: 'Old' }, [], ['home']]]);
-  const [share, docs, old] = rec.map(h => h.id);
-  const log = [{ app: 'chat', id: share, shown: false, retried: true, why: 'nothing showed', picture: '/x.png', state: 's1' }, { app: 'chat', id: share, shown: true, retried: false }, { app: 'chat', id: docs, shown: false, retried: true, why: 'nothing showed', picture: '/d.png', state: 's2' }];
-  const out = hoverOutcomes(rec, log);
-  assert.deepEqual(out.map(x => [x.text, x.status, x.picture || null]), [['Share', 'captured', null], ['Docs', 'missed', '/d.png'], ['Old', 'gone', null]]);
-  assert.match(out[1].why, /on the screen and nothing showed, hovered twice/);
-  assert.equal(hoverOutcomes(rec, [{ app: 'chat', id: old, tried: false }])[2].why, "it was on the screen and wasn't hovered (out of time)");
+  assert.deepEqual(rec.map(h => [h.anchor, h.scope, h.card, h.rect, h.pages]), [[{ sel: 'button', text: 'Share' }, [], 'Share with 3 people', { x: 1, y: 2, w: 3, h: 4 }, ['home', 'task']], [{ sel: 'nav', text: 'Docs' }, [1, 0], 'Open the docs', { x: 1, y: 2, w: 3, h: 4 }, ['home']], [{ sel: 'button', text: 'Old' }, [], 'Gone now', { x: 1, y: 2, w: 3, h: 4 }, ['home']], [{ sel: 'button', text: 'Plain' }, [], '', { x: 1, y: 2, w: 3, h: 4 }, ['home']]]);
+  const [share, docs, , plain] = rec.map(h => h.id);
+  // Share: its card captured on another control's hover, its count different. Docs: found by words, another card.
+  // Old: nowhere. Plain: a card with no words, so a control of its showing is enough.
+  const sweeps = [
+    { app: 'chat', state: 's1', found: { [share]: 'place', [docs]: 'words', [plain]: 'place' }, floor: { [plain]: { shown: true } }, tries: [{ key: 'nav|Docs', ids: [docs], result: 'other card', retried: false }, { key: 'button|Share', ids: [share], result: 'nothing', retried: true, picture: '/x.png' }], cards: [{ key: 'nav|Docs', cards: ['Something else'] }] },
+    { app: 'chat', state: 's2', found: {}, floor: {}, tries: [], cards: [{ key: 'a|More', cards: ['share with 12  people'] }] },
+  ];
+  const out = hoverOutcomes(rec, sweeps);
+  assert.deepEqual(out.map(x => [x.text, x.status, x.found || null, x.picture || null]), [['Share', 'captured', 'place', null], ['Docs', 'missed', 'words', null], ['Old', 'gone', null, null], ['Plain', 'captured', 'place', null]]);
+  assert.equal(out[1].why, 'it was on the screen and showed another card');
+  assert.match(hoverOutcomes(rec, [{ app: 'chat', state: 's1', found: { [share]: 'place' }, floor: {}, tries: [{ ids: [share], result: 'nothing', retried: true, picture: '/x.png' }], cards: [] }])[0].why, /showed nothing, hovered twice/);
 });

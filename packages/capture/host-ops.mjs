@@ -61,18 +61,21 @@
 //                                    saves as it is. { apps: {} }: off → { on, apps }
 //                                    { read: { tab, name, role } }: the status on that tab now → { found, status? }
 //                                    { since }: what it read before each save, the one it's waiting on, the stop
-//   capHoverFloor({ apps, shots } | {})   the demo's recorded hovers as a floor: apps { <app>: [{ id, anchor, scope }] }
-//                                    (each as its build keeps it). From here on the recorder's hovers sweep never skips
-//                                    their controls for their kind, tries each twice (the second time for 2.5 s), and
-//                                    says how each went; one that showed is left out on the app's next screens; a picture
-//                                    of the screen when one showed nothing goes in shots. { apps: {} }: off → { on, apps }.
-//                                    {}: → { on, log: [{ app, state, page, id, shown, retried, why?, picture?, tried? }] }
+//   capHoverFloor({ apps, shots } | {})   the demo's recorded hovers as a floor: apps { <app>: [{ id, anchor, scope,
+//                                    rect, card }] } (each as its build keeps it, card: its words). From here on the
+//                                    recorder's hovers sweep finds their controls (by place, else by words), never skips
+//                                    them for their kind, tries each twice (the second time for 2.5 s) until one shows its
+//                                    card, and says how it went; one whose card was captured anywhere in its app isn't
+//                                    looked for again; a picture of the screen when a control showed nothing goes in shots.
+//                                    { apps: {} }: off → { on, apps }. {}: → { on, log: [{ app, state, page, floor, found,
+//                                    tries, cards }] }, one per sweep
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { allowedBy } from './browser.mjs';
 import { READ_DOCS_SRC } from './page-read.mjs';
 import { CONTROL_NAME_SRC } from './page-naming.mjs';
 import { cardIn, shownIn } from './cards.mjs';
+import { cardMatch } from './hover-card.mjs';
 
 const LEAVE_PAGE = readFileSync(new URL('./leave-out-page.js', import.meta.url), 'utf8').replace(/^\/\/.*\n/gm, '');
 const AsyncFn = Object.getPrototypeOf(async () => {}).constructor;
@@ -430,16 +433,21 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     async capHoverFloor(c) {
       if (c.apps) {
         const ok = f => f && typeof f.id === 'string' && f.anchor && typeof f.anchor.sel === 'string' && (f.scope === undefined || Array.isArray(f.scope));
-        const apps = Object.fromEntries(Object.entries(c.apps).map(([id, fs]) => [id, [].concat(fs || []).filter(ok).map(f => ({ id: f.id, anchor: f.anchor, scope: f.scope || [] }))]).filter(([, fs]) => fs.length));
+        const apps = Object.fromEntries(Object.entries(c.apps).map(([id, fs]) => [id, [].concat(fs || []).filter(ok).map(f => ({ id: f.id, anchor: f.anchor, scope: f.scope || [], ...(f.rect ? { rect: f.rect } : {}), card: String(f.card || '') }))]).filter(([, fs]) => fs.length));
         if (!Object.keys(apps).length) { floor = null; globalThis.__stuntdoubleHoverFloor = undefined; return { on: false }; }
         floor = { apps, shots: c.shots || null, log: [] };
         const shot = async (p, name) => {
           if (!floor || !floor.shots || !p) return null;
           try { const f = `${floor.shots}/hover-missed-${String(name).replace(/[^\w.-]+/g, '-')}.png`; mkdirSync(floor.shots, { recursive: true }); writeFileSync(f, await p.screenshot({ timeout: 30000 })); return f; } catch (e) { return null; }
         };
-        // An app's recorded hovers still to show (one that showed on a screen isn't looked for again).
-        const keys = app => { if (!floor) return []; const shown = new Set(floor.log.filter(e => e.app === app && e.shown).map(e => e.id)); return (floor.apps[app] || []).filter(f => !shown.has(f.id)); };
-        globalThis.__stuntdoubleHoverFloor = { keys, seen: e => { if (floor) floor.log.push({ at: at(), ...e }); }, shot };
+        // An app's recorded hovers still to capture: not one whose card a sweep of the app has captured (any card, for
+        // one whose card has no words: a control of its showed).
+        const keys = app => {
+          if (!floor) return [];
+          const log = floor.log.filter(e => e.app === app), cards = log.flatMap(e => e.cards.flatMap(x => x.cards));
+          return (floor.apps[app] || []).filter(f => !(f.card ? cards.some(x => cardMatch(f.card, x)) : log.some(e => e.floor[f.id] && e.floor[f.id].shown)));
+        };
+        globalThis.__stuntdoubleHoverFloor = { keys, seen: e => { if (floor) floor.log.push({ at: at(), ...e }); }, shot, match: cardMatch };
         log(`hover floor on: ${Object.entries(apps).map(([id, ks]) => `${id} ${ks.length}`).join(', ')}`);
         return { on: true, apps: Object.fromEntries(Object.entries(apps).map(([id, ks]) => [id, ks.length])) };
       }

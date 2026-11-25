@@ -29,6 +29,7 @@ import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
+import { cardMatch, cardNorm, defCard } from '@stuntdouble/capture/hover-card.mjs';
 
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost)(:\d+)?$/i;
 const sleepMs = ms => new Promise(r => setTimeout(r, ms));
@@ -60,8 +61,8 @@ const computerWord = () => process.platform === 'darwin' ? 'Mac' : process.platf
 // What she reads when a save stopped on her status.
 export const ownStatusSay = (label, status) => `${label} showed you as ${status}. Start again while you're using your ${computerWord()}, with ${label} open.`;
 // The demo's recorded hovers (its build's data/snaps/hovers-<app>.json), for the apps the plan goes to: each hover
-// once, by where the replica finds it (its anchor, and its scope from there), with the screens it was recorded on.
-// → [{ app, id, anchor, scope, text, pages }]
+// once, by where the replica finds it (its anchor, and its scope from there), where it was on the screen (rect), and
+// its card's words, with the screens it was recorded on. → [{ app, id, anchor, scope, rect, card, text, pages }]
 export function recordedHovers(demo, apps) {
   const out = new Map();
   for (const app of apps) {
@@ -71,23 +72,33 @@ export function recordedHovers(demo, apps) {
       const a = h && h.anchor;
       if (!a || !a.sel) continue;
       const anchor = Object.fromEntries(['sel', 'in', 'text', 'textStarts'].filter(k => a[k] !== undefined).map(k => [k, a[k]]));
-      const scope = Array.isArray(h.scope) ? h.scope : [], id = JSON.stringify([anchor.sel, anchor.in || '', anchor.text ?? anchor.textStarts ?? '', scope]);
-      if (!out.has(`${app}\n${id}`)) out.set(`${app}\n${id}`, { app, id, anchor, scope, text: String(a.text || a.textStarts || '').slice(0, 60), pages: [] });
+      const scope = Array.isArray(h.scope) ? h.scope : [], card = defCard(h), id = JSON.stringify([anchor.sel, anchor.in || '', anchor.text ?? anchor.textStarts ?? '', scope, cardNorm(card)]);
+      const r = h.anchorRect && typeof h.anchorRect.x === 'number' ? { x: h.anchorRect.x, y: h.anchorRect.y, w: h.anchorRect.w, h: h.anchorRect.h } : null;
+      if (!out.has(`${app}\n${id}`)) out.set(`${app}\n${id}`, { app, id, anchor, scope, ...(r ? { rect: r } : {}), card, text: String(a.text || a.textStarts || '').slice(0, 60), pages: [] });
       const e = out.get(`${app}\n${id}`);
       if (h.page && !e.pages.includes(h.page)) e.pages.push(h.page);
     }
   }
   return [...out.values()];
 }
-// Each recorded hover after a run, from what the hovers sweep said (capHoverFloor's log): captured (it showed, on any
-// screen of its app), missed (its control was there and showed nothing, or wasn't hovered), or gone (its control was on
-// no screen the run swept). → [{ app, key, text, pages, status, why?, picture? }]
-export function hoverOutcomes(recorded, log) {
+// Each recorded hover after a run, from its app's sweeps (capHoverFloor's log, one entry per sweep): captured (a hover
+// captured in its app shows its card: the same words, numbers aside; for a card with no words, a control of its
+// showed), missed (its anchor was on a screen and its card wasn't captured), or gone (its anchor was on no screen the
+// run swept). found: how its anchor was found (place, or words when its place had moved).
+// → [{ app, id, sel, text, pages, status, found?, why?, picture?, screen? }]
+export function hoverOutcomes(recorded, sweeps) {
   return recorded.map(h => {
-    const seen = (log || []).filter(e => e.app === h.app && e.id === h.id);
-    const status = seen.some(e => e.shown) ? 'captured' : seen.length ? 'missed' : 'gone';
-    const miss = status === 'missed' ? seen.find(e => e.picture) || seen[0] : null;
-    return { app: h.app, id: h.id, sel: h.anchor.sel, text: h.text, pages: h.pages, status, ...(miss ? { why: miss.tried === false ? "it was on the screen and wasn't hovered (out of time)" : `it was on the screen and ${miss.why || 'nothing showed'}, hovered twice (the second time for 2.5 s)`, picture: miss.picture || null, screen: miss.state } : {}) };
+    const mine = (sweeps || []).filter(e => e.app === h.app);
+    const captured = h.card ? mine.some(e => (e.cards || []).some(x => (x.cards || []).some(t => cardMatch(h.card, t)))) : mine.some(e => e.floor && e.floor[h.id] && e.floor[h.id].shown);
+    const at = mine.filter(e => e.found && e.found[h.id]), found = at.some(e => e.found[h.id] === 'place') ? 'place' : at.length ? 'words' : null;
+    const status = captured ? 'captured' : found ? 'missed' : 'gone';
+    const out = { app: h.app, id: h.id, sel: h.anchor.sel, text: h.text, pages: h.pages, status, ...(found ? { found } : {}) };
+    if (status !== 'missed') return out;
+    const tries = mine.flatMap(e => (e.tries || []).filter(t => (t.ids || []).includes(h.id)).map(t => ({ ...t, state: e.state })));
+    const other = tries.find(t => t.result === 'other card'), none = tries.find(t => t.result === 'nothing');
+    const why = other ? 'it was on the screen and showed another card' : none ? 'it was on the screen and showed nothing, hovered twice (the second time for 2.5 s)' : "it was on the screen and wasn't hovered (out of time, or none of its controls could be pointed at)";
+    const pic = tries.find(t => t.picture);
+    return { ...out, why, picture: pic ? pic.picture : null, screen: (pic || tries[0] || at[0] || {}).state || null };
   });
 }
 
@@ -313,7 +324,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // The recording's hovers as a floor: never skipped by what the sweep learns, each tried twice.
     if (recHovers.length) {
       const byApp = {};
-      for (const h of recHovers) (byApp[h.app] = byApp[h.app] || []).push({ id: h.id, anchor: h.anchor, scope: h.scope });
+      for (const h of recHovers) (byApp[h.app] = byApp[h.app] || []).push({ id: h.id, anchor: h.anchor, scope: h.scope, rect: h.rect, card: h.card });
       const on = await cmd('capHoverFloor', { apps: byApp, shots: stops }, 30).catch(() => ({ on: false }));
       if (on.on) run.hovers = { recorded: recHovers.length };
     }
@@ -512,6 +523,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (fl && fl.on) {
         const list = hoverOutcomes(recHovers, fl.log);
         const n = k => list.filter(x => x.status === k).length;
+        // A picture is kept only for a hover that's missed (a control can show nothing while another of its anchor's shows its card).
+        const keep = new Set(list.map(x => x.picture).filter(Boolean));
+        for (const t of fl.log.flatMap(e => e.tries || [])) if (t.picture && !keep.has(t.picture)) rmSync(t.picture, { force: true });
         Object.assign(run.hovers, { captured: n('captured'), gone: n('gone'), missed: n('missed'), list, ...(run.stopped ? { partial: true } : {}) });
         for (const x of list.filter(x => x.status === 'missed')) run.needsYou.push({ text: `Hover over "${x.text || x.sel}" (${x.app})`, why: `${x.why}. The replica won't show its hover.`, picture: x.picture });
       }

@@ -103,22 +103,56 @@
     },
     noise() { const ops = []; diff(H.rest, document.body, ops); ops.forEach(o => H.noiseSigs.add(sigOf(o))); return ops.length; },
     // Candidates on screen: interactive elements and list items, one per element under their centre.
+    // Each recorded hover ({ id, anchor, scope, rect }) found on this page: as the replica finds it (the anchor by its
+    // selector, place and words, then down its scope, child by child); else, when its place has moved, by its words
+    // (an element whose own name or words are the anchor's, else start with them; the innermost, nearest the recorded
+    // spot). → [[element, id, 'place' | 'words']]
+    floorTargets(floor) {
+      const fmatch = (el, m) => { try { if (m.sel && !el.matches(m.sel)) return false; } catch (e) { return false; } if (m.in && !el.closest(m.in)) return false; if (m.text !== undefined && norm(el.innerText) !== m.text) return false; if (m.textStarts !== undefined && !norm(el.innerText).startsWith(m.textStarts)) return false; return true; };
+      const ekids = el => [...el.children].filter(c => !/^(script|noscript|template|base)$/.test(c.localName));
+      const down = (e, scope) => (scope || []).reduce((x, i) => x && ekids(x)[i], e);
+      const shown = e => e.getClientRects().length > 0;
+      let all = null;
+      const byWords = f => {
+        const t = norm(f.anchor.text !== undefined ? f.anchor.text : f.anchor.textStarts || '');
+        if (!t) return null;
+        all = all || [...document.body.querySelectorAll('*')].filter(e => !/^(script|style|noscript|template)$/.test(e.localName));
+        const own = e => norm(e.getAttribute('aria-label') || ''), words = e => norm(e.innerText);
+        // A cheap first cut (its first word anywhere in the element's text, or a name of its own), then the words.
+        const w0 = t.split(' ')[0];
+        const near = all.filter(e => (e.getAttribute('aria-label') || '').length || (e.textContent || '').includes(w0));
+        let hit = near.filter(e => shown(e) && (own(e) === t || words(e) === t));
+        if (!hit.length) hit = near.filter(e => shown(e) && (own(e).startsWith(t) || words(e).startsWith(t)));
+        hit = hit.filter(e => !hit.some(o => o !== e && e.contains(o)));
+        if (!hit.length) return null;
+        const r = f.rect, dist = e => { if (!r) return 0; const b = e.getBoundingClientRect(); return Math.hypot(b.x + b.width / 2 - (r.x + r.w / 2), b.y + b.height / 2 - (r.y + r.h / 2)); };
+        return hit.sort((a, b) => dist(a) - dist(b))[0];
+      };
+      const out = [];
+      for (const f of floor || []) {
+        let els = []; try { els = [...document.querySelectorAll(f.anchor.sel)]; } catch (e) {}
+        let n = 0;
+        for (const e of els) if (fmatch(e, f.anchor)) { const t = down(e, f.scope); if (t) { out.push([t, f.id, 'place']); n++; } }
+        if (n) continue;
+        const w = byWords(f);
+        if (!w) continue;
+        // Its scope from there, when the element found is the same kind as the anchor; else the element itself.
+        const tag = (/^[a-z][a-z0-9-]*/i.exec(f.anchor.sel) || [''])[0];
+        out.push([(tag && w.localName === tag.toLowerCase() && down(w, f.scope)) || w, f.id, 'words']);
+      }
+      return out;
+    },
+    // The recorded hovers whose anchor is on this page, and how each was found. → { <id>: 'place' | 'words' }
+    floorFound(floor) { const o = {}; for (const [, id, how] of H.floorTargets(floor)) if (!o[id] || how === 'place') o[id] = how; return o; },
     candidates(opt) {
       opt = opt || {};
       const root = opt.region ? document.querySelector(opt.region) : document.body;
       if (!root) return [];
       const out = []; const seen = new Set();
       const perSel = {};
-      // The recording's hovers (opt.floor: [{ id, anchor, scope }]), found as the replica finds them: the anchor by its
-      // selector, place and words, then down its scope (child by child). A control that is that element, holds it or
-      // is inside it is theirs (c.floor: their ids).
-      const fmatch = (el, m) => { try { if (m.sel && !el.matches(m.sel)) return false; } catch (e) { return false; } if (m.in && !el.closest(m.in)) return false; if (m.text !== undefined && norm(el.innerText) !== m.text) return false; if (m.textStarts !== undefined && !norm(el.innerText).startsWith(m.textStarts)) return false; return true; };
-      const ekids = el => [...el.children].filter(c => !/^(script|noscript|template|base)$/.test(c.localName));
-      const targets = [];
-      for (const f of opt.floor || []) {
-        let els = []; try { els = [...document.querySelectorAll(f.anchor.sel)]; } catch (e) {}
-        for (const e of els) if (fmatch(e, f.anchor)) { const t = (f.scope || []).reduce((x, i) => x && ekids(x)[i], e); if (t) targets.push([t, f.id]); }
-      }
+      // The recording's hovers (opt.floor), each a control's or controls' here (floorTargets). A control that is that
+      // element, holds it or is inside it is theirs (c.floor: their ids).
+      const targets = opt.floor && opt.floor.length ? H.floorTargets(opt.floor) : [];
       for (const e of root.querySelectorAll(opt.sel || INTERACTIVE)) {
         if (!visible(e)) continue;
         const r = e.getBoundingClientRect();

@@ -6,12 +6,16 @@
 //         neutral?: [[x, y]], waitMs?, maxS?, snapId?, skipKeys?: [key], max? }
 // skipKeys: controls already audited on another screen of the app ("sel|text"), not hovered again; out.keys are the
 // ones this run hovered. max: at most this many controls.
-// floor: the demo's recorded hovers ([{ id, anchor, scope }]): the controls that are theirs on this screen (hover-page
-// candidates' c.floor) are hovered first, never skipped for their kind (skipSels) or past max, maxS or perSel, and
-// when nothing shows in waitMs, hovered once more for floorWaitMs (2.5 s); until one of a hover's controls shows it.
-// out.floor: per recorded hover, { shown, retried, why?, picture? } (floorShot(name): a picture of the screen as it
-// showed nothing), or { tried: false } when its controls were there and not hovered. out.floorMissKeys: the controls
-// ("sel|text") that showed nothing, to be hovered again on the app's next screens.
+// floor: the demo's recorded hovers ([{ id, anchor, scope, rect, card }]): the controls that are theirs on this screen
+// (hover-page floorTargets: by place, else by words) are hovered first, never skipped for their kind (skipSels) or
+// past max, maxS or perSel, and when nothing shows in waitMs, hovered once more for floorWaitMs (2.5 s); until one of
+// a hover's controls shows its card (floorMatch(card, words): the same words, numbers aside; any card when the
+// recorded one has no words). out.floorFound: { <id>: 'place' | 'words' }, the recorded hovers whose anchor is here.
+// out.floor: per recorded hover, { shown, retried, why? }, or { tried: false } when its controls were there and not
+// hovered. out.floorTries: each of their controls hovered ({ key, ids, result: card | other card | nothing, retried,
+// picture? }; floorShot(name): a picture of the screen as it showed nothing). out.cards: every hover that showed,
+// its card's words ({ key, cards }). out.floorMissKeys: the controls ("sel|text") that showed nothing, to be hovered
+// again on the app's next screens.
 const p = ARGS.p || await H.pageFor(ARGS.tab);
 await p.bringToFront();
 let f = p.mainFrame();
@@ -27,16 +31,19 @@ const ev = (fn, a) => f.evaluate(fn, a);
 const move = (x, y, steps = 2) => p.mouse.move(off.x + x, off.y + y, { steps });
 const quiet = async (ms, max) => { const s = Date.now(); while (Date.now() - s < max) { if ((await ev(() => window.__d1h.quietFor())) >= ms) return true; await H.poll(60); } return false; };
 const t0 = Date.now();
-const out = { page: ARGS.page, n: 0, tried: 0, steps: [], neutral: null, floor: {}, floorMissKeys: [] };
-const floorShown = new Set();
+const out = { page: ARGS.page, n: 0, tried: 0, steps: [], neutral: null, floor: {}, floorMissKeys: [], floorTries: [], cards: [] };
+const floorShown = new Set(), entries = new Map((ARGS.floor || []).map(e => [e.id, e]));
 const fl = c => (c.floor || []).some(id => !floorShown.has(id));
+const cardsMatch = ARGS.floorMatch || ((a, b) => { const n = x => String(x || '').toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim(); return !!n(a) && n(a) === n(b); });
+const partText = h => String(h || '').replace(/<[^>]*>/g, ' ');
 const vw = await ev(() => [innerWidth, innerHeight]);
+if (entries.size) out.floorFound = await ev(fl0 => window.__d1h.floorFound(fl0), ARGS.floor).catch(() => ({}));
 
 // Nothing new to hover on this screen (every control was hovered on another): done, before any waiting.
 if (!ARGS.scroll && !ARGS.only) {
   const skip0 = new Set(ARGS.skipKeys || []);
   const c0 = await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
-  if (!c0.some(c => !skip0.has(c.sel + '|' + c.text))) return { page: ARGS.page, n: 0, tried: 0, skipped: c0.length, steps: [0], keys: [], frameUrl: f === p.mainFrame() ? null : f.url().split('?')[0], secs: Math.round((Date.now() - t0) / 1000) };
+  if (!c0.some(c => !skip0.has(c.sel + '|' + c.text))) return { page: ARGS.page, n: 0, tried: 0, skipped: c0.length, ...(out.floorFound ? { floorFound: out.floorFound, floor: {}, floorTries: [], cards: [] } : {}), steps: [0], keys: [], frameUrl: f === p.mainFrame() ? null : f.url().split('?')[0], secs: Math.round((Date.now() - t0) / 1000) };
 }
 // ARGS.ctx: the neutral spot and the noise this app showed on its last screen (the recorder keeps them): the spot is
 // used again and the noise only topped up, instead of finding both from scratch on every screen.
@@ -108,7 +115,8 @@ for (let step = 0; step <= steps; step++) {
     }
     const floorMiss = async why => {
       const picture = ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${out.tried}`).catch(() => null) : null;
-      for (const id of c.floor || []) if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why, picture };
+      for (const id of c.floor || []) if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why };
+      out.floorTries.push({ key, ids: c.floor, result: 'nothing', retried, picture });
       out.floorMissKeys.push(key);
     };
     // Per kind of control (its selector), how often it was tried and showed something: the recorder stops trying a
@@ -137,7 +145,19 @@ for (let step = 0; step <= steps; step++) {
     }
     await H.post('/hover', { page: ARGS.page, n: out.n, firstMs: first, farMs, cand: c, step, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, shot, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
     out.n++;
-    for (const id of c.floor || []) { out.floor[id] = { shown: true, retried }; floorShown.add(id); }
+    // Its card's words: each popup's, and what changed in place.
+    const cards = [...(res.portals || []).map(q => q.text || ''), (res.ops || []).map(o => o.kind === 'add' ? partText((ser.parts || [])[o.part]) : o.kind === 'addText' || o.kind === 'text' ? (o.text || '') : '').join(' ')].map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    out.cards.push({ key, cards });
+    // A recorded hover of this control: shown when it's that card (any card, when the recording's has no words).
+    if (c.floor && c.floor.length) {
+      let any = false;
+      for (const id of c.floor) {
+        const e = entries.get(id), same = !e || !e.card || cards.some(x => cardsMatch(e.card, x));
+        if (same) { out.floor[id] = { shown: true, retried }; floorShown.add(id); any = true; }
+        else if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why: 'it showed another card' };
+      }
+      out.floorTries.push({ key, ids: c.floor, result: any ? 'card' : 'other card', retried });
+    }
   }
   for (const c of todo) for (const id of c.floor || []) if (!out.floor[id]) out.floor[id] = { tried: false };
   if (out.timedOut) break;

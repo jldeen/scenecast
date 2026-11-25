@@ -412,7 +412,7 @@ async function recAuto(A) {
   const learned = hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900;
   const skipSels = Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel);
   const F = recFloor(), floor = F ? F.keys(A.id) : [];
-  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorShot: name => F.shot(A.page, name) } : {}), ...c });
+  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorShot: name => F.shot(A.page, name), floorMatch: F.match } : {}), ...c });
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)] });
   for (const [i, fu] of f.frames.entries()) {
@@ -784,7 +784,7 @@ async function recSide(A, c) {
       const missed = k => (out.floorMissKeys || []).includes(k);
       const seen = recSeen('hovers', A.id + (out.frameUrl || '')); for (const k of out.keys || []) if (!missed(k)) seen.add(k);
       const F = recFloor();
-      if (F) for (const [id, x] of Object.entries(out.floor || {})) F.seen({ app: A.id, state, page: c.page || state, id, ...x });
+      if (F && (out.floorFound || (out.cards || []).length)) F.seen({ app: A.id, state, page: c.page || state, floor: out.floor || {}, found: out.floorFound || {}, tries: out.floorTries || [], cards: out.cards || [] });
       const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
       hs.firsts.push(...(out.firsts || []));
       for (const [sel, k] of Object.entries(out.kinds || {})) { const t = hs.kinds[sel] = hs.kinds[sel] || { tried: 0, shown: 0 }; t.tried += k.tried; t.shown += k.shown; }
