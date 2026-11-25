@@ -792,7 +792,8 @@ try {
 - tasks: "Sync" is off
 - tasks: shows "No tasks yet"
 `;
-    const withAhead = on => { const c = JSON.parse(cfg0); c.apps = c.apps.map(a => a.id === 'tasks' ? { ...a, url: `${tasks.url}?answer=40` } : a.id === 'admin' ? { ...a, url: `${fx.admin}?audit=1` } : a); c.zooms = [110, 125]; c.record.auto = { ...c.record.auto, zoom: true, maxS: 120, zoomMinS: 5, ahead: on }; writeFileSync(cfgFile, JSON.stringify(c, null, 2)); };
+    // Each app's start too: a demo with a recording starts on its recorded start screen's address, else.
+    const withAhead = on => { const c = JSON.parse(cfg0); c.apps = c.apps.map(a => a.id === 'tasks' ? { ...a, url: `${tasks.url}?answer=40`, start: `${tasks.url}?answer=40` } : a.id === 'admin' ? { ...a, url: `${fx.admin}?audit=1`, start: `${fx.admin}?audit=1` } : a); c.zooms = [110, 125]; c.record.auto = { ...c.record.auto, zoom: true, maxS: 120, zoomMinS: 5, ahead: on }; writeFileSync(cfgFile, JSON.stringify(c, null, 2)); };
     writeFileSync(join(DEMO, 'plan.md'), AHEAD_PLAN); writeFileSync(join(DEMO, 'reset.md'), AHEAD_RESET);
     withAhead(false);
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
