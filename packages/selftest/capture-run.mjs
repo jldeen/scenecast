@@ -334,6 +334,7 @@ try {
     const bodies = existsSync(KEEP) ? readdirSync(KEEP) : [];
     check('ai ready: one line, not ready with what the list showed, then ready once the row is there; each answer\'s body kept where asked', notReady.ready === false && notReady.line === "not ready: Tasks' catalog doesn't show Kestrel ledger today (it showed: nothing)" && isReady.ready === true && isReady.line === "ready: Tasks' catalog shows Kestrel ledger" && bodies.length >= 2 && bodies.some(f => /-200\.json$/.test(f) && /Kestrel ledger/.test(readFileSync(join(KEEP, f), 'utf8'))), JSON.stringify({ notReady, isReady, bodies }));
     writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
   }
   tasks.catalog('fail-on-type');
   tasks.log.length = 0;
