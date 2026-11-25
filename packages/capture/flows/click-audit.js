@@ -85,7 +85,9 @@ const reland = async () => {
 const titleKey = t => String(t || '').replace(/^\(\d+\)\s*/, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 const titleNow = () => p.mainFrame().evaluate(() => document.title).catch(() => '');
 // After a reload, a new page helper: the page's own churn learned again (else every click after it reads as stuck).
-const relearn = async () => { await move(...NEUTRAL); await quiet(400, 3000); await ev(() => window.__d1h.takeRest()); await sleep(1000); await ev(() => window.__d1h.noise()); };
+// A reloaded app goes on loading for a while (Teams draws a channel's posts for 10 s and more): it waits for a second
+// with no change (15 s at most), then learns 2 s of what changes by itself. out.relearnMs: the time it took.
+const relearn = async () => { const s0 = Date.now(); await move(...NEUTRAL); await quiet(1000, ARGS.relearnMaxMs || 15000); await ev(() => window.__d1h.takeRest()); await sleep(2000); await ev(() => window.__d1h.noise()); out.relearnMs = (out.relearnMs || 0) + Date.now() - s0; out.relearns = (out.relearns || 0) + 1; };
 async function backToRest() {
   // Reload as a last resort (the page's own state, nothing in the tenant).
   await p.goto(url0, { waitUntil: 'domcontentloaded' }); await sleep(ARGS.reloadWaitMs || 9000);
