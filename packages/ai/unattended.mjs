@@ -95,7 +95,8 @@ export function hoverOutcomes(recorded, sweeps) {
     const out = { app: h.app, id: h.id, sel: h.anchor.sel, text: h.text, pages: h.pages, status, ...(found ? { found } : {}) };
     if (status !== 'missed') return out;
     const tries = mine.flatMap(e => (e.tries || []).filter(t => (t.ids || []).includes(h.id)).map(t => ({ ...t, state: e.state })));
-    const other = tries.find(t => t.result === 'other card'), none = tries.find(t => t.result === 'nothing'), odd = tries.find(t => t.result === 'unreadable');
+    const res = t => (t.results && t.results[h.id]) || t.result;
+    const other = tries.find(t => res(t) === 'other card'), none = tries.find(t => res(t) === 'nothing'), odd = tries.find(t => res(t) === 'unreadable');
     const why = other ? 'it was on the screen and showed another card' : none ? 'it was on the screen and showed nothing, hovered twice (the second time for 2.5 s)' : odd ? "it was on the screen and what it showed couldn't be read" : "it was on the screen and wasn't hovered (out of time, or none of its controls could be pointed at)";
     const pic = tries.find(t => t.picture);
     return { ...out, why, picture: pic ? pic.picture : null, screen: (pic || tries[0] || at[0] || {}).state || null };

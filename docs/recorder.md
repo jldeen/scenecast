@@ -247,7 +247,7 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
   screen's cap or time: while any is left, the next one hovered is theirs. When nothing shows, each is hovered once
   more for 2.5 s, until one shows its card (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
-  shows its card: the same words, numbers aside; `hover-card.mjs`), missed (its anchor was there and its card wasn't
+  shows its card: the same words, numbers aside, or most of them in another order; `hover-card.mjs`), missed (its anchor was there and its card wasn't
   captured) or gone (its anchor's words were on no screen the run swept): a missed one goes under Needs you with a
   picture of the screen (only a missed one keeps its picture). run.json: `hovers` (the list, how each anchor was
   found, and the three counts the summary prints). A live walk and `ai check` don't sweep hovers.

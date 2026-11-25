@@ -125,13 +125,28 @@ for (let step = 0; step <= steps; step++) {
     const kind = (out.kinds = out.kinds || {})[c.sel] = (out.kinds || {})[c.sel] || { tried: 0, shown: 0 }; kind.tried++;
     if (first === null) { if (inFloor) await floorMiss('nothing showed'); atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
     kind.shown++; (out.firsts = out.firsts || []).push(first);
-    let last = await ev(() => window.__d1h.sig()), stable = Date.now(), farMs = null;
-    while (Date.now() - s < (ARGS.settleMaxMs || 4000)) {
-      if (farMs === null && await ev(([x, y]) => window.__d1h.farVisible(x, y), [c.x, c.y])) farMs = Date.now() - s;
-      await sleep(farMs === null ? 50 : 150);
-      const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500 && (farMs !== null || Date.now() - s > 1500)) break;
+    let farMs = null;
+    const settleRead = async () => {
+      let last = await ev(() => window.__d1h.sig()), stable = Date.now();
+      farMs = null;
+      while (Date.now() - s < (ARGS.settleMaxMs || 4000)) {
+        if (farMs === null && await ev(([x, y]) => window.__d1h.farVisible(x, y), [c.x, c.y])) farMs = Date.now() - s;
+        await sleep(farMs === null ? 50 : 150);
+        const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500 && (farMs !== null || Date.now() - s > 1500)) break;
+      }
+      return ev(([x, y]) => window.__d1h.result(x, y), [c.x, c.y]);
+    };
+    let res = await settleRead();
+    // A recorded hover whose card couldn't be read: once more, the same way.
+    if (!res && inFloor && !retried) {
+      retried = true;
+      await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest());
+      await move(c.x, c.y);
+      s = Date.now();
+      first = await waitShow(ARGS.floorWaitMs || 2500);
+      res = first === null ? null : await settleRead();
+      if (first === null) { await floorMiss('nothing showed'); atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
     }
-    const res = await ev(([x, y]) => window.__d1h.result(x, y), [c.x, c.y]);
     if (!res) { if (inFloor) await floorMiss("what it showed couldn't be read"); continue; }
     const ser = await f.evaluate(H.SERX({ parts: '[data-d1-hpart]' }));
     await ev(() => window.__d1h.unmark());
@@ -151,13 +166,14 @@ for (let step = 0; step <= steps; step++) {
     out.cards.push({ key, cards });
     // A recorded hover of this control: shown when it's that card (any card, when the recording's has no words).
     if (c.floor && c.floor.length) {
-      let any = false;
+      const results = {};
       for (const id of c.floor) {
         const e = entries.get(id), same = !e || !e.card || cards.some(x => cardsMatch(e.card, x));
-        if (same) { out.floor[id] = { shown: true, retried }; floorShown.add(id); any = true; }
+        results[id] = same ? 'card' : 'other card';
+        if (same) { out.floor[id] = { shown: true, retried }; floorShown.add(id); }
         else if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why: 'it showed another card' };
       }
-      out.floorTries.push({ key, ids: c.floor, result: any ? 'card' : 'other card', retried });
+      out.floorTries.push({ key, ids: c.floor, results, result: Object.values(results).includes('card') ? 'card' : 'other card', retried });
     }
   }
   for (const c of todo) for (const id of c.floor || []) if (!out.floor[id]) out.floor[id] = { tried: false };

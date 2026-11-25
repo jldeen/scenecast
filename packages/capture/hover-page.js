@@ -172,11 +172,16 @@
         seen.add(id);
         const s = specOf(owner);
         const k = s.sel + '|' + (s.in || ''), text = (s.text || s.textStarts || '').slice(0, 60);
-        const fl = targets.length ? [...new Set(targets.filter(([t]) => t === owner || t.contains(owner) || (owner.contains(t) && t.closest(INTERACTIVE) === owner)).map(([, fid]) => fid))] : [];
+        const mine = targets.filter(([t]) => t === owner || t.contains(owner) || (owner.contains(t) && t.closest(INTERACTIVE) === owner));
+        const fl = [...new Set(mine.map(([, fid]) => fid))];
         perSel[k] = (perSel[k] || 0) + 1;
         // A control the recording has a hover for is never left out for its kind's count.
         if (perSel[k] > (opt.perSel || 14) && !fl.length) continue;
-        out.push({ x, y, id, sel: s.sel, text, ...(fl.length ? { floor: fl } : {}) });
+        // A control that holds a recorded hover's target is hovered on that target (a pane around the words recorded).
+        let px = x, py = y;
+        const held = mine.map(([t]) => t).find(t => t !== owner && owner.contains(t));
+        if (held && !mine.some(([t]) => t === owner || t.contains(owner))) { const r2 = held.getBoundingClientRect(); const hx = Math.round(r2.x + Math.min(r2.width / 2, 40)), hy = Math.round(r2.y + r2.height / 2); if (r2.width > 0 && hx > 0 && hy > 0 && hx < innerWidth - 1 && hy < innerHeight - 1 && owner.contains(document.elementFromPoint(hx, hy))) { px = hx; py = hy; } }
+        out.push({ x: px, y: py, id, sel: s.sel, text, ...(fl.length ? { floor: fl } : {}) });
       }
       return out;
     },

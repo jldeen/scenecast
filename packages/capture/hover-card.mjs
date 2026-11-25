@@ -7,11 +7,18 @@ const ENT = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39'
 export const textOf = html => String(html || '').replace(/<[^>]*>/g, ' ').replace(/&(nbsp|amp|lt|gt|quot|apos|#39);/g, (m, k) => ENT[k]).replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d));
 // Lower case, every number as #, spaces as one.
 export const cardNorm = s => textOf(s).toLowerCase().replace(/\d+(?:[.,:]\d+)*/g, '#').replace(/\s+/g, ' ').trim();
-// The same card: the same words (numbers may differ); two long ones, the same first 60 characters.
+// A card's words, numbers and punctuation aside.
+const wordsOf = s => new Set(cardNorm(s).replace(/#/g, ' ').split(/[^\p{L}]+/u).filter(w => w.length > 1));
+// The same card: the same words (numbers may differ); two long ones, the same first 60 characters; or, for cards of
+// four words or more, most of the same words in any order (80% of the shorter card's: an app that moved a line).
 export function cardMatch(a, b) {
   const x = cardNorm(a), y = cardNorm(b);
   if (!x || !y) return false;
-  return x === y || (x.length >= 24 && y.length >= 24 && x.slice(0, 60) === y.slice(0, 60));
+  if (x === y || (x.length >= 24 && y.length >= 24 && x.slice(0, 60) === y.slice(0, 60))) return true;
+  const p = wordsOf(a), q = wordsOf(b);
+  if (p.size < 4 || q.size < 4) return false;
+  let n = 0; for (const w of p) if (q.has(w)) n++;
+  return n / Math.min(p.size, q.size) >= 0.8;
 }
 // What changes in place, as words: the parts it adds and the text it sets.
 export const opsText = (ops, partHtml = o => o.html) => (ops || []).map(o => o.kind === 'add' ? textOf(partHtml(o)) : o.kind === 'addText' || o.kind === 'text' ? String(o.text || '') : '').join(' ');
