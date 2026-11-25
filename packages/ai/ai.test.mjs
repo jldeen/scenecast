@@ -14,7 +14,7 @@ import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
 import { fillApi, checkLine } from './reset-run.mjs';
 import { stepNets } from './walk.mjs';
-import { senderApps, serviceAnswer, suspectSteps } from './unattended.mjs';
+import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict } from './unattended.mjs';
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;
@@ -262,4 +262,18 @@ test("a pack-named service's latest answer: 2xx is up; a 500 or a call with no a
   assert.equal(serviceAnswer([{ service: N, failed: 'net::ERR_FAILED' }], N).why, "Contoso's catalog didn't answer (net::ERR_FAILED). Try again later.");
   assert.equal(serviceAnswer([{ service: N, failed: 'net::ERR_ABORTED' }], N), null);
   assert.equal(serviceAnswer([{ service: N, status: 200 }, { service: N, failed: 'net::ERR_ABORTED' }], N).ok, true);
+});
+
+test("a service's list: the plan's rows of it, by the pack's pattern, in its app; an answer without one says which, and what it showed", () => {
+  const sv = { name: "Contoso's catalog service", app: 'shop', cards: { steps: '/ Plugin$/', suffix: ' Plugin', name: '/^(.+?) (?=[A-Z])/', list: "Contoso's catalog" } };
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'mail' }, { kind: 'click', target: 'Ledger Tracks it. Plugin' }] }, { steps: [{ kind: 'app', app: 'shop' }, { kind: 'click', target: 'Plugins' }, { kind: 'click', target: 'Kestrel ledger Tracks every shipment. Plugin' }, { kind: 'click', target: '/Plugin$/' }] }] };
+  const texts = cardSteps(plan, sv, ['mail', 'shop']);
+  assert.deepEqual(texts, ['Kestrel ledger Tracks every shipment. Plugin']);
+  assert.deepEqual(cardSteps(plan, { ...sv, cards: undefined }, ['mail', 'shop']), []);
+  assert.equal(cardsVerdict(sv, texts, { status: 200, cards: { [texts[0]]: 'Kestrel ledger' }, shown: ['Kestrel ledger'] }), null);
+  const no = cardsVerdict(sv, texts, { status: 200, cards: { [texts[0]]: null }, shown: ['Contoso Notes'] });
+  assert.equal(no.why, "Contoso's catalog doesn't show Kestrel ledger today. Try again later.");
+  assert.deepEqual(no.shown, ['Contoso Notes']);
+  assert.equal(cardsVerdict(sv, texts, { status: 200, unread: "its body isn't JSON" }).why, "Contoso's catalog: its body isn't JSON. Try again later.");
+  assert.equal(cardsVerdict(sv, [], { status: 200 }), null);
 });

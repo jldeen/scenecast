@@ -228,7 +228,7 @@ export function guardFor(cfg, list = packs()) {
 // later, not a half-done run. → [{ app, name, match, start, waitS }]
 export function servicesFor(cfg, list = packs()) {
   const byApp = packsForDemo(cfg, list), out = [];
-  for (const a of (cfg && cfg.apps) || []) for (const sv of ((byApp[a.id] || {}).services) || []) if (sv && sv.name && sv.match) out.push({ app: a.id, name: sv.name, match: sv.match, start: !!sv.start, waitS: +sv.waitS || 90 });
+  for (const a of (cfg && cfg.apps) || []) for (const sv of ((byApp[a.id] || {}).services) || []) if (sv && sv.name && sv.match) out.push({ app: a.id, name: sv.name, match: sv.match, start: !!sv.start, waitS: +sv.waitS || 90, ...(sv.cards ? { cards: sv.cards } : {}) });
   return out;
 }
 
@@ -304,6 +304,10 @@ export function checkPack(p) {
   for (const sv of p.services || []) {
     if (!sv || !sv.name) out.push('services: every service has a name ("IQ\'s plugin service")');
     else if (typeof sv.match !== 'string' || !/^\/\^[A-Z]+ .+\/[a-z]*$/.test(sv.match)) out.push(`services ${sv.name}: match is a /^METHOD host\\/path$/ pattern`);
+    // Its list's cards: which plan steps click one (a /pattern/ over the step's words), the type label they end with,
+    // what the list is called; never a card's own words (those are a demo's, from its plan).
+    const c = sv && sv.cards;
+    if (c && (typeof c.steps !== 'string' || !/^\/.+\/[a-z]*$/.test(c.steps) || !c.list || !c.why)) out.push(`services ${sv.name}: cards has steps (a /pattern/ over a step's words), list and why`);
   }
   // A filter (Leave out): why, and the one response it reads (a pattern over "METHOD host/path", never everything) and
   // where its items are; or a DOM list. Never which items: those are a demo's.

@@ -42,7 +42,34 @@ export function serviceAnswer(answers, name) {
   if (!mine.length) return null;
   const last = mine[mine.length - 1], status = last.status || last.failed || 'no answer';
   const ok = typeof last.status === 'number' && last.status >= 200 && last.status < 300;
-  return { ok, status, at: last.at, why: ok ? null : typeof last.status === 'number' ? `${name} is failing (${status}). Try again later.` : `${name} didn't answer (${status}). Try again later.` };
+  return { ok, status, at: last.at, entry: last, why: ok ? null : typeof last.status === 'number' ? `${name} is failing (${status}). Try again later.` : `${name} didn't answer (${status}). Try again later.` };
+}
+// The rows of a service's list the plan clicks (its pack's cards.steps over each click step's words, in the service's
+// app): the plan's own words, so the approval binds them. → [text]
+const reOf = s => { const m = /^\/(.+)\/([a-z]*)$/.exec(String(s || '')); try { return m ? new RegExp(m[1], m[2]) : null; } catch (e) { return null; } };
+export function cardSteps(plan, sv, appIds) {
+  const re = sv && sv.cards && reOf(sv.cards.steps);
+  if (!re) return [];
+  const appOf = name => appIds.find(a => a === name) || appIds.find(a => a.startsWith(name) || name.startsWith(a)) || null;
+  const out = [];
+  let app = null;
+  for (const st of (plan.beats || []).flatMap(b => b.steps)) {
+    if (st.kind === 'app') { app = appOf(st.app) || app; continue; }
+    if (app === sv.app && st.kind === 'click' && typeof st.target === 'string' && re.test(st.target) && !out.includes(st.target)) out.push(st.target);
+  }
+  return out;
+}
+// A 2xx answer judged for the plan's rows (capNet's cards): → null when each is in its list, else why not, and what it
+// showed. The row's name for the message: the pack's cards.name group, else its words.
+export function cardsVerdict(sv, texts, entry) {
+  if (!texts.length || !entry) return null;
+  const list = (sv.cards && sv.cards.list) || sv.name, nameRe = reOf(sv.cards && sv.cards.name);
+  const nameOf = t => { const m = nameRe && nameRe.exec(t); return (m && m[1]) || t; };
+  if (entry.unread) return { why: `${list}: ${entry.unread}. Try again later.`, missing: texts.map(nameOf), shown: null };
+  const missing = texts.filter(t => !(entry.cards && entry.cards[t])).map(nameOf);
+  if (!missing.length) return null;
+  const shown = entry.shown || [];
+  return { why: `${list} doesn't show ${missing.join(', ')} today. Try again later.`, missing, shown };
 }
 const serviceFailing = n => !!n.service && !aborted(n) && (n.failed || (typeof n.status === 'number' && n.status >= 500));
 // How a failing call went, for a beat's stop: "answered 500", or "didn't answer (net::ERR_FAILED)".
@@ -100,7 +127,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   // The apps' pack-named services, every answer watched (run.services): one failing at the start means no capture;
   // during a beat, the run stops before that beat's next write.
   const svcs = packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : [];
-  await cmd('capNet', { on: true, watch: svcs.map(({ name, match }) => ({ name, match })) }, 30).catch(() => {});
+  // A service whose list the plan clicks a row of: each 2xx answer read for those rows.
+  const cardsOf = Object.fromEntries(svcs.map(sv => [sv.name, cardSteps(plan, sv, demo.cfg.apps.map(a => a.id))]));
+  await cmd('capNet', { on: true, watch: svcs.map(({ name, match, cards }) => ({ name, match, ...(cardsOf[name].length ? { cards: { texts: cardsOf[name], suffix: cards.suffix || '' } } : {}) })) }, 30).catch(() => {});
   run.services = [];
   let netSeen = ((await cmd('capNet', {}, 30).catch(() => ({}))).total) || 0;
   const serviceNews = async () => {
@@ -125,6 +154,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       }
       if (!v) v = { ok: false, why: `${sv.name} didn't answer in ${sv.waitS} s. Try again later.` };
       if (!v.ok) return { kind: 'service', why: v.why, service: sv.name, status: v.status || null, app: sv.app, stage, picture: await shot(sv.app, `${stage}-${sv.app}-service`) };
+      // Answered, and the rows the plan clicks are in its list (or the run stops here, listed for her).
+      const cv = cardsVerdict(sv, cardsOf[sv.name], v.entry);
+      if (cv) { run.needsYou.push({ text: cv.missing.join(', '), why: cv.why }); return { kind: 'not-ready', why: cv.why, service: sv.name, app: sv.app, stage, missing: cv.missing, shown: cv.shown, picture: await shot(sv.app, `${stage}-${sv.app}-not-ready`) }; }
     }
     return null;
   };
@@ -380,6 +412,53 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     save();
     return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary };
   }
+}
+
+// Ready? Look-only, in the capture browser, the run's own first check: the guard and Leave out as a run has them, each
+// app with a start service opened, its call answered 2xx, and the rows the plan clicks in its list. Nothing is written.
+// keep: a local folder for every answer's body (a person's look, never the repo). → { ready, line, services }
+export async function readyCheck({ demo, cmd: viaCmd, packs, plan: viaPlan = null, keep = null }) {
+  const cmd = viaCmd || rx(demo);
+  await captureBrowser(cmd, 'a readiness check');
+  const plan = viaPlan || readPlan(demo);
+  if (!plan || !stepCount(plan)) throw new Error('make the plan first');
+  packs = packs === undefined ? await walkerPacks() : packs;
+  const lo = leaveOutOf({ demo, packs });
+  if (lo.problems.length) throw new Error(`reset.md's Leave out: ${lo.problems[0]}`);
+  const svcs = (packs && packs.servicesFor ? packs.servicesFor(demo.cfg) : []).filter(x => x.start);
+  const ids = demo.cfg.apps.map(a => a.id), cardsOf = Object.fromEntries(svcs.map(sv => [sv.name, cardSteps(plan, sv, ids)]));
+  const g = await guardOn(demo, cmd, packs);
+  const out = [];
+  try {
+    if (lo.rules.length) { const r = await leaveOn(cmd, lo).catch(e => ({ on: false, refused: e.message })); if (!r.on) throw new Error(`Leave out couldn't start: ${r.refused}`); }
+    await cmd('capNet', { on: true, watch: svcs.map(({ name, match, cards }) => ({ name, match, ...(cardsOf[name].length ? { cards: { texts: cardsOf[name], suffix: cards.suffix || '' } } : {}), ...(keep ? { keep } : {}) })) }, 30);
+    const w = liveWalker({ demo, cmd, packs });
+    for (const id of ids.filter(id => svcs.some(x => x.app === id))) {
+      const since = (await cmd('capNet', {}, 30)).total || 0, t = Date.now();
+      await w.home(id);
+      for (const sv of svcs.filter(x => x.app === id)) {
+        let v = null;
+        for (;;) {
+          const got = ((await cmd('capNet', { since }, 30)).net || []).filter(n => n.service);
+          v = serviceAnswer(got, sv.name);
+          if (v || Date.now() - t > sv.waitS * 1000) break;
+          await sleepMs(1000);
+        }
+        if (!v) v = { ok: false, why: `${sv.name} didn't answer in ${sv.waitS} s. Try again later.` };
+        const cv = v.ok ? cardsVerdict(sv, cardsOf[sv.name], v.entry) : null;
+        const owner = String((sv.cards && sv.cards.list) || sv.name).replace(/'s .*$/, '');
+        const names = v.ok && !cv ? cardsOf[sv.name].map(t => (v.entry && v.entry.cards && v.entry.cards[t]) || t) : [];
+        out.push({ service: sv.name, app: id, ok: v.ok && !cv, status: v.status, why: !v.ok ? v.why : cv ? cv.why : null, ...(cv ? { shown: cv.shown } : {}), ...(names.length ? { shows: names } : {}), owner });
+      }
+    }
+  } finally {
+    if (lo.rules.length) await cmd('capLeaveOut', { rules: [] }, 60).catch(() => {});
+    await guardOff(cmd, g.hosts);
+  }
+  const bad = out.find(x => !x.ok);
+  const line = bad ? `not ready: ${bad.why.replace(/\.? Try again later\.$/, '')}${bad.shown ? ` (it showed: ${bad.shown.length ? bad.shown.slice(0, 12).join(', ') + (bad.shown.length > 12 ? `, and ${bad.shown.length - 12} more` : '') : 'nothing'})` : ''}`
+    : `ready: ${out.map(x => x.shows ? `${x.owner} shows ${x.shows.join(', ')}` : `${x.service} answered ${x.status}`).join('; ') || 'no service to check'}`;
+  return { ready: !bad, line, services: out };
 }
 
 // The app's pack knows the write: the plan's tag names a write the pack has, or the pack's own rules find it.

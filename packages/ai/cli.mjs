@@ -13,6 +13,8 @@
 //   ai record  --demo <dir>     Record for me: run the approved plan in the browser while recording; then the script
 //   ai record  --demo <dir> --unattended   the same in the capture browser, with nobody there: pre-approved writes
 //                               only, the read-only guard, the demo's reset before and after (run.json)
+//   ai ready   --demo <dir> [--plan f] [--keep dir]  look-only: each start service answers, and the rows the plan
+//                                         clicks are in its list (the run's first check); one line, ready or not
 //   ai walk    --demo <dir> [--live]       a read-only walk of plan.md: the recording's screens, or the product in the
 //                               capture browser (walk.json); a walker never writes
 //   ai script  --demo <dir>     the talk track (script.md) from what was recorded
@@ -93,6 +95,15 @@ async function main() {
       const s = await writeScript({ demo: d, model: m, settings, emit });
       return { ...r, script: { beats: s.beats, lines: s.lines } };
     }
+    // Ready? The run's first check, look-only (the capture browser): each start service answered, and the rows the plan
+    // clicks in its list. --plan <file>: that plan's rows, not the demo's plan.md. --keep <dir>: every answer's body
+    // there (a person's local look; never the repo). → { ready, line, services }
+    case 'ready': {
+      const d = demo(), { readyCheck } = await import('./unattended.mjs'), { parsePlan } = await import('./plan.mjs');
+      const pf = arg(args, '--plan', null), keep = arg(args, '--keep', null);
+      const { readFileSync: rf } = await import('node:fs');
+      return readyCheck({ demo: d, emit, plan: pf ? parsePlan(rf(pf, 'utf8')) : null, keep });
+    }
     case 'walk': {
       const d = demo();
       if (args.includes('--live')) { const { walkLive } = await import('./unattended.mjs'); const w = await walkLive({ demo: d, emit }); return { secs: w.secs, beats: w.beats.map(b => ({ beat: b.beat, secs: b.secs, steps: b.steps.map(s => s.status) })), held: (w.guard.held || []).length, suspect: w.suspect || null }; }
@@ -124,7 +135,7 @@ async function main() {
       return { sent: readdirSync(dir).sort().map(f => { const r = JSON.parse(readFileSync(join(dir, f), 'utf8')); return { file: join(dir, f), task: r.task, model: r.model, at: r.at, chars: r.prompt.length, pageText: r.pageText }; }) };
     }
     default:
-      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|approve|reset|reground|finish|record|bench|script|coach|answer|stop|sent');
+      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|approve|reset|reground|finish|record|ready|bench|script|coach|answer|stop|sent');
       return null;
   }
 }

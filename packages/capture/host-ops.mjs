@@ -15,7 +15,10 @@
 //   capBack({ tab })                the tab's previous page (the walker's way back from an off-plan landing)
 //   capUrl({ tab })                 where a tab is now (one that left the app has lost its mark)
 //   capNet({ on: true, watch? } | { since })  requests that failed other than by the guard, answers ≥ 400 (tab,
-//                                   frame), and every answer from a watched service ({ name, match }), tagged service
+//                                   frame), and every answer from a watched service ({ name, match }), tagged service.
+//                                   A watched service's cards ({ texts, suffix }): each 2xx answer read for them
+//                                   (cards.mjs): cards: { <text>: the row's name | null }, shown: what its list holds.
+//                                   keep: a local folder its answers' bodies are written to (a person's check only)
 //   capAuthWatch({ host | hostPattern, from? } | { off: true })   arm (or disarm) catching the app's own session
 //   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick, armed? })
 //                                   a pack's API check (GET, HEAD: the guard as it is; only pick's number and true/false
@@ -49,6 +52,7 @@ import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { allowedBy } from './browser.mjs';
 import { READ_DOCS_SRC } from './page-read.mjs';
+import { cardIn, shownIn } from './cards.mjs';
 
 const LEAVE_PAGE = readFileSync(new URL('./leave-out-page.js', import.meta.url), 'utf8').replace(/^\/\/.*\n/gm, '');
 const AsyncFn = Object.getPrototypeOf(async () => {}).constructor;
@@ -146,10 +150,25 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       if (/BLOCKED_BY_CLIENT/.test(why)) return;
       try { const u = new URL(r.url()), service = services.length ? serviceOf(r.method(), r.url()) : null; if (/^https?:$/.test(u.protocol)) net.push({ at: at(), method: r.method(), host: u.host, path: shape(u.pathname), failed: why, ...sentBy(r), ...(service ? { service } : {}) }); } catch (e) {}
     });
-    cb.ctx.on('response', r => {
+    let kept = 0;
+    cb.ctx.on('response', async r => {
       const q = r.request(), service = services.length ? serviceOf(q.method(), r.url()) : null;
       if (r.status() < 400 && !service) return;
-      try { const u = new URL(r.url()); net.push({ at: at(), method: q.method(), host: u.host, path: shape(u.pathname), status: r.status(), ...sentBy(q), ...(service ? { service } : {}) }); } catch (e) {}
+      let e;
+      try { const u = new URL(r.url()); e = { at: at(), method: q.method(), host: u.host, path: shape(u.pathname), status: r.status(), ...sentBy(q), ...(service ? { service } : {}) }; } catch (x) { return; }
+      const w = service && services.find(x => x.name === service);
+      // Its body, read before the entry is listed, when the service has cards or a folder to keep it in.
+      if (w && (w.keep || (w.cards && r.status() >= 200 && r.status() < 300))) {
+        const text = await r.text().catch(() => null);
+        if (w.keep && text !== null) { try { mkdirSync(w.keep, { recursive: true }); writeFileSync(`${w.keep}/${e.at.replace(/[:.]/g, '-')}-${++kept}-${r.status()}.json`, text); } catch (x) {} }
+        if (w.cards && r.status() >= 200 && r.status() < 300) {
+          let j = null; try { j = JSON.parse(text); } catch (x) {}
+          e.cards = Object.fromEntries((w.cards.texts || []).map(t => [t, j ? cardIn(j, t, { suffix: w.cards.suffix || '' }) : null]));
+          e.shown = j ? shownIn(j) : null;
+          if (!j) e.unread = text === null ? "its body couldn't be read" : "its body isn't JSON";
+        }
+      }
+      net.push(e);
     });
   };
   const active = new Map();
@@ -201,7 +220,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     // { on: true } starts recording; { since } reads what came since.
     // { on: true, watch?: [{ name, match }] } starts recording (watch: services whose every answer is kept, tagged
     // service); { since } reads what came since.
-    async capNet(c) { if (c.on) { netOn(); if (Array.isArray(c.watch)) services = c.watch.filter(w => w && w.name && w.match); return { on: true, total: net.length }; } return { net: (net || []).slice(c.since || 0), total: (net || []).length }; },
+    async capNet(c) { if (c.on) { netOn(); if (Array.isArray(c.watch)) services = c.watch.filter(w => w && w.name && w.match).map(w => ({ name: w.name, match: w.match, ...(w.cards && (w.cards.texts || []).length ? { cards: { texts: w.cards.texts.map(String), suffix: String(w.cards.suffix || '') } } : {}), ...(w.keep ? { keep: String(w.keep) } : {}) })); return { on: true, total: net.length }; } return { net: (net || []).slice(c.since || 0), total: (net || []).length }; },
     async capInfo() { return { capture: true, mode: cb.mode, guarded: !!base }; },
     async capGuard(c) {
       // It replaces the guard that's on (the start's, or a run's) with no gap between them.

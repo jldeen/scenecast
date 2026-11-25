@@ -148,6 +148,13 @@ service: answering 500, its add picker says "Plugins could not be loaded").
   and again at its start screen; each time it waits up to `waitS` (90 s) for that call, and captures nothing unless it
   answers 2xx. A call with no answer at all reads "didn't answer (net::ERR_FAILED)".
 - During a run, a 500 or a failed call to it stops the run before that beat's next write, and lists the step.
+- `cards` (optional): the answer is a list a screen draws (IQ's add picker's plugins), and a plan step that clicks one
+  of its rows needs that row in it. `steps`: a /pattern/ over a step's words that marks such a step (`/ Plugin$/`);
+  `suffix`: the type label a row's words end with; `name`: a /pattern/ whose group is the row's name, for the message;
+  `list`: what people call it ("IQ's plugin list"). Each 2xx answer is read for every such step's row (its name where
+  the words start, its description the rest, whatever the fields are called). One missing stops the run before
+  anything runs: "IQ's plugin list doesn't show <name> today. Try again later." The words are the plan's, never the
+  pack's.
 
 `servicesFor(cfg)` gives a demo's: `[{ app, name, match, start, waitS }]`.
 

@@ -92,7 +92,8 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHel
   ],
   guard: { allow: [`${HOST}/api/telemetry`], ...(frameHost ? { hosts: [NOTES_HOST] } : {}), ...(stayHeld ? { stayHeld } : {}) },
   apis: { tasks: { open: `http://${HOST}/`, host: HOST }, notes: { open: `http://${HOST}/`, host: NOTES_HOST, from: NOTES_HOST } },
-  services: [{ name: "Tasks' catalog service", match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/catalog$/`, start: true, waitS: 20 }],
+  services: [{ name: "Tasks' catalog service", match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/catalog$/`, start: true, waitS: 20,
+    cards: { steps: '/ Plugin$/', suffix: ' Plugin', name: '/^(.+?) (?=[A-Z])/', list: "Tasks' catalog", why: 'Its list: a plan step that clicks a row needs it there.' } }],
   ...(filters ? { filters: [
     { id: 'suggested', why: 'The Suggested list: GET /api/suggested, items by ref, drawn in order\'s order.', url: `*://${HOST}/api/suggested*`, match: `/^GET ${HOST.replace(/\./g, '\\.')}\\/api\\/suggested$/`, items: 'items', fields: ['name'], refs: [{ list: 'order', by: 'ref' }], shows: 'name' },
     { id: 'team-tree', kind: 'dom', why: 'The Teams tree, drawn from the page\'s own store.', list: '[role=tree] [role=treeitem][aria-level="2"]' },
@@ -309,6 +310,31 @@ try {
   const untouched = tasks.state().tasks.map(t => t.name).join('|') === 'Call Kestrel' && tasks.state().sync === true && !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry');
   check('a named service not answering as its app first opens: the run stops before the reset, nothing written, "try again later"', rj.stopped && rj.stopped.kind === 'service' && rj.stopped.stage === 'before-reset' && /^Tasks' catalog service didn't answer \(net::ERR_[A-Z_]+\)\. Try again later\.$/.test(rj.stopped.why) && rj.stopped.picture && existsSync(rj.stopped.picture) && !rj.summary && !rj.reset.before && !rj.reset.after && untouched, JSON.stringify({ stopped: rj.stopped, summary: rj.summary, reset: rj.reset, state: tasks.state(), log: tasks.log.filter(l => !l.startsWith('GET')) }));
   tasks.seed({});
+  // 1f2 · Ready for its rows: a plan that clicks a row of the catalog's list. Answered 200 without that row (an empty
+  // list), the run stops before the reset, nothing written, listed for her; ai ready says the same in one line, and
+  // "ready" once the list has it. Its answers' bodies go where --keep says.
+  { const CARD = PLAN('- Click "Kestrel ledger Tracks every shipment. Plugin"\n  Lands on: "Kestrel ledger"\n');
+    writeFileSync(join(DEMO, 'plan.md'), CARD);
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    tasks.catalog('ok');
+    tasks.seed({ tasks: ['Call Kestrel'], sync: true });
+    tasks.log.length = 0;
+    res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    rj = readRun(DEMO);
+    const kept = tasks.state().tasks.map(t => t.name).join('|') === 'Call Kestrel' && tasks.state().sync === true && !tasks.log.some(l => !l.startsWith('GET') && l !== 'POST /api/telemetry');
+    const WHY = "Tasks' catalog doesn't show Kestrel ledger today. Try again later.";
+    check('a plan row its service\'s list doesn\'t have today: the run stops before the reset, nothing written, listed for her', rj.stopped && rj.stopped.kind === 'not-ready' && rj.stopped.stage === 'before-reset' && rj.stopped.why === WHY && Array.isArray(rj.stopped.shown) && rj.stopped.shown.length === 0 && rj.stopped.picture && existsSync(rj.stopped.picture) && (rj.needsYou || []).some(n => n.why === WHY) && !rj.reset.before && !rj.reset.after && kept, JSON.stringify({ stopped: rj.stopped, needsYou: rj.needsYou, reset: rj.reset, state: tasks.state(), log: tasks.log.filter(l => !l.startsWith('GET')) }));
+    tasks.seed({});
+    const KEEP = join(tmp, 'ready-bodies');
+    const ready = async () => { const r = await aiProc(['ready', '--demo', DEMO, '--keep', KEEP], DEMO, E, () => {}, 180); return r.done ? r.done.result : { code: r.code, error: r.error, err: String(r.err || '').slice(-600) }; };
+    const notReady = await ready();
+    tasks.catalog('cards');
+    const isReady = await ready();
+    tasks.catalog('ok');
+    const bodies = existsSync(KEEP) ? readdirSync(KEEP) : [];
+    check('ai ready: one line, not ready with what the list showed, then ready once the row is there; each answer\'s body kept where asked', notReady.ready === false && notReady.line === "not ready: Tasks' catalog doesn't show Kestrel ledger today (it showed: nothing)" && isReady.ready === true && isReady.line === "ready: Tasks' catalog shows Kestrel ledger" && bodies.length >= 2 && bodies.some(f => /-200\.json$/.test(f) && /Kestrel ledger/.test(readFileSync(join(KEEP, f), 'utf8'))), JSON.stringify({ notReady, isReady, bodies }));
+    writeFileSync(join(DEMO, 'plan.md'), PLAN(''));
+  }
   tasks.catalog('fail-on-type');
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);

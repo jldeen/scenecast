@@ -417,7 +417,8 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
       // 'drop': the connection closed with no answer at all (a call with no status, as a failed CORS preflight is).
       if (st.catalog === 'drop') { q.socket.destroy(); return; }
       const down = st.catalog === 'fail' || (st.catalog === 'fail-on-type' && from === 'type');
-      return send(s, down ? 500 : 200, 'application/json', down ? '{"error":"catalog unavailable"}' : '{"items":[]}');
+      // 'cards': its list has one row (a plan can click "Kestrel ledger Tracks every shipment. Plugin"); else empty.
+      return send(s, down ? 500 : 200, 'application/json', down ? '{"error":"catalog unavailable"}' : st.catalog === 'cards' ? '{"items":[{"id":"k1","name":"Kestrel ledger","about":"Tracks every shipment."}]}' : '{"items":[]}');
     }
     if (q.method === 'POST' && path === '/api/tasks') { const b = await body(q); const t = { id: st.next++, name: String(b.name || '').slice(0, 200) }; st.tasks.push(t); return send(s, 200, 'application/json', JSON.stringify(t)); }
     const del = /^\/api\/tasks\/(\d+)$/.exec(path);
@@ -457,8 +458,8 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     // The notes panel posts /api/seen every 150 ms while it's open, and Unpin takes 1.5 s: the app's own non-reads to
     // a host while an API undo's call to it is open.
     notePing: on => { st.ping = !!on; st.seen = []; st.unpins = []; },
-    // Its catalog service: 'ok', 'fail' (500 always), 'fail-on-type' (500 for the lookup as you type) or 'drop' (no
-    // answer: the connection closed).
+    // Its catalog service: 'ok' (an empty list), 'cards' (one row), 'fail' (500 always), 'fail-on-type' (500 for the
+    // lookup as you type) or 'drop' (no answer: the connection closed).
     catalog: mode => { st.catalog = mode; },
     suggest: on => { st.suggest = !!on; },
     close: () => { server.close(); notes.close(); },
