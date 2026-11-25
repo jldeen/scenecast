@@ -122,6 +122,15 @@ function notNavigation(s, prev) {
   if (s.kind === 'press') return s.key === 'Enter' && prev && prev.kind === 'type' && !risk(s, null, { name: prev.target || '' }) ? null : 'presses a key a check can\'t';
   return 'isn\'t a step a check can take';
 }
+// The start screen's controls a route can start at: not a row of a list that says it has more rows than it shows (a
+// virtualized grid: a live page may not render that row, or may order the list differently).
+const steady = sc => (sc.controls || []).filter(c => {
+  if (c.list === undefined || c.row === undefined) return true;
+  const said = ((sc.lists || {})[c.list] || [])[2];
+  if (!said) return true;
+  const shown = new Set([...(sc.items || []), ...(sc.controls || [])].filter(x => x.list === c.list && x.row !== undefined && !x.restored).map(x => x.row));
+  return shown.size >= said;
+});
 const proven = s => !!(s && s.lands && s.lands.kind);
 const onScreen = (controls, target) => (controls || []).some(c => { const a = norm(c.name), b = norm(target); return a && b && (a === b || a.startsWith(b)); });
 
@@ -148,7 +157,7 @@ export function routeTo(plan, app, screen, { walker = null, appOf = x => x } = {
     if (s.kind === 'app') { if (s === goTo) return { route: { home: true, steps: steps(k + 1) } }; continue; }
     const bad = notNavigation(s, mine[k - 1]);
     if (bad) return { why: `the way to ${screen} passes ${formatStep(s)}, which ${bad}` };
-    if (startScreen && s.target && onScreen(startScreen.controls, s.target)) return { route: { home: true, steps: steps(k) } };
+    if (startScreen && s.target && onScreen(steady(startScreen), s.target)) return { route: { home: true, steps: steps(k) } };
   }
   return { why: `no read-only way from ${app}'s start to ${screen}` };
 }
