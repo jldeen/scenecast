@@ -289,7 +289,7 @@ try {
   const sst2 = tasks.state();
   tasks.notePing(false);
   const duringWrite = (rj.guard.held || []).filter(h => h.host === NOTES_HOST && h.path === '/api/seen' && h.duringWrite).length;
-  check('a background POST to a write\'s host stays held during the write (stayHeld), and the write lands', !rj.stopped && rj.writes.length === 1 && rj.writes[0].write === 'pin-note' && count(tasks.log, 'POST notes/api/pin') === 1 && sst2.seen.length === 0 && duringWrite > 0 && rj.reset.after && rj.reset.after.ok && sst2.pinned === false, JSON.stringify({ stopped: rj.stopped, writes: rj.writes, seen: sst2.seen.length, duringWrite, after: rj.reset.after && rj.reset.after.ok }));
+  check('a background POST to a write\'s host stays held during the write (stayHeld), and the write lands', !rj.stopped && rj.writes.length === 1 && rj.writes[0].write === 'pin-note' && count(tasks.log, 'POST notes/api/pin') === 1 && sst2.seen.length === 0 && duringWrite > 0 && rj.reset.after && rj.reset.after.ok && sst2.pinned === false, JSON.stringify({ stopped: rj.stopped, writes: (rj.writes || []).length, seen: sst2.seen.length, duringWrite, pinned: sst2.pinned, after: rj.reset.after }));
   const kept = (() => { try { return JSON.parse(readFileSync(join(DEMO, '.out', 'ai', 'held-bodies.json'), 'utf8')); } catch (e) { return null; } })();
   check('and the held bodies the demo asked for are kept in their own file, not in run.json', kept && kept.length > 0 && kept.every(b => b.path === '/api/seen' && /^\{"seen":\d+\}$/.test(b.body)) && !readFileSync(join(DEMO, '.out', 'ai', 'run.json'), 'utf8').includes('\\"seen\\"'), JSON.stringify({ kept: kept && kept.slice(0, 2), n: kept && kept.length }));
   setKeep(null);
@@ -336,13 +336,13 @@ try {
     const FIND_PLAN = PLAN('').replace('Lands on: "No tasks yet"', 'Lands on: "Sync is off"').replace('"Up to date: 1 task"', '"Up to date"');
     const FIND_RESET = `# Reset: Tasks demo\n\n## Undo · Tasks\n\n- Go to tasks\n- Undo with the app pack: fixture-tasks:new-task\n  Undoes: beat 1, Press Enter\n  Names: "Call Kestrel"\n  Note: an API call in the capture browser's own signed-in session, with {taskId} from the run; if it can't: Click "Delete {typed}"\n\n## Set first\n\n- tasks: "Sync" is off\n  Set: "Sync" · fixture-tasks:sync\n\n## Check\n\n- tasks: no "Call Kestrel"\n  From: beat 1\n- tasks: "Sync" is off\n`;
     writeFileSync(join(DEMO, 'plan.md'), FIND_PLAN); writeFileSync(join(DEMO, 'reset.md'), FIND_RESET);
-    const ap3 = json((await run(['ai', 'approve', '--demo', DEMO], { env: E })).out);
+    const ap3o = await run(['ai', 'approve', '--demo', DEMO], { env: E }), ap3 = (() => { try { return json(ap3o.out).result || {}; } catch (e) { return { error: ap3o.out.slice(-600) }; } })();
     tasks.seed({ tasks: ['Call Kestrel', 'Buy milk', 'Call Kestrel'], sync: false });
     tasks.log.length = 0;
     res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
     rj = readRun(DEMO);
     const bDid = ((rj.reset.before || {}).did || []).join(' | ');
-    check('the reset before finds the script\'s own leftovers by name, as approved, and undoes only those', (ap3.reset || []).some(r => r.text === 'Find by name: "Call Kestrel"') && rj.reset.before && rj.reset.before.ok && (bDid.match(/\(found by name\) \(DELETE, 200\)/g) || []).length === 2 && !rj.stopped && rj.reset.after && rj.reset.after.ok && count(tasks.log, 'DELETE /api/tasks/{id}') === 3 && JSON.stringify(tasks.state().tasks.map(t => t.name)) === '["Buy milk"]', JSON.stringify({ approved: ap3.reset, before: rj.reset.before, stopped: rj.stopped, after: rj.reset.after && rj.reset.after.why, state: tasks.state().tasks, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+    check('the reset before finds the script\'s own leftovers by name, as approved, and undoes only those', (ap3.reset || []).some(r => r.text === 'Find by name: "Call Kestrel"') && rj.reset.before && rj.reset.before.ok && (bDid.match(/\(found by name\) \(DELETE, 200\)/g) || []).length === 2 && !rj.stopped && rj.reset.after && rj.reset.after.ok && count(tasks.log, 'DELETE /api/tasks/{id}') === 3 && JSON.stringify(tasks.state().tasks.map(t => t.name)) === '["Buy milk"]', JSON.stringify({ approved: ap3.reset || ap3.error, code: res.code, error: res.error, err: res.err.slice(-1200), before: rj.reset.before, stopped: rj.stopped, after: rj.reset.after && rj.reset.after.why, state: tasks.state().tasks, log: tasks.log.filter(l => !l.startsWith('GET')) }));
     setValues(undefined);
     tasks.seed({ tasks: [], sync: false });
     writePack();
