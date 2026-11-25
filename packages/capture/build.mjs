@@ -39,6 +39,7 @@ const PREFLIGHT = async (ARGS) => {
 ${read('flows/preflight.js')}
 };
 OPS.preflight = c => PREFLIGHT(c);
+${read('ahead-rule.js')}
 ${read('recorder.js')}
 `;
 }

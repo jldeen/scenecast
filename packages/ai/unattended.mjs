@@ -13,7 +13,7 @@
 //   - run.json: every step, each write and what it made (for the undos), the reset, the guard, the stop.
 // The recording is the recorder's own, the same as the extension path's (build, checks and Review work unchanged);
 // its start-screen sweeps run side by side, an app per window.
-import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
@@ -260,6 +260,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     const lastAfter = {};
     let stepSeq = 0;
     run.reads = { before: { read: 0, reused: 0, changed: 0 }, after: { one: 0, two: 0 }, failed: [] };
+    // Sweep ahead (record.auto.ahead): before a step that "Wait for the answer" follows, the recorder is given the
+    // screens the plan goes to next (the last walk of this plan's addresses), to sweep while the answer streams in.
+    const aheadOn = !!(demo.cfg.record && demo.cfg.record.auto && demo.cfg.record.auto.ahead);
+    const planSha = aheadOn ? createHash('sha256').update(readFileSync(join(demo.dir, 'plan.md'))).digest('hex') : null;
+    if (aheadOn) run.ahead = [];
     const packCheck = known => {
       const p = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(x => x && x.id === known.pack) : null;
       const pw = p && (p.writes || []).find(x => x.id === known.write);
@@ -397,6 +402,12 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const prev = app;
         if (step.kind === 'app') app = w.appOf(step.app) || app;
         const ts = Date.now();
+        const fi = flat.findIndex(x => x.bi === bi && x.si === si);
+        if (aheadOn && flat[fi + 1] && flat[fi + 1].s.kind === 'wait') {
+          const screens = aheadScreens(aiDir(demo), flat, fi + 1, planSha);
+          const r = screens.length ? await cmd('recordAhead', { app, screens }, 30).catch(e => ({ started: false, why: e.message })) : { started: false, why: "the last walk of this plan gives no screens after the answer" };
+          run.ahead.push({ beat: bi + 1, step: si, app, screens: screens.map(x => x.step), ...r });
+        }
         const stop = await doStep(bi, si, step, at, prev).catch(e => ({ kind: 'error', why: e.message }));
         if (stop) {
           await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
@@ -552,6 +563,27 @@ function keepBodiesOut(demo, bodies) {
 // was the very step before, no input ran since, nothing was set off camera for this step, and the page's recorder
 // signature now (now.sig) is the one it had at that read. A page that changed on its own (a stream ending, a toast, a
 // background refresh) gets a new read.
+// Sweep ahead's screens, for the answer that the step flat[wait] waits for: the screens the plan goes to after it, as
+// the last walk of this very plan (sha) found them (walk-screens: each step's app and address), in plan order, each
+// once. Only a screen a step gave an address of its own (it changed the address: a twin can load it there), never an
+// app's start screen (swept at the start). → [{ app, url, step: '<beat>-<step>' }]
+export function aheadScreens(dir, flat, wait, planSha) {
+  let walk = null;
+  try { walk = JSON.parse(readFileSync(join(dir, 'walk.json'), 'utf8')); } catch (e) { return []; }
+  if (!walk || !walk.plan || !planSha || walk.plan.sha256 !== planSha) return [];
+  const sd = join(dir, 'walk-screens');
+  const read = n => { try { return JSON.parse(readFileSync(join(sd, n), 'utf8')); } catch (e) { return null; } };
+  const urlAt = x => { const j = x && read(`${x.bi + 1}-${x.si + 1}.json`); return j && j.status === 'reached' && j.url ? j : null; };
+  const starts = new Set((existsSync(sd) ? readdirSync(sd) : []).filter(f => /^start-.+\.json$/.test(f)).map(f => (read(f) || {}).url).filter(Boolean));
+  const out = [], seen = new Set();
+  let prev = (urlAt(flat[wait]) || urlAt(flat[wait - 1]) || {}).url || null;
+  for (const x of flat.slice(wait + 1)) {
+    const j = urlAt(x), url = j ? j.url : null;
+    if (url && j.app && url !== prev && !starts.has(url) && !seen.has(j.app + ' ' + url)) { seen.add(j.app + ' ' + url); out.push({ app: j.app, url, step: `${x.bi + 1}-${x.si + 1}` }); }
+    if (url) prev = url;
+  }
+  return out;
+}
 export function canReuse(kept, now) {
   return !!kept && !!kept.sig && kept.seq === now.seq - 1 && kept.inputs === now.inputs && !now.setBefore && now.sig === kept.sig;
 }

@@ -33,11 +33,12 @@
 //   capTab({ open, mark } | { close: mark })   a tab of its own for a moment, in the same signed-in browser under the
 //                                    same guard (Set before: a state set off camera), marked so a lookup by an app's
 //                                    address never takes it for the app's own tab; its events say side: mark
-//   capTwins({ app, n, url } | { close: true })   in this process only (the recorder's side sweeps, record.auto.twins):
-//                                    n windows of the app kept for the recording, each sent to url and loaded, marked
-//                                    (its storage writes kept in the window: twin-storage.js),
-//                                    twin:<app> (never taken for the app's own tab); → { n, urls } (and .pages, the
-//                                    windows themselves, in this process). close: all of them
+//   capTwins({ app, n, url, pool? } | { close: true })   in this process only (the recorder's side sweeps,
+//                                    record.auto.twins and .ahead): n windows of the app kept for the recording, each
+//                                    sent to url and loaded, marked (its storage writes kept in the window:
+//                                    twin-storage.js), twin:<app> (never taken for the app's own tab); pool: a set of
+//                                    their own (sweep ahead's), never the screen's twins → { n, urls } (and .pages,
+//                                    the windows themselves, in this process). close: all of them
 //   capActive({ tab, origins })     a person at the app: idle detection allowed on its sites and the page told its
 //                                    user is active and the screen unlocked (the capture browser has no person)
 //   capLeaveOut({ rules, words, check, shots })   reset.md's Leave out, from here on, in every tab, frame and worker:
@@ -350,8 +351,8 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     async capTwins(c) {
       if (c.close) { for (const [, pool] of twins) for (const p of pool) if (!p.isClosed()) await p.close().catch(() => {}); twins.clear(); return { closed: true }; }
       const mark = `twin:${c.app}`, put = p => p.evaluate(k => { try { sessionStorage.setItem('d1tab', k); } catch (e) {} }, mark).catch(() => {});
-      const pool = (twins.get(c.app) || []).filter(p => !p.isClosed());
-      twins.set(c.app, pool);
+      const key = c.pool ? `${c.pool}:${c.app}` : c.app, pool = (twins.get(key) || []).filter(p => !p.isClosed());
+      twins.set(key, pool);
       while (pool.length < c.n) { const p = await cb.open('about:blank'); await p.addInitScript({ content: TWIN_STORAGE }); sideOf.set(p, mark); p.on('framenavigated', f => { if (f === p.mainFrame()) put(p); }); pool.push(p); }
       const use = pool.slice(0, c.n);
       await Promise.all(use.map(async p => { await p.goto(c.url, { waitUntil: 'load', timeout: 60000 }).catch(e => log(`twin ${c.app}: ${String(e.message).split('\n')[0]}`)); await put(p); }));

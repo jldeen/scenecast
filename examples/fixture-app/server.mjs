@@ -10,7 +10,9 @@
 //         its list when the answer ends; the second answer also ends with an "Approved 1 action" row that keeps its
 //         list in the page and opens by a class swap
 //   admin http://127.0.0.1:47802/  a search box that filters on Enter, a virtualized grid of 300 tools (only the
-//         rows in view exist), a details pane that opens on a row and closes with its button or Escape
+//         rows in view exist), a details pane that opens on a row and closes with its button or Escape. ?audit=1: an
+//         Audit log link to /audit, a screen with an address of its own: hover cards, and a layout script changes
+//         below 1300 px wide (a zoom level is captured)
 //   node test/fixture/server.mjs
 import { createServer } from 'node:http';
 
@@ -296,12 +298,34 @@ list.addEventListener('click', e => {
 });
 document.addEventListener('click', e => { if (e.target.closest('[aria-label="Close details"]')) closeDetails(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetails(); });
+if (new URLSearchParams(location.search).has('audit')) { const a = document.createElement('a'); a.href = '/audit?audit=1'; a.textContent = 'Audit log'; document.querySelector('header').appendChild(a); }
+</script></body></html>`;
+
+// Hover cards (a tooltip placed by script under the control), for the screens below.
+const CARDS = `for (const b of document.querySelectorAll('[data-card]')) {
+  b.addEventListener('mouseenter', () => { const r = b.getBoundingClientRect(), c = document.createElement('div'); c.className = 'card'; c.setAttribute('role', 'tooltip'); c.textContent = b.dataset.card; c.style.left = r.left + 'px'; c.style.top = (r.bottom + 6) + 'px'; document.body.appendChild(c); b.card = c; });
+  b.addEventListener('mouseleave', () => { if (b.card) b.card.remove(); b.card = null; });
+}`;
+const CARD_CSS = '.card{position:fixed;background:#fff;border:1px solid #c9ccd1;border-radius:6px;padding:8px 10px;box-shadow:0 2px 8px rgba(0,0,0,.15)}';
+const audit = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Admin</title><link rel="icon" href="/icon.png">
+<style>body{margin:0;font:14px -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#1b1b1b;background:#fff}nav{display:flex;gap:16px;padding:10px 20px;border-bottom:1px solid #e3e5e8}
+main{padding:16px 20px}.bar{display:flex;gap:8px;margin:0 0 12px}button{font:inherit;padding:4px 10px;border:1px solid #c9ccd1;border-radius:6px;background:#f6f8fa}
+table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:6px 10px;border-bottom:1px solid #f0f1f3}body.narrow .when{display:none}${CARD_CSS}</style></head>
+<body><nav aria-label="Admin"><b>Fixture Admin</b><a href="/?audit=1">Tools</a></nav><main><h1>Audit log</h1>
+<div class="bar"><button data-card="Download the log as a file">Export</button><button data-card="Show one kind of change">Filter</button></div>
+<table><thead><tr><th>Change</th><th>By</th><th class="when">When</th></tr></thead><tbody>
+<tr><td>Tool alpha-0 turned on</td><td>Jessica</td><td class="when">Monday</td></tr><tr><td>Tool bravo-1 renamed</td><td>Jessica</td><td class="when">Tuesday</td></tr>
+</tbody></table></main>
+<script>
+const fit = () => document.body.classList.toggle('narrow', innerWidth < 1300);
+addEventListener('resize', fit); fit();
+${CARDS}
 </script></body></html>`;
 
 export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
   const serve = (port, routes) => createServer((q, s) => { const r = routes[q.url.split('?')[0].split('#')[0]]; if (!r) { s.writeHead(404); return s.end(); } s.writeHead(200, { 'content-type': r[0] }); s.end(r[1]); }).listen(port, '127.0.0.1');
   const a = serve(chatPort, { '/': ['text/html; charset=utf-8', chat], '/chat.css': ['text/css', chatCss], '/icon.png': ['image/png', PNG] });
-  const b = serve(adminPort, { '/': ['text/html; charset=utf-8', admin], '/icon.png': ['image/png', PNG] });
+  const b = serve(adminPort, { '/': ['text/html; charset=utf-8', admin], '/audit': ['text/html; charset=utf-8', audit], '/icon.png': ['image/png', PNG] });
   return { chat: `http://127.0.0.1:${chatPort}/`, admin: `http://127.0.0.1:${adminPort}/`, close: () => { a.close(); b.close(); } };
 }
 
@@ -318,6 +342,8 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         suggest(true): the page also lists Suggested items from GET /api/suggested ({ items, order }: the items by ref,
 //         drawn in order's order; an order ref with no item draws an empty row) with their count, and a Teams tree it
 //         draws from its own store (localStorage, as Teams keeps its teams in IndexedDB): Leave out's two ways.
+//         ?answer=<s>: Summarize, whose summary streams in over s seconds (an answer; it only reads), and a Stats link
+//         to /stats, a screen with an address of its own and hover cards: what sweep ahead sweeps during the answer.
 //   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
 //         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
 //         API undo that has to go from that frame.
@@ -379,6 +405,15 @@ if (new URLSearchParams(location.search).has('prefs')) {
   addEventListener('storage', e => { if (e.key === 'fx-density') apply(e.newValue); });
   apply(localStorage.getItem('fx-density'));
 }
+{ const secs = +new URLSearchParams(location.search).get('answer');
+  if (secs > 0) {
+    const bar = document.querySelector('.bar'), b = document.createElement('button'), a = document.createElement('a'), out = document.createElement('p');
+    b.id = 'summarize'; b.textContent = 'Summarize'; a.href = '/stats' + location.search; a.textContent = 'Stats'; out.id = 'summary'; out.setAttribute('role', 'status');
+    bar.appendChild(b); bar.appendChild(a); document.querySelector('main').insertBefore(out, $('list'));
+    const words = 'Summary: one task is open and nothing is overdue. Sync is off, so changes stay on this device until it is turned on again. The catalog answered as the page loaded, and the notes panel has nothing pinned right now.'.split(' ');
+    b.addEventListener('click', () => { let i = 0; out.textContent = ''; const t = setInterval(() => { out.textContent = words.slice(0, ++i).join(' '); if (i >= words.length) { clearInterval(t); out.textContent += ' Summary done.'; } }, Math.round(secs * 1000 / words.length)); });
+  }
+}
 load();
 if ($('sug')) {
   fetch('/api/suggested').then(r => r.json()).then(j => {
@@ -391,6 +426,20 @@ if ($('sug')) {
 }
 { const q = new URLSearchParams(location.search), ms = q.get('signin'), tid = q.get('tid');
   if (ms && ms !== 'never' && tid) setTimeout(() => localStorage.setItem('00000000-0000-0000-0000-0000000000aa.' + tid + '-login.windows.net-idtoken-fixture-' + tid + '---', '1'), +ms); }
+</script></body></html>`;
+
+const statsPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+<link rel="icon" href="/icon.png"><style>
+body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
+main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
+.bar{display:flex;gap:8px;align-items:center;margin:0 0 16px} button{font:inherit;padding:4px 10px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;cursor:pointer}${CARD_CSS}
+</style></head><body><main>
+<h1>Task stats</h1><p>Counts for this week.</p>
+<div class="bar"><button data-card="Closed since Monday">Done this week</button><button data-card="Nothing is overdue">Overdue</button><button data-card="Jessica: 1 task">By owner</button></div>
+<a href="/" id="back">Back to tasks</a>
+</main><script>
+document.getElementById('back').href = '/' + location.search;
+${CARDS}
 </script></body></html>`;
 
 const notesPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Notes</title><style>
@@ -418,6 +467,7 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
     if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest));
     if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
+    if (q.method === 'GET' && path === '/stats') return send(s, 200, 'text/html; charset=utf-8', statsPage());
     if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
     if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
     if (q.method === 'GET' && path === '/api/tasks') return send(s, 200, 'application/json', JSON.stringify(view()));
