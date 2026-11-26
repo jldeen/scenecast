@@ -260,9 +260,7 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
   screen's cap or time: while any is left, the next one hovered is theirs. Their first tries don't count against the
   screen's budget (`auto.maxS`): the clicks after them get the time they had without them (Nov 25: Teams' 47
-  recorded hovers took 208 s on its start screen and left the rest of it out of time). Zoom and lists run before
-  hovers and clicks (both save the screen again: a click audit once opened admin's notifications first, and the
-  list's save kept the bell without its count). Zoom, lists and drags have
+  recorded hovers took 208 s on its start screen and left the rest of it out of time). Zoom, lists and drags have
   their own time, outside the budget (zoom: `auto.zoomMaxS`, 90 s), and a kind of screen's zoom, chips and drags count
   as done only once they've run, so a screen whose sweep stopped short leaves them to that kind's next screen. One that
   shows nothing, or whose controls couldn't be pointed at, or whose one control showed another card (a card left from
@@ -317,7 +315,8 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 - **Counts a page loads after itself** (admin's bell: "Notifications" until its count loads; the recording has
   "Notifications, 1 unread items"). The controls the recording's screens name with a count or status after a comma
   (starting with a number or "status") are armed per app (`capCounts`). A page's first save after it loads (a start
-  screen, the first save after a reload) waits up to `record.countWaitS` (20 s) while one shows only its bare name,
+  screen; any save after a reload: the list sweep saves admin's screen again after the click audit reloaded it, its
+  bell back without its count yet) waits up to `record.countWaitS` (20 s) while one shows only its bare name,
   then saves; one that never gets its count saves anyway with a note: `admin: "Notifications" shows no count; the
   recording has "Notifications, 1 unread items"`. run.json: `counts` (the controls, and each wait).
 - **A page that moves while it's swept** (a banner on top, a list that loads): every hover and every click reads its

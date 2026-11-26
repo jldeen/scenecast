@@ -40,7 +40,10 @@ const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); 
 const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
 if (!H.leaveGated) {
   const snap0 = H.snap, post0 = H.post;
-  H.snap = async (p, id, opts) => { if (REC.unrestored) throw new Error(`a screen wasn't put back: ${REC.unrestored.state} after its ${REC.unrestored.after} (${REC.unrestored.left})`); const N = recNotice(); if (N) await N.gate(p, recAppOfPage(p), id); const O = recOwn(); if (O) await O.gate(p, recAppOfPage(p), id); const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
+  H.snap = async (p, id, opts) => { if (REC.unrestored) throw new Error(`a screen wasn't put back: ${REC.unrestored.state} after its ${REC.unrestored.after} (${REC.unrestored.left})`);
+    // A page's first save after it loads (a new screen's; a list's or a sweep's after the click audit reloaded it,
+    // admin's bell back without its count yet) waits for the counts its recording shows (capCounts): else a note.
+    { const C = recCounts(); if (C) { const app = recAppOfPage(p); const r = await C.gate(p, app, id).catch(() => null); if (r && r.missing.length) for (const m of r.missing) REC.notes.push(`${app}: "${m.base}" shows no count; the recording has "${m.name}"`); } } const N = recNotice(); if (N) await N.gate(p, recAppOfPage(p), id); const O = recOwn(); if (O) await O.gate(p, recAppOfPage(p), id); const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
   H.post = async (path, data) => {
     const O = recOwn();
     if (O && path === '/hover') O.after();
@@ -256,9 +259,6 @@ async function recPutBackOff(A, state, after, want, d, first, fix, now, pic) {
   return false;
 }
 async function recAddState(A, id, sig) {
-  // A page's first save after it loads waits for the counts its recording shows (capCounts): else a note.
-  const C = recCounts();
-  if (C) { const r = await C.gate(A.page, A.id, id).catch(() => null); if (r && r.missing.length) for (const m of r.missing) REC.notes.push(`${A.id}: "${m.base}" shows no count; the recording has "${m.name}"`); }
   const tSnap = Date.now();
   await H.snap(A.page, id, { clean: true });
   (REC.openFp = REC.openFp || {})[id] = await A.page.mainFrame().evaluate(OPEN_STATE).catch(() => null);
@@ -560,11 +560,6 @@ async function recAuto(A) {
   const gseen = recSeen('groups', A.id);
   if (o.groups && f.groups.some(id => !gseen.has(id))) { await run('groups'); f.groups.forEach(id => gseen.add(id)); }
   if (o.chips && need('chips') && await run('chips', { widths: o.chipWidths })) ran('chips');
-  // Zoom and lists save the screen again (each zoom level; a list's every row, under the screen's own id): before any
-  // hover or click changes it. A click audit once opened admin's notifications first, and the list's save that
-  // followed kept the bell without its "1 unread" (and the audit's mark).
-  if (o.zoom && need('zoom') && await run('zoom', { zooms: o.zooms || REC.zooms })) ran('zoom');
-  if (o.lists && f.list) await run('list');
   // How long to wait for a hover to show: learned per app from its own (a Fluent tooltip shows after 250–400 ms in
   // Teams and the admin center, up to 800 ms in Copilot): 1.5× the slowest seen, 450–900 ms, once three have shown.
   // A control that shows nothing costs that wait, and most show nothing.
@@ -584,6 +579,8 @@ async function recAuto(A) {
     if (o.hovers) await run('hovers', hv({ frameRe, page: `${state}-frame${i}`, skipKeys: [...recSeen('hovers', A.id + fu)] }));
     if (o.clicks) await run('clicks', { frameRe, page: `${state}-frame${i}`, pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id + fu), ...dropped()], reland: (REC.openFp || {})[state] || null, ...fc(true) });
   }
+  if (o.zoom && need('zoom') && await run('zoom', { zooms: o.zooms || REC.zooms })) ran('zoom');
+  if (o.lists && f.list) await run('list');
   // Last: the drag audit moves panes (and puts them back).
   if (o.drags && need('drags') && f.handles && await run('drags', { range: 240, step: 40 })) ran('drags');
   // The recorded hovers that showed nothing the first time: each once more, last, its control found again from
