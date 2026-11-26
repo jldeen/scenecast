@@ -153,7 +153,17 @@ function launchDetached(args, log) {
 }
 
 // In the background, until stop: waits until the recorder runs (or it can't), and says which.
-export async function start(demo, { waitS = 120 } = {}) {
+// A start that couldn't tell an app's tenant (its sign-in stuck, not slow: the next start is fine) is stopped and
+// started once more, 5 s later. Any other refusal (another tenant, a sign-in needed) is the answer.
+export async function start(demo, { waitS = 120, once = startOnce, pause = 5000 } = {}) {
+  const r = await once(demo, { waitS });
+  if (r.ok || !/couldn't tell which tenant/.test(r.error || '')) return r;
+  await stop(demo);
+  await sleep(pause);
+  return { ...(await once(demo, { waitS })), retried: true };
+}
+
+async function startOnce(demo, { waitS = 120 } = {}) {
   const s0 = hostState(demo);
   if (s0 && s0.alive && s0.phase === 'recording-ready') return { ok: true, already: true, ...s0 };
   rmSync(stateFile(demo), { force: true });
