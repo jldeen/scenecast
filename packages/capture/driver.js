@@ -177,17 +177,39 @@ const CLEAN_CSS = '*{caret-color:transparent!important}';
 // replica's macOS look has none (player/app/variants.js); with a mouse connected macOS shows classic bars (Nov 23,
 // Jessica's Mac: a scrollbar in the admin capture). Windows' are drawn by the replica, so they stay in the picture.
 const CLEAN_BARS = '*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important}';
-async function cleanFor(p) {
+// The page's scrollbars hidden by the browser itself (Emulation.setScrollbarsHidden), not only by CSS: Chrome on a Mac
+// draws its overlay scrollbar over the page, and the style didn't take it out of the picture (Nov 23, 0.5.4-rc.1 on
+// Jessica's Mac). Only where the style hides them too, so nothing moves.
+async function hideBars(p, hidden) {
+  const params = { hidden };
+  if (p.cmd) return p.cmd(undefined, 'Emulation.setScrollbarsHidden', params).catch(() => {});
+  let s = LIGHT.get(p);
+  if (!s || s === true) { s = await ctx.newCDPSession(p).catch(() => null); if (!s) return; LIGHT.set(p, s); }
+  await s.send('Emulation.setScrollbarsHidden', params).catch(() => {});
+}
+async function cleanFor(p, id = '') {
   const done = [];
+  let bars = false;
+  // The page's scroll containers and the room their scrollbars take (offsetWidth - clientWidth), for the log: a clean
+  // picture that still shows a scrollbar then says which container had one, and whether hiding it worked.
+  const room = [];
   for (const f of p.frames()) {
     const ok = await frameEval(p, f, ([css, bars]) => {
+      const list = () => [...document.querySelectorAll('*')].filter(e => { const o = getComputedStyle(e).overflowY; return (o === 'auto' || o === 'scroll') && e.scrollHeight > e.clientHeight; }).slice(0, 8).map(e => (e.id ? '#' + e.id : e.tagName.toLowerCase()) + ':' + (e.offsetWidth - e.clientWidth));
+      const before = list();
       const d = document.createElement('div'); d.style.cssText = 'position:absolute;top:-999px;width:100px;height:100px;overflow:scroll';
       (document.body || document.documentElement).appendChild(d); const overlay = d.offsetWidth - d.clientWidth === 0 || /Mac/.test(navigator.platform); d.remove();
       const st = document.createElement('style'); st.setAttribute('data-sc-clean', ''); st.textContent = css + (overlay ? bars : '');
-      document.documentElement.appendChild(st); return true;
+      document.documentElement.appendChild(st);
+      return { bars: overlay, before, after: list() };
     }, [CLEAN_CSS, CLEAN_BARS], 3000, { noContext: 'skip' }).catch(() => false);
-    if (ok) done.push(f);
+    if (ok) { done.push(f); if (ok.before && ok.before.length) room.push(`${f === p.mainFrame() ? 'main' : 'frame'} ${ok.before.join(' ')} -> ${ok.after.join(' ')}`); }
+    if (ok && ok.bars && f === p.mainFrame()) bars = true;
   }
+  if (bars) await hideBars(p, true);
+  // The style in effect before the picture: two frames in the page.
+  await p.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {});
+  if (room.length) await rlog(`clean ${id}: scrollbars ${bars ? 'hidden' : 'kept'}; room before -> after: ${room.join('; ')}`);
   // Parked, unless that changes the screen (a menu or card open because the pointer is on it); back where it was after
   // the picture, so nothing the page does with the pointer changes (it held a click otherwise, real-tabs).
   const look = () => p.evaluate(() => (document.body ? document.body.innerText.length : 0) + '|' + document.querySelectorAll('[aria-expanded="true"],[role=dialog],[role=menu],[role=tooltip]').length).catch(() => null);
@@ -211,12 +233,12 @@ async function cleanFor(p) {
   const seen = await look();
   let blurred = await unfocus();
   if (blurred) { await poll(100); if ((await look()) !== seen) { await refocus(); await poll(150); blurred = false; } }
-  return async () => { if (blurred) await refocus(); if (parked) await p.mouse.move(was.x, was.y).catch(() => {}); for (const f of done) await frameEval(p, f, () => { for (const s of document.querySelectorAll('style[data-sc-clean]')) s.remove(); }, undefined, 3000, { noContext: 'skip' }).catch(() => {}); };
+  return async () => { if (bars) await hideBars(p, false); if (blurred) await refocus(); if (parked) await p.mouse.move(was.x, was.y).catch(() => {}); for (const f of done) await frameEval(p, f, () => { for (const s of document.querySelectorAll('style[data-sc-clean]')) s.remove(); }, undefined, 3000, { noContext: 'skip' }).catch(() => {}); };
 }
 async function snap(p, id, opts = {}) {
   const t0 = Date.now();
   if (opts.shot !== false) {
-    const undo = opts.clean ? await cleanFor(p) : null;
+    const undo = opts.clean ? await cleanFor(p, id) : null;
     try { const b = await p.screenshot({ timeout: 60000 }); await post('/shot', { id, b64: b.toString('base64') }); } finally { if (undo) await undo(); }
   }
   const keys = await frameKeys(p);

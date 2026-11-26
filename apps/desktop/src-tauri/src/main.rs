@@ -2,6 +2,8 @@
 // command runs on a worker thread and reports its progress as `job` events; one job per demo at a time.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod gpu_watch;
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1911,202 +1913,15 @@ fn use_bundled_engine() {
     });
 }
 
-/// WebKit's GPU processes working for this app (launchd's children, so found by who they're responsible to: the same
-/// as the app, which is the app itself when opened normally and whatever started it otherwise, a test runner).
-#[cfg(target_os = "macos")]
-fn webkit_gpu_pids() -> Vec<i32> {
-    unsafe extern "C" {
-        fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
-    }
-    let me = std::process::id() as i32;
-    let mine = unsafe { responsibility_get_pid_responsible_for_pid(me) };
-    let mut pids = vec![0i32; 8192];
-    let n = unsafe {
-        libc::proc_listallpids(
-            pids.as_mut_ptr().cast(),
-            (pids.len() * std::mem::size_of::<i32>()) as i32,
-        )
-    };
-    pids.truncate(n.max(0) as usize);
-    pids.into_iter()
-        .filter(|&pid| pid > 0 && pid != me)
-        .filter(|&pid| {
-            let mut name = [0u8; 64];
-            let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
-            len > 0 && &name[..len as usize] == b"com.apple.WebKit.GPU"
-        })
-        .filter(|&pid| {
-            let r = unsafe { responsibility_get_pid_responsible_for_pid(pid) };
-            r == me || r == mine
-        })
-        .collect()
-}
-
-/// Every WebKit GPU process on the Mac with the process it's responsible to, and this app's own (for the test's
-/// output when none is found).
+/// The UI test's way to the window recovery (gpu_watch): what it does once WebKit couldn't end a GPU process, here
+/// with none to end (CI's virtual Macs have no GPU process): the web process ends and the page loads again.
 #[cfg(all(target_os = "macos", feature = "webdriver"))]
 #[tauri::command]
-fn test_webkit_gpu_all() -> Value {
-    unsafe extern "C" {
-        fn responsibility_get_pid_responsible_for_pid(pid: libc::pid_t) -> libc::pid_t;
-    }
-    let me = std::process::id() as i32;
-    let mut pids = vec![0i32; 8192];
-    let n = unsafe {
-        libc::proc_listallpids(
-            pids.as_mut_ptr().cast(),
-            (pids.len() * std::mem::size_of::<i32>()) as i32,
-        )
-    };
-    pids.truncate(n.max(0) as usize);
-    let all: Vec<Value> = pids
-        .into_iter()
-        .filter_map(|pid| {
-            let mut name = [0u8; 64];
-            let len = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
-            let name = String::from_utf8_lossy(&name[..len.max(0) as usize]).into_owned();
-            name.contains("WebKit").then(|| {
-                json!({ "pid": pid, "name": name, "responsible": unsafe { responsibility_get_pid_responsible_for_pid(pid) } })
-            })
-        })
-        .collect();
-    json!({ "me": me, "mine": unsafe { responsibility_get_pid_responsible_for_pid(me) }, "webkit": all })
-}
-
-/// A process macOS has stopped or suspended (SSTOP): the state Jessica's GPU process was left in.
-#[cfg(target_os = "macos")]
-fn stopped(pid: i32) -> bool {
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
-    let n = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            (&mut info as *mut libc::proc_bsdinfo).cast(),
-            size,
-        )
-    };
-    n == size && info.pbi_status == libc::SSTOP
-}
-
-/// For the UI test: the GPU processes, to stop them the way they got stuck on Jessica's Mac (the window in front first:
-/// only a window on screen is started again).
-#[cfg(all(target_os = "macos", feature = "webdriver"))]
-#[tauri::command]
-fn test_webkit_gpu_pids(window: tauri::WebviewWindow) -> Vec<i32> {
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
-    webkit_gpu_pids()
-}
-
-/// The page says the window is on screen and nothing has drawn for a while (its animation frames stopped while its
-/// timers run). On macOS that's WebKit's GPU process wedged: Nov 2026, on Jessica's Mac, WebKit killed it as
-/// unresponsive, couldn't kill the third, and the page kept its connection to that half-started one: blank for two
-/// hours, the page itself fine. A fresh GPU process alone left it blank; a fresh web process (Tauri reloads the page
-/// when it ends) drew again. So: end the GPU process WebKit has for the window (it can be stopped, not just slow), then
-/// the web process: only when macOS says the window is on screen.
-/// `test_no_gpu` (UI test builds only): on a Mac with no WebKit GPU process at all (CI's virtual Macs draw in the web
-/// process), start the page again anyway, so the restart itself is tested there.
-#[tauri::command]
-async fn window_not_drawing(
-    webview: tauri::Webview,
-    ms: u64,
-    test_no_gpu: Option<bool>,
-) -> Result<Value, String> {
-    scenecast_app::ai::app_log(
-        "window not drawing",
-        &format!("no frame drawn for {ms} ms while the page says it's visible"),
-    );
-    #[cfg(target_os = "macos")]
-    {
-        // (the window's web process; 1 once asked, 2 when the window really is on screen)
-        let pids = std::sync::Arc::new(std::sync::Mutex::new((0i32, 0i32)));
-        let got = pids.clone();
-        webview
-            .with_webview(move |wv| {
-                use objc2::{msg_send, runtime::AnyObject, sel};
-                let wk = wv.inner() as *mut AnyObject;
-                if wk.is_null() {
-                    return;
-                }
-                // WebKit's own (long-standing SPI) names for the window's processes; asked only if it answers.
-                let wk = unsafe { &*wk };
-                let web: i32 = if wk.class().responds_to(sel!(_webProcessIdentifier)) {
-                    unsafe { msg_send![wk, _webProcessIdentifier] }
-                } else {
-                    0
-                };
-                // Frames stop too when the window is covered (Chrome over it while recording): WebKit pauses
-                // drawing there and still calls the page visible. Only a window macOS says is on screen counts.
-                let win = wv.ns_window() as *mut AnyObject;
-                let on_screen = !win.is_null() && {
-                    let win = unsafe { &*win };
-                    let visible: bool = unsafe { msg_send![win, isVisible] };
-                    let mini: bool = unsafe { msg_send![win, isMiniaturized] };
-                    let occlusion: usize = unsafe { msg_send![win, occlusionState] };
-                    eprintln!("window_not_drawing: visible {visible}, minimized {mini}, occlusion {occlusion}");
-                    visible && !mini && occlusion & 2 != 0
-                };
-                *got.lock().expect("pids") = (web, if on_screen { 2 } else { 1 });
-            })
-            .map_err(|e| e.to_string())?;
-        // with_webview runs on the main thread (this command doesn't): wait for its answer.
-        for _ in 0..50 {
-            if *pids.lock().expect("pids") != (0, 0) {
-                break;
-            }
-            tokio_sleep_ms(20).await;
-        }
-        let (web, seen) = *pids.lock().expect("pids");
-        let gpu = webkit_gpu_pids();
-        let stuck: Vec<i32> = gpu.iter().copied().filter(|&p| stopped(p)).collect();
-        eprintln!(
-            "window_not_drawing: {ms} ms, on screen {}, gpu {gpu:?}, stopped {stuck:?}",
-            seen == 2
-        );
-        // Frames also pause for a window mostly covered (macOS calls it visible if any of it shows): only a GPU process
-        // that's stopped means the window can't draw. A running one is left to WebKit.
-        let forced = cfg!(feature = "webdriver") && test_no_gpu.unwrap_or(false) && gpu.is_empty();
-        if seen != 2 || (stuck.is_empty() && !forced) {
-            return Ok(
-                serde_json::json!({ "restarted": null, "why": if seen != 2 { "not on screen" } else { "GPU process running" } }),
-            );
-        }
-        scenecast_app::ai::app_log(
-            "window not drawing",
-            &format!("on screen, GPU process {stuck:?} stopped: ending the GPU and web processes"),
-        );
-        // Only the stopped ones: a running GPU process found this way could be another app's (started by the same
-        // terminal or test runner); WebKit starts a new one for the page.
-        for &pid in &stuck {
-            unsafe { libc::kill(pid, libc::SIGKILL) };
-        }
-        eprintln!(
-            "window_not_drawing: restarting: web process {web}, stopped GPU processes ended {stuck:?}"
-        );
-        if web > 0 {
-            unsafe { libc::kill(web, libc::SIGKILL) };
-            return Ok(serde_json::json!({ "restarted": "web process", "web": web, "gpu": stuck }));
-        }
-        let _ = webview.reload();
-        Ok(serde_json::json!({ "restarted": "reload", "gpu": stuck }))
-    }
-    // Windows and Linux: logged only (WebView2 has its own GPU process recovery; a covered window stops drawing too).
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (webview, test_no_gpu);
-        Ok(serde_json::json!({ "restarted": null }))
-    }
-}
-
-#[cfg(target_os = "macos")]
-async fn tokio_sleep_ms(ms: u64) {
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        std::thread::sleep(std::time::Duration::from_millis(ms))
-    })
-    .await;
+async fn test_recover_window(window: tauri::WebviewWindow) -> Result<i32, String> {
+    // Off the main thread: restart_page waits for the webview's answer, which comes on the main thread.
+    tauri::async_runtime::spawn_blocking(move || gpu_watch::restart_page(&window))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -2174,11 +1989,8 @@ fn main() {
             move |_ctx, request| serve_file(&state, &request)
         })
         .invoke_handler(tauri::generate_handler![
-            window_not_drawing,
             #[cfg(all(target_os = "macos", feature = "webdriver"))]
-            test_webkit_gpu_pids,
-            #[cfg(all(target_os = "macos", feature = "webdriver"))]
-            test_webkit_gpu_all,
+            test_recover_window,
             app_info,
             list_demos,
             get_demo,
@@ -2255,6 +2067,8 @@ fn main() {
         .setup({
             let state = state.clone();
             move |app| {
+                #[cfg(target_os = "macos")]
+                gpu_watch::start(app.handle().clone());
                 #[cfg(feature = "auditaur")]
                 app.add_capability(
                     r#"{"identifier":"auditaur","windows":["main"],"permissions":["auditaur:default"]}"#,

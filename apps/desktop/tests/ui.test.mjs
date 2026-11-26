@@ -134,7 +134,7 @@ async function shot(name) {
   await b.saveScreenshot(join(SHOTS, `${name}.png`));
 }
 // The app's own state: whether a demo's job (the quick checks it starts after a build, a script or an edit) runs.
-const checksAfter = (since, id = 'fixture-demo') => b.execute((since, id) => { const j = window.__scenecast?.jobs?.[id]?.checks; return j && j.startedAt > since && !window.__scenecast.jobs[id].running.checks ? (j.outcome || { error: j.error, lines: (j.lines || []).slice(-30) }) : null; }, since, id);
+const checksAfter = (since, id = 'fixture-demo') => b.execute((since, id) => { const j = window.__scenecast?.jobs?.[id]?.checks; return j && j.startedAt > since && !window.__scenecast.jobs[id].running.checks && (j.outcome || j.error) ? (j.outcome || { error: j.error, lines: (j.lines || []).slice(-30) }) : null; }, since, id);
 // Why a checks run didn't pass: its failing items, or its error with the end of its output and the app's log.
 const checksWhy = o => o?.items ? JSON.stringify(o.items.filter(i => i.status === 'fail')) : `error: ${o?.error}\n${(o?.lines || []).map(l => typeof l === 'string' ? l : JSON.stringify(l)).join('\n')}\n--- app output ---\n${appLog.join('').slice(-3000)}`;
 // The checks the app starts on its own after a step that began at `since`: wait for them to start and end.
@@ -347,6 +347,24 @@ try {
   const failing = await b.execute(() => [...document.querySelectorAll('[aria-label=Checks] [data-status=fail]')].map(li => li.innerText.replace(/\s+/g, ' ')).join('; '));
   check('the build runs the quick checks on its own, and they pass', (await attr('checks-done', 'data-pass')) === 'true' && (await attr('checks-done', 'data-quick')) === 'true', `${await text('checks-done')} ${failing}`);
   check('no "run every check" outside Export', !(await exists('checks-full')));
+  // The app says a job is done a moment before the page has its answer (Nov 23: "the script runs the quick checks on
+  // its own: error: null", though they passed). That word coming first while the page waits: the job reads running
+  // until its answer is in place, never finished with no result.
+  {
+    const t0 = await b.execute(() => Date.now());
+    await click('checks-quick');
+    await waitFor('the checks to start', () => b.execute(t0 => (window.__scenecast.jobs['fixture-demo']?.checks?.startedAt || 0) > t0, t0), 20000, 50);
+    await b.execute(() => window.__TAURI__.event.emit('job-state', { demo: 'fixture-demo', job: 'checks', running: false }));
+    await sleep(200);
+    const seen = [];
+    for (let i = 0; i < 600; i++) {
+      const st = await b.execute(() => { const J = window.__scenecast.jobs['fixture-demo']; return { running: !!J.running.checks, result: !!(J.checks.outcome || J.checks.error) }; });
+      seen.push(st);
+      if (!st.running) break;
+      await sleep(100);
+    }
+    check('a job the app says is done reads running until its answer is in place', seen.length > 1 && seen[0].running && seen.every(x => x.running || x.result), JSON.stringify(seen.slice(0, 3).concat(seen.slice(-2))));
+  }
   await shot('07-build');
   lap('build');
 
@@ -628,38 +646,23 @@ try {
   check('deletes a demo', !existsSync(join(LIB, 'fixture-demo-copy')));
   lap('library');
 
-  // ---- A window that can't draw starts its page again (macOS) ----------------------------------------------------
-  // Nov 2026, Jessica's Mac: WebKit's GPU process stopped answering, WebKit couldn't end the last of its replacements,
-  // and the window stayed blank for two hours with the page itself fine. Here the app's GPU processes are stopped
-  // (SIGSTOP), as hers was. The page's watchdog (frames stop while its timers run) can't be tested on CI's display
-  // (frames don't run there at all), so the app is told directly, as the watchdog tells it; it must start the page
-  // again, leave no stopped GPU process, and draw: a real screenshot of the window that isn't blank.
+  // ---- A window WebKit can't draw in comes back (macOS) ---------------------------------------------------------
+  // Nov 2026, Jessica's Mac: WebKit couldn't end its unresponsive GPU process and the window stayed blank. The app reads
+  // that from its own log (gpu_watch.rs; the reading is unit-tested, the real case is checked on a real Mac: CI's
+  // virtual Macs have no GPU process). Here, what it then does: the window's web process ends, the page loads again on
+  // its own and draws, with no restart.
   if (process.platform === 'darwin') {
-    const inv = (cmd, args = {}) => b.executeAsync((cmd, args, done) => window.__TAURI__.core.invoke(cmd, args).then(done, e => done({ error: String(e) })), cmd, args);
     await b.execute(() => { window.__before = 1; });
-    const gpu = await inv('test_webkit_gpu_pids');
-    // CI's virtual Macs have no WebKit GPU process (the web process draws): there, only the restart can be tested.
-    const noGpu = Array.isArray(gpu) && !gpu.length;
-    if (noGpu) console.log('window recovery: no WebKit GPU process on this Mac (a virtual one draws in the web process), so stopping it is tested on a real Mac only: ' + JSON.stringify(await inv('test_webkit_gpu_all')));
-    else check('the app finds its GPU process', Array.isArray(gpu), JSON.stringify(gpu));
-    for (const pid of noGpu ? [] : gpu) try { process.kill(pid, 'SIGSTOP'); } catch (e) {}
-    // Not awaited in the page: the answer never comes back to it, as its web process is the one ended.
-    await b.execute((noGpu) => { window.__TAURI__.core.invoke('window_not_drawing', { ms: 10000, testNoGpu: noGpu }).catch(() => {}); }, noGpu);
+    // Fired after a moment, so this call has returned before the page it runs in ends.
+    await b.execute(() => { setTimeout(() => window.__TAURI__.core.invoke('test_recover_window').catch(() => {}), 300); return true; });
     let back = false;
-    for (let i = 0; i < 40 && !back; i++) { await sleep(500); back = await b.execute(() => window.__before !== 1).catch(() => false); }
-    const said = appLog.join('').split('\n').filter(l => /window_not_drawing/.test(l)).slice(-4).join('\n');
-    console.log('window recovery, the app says:\n' + said);
-    check(noGpu ? 'the app starts its page again (a fresh web process)' : 'a window whose GPU process is stopped starts its page again', /restarting: web process [1-9]/.test(said) && back, said);
-    await sleep(1000);
-    const left = (noGpu ? [] : gpu).filter(pid => { try { process.kill(pid, 0); return true; } catch (e) { return false; } });
-    for (const pid of left) try { process.kill(pid, 'SIGCONT'); } catch (e) {}
-    if (!noGpu) check('no stopped GPU process left behind', left.length === 0, `still there: ${left.join(' ')}`);
-    // Drawing: the window's own picture, not one colour.
+    for (let i = 0; i < 40 && !back; i++) { await sleep(500); back = await b.execute(() => window.__before !== 1 && !!document.querySelector('[data-test]')).catch(() => false); }
+    check('the window\'s page loads again on its own after its web process ends', back);
     let drawn = false, shot = null;
     for (let i = 0; i < 20 && !drawn; i++) {
       await sleep(500);
       shot = await b.takeScreenshot().catch(() => null);
-      if (shot) { const png = Buffer.from(shot, 'base64'); drawn = png.length > 20000; }
+      if (shot) drawn = Buffer.from(shot, 'base64').length > 20000;
     }
     if (SHOTS && shot) writeFileSync(join(SHOTS, 'zz-drawing-again.png'), Buffer.from(shot, 'base64'));
     check('it draws again within seconds, no restart', drawn && appExit === null, `picture ${shot ? Buffer.from(shot, 'base64').length : 0} bytes`);

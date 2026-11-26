@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/core",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "StuntDouble core: demo settings (demo.json), the flow compiler, edits and text rules, the presenter notes, the workflow (text, status, save, release), the project template, and the engine entry the stuntdouble binary runs.",
   "type": "module",
   "license": "MIT",
@@ -12,15 +12,15 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@stuntdouble/capture": "0.5.4",
-    "@stuntdouble/player": "0.5.4",
-    "@stuntdouble/checks": "0.5.4",
-    "@stuntdouble/apps": "0.5.4"
+    "@stuntdouble/capture": "0.5.5",
+    "@stuntdouble/player": "0.5.5",
+    "@stuntdouble/checks": "0.5.5",
+    "@stuntdouble/apps": "0.5.5"
   },
   "peerDependencies": {
-    "@scenecast/ai": "0.5.4",
-    "@scenecast/script": "0.5.4",
-    "@scenecast/editor": "0.5.4"
+    "@scenecast/ai": "0.5.5",
+    "@scenecast/script": "0.5.5",
+    "@scenecast/editor": "0.5.5"
   },
   "peerDependenciesMeta": {
     "@scenecast/ai": {

@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/capture",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "StuntDouble capture: DOM/CSSOM/fonts/shadow DOM/iframes serializer, driver, recorder, side-state audits, receiver, build of raw captures into data/, and the capture browser (the installed Chrome, its own profile, off the screen).",
   "type": "module",
   "license": "MIT",
@@ -12,8 +12,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@stuntdouble/core": "0.5.4",
-    "@stuntdouble/apps": "0.5.4",
+    "@stuntdouble/core": "0.5.5",
+    "@stuntdouble/apps": "0.5.5",
     "playwright-core": "^1.56.0"
   }
 }

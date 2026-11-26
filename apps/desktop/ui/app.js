@@ -213,6 +213,7 @@ async function step(job, cmd, args, after) {
   const id = args?.id || S.id;
   const token = {};
   J(id).running[job] = true;
+  (J(id).owned ??= {})[job] = token;
   J(id)[job] = { ...(J(id)[job] || {}), stages: [], lines: [], items: [], events: [], error: null, outcome: null, startedAt: Date.now(), token };
   const mine = () => J(id)[job]?.token === token;
   rerender();
@@ -230,7 +231,7 @@ async function step(job, cmd, args, after) {
     if (x && !(S.view === 'demo' && S.id === id && tabJobs(S.tab).includes(job))) toast(`${x.title}. ${x.body}`, true);
     J(id)[job].error = msg;
   } finally {
-    if (mine()) delete J(id).running[job];
+    if (mine()) { delete J(id).running[job]; delete J(id).owned[job]; }
     await refreshDemo(id);
     rerender();
   }
@@ -310,8 +311,12 @@ listen('capture', async ({ payload: { demo: id, action } }) => {
   if (S.view !== 'demo' || S.id !== id) await openDemo(id, 'record');
   await ACTIONS['record-stop']();
 });
+// A job's busy mark. The app says it's done when its command ends, a moment before the page has the command's answer:
+// for a job this page started (step), the mark stays until step has the answer (or error) in place, so nothing reads
+// "finished, no result" (Nov 23: the quick checks after a script read that, though they passed). Jobs the app runs on
+// its own (the background compare) follow the app.
 listen('job-state', ({ payload: { demo: id, job, running: on } }) => {
-  if (on) J(id).running[job] = true; else delete J(id).running[job];
+  if (on) J(id).running[job] = true; else if (!J(id).owned?.[job]) delete J(id).running[job];
   if (id === S.id) renderTabsBar();
 });
 
@@ -2273,21 +2278,3 @@ setInterval(() => { if (U.available && !U.busy) { const b = $('#update-now'); if
 window.__scenecast = S;
 // The UI test opens a shared file the way a double-click does.
 S.openFile = openShared;
-// The window drawing: animation frames come while it's on screen. The page's 1 s timer still ticking with no frame
-// between six ticks means the page is fine but nothing reaches the screen (WebKit's GPU process wedged: a blank window
-// for two hours, Nov 2026). Ticks, not time: a long task holds timers and frames alike, and once it ends the timer can
-// run before the next frame (6.5 s measured mid Record for me, the page fine). The app starts the page again if macOS
-// says the window is on screen (window_not_drawing); at most once a minute.
-(() => {
-  let last = performance.now(), ticks = 0, told = 0;
-  const frame = () => { last = performance.now(); ticks = 0; requestAnimationFrame(frame); };
-  requestAnimationFrame(frame);
-  const W = window.__drawing = { stalledMs: 0, ticks: 0, told: 0 };
-  setInterval(() => {
-    const now = performance.now();
-    if (document.visibilityState !== 'visible') { last = now; ticks = 0; W.stalledMs = 0; W.ticks = 0; return; }
-    ticks++;
-    W.stalledMs = Math.round(now - last); W.ticks = ticks;
-    if (ticks >= 6 && W.stalledMs > 6000 && now - told > 60000) { told = now; W.told++; call('window_not_drawing', { ms: W.stalledMs }).catch(() => {}); }
-  }, 1000);
-})();

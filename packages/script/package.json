@@ -1,11 +1,11 @@
 {
   "name": "@scenecast/script",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": true,
   "type": "module",
   "description": "Script to focus points: the presenter's lines matched to the replica's screens (pluggable matcher, deterministic by default), the line-to-screen sheet and the cue sheet.",
   "dependencies": {
-    "@stuntdouble/core": "0.5.4",
-    "@stuntdouble/player": "0.5.4"
+    "@stuntdouble/core": "0.5.5",
+    "@stuntdouble/player": "0.5.5"
   }
 }
