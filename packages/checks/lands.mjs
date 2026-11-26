@@ -1,25 +1,10 @@
-// In the page (page.evaluate): is a focus point's target drawn where its mark goes? Points across the target, in its
-// own page, are hit-tested there: a point counts when the first thing drawn at it is the target or inside it.
-// Something opaque on top (a composer floating over the list, another row, a card) hides it, and a target its list
-// clips isn't hit at all. Returns { box, hits, points, top } (top: what's drawn at its centre), or null when the point
-// isn't on this screen.
+// In the page (page.evaluate): is a focus point's mark around something drawn where it is? The focus module hit-tests
+// points inside the marked words (or element): something on top (a composer floating over the list, another row, a
+// card) hides them, and words their list clips aren't hit at all. → { box, hits, points, top } (top: what's drawn at
+// the middle), or null when the point isn't on this screen or the demo's focus module can't say.
 export function focusLands(id) {
-  const box = window.d1.focus.locate(id), target = window.d1.focus.target(id);
-  if (!box || !target) return null;
-  const d = target.ownerDocument, r = target.getBoundingClientRect();
-  const opaque = e => {
-    if (/^(img|svg|canvas|video|picture)$/.test(e.localName)) return true;
-    const cs = d.defaultView.getComputedStyle(e), m = cs.backgroundColor.match(/[\d.]+/g);
-    return cs.backgroundImage !== 'none' || (m && (m.length < 4 || +m[3] > 0.5));
-  };
-  let hits = 0, points = 0;
-  for (const fy of [0.25, 0.5, 0.75]) for (const fx of [0.1, 0.3, 0.5, 0.7, 0.9]) {
-    points++;
-    for (const e of d.elementsFromPoint(r.left + r.width * fx, r.top + r.height * fy)) {
-      if (e === target || target.contains(e)) { hits++; break; }
-      if (!e.contains(target) && opaque(e)) break;
-    }
-  }
-  const c = d.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-  return { box: box.map(Math.round), hits, points, top: c ? (c.innerText || c.getAttribute('aria-label') || c.localName).replace(/\s+/g, ' ').trim().slice(0, 80) : null };
+  const f = window.d1.focus, box = f.locate(id);
+  if (!box || !f.shown) return null;
+  const s = f.shown(id);
+  return s && { box: box.map(Math.round), ...s };
 }

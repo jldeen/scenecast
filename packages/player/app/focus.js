@@ -162,10 +162,10 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
         const f = one(t.text); if (!f) return null;
         let el = f.el; if (typeof t.up === 'number') for (let i = 0; i < t.up && el.parentElement; i++) el = el.parentElement; else el = el.closest(t.up);
         if (!el) return null;
-        return { el, rects: [place(off(el.ownerDocument), el.getBoundingClientRect())] };
+        return { el, rects: [place(off(el.ownerDocument), el.getBoundingClientRect())], hit: { el } };
       }
       if (typeof t !== 'string') {
-        for (const d of docs) { const el = [...d.querySelectorAll(t.sel)].find(x => { const r = x.getBoundingClientRect(); return r.width > 2 && r.height > 2; }); if (el) return { el, rects: [place(off(d), el.getBoundingClientRect())] }; }
+        for (const d of docs) { const el = [...d.querySelectorAll(t.sel)].find(x => { const r = x.getBoundingClientRect(); return r.width > 2 && r.height > 2; }); if (el) return { el, rects: [place(off(d), el.getBoundingClientRect())], hit: { el } }; }
         return null;
       }
       const re = new RegExp(N(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+'));
@@ -186,7 +186,7 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
           const rg = d.createRange(), [sn, so] = at(a), [en, eo] = at(z - 1); rg.setStart(sn, Math.min(so, sn.length)); rg.setEnd(en, Math.min(eo + 1, en.length));
           const o = off(d);
           const rects = [...rg.getClientRects()].filter(r => r.width > 1 && r.height > 1).map(r => place(o, r));
-          if (rects.length) return { el: sn.parentElement, rects };
+          if (rects.length) return { el: sn.parentElement, rects, hit: { range: rg } };
         }
       }
       return null;
@@ -195,7 +195,7 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
     if (parts.some(x => !x)) return null;
     const rs = parts.flatMap(x => x.rects), g = p.grow || [0, 0, 0, 0];
     // grow: page pixels added to the box (left, top, right, bottom), e.g. to take in a row's icons.
-    return { el: parts[0].el, box: [Math.min(...rs.map(r => r[0])) - g[0], Math.min(...rs.map(r => r[1])) - g[1], Math.max(...rs.map(r => r[2])) + g[2], Math.max(...rs.map(r => r[3])) + g[3]] };
+    return { el: parts[0].el, hits: parts.map(x => x.hit), box: [Math.min(...rs.map(r => r[0])) - g[0], Math.min(...rs.map(r => r[1])) - g[1], Math.max(...rs.map(r => r[2])) + g[2], Math.max(...rs.map(r => r[3])) + g[3]] };
   }
   const here = (p, cur = current()) => cur && p.app === cur.id && p.states.includes(cur.state);
   const ready = (p, cur = current()) => here(p, cur) && (p.open ? p.open.every(l => groupButton(cur.app, l)) || !!locate(p, cur) : !!locate(p, cur));
@@ -265,12 +265,27 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
   }
   const r2 = a => a.map(v => Math.round(v * 100) / 100);
 
-  // Something is drawn over all of it (a composer floating over the chat's end, a sticky header), or it's clipped:
-  // none of the points across it shows the element itself.
-  function covered(el) {
-    const d = el.ownerDocument, r = el.getBoundingClientRect();
-    for (const fy of [0.3, 0.7]) for (const fx of [0.1, 0.3, 0.5, 0.7, 0.9]) { const e = d.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy); if (e && (e === el || el.contains(e))) return false; }
-    return true;
+  // Points across what a mark goes around: its words (a range, each of its lines), or its element. Each is { at, ok }:
+  // at, the point in its own document; ok, whether what's drawn there is it (not something over it, nor, where its list
+  // clips it, whatever is drawn there instead).
+  function spots(t) {
+    const out = [];
+    for (const h of t.hits || []) {
+      const d = (h.el || h.range.startContainer).ownerDocument;
+      const rects = h.el ? [h.el.getBoundingClientRect()] : [...h.range.getClientRects()].filter(r => r.width > 1 && r.height > 1);
+      // The words' element, or one inside them; never an element around the whole match that isn't its own (a list's
+      // empty space where the words would be).
+      const own = e => !!e && (h.el ? e === h.el || h.el.contains(e) : h.range.intersectsNode(e) && (e === h.range.startContainer.parentElement || e === h.range.endContainer.parentElement || !(e.contains(h.range.startContainer) && e.contains(h.range.endContainer))));
+      for (const r of rects) for (const fx of [0.15, 0.5, 0.85]) { const x = r.left + r.width * fx, y = r.top + r.height / 2; out.push({ d, x, y, ok: own(d.elementFromPoint(x, y)) }); }
+    }
+    return out;
+  }
+  // Something is drawn over all of it (a composer floating over the chat's end, a sticky header), or it's clipped.
+  const covered = t => !spots(t).some(p => p.ok);
+  // How much of it is drawn where it is, and what's drawn at its middle (for the checks).
+  function shownOf(t) {
+    const s = spots(t), mid = s[Math.floor(s.length / 2)], e = mid && mid.d.elementFromPoint(mid.x, mid.y);
+    return { hits: s.filter(x => x.ok).length, points: s.length, top: e ? (e.innerText || e.getAttribute('aria-label') || e.localName).replace(/\s+/g, ' ').trim().slice(0, 80) : null };
   }
   async function show(i, my) {
     const p = points[i];
@@ -285,7 +300,7 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
     // Off screen, under something drawn over it, or too near the top or bottom for the margin: scroll it to the middle
     // first.
     const off = t.box[1] < 0 || t.box[3] > H() || t.box[0] < 0 || t.box[2] > W();
-    if (off || covered(t.el) || !inside(frameAt(p, t.box, fitZ(p, t.box)), MARGIN)) {
+    if (off || covered(t) || !inside(frameAt(p, t.box, fitZ(p, t.box)), MARGIN)) {
       t.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       let prev = '', same = 0;
       // Until the smooth scroll has started and finished: at least 300 ms, then 6 still frames.
@@ -434,6 +449,9 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
     state: () => ({ run: st.run, limit: st.shown ? st.shown.limit : null, s: st.s, A: st.A.slice(), z: st.z, draw: st.draw, cursor: st.cursor, id: st.cursor >= 0 ? points[st.cursor].id : null, last: st.last, marks: st.marks.map(m => ({ kind: m.kind, a: m.a.map(v => Math.round(v * 100) / 100), b: m.b.map(v => Math.round(v * 100) / 100) })) }),
     ready: () => points.map(p => ready(p) ? p.id : null).filter(Boolean),
     locate: id => { const p = points.find(x => x.id === id); const t = p && locate(p); return t && t.box; },
+    // For the checks: what a point's mark goes around, and whether any of it is drawn where it is.
+    target: id => { const p = points.find(x => x.id === id); const t = p && locate(p); return t && t.el; },
+    shown: id => { const p = points.find(x => x.id === id); const t = p && locate(p); return t ? shownOf(t) : null; },
     // Where a point that isn't in the list would land (the script matcher and the editor check a target with it).
     locatePoint: p => { const t = locate(p); return t ? { box: t.box } : null; },
     // The editor's changes, at once: the new list, zoomed out, the sequence from the start of the beat.

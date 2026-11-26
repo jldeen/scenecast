@@ -594,7 +594,7 @@ try {
           await page.evaluate(([a, s]) => window.d1.go(a, s), [p.app, p.states[0]]); await idle(page);
           await page.mouse.move(w - 1, h - 1);
           await settle(page, p.id);
-          if (low) { const moved = await page.evaluate(id => { const el = window.d1.focus.target(id); let sc = el && el.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 40 && /(auto|scroll)/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement; if (!sc) return false; const before = sc.scrollTop; const er = el.getBoundingClientRect(), sr = sc.getBoundingClientRect(); if (sr.bottom + 4 + er.height > el.ownerDocument.defaultView.innerHeight) return false; sc.scrollTop += er.top - (sr.bottom + 4); return sc.scrollTop !== before; }, p.id); if (!moved) continue; await settle(page, p.id); }
+          if (low) { const moved = await page.evaluate(id => { const el = window.d1.focus.target && window.d1.focus.target(id); let sc = el && el.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 40 && /(auto|scroll)/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement; if (!sc) return false; const before = sc.scrollTop; const er = el.getBoundingClientRect(), sr = sc.getBoundingClientRect(); if (sr.bottom + 4 + er.height > el.ownerDocument.defaultView.innerHeight) return false; sc.scrollTop += er.top - (sr.bottom + 4); return sc.scrollTop !== before; }, p.id); if (!moved) continue; await settle(page, p.id); }
           await page.evaluate(id => window.d1.focus.at(id), p.id);
           await page.keyboard.press(MOD + 'KeyF'); await sleep(50); await quiet(page);
           await page.keyboard.press('Escape'); await quiet(page);
