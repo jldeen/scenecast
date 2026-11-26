@@ -322,7 +322,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
             const uh = await uncovered(id, h, h.name);
             if (!uh.ok) return uh;
             await send(id, 'click', { x: uh.el.x, y: uh.el.y }, 30, { ...hitOf(h, step, h.name), landed: uh.hit });
-            await settle(id, 60);
+            // A new screen: the recorder sweeps its step rows (minutes, run 17), as after any click.
+            await settle(id, 600);
             return { ok: true };
           };
           // None on the screen: today's answers fold their steps under a timeline header ("Worked for 1m 36s"), above
