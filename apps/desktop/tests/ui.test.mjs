@@ -54,6 +54,9 @@ const FEED_URL = `http://127.0.0.1:${feed.address().port}/latest.json`;
 
 // ---- The app -----------------------------------------------------------------------------------------------------
 const appLog = [];
+// Windows finds a user's AppData under USERPROFILE: Google Chrome won't start (the checker's, Playwright's) where the
+// home has none.
+for (const d of ['Local', 'Roaming']) mkdirSync(join(tmp, 'home', 'AppData', d), { recursive: true });
 const app = spawn(BIN, [], {
   env: {
     ...process.env,
