@@ -62,3 +62,14 @@ function scenecastRunning() {
   return null;
 }
 export { APP_PORTS };
+
+// Edge, for the checks that run in it, where it's installed. A Mac without it skips them, so a local npm test goes on
+// to everything after them; CI's macOS and Windows runners have it, and there a missing Edge still fails.
+export async function edgeHere(check) {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return false;
+  const { browserApp } = await import('@stuntdouble/checks/real-chrome.mjs');
+  if (browserApp('msedge')) return true;
+  if (process.env.CI) { check('Edge is installed (CI)', false, 'msedge not found'); return false; }
+  console.log('SKIP the Edge checks: Edge isn\'t installed here');
+  return false;
+}

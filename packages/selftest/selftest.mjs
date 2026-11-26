@@ -23,7 +23,7 @@ import { loadDemo } from '@stuntdouble/core/lib/demo.mjs';
 import { flowParts } from '@stuntdouble/core/lib/buildkey.mjs';
 import { scriptAndEditor } from './script-focus.mjs';
 import { presenterWalk } from './presenter-walk.mjs';
-import { selftestGuard } from './guard.mjs';
+import { selftestGuard, edgeHere } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -511,7 +511,7 @@ export default flow => {
         try { offline = await run(['check', '--url', fileUrl, '--only', 'two-run,composer,keys,focus,clicks,hovers,drags,zoom'], at); }
         finally { renameSync(flowAside, flowFile); }
         check('folder export: offline interaction and two-run checks, from the export\'s bundle alone', offline.code === 0, offline.out.slice(-1000));
-        if (process.platform === 'win32' || process.platform === 'darwin') {
+        if (await edgeHere(check)) {
           const edge = await run(['check', '--url', fileUrl, '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
           const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
           check('folder export: Edge presenter keys and focus',
@@ -540,7 +540,7 @@ export default flow => {
       } finally { await new Promise(resolve => server.close(resolve)); }
     }
   }
-  if (process.platform === 'win32' || process.platform === 'darwin') {
+  if (await edgeHere(check)) {
     const edge = await run(['check', '--only', 'composer,keys,focus'], { ...at, env: { REPLICA_CHROME_CHANNEL: 'msedge' } });
     const result = JSON.parse(readFileSync(join(DEMO, '.out', 'fidelity.json'), 'utf8'));
     check('Edge: presenter keys and focus', edge.code === 0 && ['composer', 'keys', 'focus'].every(id => result.items.some(item => item.id === id && item.status === 'pass')), edge.out.slice(-800));
