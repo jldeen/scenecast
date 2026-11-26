@@ -1,6 +1,6 @@
 {
   "name": "scenecast-workspace",
-  "version": "0.5.5-rc.1",
+  "version": "0.5.5",
   "private": true,
   "type": "module",
   "description": "Scenecast's JavaScript: everything that runs in the browser (recorder, player, checks). The scenecast binary (Rust) runs it.",
