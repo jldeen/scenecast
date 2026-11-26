@@ -84,6 +84,9 @@
       },
       "nsis": {
         "installMode": "currentUser"
+      },
+      "wix": {
+        "version": "0.5.6.1"
       }
     }
   },
