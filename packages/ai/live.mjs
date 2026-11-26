@@ -287,7 +287,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   async function act(id, step, { write = false, el: given = null, sent = null, dispatched = null } = {}) {
     switch (step.kind) {
       case 'app': { await cmd('front', { tab: tab(id) }, 30); await quiet(id, 500, 6000); return { did: 'switched' }; }
-      case 'wait': await settle(id, 300); if (!recording) await quiet(id, 1500, 180000); return { did: 'waited' };
+      case 'wait': await settle(id, 600); if (!recording) await quiet(id, 1500, 180000); return { did: 'waited' };
       case 'scroll': {
         const o = await controls(id);
         await send(id, 'wheel', { x: Math.round(o.vw / 2), y: Math.round(o.vh / 2), dy: step.dir === 'up' ? -600 : 600 }, 30, { for: formatStep(step) });
