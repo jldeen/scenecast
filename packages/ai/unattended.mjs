@@ -590,12 +590,13 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const pc = packCheck(known);
         if (pc) await cmd('capAuthWatch', { host: pc.at.host, hostPattern: pc.at.hostPattern, from: pc.at.from || null }, 30).catch(() => {});
         r = await w.write(app, step);
+        // What it made goes in first: its pack's check reads that, never an earlier write's.
+        const vals = { ...namesOf(known.write, r.result), ...named.values };
+        if (r.wrote) Object.assign(results, vals);
         if (pc) checked = r.wrote ? await runPackCheck(pc, app) : (await cmd('capAuthWatch', { off: true }, 30).catch(() => {}), null);
         if (r.wrote) {
           const rec = { beat: bi + 1, step: si, text: at.text, writes: step.writes || wr.why, pack: known.pack, write: known.write, undo: step.undo || known.undo || null, result: r.result, ...(Object.keys(named.values).length ? { made: named.values } : {}) };
-          const vals = { ...namesOf(known.write, r.result), ...named.values };
           run.writes.push(rec); ran.push({ beat: bi + 1, text: at.text, app, values: vals, made: named.values });
-          Object.assign(results, vals);
           emit({ event: 'wrote', ...rec });
         }
         // Its control was used and then the step failed: recorded above (the reset after undoes it), then the run stops.
