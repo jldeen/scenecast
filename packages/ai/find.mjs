@@ -35,9 +35,16 @@ export const GROUP_LABEL = /^\d+ (?:items?|background tasks?) complete\b/i;
 // An answer's timeline header, folded ("Worked for 1m 36s"): today's Copilot keeps an answer's step groups under it.
 // The newest (lowest on the page) that's closed, or null.
 export const TIMELINE_HEAD = /^(?:worked|background task ran) for \d/i;
-export function timelineHead(items) {
-  return (items || []).filter(it => !it.disabled && it.expanded === false && TIMELINE_HEAD.test(String(it.name || '').trim()))
+export function timelineHead(items, { folded = true } = {}) {
+  return (items || []).filter(it => !it.disabled && (folded ? it.expanded === false : typeof it.expanded === 'boolean') && TIMELINE_HEAD.test(String(it.name || '').trim()))
     .sort((a, b) => (b.y - a.y) || (b.x - a.x))[0] || null;
+}
+// Whether any of a beat's step groups is open after its step si (each group's clicks alternate open, closed): with no
+// groups on the screen, the answer's timeline header stands in for them.
+export function groupOpenAfter(steps, si) {
+  const n = new Map();
+  for (const x of (steps || []).slice(0, si + 1)) if (x.kind === 'click' && GROUP_LABEL.test(x.target || '')) n.set(x.target, (n.get(x.target) || 0) + 1);
+  return [...n.values()].some(k => k % 2 === 1);
 }
 export function groupPick(items, want, index) {
   const w = norm(want);

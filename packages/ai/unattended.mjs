@@ -27,7 +27,7 @@ import { runReset, fillApi, setBefore, setBeforeProblem, claimScreen, checkClaim
 import { leaveOutOf, leaveOn, leaveLog, leftFor, leaveApps, leaveFailure } from './leave-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { walkerFromDemo } from './walker.mjs';
-import { GROUP_LABEL } from './find.mjs';
+import { GROUP_LABEL, groupOpenAfter } from './find.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 import { cardMatch, cardNorm, defCard } from '@stuntdouble/capture/hover-card.mjs';
@@ -563,6 +563,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (step.kind === 'click' && GROUP_LABEL.test(step.target || '') && !wr) {
         const labels = [...new Set(plan.beats[bi].steps.filter(x => x.kind === 'click' && GROUP_LABEL.test(x.target || '')).map(x => x.target))];
         step.groupIndex = labels.indexOf(step.target);
+        step.groupOpen = groupOpenAfter(plan.beats[bi].steps, si);
       }
       let byControl = false;
       if (doubt) {

@@ -295,6 +295,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   // While the recorder captures a screen, it holds a click's or a key's press back from the page (a click then reaches
   // it bare, with no pointerdown). So it's settled right before each one, and counts what it held back (blocked).
   const ready = async () => { if (recording) await settled(cmd, { maxS: 600 }); };
+  // The newest answer's timeline header, wherever it is on the page, brought into view. → true when there's one.
+  const bringTimeline = id => cmd('js', { tab: tab(id), code: `return await page.evaluate(() => { const re = /^(?:worked|background task ran) for \\d/i; const bs = [...document.querySelectorAll('button[aria-expanded]')].filter(b => re.test((b.innerText || b.getAttribute('aria-label') || '').trim())); const b = bs[bs.length - 1]; if (!b) return false; b.scrollIntoView({ block: 'center' }); return true; })` }, 30).then(r => r === true).catch(() => false);
   const blockedNow = async () => recording ? ((await cmd('recordStatus', {}, 30).catch(() => null)) || {}).blocked || 0 : 0;
   let lastField = null;
   async function act(id, step, { write = false, el: given = null, sent = null, dispatched = null } = {}) {
@@ -311,23 +313,40 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       case 'free': return { needsYou: true, why: `"${step.text}" isn't a step it can do on its own` };
       case 'click': case 'hover': {
         if (step.kind === 'click') await ready();
-        let { el, o } = given ? { el: given, o: await controls(id) } : await locate(id, step.target);
+        let { el, o } = given ? { el: given, o: await controls(id) } : Number.isInteger(step.groupIndex) ? { el: null, o: await controls(id) } : await locate(id, step.target);
         // A step group by its place among the screen's groups (groupIndex: the plan's), when its label changed.
         let group = null;
         if (!given && Number.isInteger(step.groupIndex)) {
           let o2 = await controls(id), g = groupPick(o2.items, step.target, step.groupIndex), head = null;
-          // None on the screen: today's answers fold their step groups under a timeline header ("Worked for 1m 36s").
-          // It's opened first (it only shows the steps), then the group is picked again.
-          if (!g && (head = timelineHead(o2.items))) {
-            const uh = await uncovered(id, head, head.name);
-            if (uh.ok) {
-              await send(id, 'click', { x: uh.el.x, y: uh.el.y }, 30, { ...hitOf(head, step, head.name), landed: uh.hit });
-              await settle(id, 60);
+          const clickHead = async h => {
+            const uh = await uncovered(id, h, h.name);
+            if (!uh.ok) return uh;
+            await send(id, 'click', { x: uh.el.x, y: uh.el.y }, 30, { ...hitOf(h, step, h.name), landed: uh.hit });
+            await settle(id, 60);
+            return { ok: true };
+          };
+          // None on the screen: today's answers fold their steps under a timeline header ("Worked for 1m 36s"), above
+          // the fold on a long answer. It's brought into view, and opened (it only shows the steps), then the group
+          // is picked again.
+          if (!g) {
+            if (!timelineHead(o2.items, { folded: false }) && await bringTimeline(id)) o2 = await controls(id);
+            head = timelineHead(o2.items, { folded: false });
+            if (head && head.expanded === false && step.groupOpen !== false) {
+              const c = await clickHead(head);
+              if (!c.ok) return { missing: true, why: c.why };
               log(`${id}: opened "${head.name}" (the answer's timeline) to find "${step.target}"`);
-              o2 = await controls(id); g = groupPick(o2.items, step.target, step.groupIndex);
+              o2 = await controls(id); g = groupPick(o2.items, step.target, step.groupIndex); head = timelineHead(o2.items, { folded: false }) || head;
             }
           }
           if (g) { el = g; o = o2; group = g.name; }
+          // No step groups in it today: the timeline's header stands in for them, open while any of the beat's groups
+          // would be open (the plan's groupOpen), closed after.
+          else if (head && typeof step.groupOpen === 'boolean') {
+            const was = head.expanded === true;
+            if (was !== step.groupOpen) { const c = await clickHead(head); if (!c.ok) return { missing: true, why: c.why }; }
+            log(`${id}: no step groups in "${head.name}" today; it stands in for "${step.target}" (${step.groupOpen ? 'open' : 'closed'})`);
+            return { did: was !== step.groupOpen ? 'clicked' : 'already', on: head.name, hit: hitOf(head, step, head.name), wrote: false, timeline: step.groupOpen ? 'open' : 'closed' };
+          }
           // A step group is never a near name ("Supply chain disruption" for "21 items complete, using … Supply chain
           // disruption, expand" opened a skill preview, run 15).
           else return { missing: true, why: `no step group #${step.groupIndex + 1} ("${step.target}") on this screen${head ? `, with "${head.name}" open` : ''}` };

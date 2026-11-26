@@ -202,8 +202,11 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   prove it's there before reading its lines.
 - **Step groups by their place, under a folded timeline.** A plan's step-group click ("21 items complete, using …")
   takes the screen's group in the same place when its count or plugins changed. Today's Copilot folds an answer's
-  steps under a timeline header ("Worked for 1m 36s"): with no group on the screen, that header is opened first (it
-  only shows the steps). A step group is never a near name: with none, the step stops as missing.
+  steps under a timeline header ("Worked for 1m 36s"): with no group on the screen, that header (brought into view on
+  a long answer) is opened first; it only shows the steps. When it holds no groups (its steps are rows of their own),
+  the header stands in for them: open while any of the beat's groups would be open (each group's clicks alternate open
+  and closed), closed after the last one closes. A step group is never a near name: with no group and no header, the
+  step stops as missing.
 - **Waits for the recorder before each click and key.** While it captures a screen, the recorder holds a click's or a
   key's press back from the page, so a click would land bare, with no pointerdown. An unattended
   pass waits until the recorder is settled right before each one; a click it held back all the same goes once more,
