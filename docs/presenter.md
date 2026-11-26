@@ -106,7 +106,7 @@ The guide reads the first of demo.json `presenter.script`, `presenter/script.md`
 `presenter.script`). It can be Markdown, plain text or a RunLines `.sk` file: the same files script to focus points
 reads.
 
-Times are ranges as written (`0:00–0:45`), or durations (`~40s`, `1 min`) added up from 0:00. Beat numbers are as
+Times are ranges as written (`0:00–0:45`), or durations (`~40s`, `1 min`, `~1m15s`) added up from 0:00. Beat numbers are as
 written when they run 1, 2, 3 …; otherwise beats are numbered in order.
 
 ### Markdown
