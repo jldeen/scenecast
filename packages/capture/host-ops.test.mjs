@@ -49,6 +49,9 @@ test('a write opens the guard only on named hosts', async () => {
   for (const c of [{}, { hosts: [] }, { hosts: 'api.example.test' }]) assert.ok((await ops.capOpen(c)).refused, JSON.stringify(c));
   assert.equal(opened.length, 0);
   assert.ok((await ops.capOpen({ hosts: ['api.example.test'] })).id);
+  // A write's call: one kind, its anchors holding. A | outside a group splits the whole pattern; inside one it's fine.
+  for (const e of ['/^POST api\\.example\\.test\\/v1\\/x$|.*$/', '/^POST|DELETE api\\.example\\.test\\/v1\\/x$/']) assert.ok((await ops.capOpen({ hosts: ['api.example.test'], entries: [e] })).refused, e);
+  assert.ok((await ops.capOpen({ hosts: ['api.example.test'], entries: ['/^(?:POST|PUT) api\\.example\\.test\\/v1\\/(?:x|y)$/'] })).id);
 });
 
 test('an API undo opens its one call, from the frame that sent the app\'s own call', async () => {

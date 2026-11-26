@@ -92,7 +92,8 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
 
 - `on`: the plan step that writes (`kind` as in `packages/ai/plan.mjs`; `target`/`field` are text or `/regex/`).
 - `opens`: the write's own calls to a service of its app's that isn't one of its hosts (Copilot's Cowork runtime:
-  `/^POST <runtime>\/v1\/messages$/`), opened with the app's hosts for that one step only. Read them from the app's
+  `/^POST <runtime>\/v1\/messages$/`), opened with the app's hosts for that one step only. A `|` goes inside a group
+  (`(?:POST|PUT)`, `\/(?:a|b)$`), never outside one, where it would split the whole pattern. Read them from the app's
   own client code; each has a why in `guard.why`.
 - `names`: what the write makes, named from the screen's words just before it: `{ "<placeholder>": "/regex/" }`, one
   group, the last match (Copilot's Save skill card: `Skill <name> Changes`). Copilot names a skill differently each
