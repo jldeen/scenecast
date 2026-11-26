@@ -164,8 +164,11 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     }
     return { el: null, o };
   };
+  const CLICKS = 'button,a[href],input,textarea,[contenteditable=true],[role=button],[role=link],[role=treeitem],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[role=textbox],[role=searchbox],[role=combobox]';
+  // A hover's target can also be anything focusable with a name (Copilot's Workspace chips: a group named by
+  // aria-labelledby, tabindex 0).
   const selFor = kind => kind === 'field' ? 'input,textarea,[contenteditable=true],[role=textbox],[role=searchbox],[role=combobox]'
-    : 'button,a[href],input,textarea,[contenteditable=true],[role=button],[role=link],[role=treeitem],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[role=textbox],[role=searchbox],[role=combobox]';
+    : kind === 'hover' ? CLICKS + ',[tabindex]:not([tabindex="-1"])' : CLICKS;
   // Every control in the page and its frames, on screen or not, at its place on the page: the frame's box plus the
   // control's place in it.
   const pageControls = (id, kind) => { const sel = selFor(kind); return cmd('js', { tab: tab(id), code: `
@@ -603,7 +606,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     const id = appOf(app) || app;
     if (!['click', 'hover', 'type'].includes(s.kind) || !s.target) return { ok: false, why: `"${formatStep(s)}" has no control of its own to find` };
     const field = s.kind === 'type';
-    const items = await pageControls(id, field ? 'field' : undefined).catch(() => null) || [];
+    const items = await pageControls(id, field ? 'field' : s.kind === 'hover' ? 'hover' : undefined).catch(() => null) || [];
     const at = new Set();
     const same = items.filter(it => !it.disabled && norm(it.name) === norm(s.target) && (!field || it.editable || /textbox|searchbox|combobox/.test(it.role))).filter(it => { const k = `${Math.round(it.x / 4)},${Math.round(it.y / 4)}`; return at.has(k) ? false : (at.add(k), true); });
     return same.length === 1 ? { ok: true } : { ok: false, why: same.length ? `${same.length} controls are called "${s.target}"` : `no control is called exactly "${s.target}"` };
