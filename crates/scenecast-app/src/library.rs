@@ -63,6 +63,10 @@ pub struct ChecksScore {
 #[serde(rename_all = "camelCase")]
 pub struct DemoStatus {
     pub recorded: bool,
+    /// The raw recording is on this computer: building and comparing need it (a shared demo has only the build's copy
+    /// of the take).
+    #[serde(default)]
+    pub raw: bool,
     /// Milliseconds since the Unix epoch.
     pub recorded_at: Option<u64>,
     /// Screens in the recording.
@@ -507,11 +511,12 @@ pub fn set_slot(dir: &Path, slot: Option<u32>) -> Result<(), AppError> {
 pub fn status(dir: &Path, manifest: Option<&scenecast_core::BundleManifest>) -> DemoStatus {
     let mut s = DemoStatus::default();
     // The take: the raw recording, else the demo's own copy of it (the build's; a shared demo has only that).
-    let recording = scenecast_build::build::raw_dir(dir)
+    let raw = scenecast_build::build::raw_dir(dir)
         .ok()
         .map(|raw| raw.join("recording.json"))
-        .filter(|r| r.is_file())
-        .unwrap_or_else(|| dir.join("recording.json"));
+        .filter(|r| r.is_file());
+    s.raw = raw.is_some();
+    let recording = raw.unwrap_or_else(|| dir.join("recording.json"));
     if recording.is_file() {
         s.recorded = true;
         s.recorded_at = millis(&recording);
@@ -751,7 +756,7 @@ mod tests {
         )
         .unwrap();
         let s = lib.get("shared").unwrap().status;
-        assert!(s.recorded && s.recorded_at.is_some());
+        assert!(s.recorded && s.recorded_at.is_some() && !s.raw);
         assert_eq!((s.screens, s.stage.as_str()), (2, "recorded"));
     }
 
