@@ -511,6 +511,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
           const origin = await p.evaluate(() => performance.timeOrigin).catch(() => null);
           if (origin !== null && S.loads.get(p) === origin) return null;
           if (origin !== null) S.loads.set(p, origin);
+          S.checks = (S.checks || 0) + 1;
           const bare = () => p.evaluate(l => {
             const vis = e => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(e).visibility !== 'hidden'; };
             const names = [...document.querySelectorAll('button,[role=button],a[href],[role=link],[role=tab],[aria-label]')].filter(vis).map(e => (e.getAttribute('aria-label') || e.innerText || '').replace(/\s+/g, ' ').trim());
@@ -518,7 +519,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
           }, list).catch(() => []);
           const t0 = Date.now();
           let missing = await bare();
-          if (!missing.length) return null;
+          if (!missing.length) { log(`counts: ${app} ${what}: a new page load, every counted control there with its count or not on the screen`); return null; }
           while (missing.length && Date.now() - t0 < S.waitS * 1000) { await new Promise(r => setTimeout(r, 1000)); missing = await bare(); }
           const e = { at: at(), app, what, waitedS: Math.round((Date.now() - t0) / 1000), missing: missing.map(x => ({ base: x.base, name: x.name })) };
           S.log.push(e);
