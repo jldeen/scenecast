@@ -61,6 +61,8 @@
   const others = [
     { ...demo, id: 'supplier-delay', title: 'Supplier delay walkthrough', status: { ...status, stage: 'checked', recorded: true, built: true, screens: 14, liveScenes: 14 } },
     { ...demo, id: 'admin-tour', title: 'Admin center tour', status: { ...status, stage: 'checked', recorded: true, built: true, screens: 9, liveScenes: 9 } },
+    // Opened from a shared file: the build's copy of the take and the checks it was shared with, no raw recording.
+    { ...demo, id: 'shared-demo', title: 'Shared demo from a colleague', status: { ...status, stage: 'checked', recorded: true, recordedAt: now - 26 * 3600e3, built: true, screens: 44, liveScenes: 44, fidelity: { pass: false, within: 35, total: 43, viewsDiffer: 0, score: 81.4, fontsOk: false, at: now - 26 * 3600e3 } } },
   ];
   const demos = SC === 'empty' ? [] : SC === 'library' ? [demo, ...others] : [demo, ...others];
   const signedIn = q.get('signed') !== '0' && SC !== 'empty';
