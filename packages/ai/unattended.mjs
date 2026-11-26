@@ -603,11 +603,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         // Its control was used and then the step failed: recorded above (the reset after undoes it), then the run stops.
         if (r.error) return { kind: 'error', why: `${at.text}: ${r.error}` };
       } else r = await w.act(app, step);
-      if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why };
+      if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why, ...(wr ? { write: true } : {}) };
       const c = await w.check(app, step);
       const afters = await w.reads(app).catch(() => []);
       lastReads[app] = afters;
-      if (!c.ok) return { kind: c.kind, why: c.why };
+      if (!c.ok) return { kind: c.kind, why: c.why, ...(wr ? { write: true } : {}) };
       const lp = liveProof(step, { before: screensOf(before, step.kind === 'app' ? prev : app), afters: screensOf(afters, app), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
       const byCheck = !!(checked && checked.ok);
       // A wait, a hover, a scroll or a step group's expand moves nothing: after a proven step, or one its own exact
@@ -658,10 +658,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (stop && stop.notice) { noticeStopRun(stop.notice, at); break outer; }
         if (stop && !stop.own && !stop.leak && !stop.notice && !stop.unrestored) { const u = await unrestored(); if (u) stop = { kind: 'put-back', unrestored: u }; }
         if (stop && stop.unrestored) { restoreStopRun(stop.unrestored, at); break outer; }
-        // A doubt no write follows (a step it couldn't prove, words that aren't there, a control that isn't): the run
-        // keeps the screen as it is, marks the beat for Review, and goes on. A write never follows it (the doubt
-        // stops that write), and anything else still stops the run.
-        if (stop && /^(unprovable|elsewhere|missing)$/.test(stop.kind) && !stop.beforeWrite) {
+        // A doubt no write follows (a step it couldn't prove, words that aren't there, a control that isn't), on a
+        // step that isn't a write itself: the run keeps the screen as it is, marks the beat for Review, and goes on. A
+        // write never follows it (the doubt stops that write), and anything else still stops the run.
+        if (stop && /^(unprovable|elsewhere|missing)$/.test(stop.kind) && !stop.beforeWrite && !stop.write) {
           const mark = { beat: bi + 1, step: si, text: at.text, app, kind: stop.kind, why: stop.why, picture: await shot(app, `${bi + 1}-${si + 1}-mark-${stop.kind}`) };
           run.marked.push(mark);
           emit({ event: 'marked', ...mark });
