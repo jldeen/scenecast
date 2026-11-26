@@ -94,6 +94,9 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
 - `opens`: the write's own calls to a service of its app's that isn't one of its hosts (Copilot's Cowork runtime:
   `/^POST <runtime>\/v1\/messages$/`), opened with the app's hosts for that one step only. Read them from the app's
   own client code; each has a why in `guard.why`.
+- `names`: what the write makes, named from the screen's words just before it: `{ "<placeholder>": "/regex/" }`, one
+  group, the last match (Copilot's Save skill card: `Skill <name> Changes`). Copilot names a skill differently each
+  run, so the run records the name and its undo finds that one. A write whose screen doesn't give it doesn't run.
 - `undo.steps`: plan lines (the same plain steps a plan uses), run in the capture browser. `{name}` placeholders are
   what the run made (the skill, the task). `You: …` is a step for a person. `undo: null` with `irreversible: true` or
   a `note` says there is none. `{ "same": "<write id>" }` reuses another write's undo or check.
@@ -255,8 +258,10 @@ capture pass calls it from that page or frame, with the Authorization it sends, 
 and the run's results. An API undo's `find` (`{ use, path, list, name, id, as, by, where? }`, a GET) lets the reset
 before undo the script's own leftovers with nothing a run recorded: the items of the answer's `list` whose `name`
 is one of the reset's `Names:` (what the writes made, `by`: `task`, `skill`), and whose `where` fields match,
-each undone with its `id` as `{<as>}`. Only their ids leave the page. Packs never hold credentials or tokens
-(`checkPack` refuses them).
+each undone with its `id` as `{<as>}`. With a `where`, an undo only ever deletes what the find shows there (a run's
+recorded name goes through the find too), and after it the reset lists everything the `where` picks: one the
+recording's start screen doesn't show is a leftover under a name no run recorded, and the reset fails there. Only their
+ids leave the page. Packs never hold credentials or tokens (`checkPack` refuses them).
 
 ## Private packs
 

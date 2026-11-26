@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack, ownStatusFor, noticesFor } from './index.mjs';
+import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack, ownStatusFor, noticesFor, writeNames } from './index.mjs';
 import { flowDefaults, htmlPasses } from './build.mjs';
 import { packRules } from '@stuntdouble/core/lib/text-rules.mjs';
 import { elementEnd } from '@stuntdouble/capture/compose.mjs';
@@ -130,6 +130,13 @@ test('a plan step maps to the write it makes, and checks only look', () => {
   assert.equal(op('/^GET rt\\.example\\.com\\/v1\\/x$/').length, 1);
   assert.equal(op('rt.example.com/v1/messages').length, 1);
   assert.equal(checkPack({ ...cop, writes: [{ ...cop.writes[0], opens: ['/^POST rt\\.example\\.com\\/v1\\/x$/'] }] }).filter(p => /opens/.test(p)).length, 1);
+  // What a write makes, named from the screen just before it: Copilot names a skill differently each run.
+  const save = cop.writes.find(w => w.id === 'save-skill');
+  assert.deepEqual(writeNames(save, 'Save skill Skill old-name Changes 1 new file … Save skill\nSkill supplier-ship-date-change-triage  Changes 1 new file').values, { skill: 'supplier-ship-date-change-triage' });
+  assert.deepEqual(writeNames(save, 'You already have this skill.').missing, ['skill']);
+  const nm = n => checkPack({ ...cop, writes: [{ ...save, names: n }] }).filter(p => /names/.test(p));
+  assert.equal(nm({ skill: '/Skill ([a-z-]+) Changes/' }).length, 0);
+  for (const bad of [{ skill: '/Skill [a-z-]+/' }, { skill: '/(a)(b)/' }, { skill: 'Skill x' }, ['x']]) assert.equal(nm(bad).length, 1, JSON.stringify(bad));
 });
 
 test('safe steps only open a picker or a menu: never a write, never a sign-in', () => {

@@ -230,6 +230,9 @@
         "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/messages$/"
       ],
       "makes": "skill",
+      "names": {
+        "skill": "/\\bSave skill Skill ([a-z0-9][a-z0-9-]*[a-z0-9]) Changes\\b/"
+      },
       "undo": {
         "open": "https://copilot.cloud.microsoft/plugins?pluginsTab=cowork&coworkPage=added",
         "steps": [

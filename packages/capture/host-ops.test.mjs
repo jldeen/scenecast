@@ -20,10 +20,16 @@ test("an app's tab by its mark, whatever order the tabs come in: a second tab of
 });
 
 // A capture browser with one tab: the portal page and the app's frame on its own origin.
-function fakeBrowser({ from = 'https://frame.example.test' } = {}) {
+// answer: the API's JSON, the call itself run against it (its find, as in the page).
+function fakeBrowser({ from = 'https://frame.example.test', answer = null } = {}) {
   const calls = [], opened = [];
   // A call with no arguments is a read of the tab's mark (none here); one with arguments is the API call.
-  const frame = (url, name) => ({ url: () => url, evaluate: async (fn, args) => { if (args === undefined) return null; calls.push({ in: name, ...args }); return { status: 204 }; } });
+  const run = async (fn, args) => {
+    const was = globalThis.fetch;
+    globalThis.fetch = async () => ({ status: 200, json: async () => answer });
+    try { return await fn(args); } finally { globalThis.fetch = was; }
+  };
+  const frame = (url, name) => ({ url: () => url, evaluate: async (fn, args) => { if (args === undefined) return null; calls.push({ in: name, ...args }); return answer ? run(fn, args) : { status: 204 }; } });
   const main = frame('https://portal.example.test/home', 'portal'), inner = frame('https://frame.example.test/app', 'frame');
   const page = { url: () => main.url(), goto: async () => {}, frames: () => [main, inner], mainFrame: () => main, on() {}, evaluate: main.evaluate, isClosed: () => false };
   let auth = null;
@@ -53,6 +59,17 @@ test('an API undo opens its one call, from the frame that sent the app\'s own ca
   assert.equal(r.from, 'frame.example.test');
   assert.deepEqual(opened, [{ hosts: ['api.example.test'], method: 'DELETE', url: `${API}/v1/items/a%2Fb?resource=context` }]);
   assert.deepEqual(calls.map(c => [c.in, c.url, c.method]), [['frame', `${API}/v1/items/a%2Fb?resource=context`, 'DELETE']]);
+});
+
+test("a find: by ids or names, only what its where picks; all of what its where picks, never all without one", async () => {
+  const skills = [{ name: 'triage-a', source: 'onedrive_cowork' }, { name: 'supplier-delay-triage', source: 'package' }, { name: 'triage-b', source: 'onedrive_cowork' }];
+  const { ops } = fakeBrowser({ answer: { skills } });
+  await ops.capGuard({});
+  const find = extra => ops.capApi({ tab: 'portal', open: 'x', host: 'api.example.test', method: 'GET', path: '/v1/skills', find: { list: 'skills', name: 'name', id: 'name', where: { source: 'onedrive_cowork' }, ...extra } });
+  assert.deepEqual((await find({ all: true })).found, ['triage-a', 'triage-b']);
+  assert.deepEqual((await find({ ids: ['supplier-delay-triage', 'triage-b'] })).found, ['triage-b']);
+  assert.deepEqual((await find({ names: ['Supplier-Delay-Triage'] })).found, []);
+  assert.deepEqual((await find({ all: true, where: null })).found, []);
 });
 
 test('with no frame of that origin, from the page; a path off the origin or a read is refused before anything opens', async () => {

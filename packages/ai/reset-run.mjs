@@ -236,10 +236,16 @@ export async function setBefore({ demo, cmd, packs = null, approval, block, walk
 // a picture of each screen read. → [{ text, from, status: 'pass' | 'wrong' | 'cant', ok, why, picture? }]
 // reland: each app loaded again at its start (a real page load) and proven there before its first check (after a run,
 // a side path can leave a pane or a route behind that a goto to the same document keeps).
-export async function checkLines({ demo, cmd, walker, lines, plan, packs = null, recorded = null, shot = null, reland = false }) {
+// made: what the run's writes named (their pack's names, { <app>: { skill: [..] } }): a check looks for those too.
+export async function checkLines({ demo, cmd, walker, lines, plan, packs = null, recorded = null, shot = null, reland = false, made = {} }) {
   const appIds = (demo.cfg.apps || []).map(a => a.id), appOf = x => (walker.appOf && walker.appOf(x)) || x;
   const index = packIndex(packs, demo.cfg);
-  const ctx = { plan, index, walker: recorded, values: checkValues({ plan, walker: recorded, cfg: demo.cfg, appOf }), appIds, appOf };
+  const values = checkValues({ plan, walker: recorded, cfg: demo.cfg, appOf });
+  for (const [app, kv] of Object.entries(made || {})) for (const [k, v] of Object.entries(kv)) {
+    const o = values[app] = values[app] || {};
+    if (o[k] === undefined || Array.isArray(o[k])) o[k] = [...new Set([...(o[k] || []), ...[].concat(v)])];
+  }
+  const ctx = { plan, index, walker: recorded, values, appIds, appOf };
   const out = [];
   let at = null, seen = null, n = 0;
   const landed = new Set();
@@ -324,7 +330,28 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   // with what the run made; if it can't, the steps its Note gives, each approved and run as a write. Nothing a run
   // recorded (the reset before): the script's own leftovers found by name (the group's Names, as approved, through the
   // pack's find), each undone by its id. Never a name the recording's start screen shows (one the demo may keep).
+  // Then, for a find with a where (her own skills, never a plugin's): everything it picks, read-only. One the
+  // recording's start screen doesn't show is a leftover under a name no run recorded (Copilot names a skill
+  // differently each run): the reset fails there, and nothing more is deleted.
   const apiUndo = async (part, app, s, approvedText, note, names = [], undoes = []) => {
+    const r = await apiUndoOnce(part, app, s, approvedText, note, names, undoes);
+    if (!r.ok) return r;
+    const m = /^undo with the app pack:\s*([\w-]+):([\w-]+)\s*$/i.exec(s.text || '');
+    const pack = m && index.byId(m[1]), pw = pack && (pack.writes || []).find(w => w.id === m[2]);
+    const find = pw && pw.undo && pw.undo.find, fat = find && pack.apis && pack.apis[find.use];
+    if (!find || !fat || !find.where || !Object.keys(find.where).length) return r;
+    const fl = fillApi({ path: find.path }, {}, ((demo.cfg.apps || []).find(a => a.id === app) || {}).values);
+    const what = `her own ${find.by || 'item'}s (${Object.entries(find.where).map(([k, v]) => `${k} ${v}`).join(', ')})`;
+    const q = fl.left.length ? { ok: false, why: `its find needs ${fl.left.join(', ')}` }
+      : await cmd('capApi', { tab: appTab(demo, app), open: fat.open, host: fat.host, hostPattern: fat.hostPattern, from: fat.from || null, method: 'GET', path: fl.path, find: { list: find.list, name: find.name, id: find.id, all: true, where: find.where } }, 150).catch(e => ({ ok: false, why: e.message }));
+    if (!q.ok || !(q.status >= 200 && q.status < 300) || !Array.isArray(q.found)) return { ok: false, why: `${s.text}: reading ${what} after it: ${q.why || (q.status ? `the API answered ${q.status}` : 'no list in its answer')}` };
+    const start = recorded && recorded.start(app), sc0 = start ? recorded.screen(start) || recorded.shown(start) : null;
+    const { mine } = byName(q.found, sc0);
+    if (mine.length) return { ok: false, why: `${s.text}: ${what} still has ${mine.map(x => `"${x}"`).join(', ')}, which the demo doesn't start with: left by an earlier run under a name it didn't record. Add it to this line's Names in reset.md to undo it` };
+    did.push(`${app}: ${what}: none the demo doesn't start with`);
+    return r;
+  };
+  const apiUndoOnce = async (part, app, s, approvedText, note, names = [], undoes = []) => {
     if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
     const m = /^undo with the app pack:\s*([\w-]+):([\w-]+)\s*$/i.exec(s.text);
     const fall = async why => {
@@ -364,7 +391,10 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     if (writes.length) {
       for (const w of writes) {
         const vals = { ...results, ...(w.values || {}) }, label = ` (beat ${w.beat})`;
-        const r = await call(vals, label);
+        // A find with a where (only her own skills, never a plugin's): what the run recorded is undone only once the
+        // find has seen it there, never called on its own.
+        const viaFind = !!(find && fat && find.where);
+        const r = viaFind ? (fl => fl.left.length ? { ok: false, left: fl.left } : { ok: false, why: 'only through its find' })(fillApi(api, vals, appCfg.values)) : await call(vals, label);
         if (r.ok) continue;
         if (!find || !fat) return fall(r.left ? `the run didn't record ${r.left.join(', ')}` : r.why || `the API answered ${r.status}`);
         const id = r.left ? null : vals[find.as];
@@ -433,7 +463,9 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     }
     return { ok: true };
   };
-  const checkAll = () => checkLines({ demo, cmd, walker, lines: parsed.checks, plan, packs, recorded, shot, reland: phase === 'after' });
+  const made = {};
+  if (phase === 'after') for (const w of ran) for (const [k, v] of Object.entries(w.made || {})) { const o = made[w.app] = made[w.app] || {}; o[k] = [...(o[k] || []), v]; }
+  const checkAll = () => checkLines({ demo, cmd, walker, lines: parsed.checks, plan, packs, recorded, shot, reland: phase === 'after', made });
   // After the reset did something: a line still wrong is read again once, a few seconds later. An app can still be
   // answering the undo's call when its screen reloads to be read (the page went quiet before its server did).
   const checkAfterDoing = async () => { let cs = await checkAll(); if (did.length && cs.some(c => c.status === 'wrong')) { await sleep(4000); cs = await checkAll(); } return cs; };

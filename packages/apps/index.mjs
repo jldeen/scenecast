@@ -185,6 +185,25 @@ export function writeFor(pack, step, field) {
   if (!pack || !step) return null;
   return (pack.writes || []).find(w => stepIs(w.on, step, field)) || null;
 }
+// A "/body/flags" string as a RegExp (extra flags added), or null.
+const reOf = (src, extra = '') => {
+  const m = typeof src === 'string' ? /^\/(.+)\/([a-z]*)$/s.exec(src) : null;
+  if (!m) return null;
+  try { return new RegExp(m[1], [...new Set((m[2] + extra).split(''))].join('')); } catch (e) { return null; }
+};
+// What a write makes, by name, from the screen's words just before it: its names ({ <placeholder>: "/regex/" with one
+// group }), each the last match (the card nearest the end of the page). Its undo finds what it made by that name.
+// → { values: { <placeholder>: name }, missing: [placeholders the screen doesn't name] }
+export function writeNames(w, text) {
+  const t = String(text || '').replace(/\s+/g, ' '), values = {}, missing = [];
+  for (const [k, src] of Object.entries((w && w.names) || {})) {
+    const re = reOf(src, 'g');
+    let m, last = null;
+    if (re) while ((m = re.exec(t))) { if (m[1]) last = m[1]; if (!m[0].length) re.lastIndex++; }
+    if (last) values[k] = last; else missing.push(k);
+  }
+  return { values, missing };
+}
 // The pack's safe entry for a plan step (or null): a control that looks like a write but only opens a picker or a
 // menu ("Add content to Our numbers"); the write is a later step (Add to business plugin).
 export function safeFor(pack, step, field) {
@@ -321,6 +340,14 @@ export function checkPack(p) {
       const fd = (w.undo || {}).find;
       if (fd && (!fd.use || !fd.path || !fd.list || !fd.name || !fd.id || !fd.as || !fd.by)) out.push(`${at}: undo find needs use, path, list, name, id, as (the placeholder it fills) and by (what the script made: task, skill)`);
       if (w.undo && w.undo.api && !w.undo.api.use) out.push(`${at}: undo.api.use names an api (apis.<name>) whose host comes from the browser's own requests`);
+      // What a write makes, named from the screen just before it: each a "/regex/" whose one group is the name.
+      if (w.names !== undefined) {
+        if (what !== 'writes' || !w.names || typeof w.names !== 'object' || Array.isArray(w.names)) out.push(`${at}: names is a write's { <placeholder>: "/regex/" }`);
+        else for (const [k, src] of Object.entries(w.names)) {
+          const re = reOf(src);
+          if (!re || new RegExp(`${re.source}|`).exec('').length !== 2) out.push(`${at}: names.${k} is a "/regex/" with one group (the name, from the screen just before the write)`);
+        }
+      }
       // A write's own calls to a service of its app's: each one kind of call (a method, a host, a path), with a why.
       for (const e of (what === 'writes' && w.opens) || []) {
         const [x] = typeof e === 'string' ? e.split(' when body ') : [null];

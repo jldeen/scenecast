@@ -497,9 +497,12 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     // Each read in the reader's shape, what she leaves out of the replica marked left (never a proof).
     const screensOf = (reads, id) => (reads || []).map(r => { try { return leftFor(lo, id, readScreen(r.docs)); } catch (e) { return null; } }).filter(Boolean);
     const typedSoFar = [], lastReads = {};
-    const packCheck = known => {
+    const packWrite = known => {
       const p = packs && packs.packsForDemo ? Object.values(packs.packsForDemo(demo.cfg) || {}).find(x => x && x.id === known.pack) : null;
-      const pw = p && (p.writes || []).find(x => x.id === known.write);
+      return { p, pw: p && (p.writes || []).find(x => x.id === known.write) };
+    };
+    const packCheck = known => {
+      const { p, pw } = packWrite(known);
       const api = pw && pw.check && pw.check.api, at2 = api && p.apis && p.apis[api.use];
       return api && at2 && api.made !== undefined && /^(GET|HEAD)$/i.test(api.method || 'GET') ? { api, at: at2 } : null;
     };
@@ -578,14 +581,19 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (down) return { kind: 'service', why: `${down.service} ${serviceWent(down)} during this beat: its write waits until the service works. Try again later.`, beforeWrite: true };
         const gate = writeGate(run.landings, app);
         if (!gate.ok) return { kind: 'gate', why: `${gate.why}: a write runs on its own only after strong landings in its app`, beforeWrite: true };
+        // What it makes, by name, from the screen just before it (its pack's names: Copilot names a skill differently
+        // each run): its undo finds it by that name. A write whose name the screen doesn't give doesn't run.
+        const { pw } = packWrite(known);
+        const named = pw && pw.names && packs.writeNames ? packs.writeNames(pw, screensOf(before, app).map(x => x.text).join(' ')) : { values: {}, missing: [] };
+        if (named.missing.length) return { kind: 'unnamed', why: `${at.text}: the screen doesn't name the ${named.missing.join(', ')} it would make (the ${known.pack} pack's names), so its undo couldn't find it`, beforeWrite: true };
         const pc = packCheck(known);
         if (pc) await cmd('capAuthWatch', { host: pc.at.host, hostPattern: pc.at.hostPattern, from: pc.at.from || null }, 30).catch(() => {});
         r = await w.write(app, step);
         if (pc) checked = r.wrote ? await runPackCheck(pc, app) : (await cmd('capAuthWatch', { off: true }, 30).catch(() => {}), null);
         if (r.wrote) {
-          const rec = { beat: bi + 1, step: si, text: at.text, writes: step.writes || wr.why, pack: known.pack, write: known.write, undo: step.undo || known.undo || null, result: r.result };
-          const vals = namesOf(known.write, r.result);
-          run.writes.push(rec); ran.push({ beat: bi + 1, text: at.text, values: vals });
+          const rec = { beat: bi + 1, step: si, text: at.text, writes: step.writes || wr.why, pack: known.pack, write: known.write, undo: step.undo || known.undo || null, result: r.result, ...(Object.keys(named.values).length ? { made: named.values } : {}) };
+          const vals = { ...namesOf(known.write, r.result), ...named.values };
+          run.writes.push(rec); ran.push({ beat: bi + 1, text: at.text, app, values: vals, made: named.values });
           Object.assign(results, vals);
           emit({ event: 'wrote', ...rec });
         }

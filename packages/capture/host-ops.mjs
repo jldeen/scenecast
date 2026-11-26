@@ -24,7 +24,9 @@
 //                                   find ({ list, name, id, names, where? }, a GET's only): the ids of the answer's list
 //                                   items whose name is exactly one of names (and whose where fields match), never
 //                                   their text: a reset's undo of the script's own leftovers by name. With ids
-//                                   instead of names: the items whose id is exactly one of them (a run's own write)
+//                                   instead of names: the items whose id is exactly one of them (a run's own write).
+//                                   all (with a where, never without): every item its where picks (her own skills,
+//                                   to tell a leftover under a name no run recorded)
 //                                   a pack's API check (GET, HEAD: the guard as it is; only pick's number and true/false
 //                                   fields come back) or API undo in the app's own signed-in session (from: the
 //                                   frame's host whose calls it takes the session from, and calls from): its page opened (a read), the
@@ -424,10 +426,10 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
               const j = await res.json().catch(() => null), at = (o, p) => String(p).split('.').reduce((x, k) => x == null ? x : x[k], o);
               const n = t => String(t == null ? '' : t).replace(/\s+/g, ' ').trim().toLowerCase(), want = new Set((find.names || []).map(n));
               // By ids (exactly, as the run recorded them) or by names (as a person reads them).
-              const ids = Array.isArray(find.ids) ? new Set(find.ids.map(String)) : null;
+              const ids = Array.isArray(find.ids) ? new Set(find.ids.map(String)) : null, all = find.all === true && Object.keys(find.where || {}).length > 0;
               const list = at(j, find.list);
               if (!Array.isArray(list)) return { status: res.status, found: null };
-              const ok = it => (ids ? ids.has(String(at(it, find.id))) : want.has(n(at(it, find.name)))) && Object.entries(find.where || {}).every(([k, v]) => at(it, k) === v);
+              const ok = it => (all || (ids ? ids.has(String(at(it, find.id))) : want.has(n(at(it, find.name))))) && Object.entries(find.where || {}).every(([k, v]) => at(it, k) === v);
               return { status: res.status, found: list.filter(ok).map(it => String(at(it, find.id))).slice(0, 50) };
             }
             return { status: res.status, picked };
