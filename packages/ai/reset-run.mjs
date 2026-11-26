@@ -353,6 +353,9 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
       return r;
     };
     const find = pw.undo.find, fat = find && pack.apis && pack.apis[find.use];
+    // A find with a where (only her own skills, never a plugin's): nothing is undone until the find has seen it there,
+    // never called on its own.
+    const viaFind = !!(find && fat && find.where);
     // The pack's find (a GET of its list), by ids (the one a write recorded, or a ':' part of it) or by names. → the
     // ids it found, or { why } when it didn't answer with a list: a failed find is never "nothing to undo".
     const findIn = async by => {
@@ -370,9 +373,6 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     if (writes.length) {
       for (const w of writes) {
         const vals = { ...results, ...(w.values || {}) }, label = ` (beat ${w.beat})`;
-        // A find with a where (only her own skills, never a plugin's): what the run recorded is undone only once the
-        // find has seen it there, never called on its own.
-        const viaFind = !!(find && fat && find.where);
         const r = viaFind ? (fl => fl.left.length ? { ok: false, left: fl.left } : { ok: false, why: 'only through its find' })(fillApi(api, vals, appCfg.values)) : await call(vals, label);
         if (r.ok) continue;
         if (!find || !fat) return fall(r.left ? `the run didn't record ${r.left.join(', ')}` : r.why || `the API answered ${r.status}`);
@@ -400,10 +400,10 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
       }
       return { ok: true };
     }
-    const first = await call(results, '');
+    const first = viaFind ? { ok: false, why: 'only through its find' } : await call(results, '');
     if (first.ok) return { ok: true };
     // Nothing recorded (the reset before, or a write the run never recorded): its leftovers by name, before or after.
-    if (first.left && find && fat && names.length) {
+    if ((first.left || viaFind) && find && fat && names.length) {
       const findText = `Find by name: ${names.map(x => `"${x}"`).join(', ')}`;
       if (!allowed(part, findText)) return { ok: false, why: `"${findText}" isn't in the approved reset` };
       const start = recorded && recorded.start(app), sc0 = start ? recorded.screen(start) || recorded.shown(start) : null;

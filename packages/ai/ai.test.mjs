@@ -220,6 +220,48 @@ test("an API undo filled in: the demo's values win, each one a single encoded se
   assert.deepEqual(fillApi(api, {}, { pluginId: 'p1' }).left, ['{section}', '{item}']);
 });
 
+// The reset after a run, with an app pack of its own whose API undo's find has a where (her own skills only): the
+// calls it made, and what it said. The API lists her own skills in `mine`; a DELETE takes one away.
+async function undoAfter({ ran = [], results = {}, values = {} }) {
+  const { runReset } = await import('./reset-run.mjs');
+  const { resetPacks } = await import('@stuntdouble/apps/index.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'sc-undo-')), packsDir = join(root, 'packs'), dir = join(root, 'demo');
+  mkdirSync(join(packsDir, 'skills-app'), { recursive: true });
+  mkdirSync(dir);
+  writeFileSync(join(packsDir, 'skills-app', 'pack.json'), JSON.stringify({ id: 'skills-app', match: ['skills.example.test'], apis: { rt: { open: 'https://skills.example.test/', host: 'api.skills.example.test' } },
+    writes: [{ id: 'save-skill', what: 'Saves a skill', on: { kind: 'click', target: 'Save' }, undo: { api: { use: 'rt', method: 'DELETE', path: '/v1/skills/{skill}' }, find: { use: 'rt', path: '/v1/skills', list: 'skills', name: 'name', id: 'name', as: 'skill', by: 'skill', where: { source: 'mine' } } } }] }));
+  writeFileSync(join(dir, 'reset.md'), '# Reset\n\n## Undo · Skills\n\n- Go to skills\n- Undo with the app pack: skills-app:save-skill\n  Undoes: beat 2, Click "Save"\n  Names: "Weekly digest"\n');
+  const demo = { dir, cfg: { apps: [{ id: 'skills', url: 'https://skills.example.test/', pack: 'skills-app', values }] } };
+  const approval = { reset: [{ part: 'undo', text: 'Undo with the app pack: skills-app:save-skill' }, { part: 'undo', text: 'Find by name: "Weekly digest"' }] };
+  let mine = ['Weekly digest'];
+  const calls = [];
+  const cmd = async (op, a) => {
+    if (op !== 'capApi') return {};
+    calls.push(`${a.method} ${a.path}`);
+    if (a.method === 'GET') return { ok: true, status: 200, found: a.find.all ? mine : mine.filter(n => (a.find.names || a.find.ids || []).includes(n)) };
+    mine = mine.filter(n => a.path !== `/v1/skills/${encodeURIComponent(n)}`);
+    return { ok: true, status: 204 };
+  };
+  const walker = { home: async () => [], act: async () => ({}), write: async () => ({}) };
+  const was = process.env.STUNTDOUBLE_PACKS;
+  process.env.STUNTDOUBLE_PACKS = packsDir;
+  resetPacks();
+  try {
+    const r = await runReset({ demo, cmd, walker, phase: 'after', approval, ran, results });
+    return { r, deletes: calls.filter(c => c.startsWith('DELETE')) };
+  } finally {
+    if (was === undefined) delete process.env.STUNTDOUBLE_PACKS; else process.env.STUNTDOUBLE_PACKS = was;
+    resetPacks();
+  }
+}
+
+test("an API undo whose find has a where, for a group no write of the run is under: only what its find picks by name, never the run's results on their own", async () => {
+  // The run recorded another skill (a plugin's, say); her own leftover is only found by the group's Names.
+  const { r, deletes } = await undoAfter({ results: { skill: 'Team notes' } });
+  assert.deepEqual(deletes, ['DELETE /v1/skills/Weekly%20digest']);
+  assert.equal(r.ok, true, r.why);
+});
+
 test("a Check line reads the same from either parser: a string, or { app, screen, text } with the claim alone", () => {
   assert.equal(checkLine('tasks: no "Call Kestrel"'), 'tasks: no "Call Kestrel"');
   assert.equal(checkLine({ app: 'tasks', screen: 'tasks-home', text: 'no "Call Kestrel"' }), 'tasks: no "Call Kestrel"');
