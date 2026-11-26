@@ -962,6 +962,8 @@ test('a landing proven on the live page: what the plan expects is strong, any ot
   // A wait, hover or scroll right after a proven step is carried (the screen it proved): a write may follow it.
   assert.deepEqual(writeGate([L('strong', { wrote: true }), L('carried', { step: 'Wait for the answer' }), L('carried'), L('strong')], 'iq'), { ok: true, why: null });
   assert.equal(writeGate([L('strong', { wrote: true }), L('none', { step: 'Wait for the answer' }), L('strong')], 'iq').ok, false);
+  // Carried from a write that only shows the page changed: still only that.
+  assert.deepEqual(writeGate([L('weak', { wrote: true, step: 'Click "Save"' }), L('carried', { step: 'Wait for the answer' })], 'iq'), { ok: false, why: '“Click "Save"” only shows the page changed' });
 });
 
 test('words only inside a message prove a step last, and say so, unless it\'s a write its app pack checks', () => {

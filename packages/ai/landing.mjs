@@ -389,10 +389,13 @@ export function liveProof(s, { before = [], afters = [], next = null, typed = []
 export function writeGate(landings, app) {
   const mine = (landings || []).filter(x => x.app === app);
   if (!mine.length) return { ok: false, why: `nothing in ${app} is proven yet` };
-  const last = mine[mine.length - 1], since = mine.slice(mine.map(x => !!x.wrote).lastIndexOf(true) + 1);
-  // "carried": a wait, hover, scroll or step-group expand right after a proven step, on the screen it proved.
-  const shaky = (since.length ? since : [last]).find(x => x.strength !== 'strong' && x.strength !== 'carried');
+  const lastWrite = mine.map(x => !!x.wrote).lastIndexOf(true);
+  const last = mine[mine.length - 1], since = mine.slice(lastWrite + 1);
+  // "carried": a wait, hover, scroll or step-group expand right after a proven step, on the screen it proved. Right
+  // after the last write, that's the write's own landing.
+  const scan = !since.length ? [last] : since[0].strength === 'carried' && lastWrite >= 0 ? mine.slice(lastWrite) : since;
+  const shaky = scan.find(x => x.strength !== 'strong' && x.strength !== 'carried');
   if (!shaky) return { ok: true, why: null };
   const what = shaky.step ? `“${shaky.step}”` : 'a step';
-  return { ok: false, why: `${what} ${shaky.strength === 'weak' ? 'only shows the page changed' : "isn't proven"}${shaky === last ? '' : `, since the last write in ${app}`}` };
+  return { ok: false, why: `${what} ${shaky.strength === 'weak' ? 'only shows the page changed' : "isn't proven"}${shaky === last || shaky.wrote ? '' : `, since the last write in ${app}`}` };
 }
