@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/checks",
-  "version": "0.5.5",
+  "version": "0.5.6-rc.1",
   "description": "StuntDouble's checks: the fidelity checklist (two runs, cold starts, clicks, hovers, drags, zoom, focus points, secret scan, contact sheets), real vs replica, and the fixer (fixer/: pluggable diagnosers and per-demo patches).",
   "type": "module",
   "license": "MIT",
@@ -12,9 +12,9 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@stuntdouble/core": "0.5.5",
-    "@stuntdouble/capture": "0.5.5",
-    "@stuntdouble/player": "0.5.5",
+    "@stuntdouble/core": "0.5.6-rc.1",
+    "@stuntdouble/capture": "0.5.6-rc.1",
+    "@stuntdouble/player": "0.5.6-rc.1",
     "playwright-core": "^1.56.0"
   }
 }
