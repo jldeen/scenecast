@@ -715,7 +715,7 @@ function tabDone(t, s) {
   return { record: s.recorded, review: s.built && !!s.fidelity?.pass, build: s.built, fidelity: !!s.fidelity?.pass, script: s.focusPoints > 0 }[t];
 }
 function tabJobs(t) {
-  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-script', 'coach'], review: ['build', 'checks', 'fidelity', 'script', 'ai-script'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
+  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-check', 'capture-sign-in', 'ai-script', 'coach'], review: ['build', 'checks', 'fidelity', 'script', 'ai-script'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
 }
 const gateDone = (g, s) => ({ record: s.recorded || s.built, review: s.built && !!s.fidelity?.pass, present: !!s.rehearsedAt, share: !!s.exportedAt })[g];
 const gateJobs = g => g === 'review' ? [...new Set(REVIEW.flatMap(([t]) => tabJobs(t)))] : tabJobs(gateTab(g));
@@ -972,6 +972,8 @@ Object.assign(REGIONS, REGIONS_LATE);
 
 // How it's recorded: by hand (I'll click through, optionally coached) or by Copilot. Every demo can switch.
 const copilotMode = d => d.mode === 'record';
+// Copilot records in a separate browser (demo.json recorder "capture"), not hers.
+const separate = d => copilotMode(d) && !!J(d.id).capture?.separate;
 const coachMode = d => d.mode === 'coach';
 const recState = d => {
   const j = J(d.id).record || {}, stop = J(d.id)['record-stop'] || {}, st = j.status;
@@ -987,7 +989,7 @@ function recHead(d) {
   // Copilot has stopped clicking once it's writing the talk track: the browser is the presenter's again.
   const writing = aiOn && (J(d.id)['ai-record']?.stages || []).some(s => s.name === 'script');
   if (writing) return head('Writing your talk track', 'Copilot has finished clicking. It\u2019s writing what to say from what it did.', `<button class="btn primary big" disabled>Writing\u2026</button>`);
-  if (aiOn) return head('Copilot is recording', 'Keep your hands off the browser until it asks.', `<button class="btn primary big" data-action="ai-stop" data-test="ai-stop">${STOP} Stop</button>`);
+  if (aiOn) return head('Copilot is recording', separate(d) ? 'In a separate browser, off your screen. You can keep working.' : 'Keep your hands off the browser until it asks.', `<button class="btn primary big" data-action="ai-stop" data-test="ai-stop">${STOP} Stop</button>`);
   if (starting) return head('Getting ready', `<span data-test="record-starting">Checking your browser and the app tabs, then capturing each start screen. Wait for <strong>Recording</strong> before you click.</span>`,
     `<button class="btn primary big" disabled>Starting…</button>`);
   if (recording && st?.held) {
@@ -1019,6 +1021,9 @@ function recHead(d) {
     const other = `<button class="alink" data-action="set-mode" data-mode-to="manual" data-test="mode-manual">${HAND} or click through yourself</button>`;
     if (!plan.length) return head('Run of show', `Say what to show above. Copilot drafts the steps; you read them before it starts.${again}`,
       `${other}<button class="btn primary big" data-action="ai-plan" data-test="ai-plan" ${running('ai-plan', d.id) ? 'disabled' : ''}>Draft the plan ${I.arrow}</button>`);
+    if (separate(d)) return head('Run of show', `Copilot clicks in a separate browser, off your screen. It stops before any change it can\u2019t prove, and puts the demo back after.${again}`,
+      `${other}<button class="btn" data-action="ai-check" data-test="ai-check" ${running('ai-check', d.id) || running('ai-plan', d.id) ? 'disabled' : ''}>Check my script</button>
+       <button class="btn primary big" data-action="ai-record" data-test="ai-record" ${running('ai-plan', d.id) || running('ai-check', d.id) ? 'disabled' : ''}>Approve and start ${I.arrow}</button>`);
     return head('Run of show', `Copilot clicks; ${asks ? `${plural(asks, 'step')} ${asks === 1 ? 'asks' : 'ask'} you first` : 'nothing needs your go-ahead'}.${again}`,
       `${other}<button class="btn primary big" data-action="ai-record" data-test="ai-record" ${running('ai-plan', d.id) ? 'disabled' : ''}>Approve and start ${I.arrow}</button>`);
   }
@@ -1155,6 +1160,7 @@ PANELS.record = (panel, d) => {
         ${planBeats(AIS[d.id]?.plan).length ? `<button class="btn" data-action="ai-plan" data-test="ai-plan-again" ${running('ai-plan', d.id) ? 'disabled' : ''}>${I.spark} Draft it again</button>` : ''}</div>
       <div class="row" style="margin-top:8px"><button class="btn" data-action="ai-plan-script" data-test="ai-plan-script" ${running('ai-plan', d.id) ? 'disabled' : ''}>Make it from my script\u2026</button>
         <span class="hint small">Your talk track, in Word, Markdown, RunLines or text. Copilot puts each Do line on the real screens.</span></div>
+      <div data-region="separate"></div>
       <details style="margin-top:6px"><summary>Add notes, a doc or an email to work from</summary>
         <label for="ai-source" class="visually-hidden">Material to work from</label><textarea id="ai-source" rows="3" data-test="ai-source" data-save="source" style="margin-top:8px"></textarea>
         <div class="row" style="margin-top:6px"><button class="btn small" data-action="pick-source-demo">Open a file…</button></div></details>
@@ -1167,6 +1173,7 @@ PANELS.record = (panel, d) => {
     <section class="card rundown" aria-label="Run of show" data-test="run-of-show">
       <div data-region="rec-head"></div>
       <div data-region="ai-run" class="ai-run"></div>
+      <div data-region="ai-check"></div>
       <div class="rd-cols" aria-hidden="true"><span></span><span>Item</span><span>App</span><span>Time</span><span>State</span></div>
       ${live ? '<div data-region="preshow" hidden></div>' : `<div class="sec">Pre-show</div>
       <div data-region="preshow"></div>
@@ -1180,6 +1187,7 @@ PANELS.record = (panel, d) => {
     <div data-region="ai-after"></div>
     ${sent ? `<details class="card sent"><summary>What was sent to Copilot</summary><div data-region="ai-sent"></div></details>` : ''}`;
   if (aiMode(d.mode)) loadAi(d.id);
+  if (copilotMode(d)) invoke('capture_profiles', { id: d.id }).then(c => { J(d.id).capture = c; renderRegions(); }).catch(() => {});
   // The rundown (talk track beats), the profiles (who, and whether to ask which), and a quiet check (no fixes):
   // Start checks again, with its fixes.
   invoke('rundown', { id: d.id }).then(r => { J(d.id).rundown = r; renderRegions(); }).catch(() => {});
@@ -1207,7 +1215,30 @@ function pendingQuestion(events) {
   const answered = new Set(events.filter(e => e.event === 'answered').map(e => e.data.id));
   return [...events].reverse().find(e => questionKinds.has(e.event) && !answered.has(e.data.id));
 }
+// What Check my script found: where a run would stop (before a change it can't prove), and the steps it couldn't
+// prove that no change follows (the run goes on past those and marks the beat).
+const checkItem = (k, x) => `<li data-test="ai-check-${k}">${x.beat > 0 ? `Beat ${x.beat}${x.text ? `, ${esc(x.text)}` : ''}: ` : ''}${esc(x.why)}${x.fix ? `<br><small>${esc(x.fix)}</small>` : ''}</li>`;
 Object.assign(REGIONS, {
+  separate(d) {
+    const c = J(d.id).capture;
+    if (!c || running('ai-record', d.id)) return '';
+    const names = [...new Set([...(c.profiles || []), c.profile])];
+    return `<div class="row" style="margin-top:8px" data-test="separate" data-on="${!!c.separate}"><span class="small">Copilot records</span>
+      <span class="seg" role="group" aria-label="Where Copilot records"><button type="button" class="btn small ${c.separate ? 'subtle' : ''}" aria-pressed="${!c.separate}" data-action="separate" data-to="" data-test="separate-off">in your browser</button><button type="button" class="btn small ${c.separate ? '' : 'subtle'}" aria-pressed="${!!c.separate}" data-action="separate" data-to="${esc(c.profile)}" data-test="separate-on">in a separate browser</button></span>
+      ${c.separate ? `<button class="alink small" data-action="capture-sign-in" data-test="capture-sign-in" ${running('capture-sign-in', d.id) ? 'disabled' : ''}>${running('capture-sign-in', d.id) ? 'Signing in\u2026' : 'Sign in to it'}</button>
+        <details class="small"><summary>Details</summary><label>Its profile <select id="separate-profile" data-test="separate-profile">${names.map(n => `<option ${n === c.profile ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label></details>` : ''}</div>`;
+  },
+  'ai-check'(d) {
+    if (!separate(d)) return '';
+    const j = J(d.id)['ai-check'] || {};
+    if (running('ai-check', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-checking">Walking your plan in the separate browser, changing nothing. About 7 minutes.</p>`;
+    const o = j.outcome;
+    if (!o) return errorBox(j.error, 'ai-check');
+    const later = o.unchecked ? ` ${plural(o.unchecked, 'step')} after a change can only be seen when it records.` : '';
+    if (!o.stops.length && !o.marks.length) return `<div class="notice ok" data-test="ai-check-done" data-stops="0" data-marks="0"><div><strong>Nothing in the way.</strong> Every step it could walk landed where your plan says.${later}</div></div>`;
+    return `<div class="notice ${o.stops.length ? 'warn' : 'info'}" data-test="ai-check-done" data-stops="${o.stops.length}" data-marks="${o.marks.length}"><div><strong>${o.stops.length ? `It would stop ${plural(o.stops.length, 'time')}` : 'It would record to the end'}</strong>${o.marks.length ? `, and mark ${plural(o.marks.length, 'step')} it couldn\u2019t prove` : ''}. Fix these in the plan, then check again.${later}
+      <ul>${o.stops.map(x => checkItem('stop', x)).join('')}${o.marks.map(x => checkItem('mark', x)).join('')}</ul></div></div>`;
+  },
   'ai-plan-progress'(d) {
     const j = J(d.id)['ai-plan'] || {};
     if (running('ai-plan', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-planning">${J(d.id).planFrom ? `Copilot is reading ${esc(J(d.id).planFrom)} and putting each step on the screens your demo shows\u2026` : 'Copilot is reading your words and the start screens, and drafting the plan\u2026'}</p>`;
@@ -1248,7 +1279,13 @@ Object.assign(REGIONS, {
         ${q.event === 'question' ? `<div class="row" style="margin-top:8px"><input type="text" id="ai-instead" placeholder='Or tell it what to do: Click "Plugins"' style="flex:1"><button class="btn" data-answer="do" data-qid="${esc(x.id)}" data-with-text="1">Do this instead</button></div>` : ''}</div></div>`;
     }
     if (notes.length && on) html += `<ul class="small muted">${notes.map(e => `<li>${esc(e.event === 'adapted' ? `Did "${e.data.to}" instead of "${e.data.from}"` : e.event === 'skipped' ? `Skipped "${e.data.step}": ${e.data.why}` : e.data.text)}</li>`).join('')}</ul>`;
-    if (j.outcome) {
+    if (j.outcome && j.outcome.resetBefore !== undefined) {
+      // In a separate browser: where it stopped (with its picture), the beats it marked, its changes and the reset.
+      const o = j.outcome, at = o.stopped?.at;
+      html += `<div class="notice ${o.stopped ? 'warn' : 'ok'}" data-test="ai-record-done" data-steps="${o.steps}" data-stopped="${!!o.stopped}" data-marked="${(o.marked || []).length}"><div><strong>${o.stopped ? 'Copilot stopped' : 'Recorded for you'}:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}.${o.stopped ? ` ${at ? `Beat ${at.beat + 1}, ${esc(at.text)}: ` : ''}${esc(o.stopped.why)}${o.stopped.picture ? ` <button class="link" data-reveal="${esc(o.stopped.picture)}">See its picture</button>` : ''}` : ''}
+        ${o.writes ? `${plural(o.writes, 'change')} made, then undone${o.resetAfter === false ? ', <strong>but the reset after didn\u2019t finish</strong>' : ''}.` : ''}
+        ${(o.marked || []).length ? `<ul data-test="ai-record-marked">${o.marked.map(m => `<li>Beat ${m.beat}, ${esc(m.text)}: ${esc(m.why)}${m.picture ? ` <button class="link" data-reveal="${esc(m.picture)}">See it</button>` : ''}</li>`).join('')}</ul>` : ''}</div></div>`;
+    } else if (j.outcome) {
       const o = j.outcome;
       html += `<div class="notice ok" data-test="ai-record-done" data-steps="${o.steps}" data-confirmed="${o.confirmed}"><div><strong>Recorded for you:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}${o.confirmed ? `, ${o.confirmed} after you said yes` : ''}${o.stopped ? ' (stopped early)' : ''}. ${o.script ? `The talk track: ${plural(o.script.beats, 'beat')}, ${plural(o.script.lines, 'line')}.` : ''}</div></div>`;
     }
@@ -1944,12 +1981,30 @@ const ACTIONS = {
     // Approving is the plan as it is now: its writes included. Any edit after this needs approving again.
     try { await saveAiFields(id); await call('ai_save', { id, plan }); await call('ai_approve', { id }); } catch { return; }
     J(id).aiChain = null;
-    const o = await step('ai-record', 'ai_record', {});
+    const o = await step('ai-record', J(id).capture?.separate ? 'ai_record_unattended' : 'ai_record', {});
     loadAi(id);
     // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away.
     if (o) await makeReplica(id);
   },
   'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
+  separate: async t => {
+    const id = S.id;
+    await call('set_separate', { id, profile: t.dataset.to || null });
+    J(id).capture = await invoke('capture_profiles', { id }).catch(() => J(id).capture);
+    J(id).preflight = null;
+    rerender();
+  },
+  'capture-sign-in': async () => {
+    const r = await step('capture-sign-in', 'capture_sign_in', {});
+    if (r) toast(r.ok ? 'Signed in to the separate browser' : `Not signed in: ${r.error || 'the window closed first'}`, !r.ok);
+  },
+  'ai-check': async () => {
+    const id = S.id;
+    const plan = $('#ai-plan')?.value || '';
+    if (!plan.trim()) return toast('Draft the plan first', true);
+    try { await saveAiFields(id); await call('ai_save', { id, plan }); } catch { return; }
+    await step('ai-check', 'ai_check_script', {});
+  },
   'coach-start': async () => {
     const id = S.id;
     await saveAiFields(id);
@@ -2159,6 +2214,10 @@ document.addEventListener('change', e => {
       toast(`Recording in ${BNAME[t.value]}`);
       rerender();
     }).catch(() => {});
+  }
+  if (t.id === 'separate-profile' && S.view === 'demo') {
+    const id = S.id;
+    return call('set_separate', { id, profile: t.value }).then(async () => { J(id).capture = await invoke('capture_profiles', { id }).catch(() => J(id).capture); rerender(); }).catch(() => {});
   }
   if (t.name === 'profile' && t.closest('#profile-pick')) {
     const id = S.id;

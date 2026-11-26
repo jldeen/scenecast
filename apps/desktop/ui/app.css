@@ -377,3 +377,6 @@ dialog .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px
 .compare .shotwrap{position:relative;line-height:0}
 .compare .shotwrap img{width:100%;height:auto}
 .compare .spot{position:absolute;border:2px solid var(--bad);border-radius:4px;pointer-events:none}
+
+/* Two choices side by side (Copilot records in your browser or in a separate one). */
+.seg { display: inline-flex; gap: 4px; }

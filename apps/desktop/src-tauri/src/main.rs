@@ -1101,6 +1101,86 @@ async fn ai_record(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<
     answer
 }
 
+/// The separate browser: its profiles, and the one this demo records with (`separate`: false is her own browser).
+#[tauri::command]
+async fn capture_profiles(state: State<'_, Shared>, id: String) -> Res<Value> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let dir = state.library.dir(&id)?;
+        let cfg: Value = serde_json::from_slice(&std::fs::read(dir.join("demo.json"))?)?;
+        let on = cfg["recorder"].as_str() == Some("capture");
+        Ok(serde_json::json!({
+            "profiles": scenecast_app::record::capture_profiles(),
+            "separate": on,
+            "profile": cfg["capture"]["profile"].as_str().unwrap_or("default"),
+        }))
+    })
+    .await
+}
+
+/// Copilot records in a separate browser with this profile, or (`None`) in her own.
+#[tauri::command]
+async fn set_separate(state: State<'_, Shared>, id: String, profile: Option<String>) -> Res<()> {
+    let state = state.inner().clone();
+    blocking(move || {
+        scenecast_app::record::set_separate(&state.library.dir(&id)?, profile.as_deref())
+    })
+    .await
+}
+
+/// Sign in to the separate browser: its one window on her screen, until she's signed in to the demo's apps.
+#[tauri::command]
+async fn capture_sign_in(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    job(state, app, id, "capture-sign-in", move |dir, _| {
+        scenecast_app::record::capture_sign_in(dir)
+    })
+    .await
+}
+
+/// The separate browser up for a job (Record's readiness check starts it), and down after it.
+fn with_capture<T>(dir: &Path, app: &AppHandle, id: &str, f: impl FnOnce() -> Res<T>) -> Res<T> {
+    let report = scenecast_app::record::preflight(dir, true, |u| emit(app, id, "preflight", u))?;
+    if !report.ready {
+        return Err(AppError::Invalid(scenecast_app::record::not_ready(&report)));
+    }
+    let out = f();
+    let _ = scenecast_app::record::capture_stop(dir);
+    out
+}
+
+/// Check my script: a read-only walk of the plan in the separate browser, and where a run would likely stop.
+#[tauri::command]
+async fn ai_check_script(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
+    let (to, who) = (app.clone(), id.clone());
+    job(state, app, id, "ai-check", move |dir, busy| {
+        with_capture(dir, &to, &who, || {
+            scenecast_app::ai::run(Some(dir), &["check-script"], |u| busy.emit(u))
+        })
+    })
+    .await
+}
+
+/// Copilot records the approved plan in a separate browser, unattended: the reset (made once, from the plan) before
+/// and after, the guard, and a stop before any write it can't prove.
+#[tauri::command]
+async fn ai_record_unattended(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
+    let (to, who) = (app.clone(), id.clone());
+    job(state, app, id, "ai-record", move |dir, busy| {
+        if !dir.join("reset.md").is_file() {
+            scenecast_app::ai::run(Some(dir), &["reset"], |u| busy.emit(u))?;
+        }
+        scenecast_app::ai::run(Some(dir), &["approve"], |u| busy.emit(u))?;
+        with_capture(dir, &to, &who, || {
+            scenecast_app::ai::run(Some(dir), &["record", "--unattended", "--checked"], |u| {
+                busy.emit(u)
+            })
+        })
+    })
+    .await
+}
+
 /// The talk track from the recording (I'll click, you script it; Coach me).
 #[tauri::command]
 async fn ai_script(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
@@ -2038,6 +2118,11 @@ fn main() {
             ai_plan,
             ai_approve,
             ai_record,
+            ai_record_unattended,
+            ai_check_script,
+            capture_profiles,
+            set_separate,
+            capture_sign_in,
             ai_script,
             ai_answer,
             ai_stop,

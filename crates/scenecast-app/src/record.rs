@@ -222,6 +222,94 @@ pub fn set_browser(dir: &Path, browser: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// The separate browser's profiles, each signed in on its own: the folders under `~/.stuntdouble/capture`, by name.
+pub fn capture_profiles() -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(home().join(".stuntdouble").join("capture"))
+        .map(|d| {
+            d.filter_map(Result::ok)
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort();
+    out
+}
+
+/// Where Copilot records: in a separate browser with that profile (`demo.json` `recorder: "capture"`), or with
+/// `None` in the presenter's own browser.
+pub fn set_separate(dir: &Path, profile: Option<&str>) -> Result<(), AppError> {
+    let file = dir.join("demo.json");
+    let mut cfg: Value = serde_json::from_slice(&std::fs::read(&file)?)?;
+    let Some(o) = cfg.as_object_mut() else {
+        return Err(AppError::Invalid("demo.json isn't an object".into()));
+    };
+    match profile {
+        Some(p) => {
+            if p.is_empty()
+                || !p
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+            {
+                return Err(AppError::Invalid(format!("`{p}`: a profile's name")));
+            }
+            o.insert("recorder".into(), Value::from("capture"));
+            let c = o
+                .entry("capture")
+                .or_insert_with(|| Value::Object(Default::default()));
+            if !c.is_object() {
+                *c = Value::Object(Default::default());
+            }
+            c["profile"] = Value::from(p);
+        }
+        None => {
+            if o.get("recorder").and_then(Value::as_str) == Some("capture") {
+                o.remove("recorder");
+            }
+        }
+    }
+    std::fs::write(&file, serde_json::to_string_pretty(&cfg)? + "\n")?;
+    Ok(())
+}
+
+/// The separate browser on the presenter's screen, once, to sign in to the demo's apps (`capture sign-in`). Returns
+/// what it says when she's done: `{ ok, … }`.
+pub fn capture_sign_in(dir: &Path) -> Result<Value, AppError> {
+    let engine = crate::receiver::engine_for(dir)?;
+    let mut out = String::new();
+    engine.run_with_progress(
+        [
+            std::ffi::OsStr::new("capture"),
+            "sign-in".as_ref(),
+            "--demo".as_ref(),
+            dir.as_os_str(),
+        ],
+        |p| {
+            if let scenecast_build::Progress::Stdout(l) = p {
+                out.push_str(&l);
+                out.push('\n');
+            }
+        },
+    )?;
+    Ok(serde_json::from_str(&out)
+        .unwrap_or_else(|_| serde_json::json!({ "ok": false, "error": out.trim() })))
+}
+
+/// The separate browser down (`capture stop`), so its profile is free; Record's readiness check starts it again.
+pub fn capture_stop(dir: &Path) -> Result<(), AppError> {
+    let engine = crate::receiver::engine_for(dir)?;
+    engine.run_with_progress(
+        [
+            std::ffi::OsStr::new("capture"),
+            "stop".as_ref(),
+            "--demo".as_ref(),
+            dir.as_os_str(),
+        ],
+        |_| {},
+    )?;
+    Ok(())
+}
+
 /// The steps to load the extension once, for a browser.
 pub fn setup_for(dir: PathBuf, browser: &str, port: u16) -> ExtensionSetup {
     let (name, page) = if browser == "edge" {
@@ -563,6 +651,24 @@ fn nothing_recorded(summary: &RecordSummary) -> Result<(), AppError> {
 mod tests {
     use super::*;
     use crate::library::{Library, NewApp, NewDemo};
+
+    #[test]
+    fn copilot_records_in_a_separate_browser_by_its_profile_and_back_in_hers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("demo.json");
+        std::fs::write(&file, r#"{"title":"T","capture":{"tenant":"example.com"}}"#).unwrap();
+        let read = || serde_json::from_slice::<Value>(&std::fs::read(&file).unwrap()).unwrap();
+        set_separate(tmp.path(), Some("demo-tenant")).unwrap();
+        let c = read();
+        assert_eq!(c["recorder"], "capture");
+        assert_eq!(c["capture"]["profile"], "demo-tenant");
+        assert_eq!(c["capture"]["tenant"], "example.com");
+        assert!(set_separate(tmp.path(), Some("../elsewhere")).is_err());
+        set_separate(tmp.path(), None).unwrap();
+        let c = read();
+        assert!(c.get("recorder").is_none());
+        assert_eq!(c["capture"]["profile"], "demo-tenant");
+    }
 
     #[test]
     fn the_browser_and_port_come_from_the_demo() {

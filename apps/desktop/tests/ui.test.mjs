@@ -589,6 +589,12 @@ try {
   const planText = await b.execute(() => document.querySelector('[data-test="ai-plan-text"]').value);
   check('the plan fills the run of show, with the steps that ask first', await exists('plan-beat-1') && /asks you first/.test(await b.execute(() => document.querySelector('[data-test="run-of-show"]').innerText)));
   check('Record for me: a plan in plain words, sends asking first', /Click "Plugins"/.test(planText) && /Press Enter — ask first/.test(planText) && /Click "Send" — ask first/.test(planText), planText);
+  // In a separate browser: the choice is kept with the demo (its recorder), with Check my script beside Approve; then
+  // back in her browser for the rest of this test.
+  await click('separate-on');
+  check('Copilot can record in a separate browser: kept with the demo, Check my script beside Approve', await waitFor('the separate browser', async () => JSON.parse(readFileSync(join(FM, 'demo.json'), 'utf8')).recorder === 'capture' && (await exists('ai-check')), 20000).catch(() => false));
+  await click('separate-off');
+  check('and back in her browser', await waitFor('her browser', async () => JSON.parse(readFileSync(join(FM, 'demo.json'), 'utf8')).recorder !== 'capture' && !(await exists('ai-check')), 20000).catch(() => false));
   await shot('16-plan');
   await chat.bringToFront();
   // As on a Mac with the browser in front: the covered app window gets no animation frames (found on Jessica's Mac,
