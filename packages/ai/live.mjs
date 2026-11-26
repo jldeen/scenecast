@@ -312,7 +312,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       case 'manual': return { needsYou: true, why: `"${formatStep(step)}" is the presenter's to do` };
       case 'free': return { needsYou: true, why: `"${step.text}" isn't a step it can do on its own` };
       case 'click': case 'hover': {
-        if (step.kind === 'click') await ready();
+        if (step.kind === 'click' && !write) await ready();
         let { el, o } = given ? { el: given, o: await controls(id) } : Number.isInteger(step.groupIndex) ? { el: null, o: await controls(id) } : await locate(id, step.target);
         // A step group by its place among the screen's groups (groupIndex: the plan's), when its label changed.
         let group = null;
@@ -410,7 +410,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const field = focusedField(o) || (step.key === 'Enter' ? lastField : null);
         const w = writeOf(step, null, field, o.url);
         if (w && !write) refuse(step, w);
-        await ready();
+        if (!write) await ready();
         const before = await actions();
         if (dispatched) dispatched();
         await send(id, 'press', { key: step.key }, 30, { for: formatStep(step), on: field ? field.name : null });
@@ -549,6 +549,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       if (!ra.ok) return { missing: true, why: `${ra.why}: a write runs only where the reader and the page name its control alike` };
     }
     const before = await controls(id).catch(() => ({}));
+    // The recorder settled first: the guard never stays open while it captures (act's click or key doesn't wait again).
+    await ready();
     let id1 = null;
     const openedAt = Date.now();
     try { const o = await cmd('capOpen', { hosts: hosts || [...hostsOf(id)], entries: opensOf(id, step, lastField) }, 30); if (o.refused) return { missing: true, why: `the guard won't open: ${o.refused}` }; id1 = o.id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }

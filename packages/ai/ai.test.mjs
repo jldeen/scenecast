@@ -412,6 +412,25 @@ test('recording, a click waits for the recorder; one it held back goes once more
   assert.equal(wr.clicks.length, 1);
 });
 
+test('recording, a write waits for the recorder before the guard opens, not while it is open', async () => {
+  const { liveWalker } = await import('./live.mjs');
+  const { READ_DOCS_SRC } = await import('@stuntdouble/capture/page-read.mjs');
+  const st = { busy: 3, actions: 0 }, opened = [];
+  const cmd = async (op, a) => {
+    if (op === 'recordStatus') { const busy = st.busy > 0; if (busy) st.busy--; return { recording: true, busy, typing: [], actions: st.actions, blocked: 0 }; }
+    if (op === 'observe') return { url: 'https://chat.example.test/', vw: 1920, vh: 1080, items: [{ role: 'textbox', name: 'Message', focused: true, editable: 'content', x: 900, y: 1000 }] };
+    if (op === 'js') return a.code === READ_DOCS_SRC ? [{ key: 'main', html: '<!doctype html><html><body><div role="textbox" contenteditable="true" aria-label="Message"></div></body></html>' }] : true;
+    if (op === 'capOpen') { opened.push({ busyLeft: st.busy }); return { id: 'w1' }; }
+    if (op === 'capLog') return { passed: [{ by: 'a planned write', at: new Date().toISOString() }] };
+    if (op === 'press') { st.actions++; return {}; }
+    return {};
+  };
+  const w = liveWalker({ demo: { cfg: { apps: [{ id: 'chat', url: 'https://chat.example.test/' }] } }, cmd, recording: true });
+  const r = await w.write('chat', { ...parseStep('Press Enter'), writes: 'sends it · chat-app:send' });
+  assert.equal(r.wrote, true, r.why);
+  assert.deepEqual(opened, [{ busyLeft: 0 }]);
+});
+
 test("a step group folded under the answer's timeline: the header opened first; never a near name", async () => {
   const { liveWalker } = await import('./live.mjs');
   const make = ({ folded, inside = true }) => {
