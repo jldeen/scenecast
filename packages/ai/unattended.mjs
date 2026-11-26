@@ -127,6 +127,25 @@ const pageBase = p => String(p || '').replace(/-(frame\d+|again)$/, '');
 const pageState = (p, reach) => { const b = pageBase(p); return (reach.state && reach.state[b]) || b; };
 // Recorded only on screens the recording knows and the run never reached.
 const unreached = (pages, reach) => !!reach && pages.length > 0 && pages.every(p => reach.known.has(pageState(p, reach)) && !reach.reached.has(pageState(p, reach)));
+// The controls the recording's screens name with a count or status after a comma, starting with a number or "status"
+// ("Notifications, 1 unread items", "Your profile, status Available"; not a post's "…, Thursday, November 5"), per app: what a page's first save waits for (capCounts). → { <app>: [{ base, name }] }
+export function countedControls(demo, apps, w = undefined) {
+  if (w === undefined) { try { w = walkerFromDemo(demo); } catch (e) { w = null; } }
+  if (!w) return {};
+  const states = (w.flow && w.flow.states) || {}, out = {};
+  for (const id of w.states || []) {
+    const app = (states[id] || {}).app;
+    if (!apps.includes(app)) continue;
+    let sc = null; try { sc = w.screen(id); } catch (e) { continue; }
+    for (const c of (sc && sc.controls) || []) {
+      const m = /^([^,]{2,60}),\s*(.+)$/.exec(String(c.name || '').trim());
+      if (!m || !/^(\d|status\b)/i.test(m[2])) continue;
+      const l = out[app] = out[app] || [];
+      if (!l.some(x => x.base === m[1])) l.push({ base: m[1], name: c.name.trim() });
+    }
+  }
+  return out;
+}
 // The clicks the demo's build dropped, per app (its flow's clickPages drop: a click that goes elsewhere, as Teams'
 // " Bot Available"). → { <app>: [name] }
 export function droppedClicks(demo, apps) {
@@ -427,6 +446,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     }
     // The recording's hovers as a floor: never skipped by what the sweep learns, each tried twice.
     // And its menus: clicked whatever the cap or the time, put back their recorded way.
+    // Counts a page loads after itself: its first save waits for them (admin's bell).
+    const counted = countedControls(demo, [...inPlan]);
+    if (Object.keys(counted).length) { const on = await cmd('capCounts', { apps: counted, waitS: ((demo.cfg.record || {}).countWaitS) }, 30).catch(() => ({ on: false })); if (on.on) run.counts = { apps: Object.fromEntries(Object.entries(counted).map(([a, l]) => [a, l.map(x => x.base)])) }; }
     const drops = droppedClicks(demo, [...inPlan]);
     if (recHovers.length || recClicks.length || Object.keys(drops).length) {
       const byApp = {}, menus = {};
@@ -674,6 +696,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       }
       if (run.ownStatus && !Object.keys(run.ownStatus.beat1).length) delete run.ownStatus.beat1;
       await cmd('capOwnStatus', { apps: {} }, 30).catch(() => {});
+    }
+    if (run.counts) {
+      const r = await cmd('capCounts', {}, 30).catch(() => null);
+      if (r && r.on) run.counts.waits = r.log || [];
+      await cmd('capCounts', { apps: {} }, 30).catch(() => {});
     }
     if (notApps.length) {
       const r = await cmd('capNotices', {}, 30).catch(() => null);

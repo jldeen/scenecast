@@ -774,6 +774,25 @@ try {
     writeFileSync(cfgF, cfg0);
     if (had === null) rmSync(HP, { force: true }); else writeFileSync(HP, had);
   }
+  // 1q · Counts a page loads after itself (admin's bell: "Notifications" until "Notifications, 1 unread items" loads).
+  // The recording's home screen names Inbox with its count; the page's first save waits for it: 'late' (8 s after load),
+  // saved with the count; 'never', saved after the cap (4 s here) with a note, and the run goes on.
+  for (const mode of ['late', 'never']) {
+    const c = JSON.parse(cfg0); c.record.countWaitS = 4; writeFileSync(cfgF, JSON.stringify(c, null, 2));
+    writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Home\n\n- Go to tasks\n  Lands on: "No tasks yet"\n'); writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
+    tasks.counts(mode); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const qr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const qj = readRun(DEMO), [qRaw, qRec] = keepRaw(`counts-${mode}-raw`);
+    const start = rawTexts(qRaw).filter(([f]) => { const parts = f.slice(qRaw.length).split(/[\\/]/); return parts.includes('snaps') && /^tasks-start/.test(parts[parts.length - 1]); });
+    const waits = ((qj.counts || {}).waits || []).filter(w => w.app === 'tasks');
+    const why = { code: qr.code, stopped: qj.stopped, counts: qj.counts, start: start.map(([f, t]) => [f.slice(qRaw.length), /Inbox, 2 unread items/.test(t), /aria-label=\\?"Inbox\\?"/.test(t)]), notes: ((qRec && qRec.notes) || []).filter(n => /count/.test(n)), err: String(qr.err || '').slice(-400) };
+    if (mode === 'late') check("a count the page loads after itself is waited for: the start screen saved with it", qr.code === 0 && !qj.stopped && start.length > 0 && start.every(([, t]) => /Inbox, 2 unread items/.test(t)) && waits.some(w => w.waitedS >= 2 && !w.missing.length), JSON.stringify(why));
+    else check("one that never comes: saved after the cap, with a note, and the run goes on", qr.code === 0 && !qj.stopped && start.length > 0 && waits.some(w => w.missing.some(m => m.base === 'Inbox')) && ((qRec && qRec.notes) || []).some(n => n === 'tasks: "Inbox" shows no count; the recording has "Inbox, 2 unread items"'), JSON.stringify(why));
+    tasks.counts(null); tasks.seed({});
+    writeFileSync(cfgF, cfg0);
+  }
   writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
   await run(['ai', 'approve', '--demo', DEMO], { env: E });
 

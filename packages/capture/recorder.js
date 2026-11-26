@@ -32,6 +32,7 @@ const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
 // take stops there. First, so Leave out's check reads the screen as it's saved.
 const recOwn = () => globalThis.__stuntdoubleOwnStatus || null;
 const recNotice = () => globalThis.__stuntdoubleNotices || null;
+const recCounts = () => globalThis.__stuntdoubleCounts || null;
 // The recording's own hovers (the capture browser only: host-ops capHoverFloor): per app, the controls the demo's
 // recording has a hover for. The hovers sweep never skips them for their kind, tries them twice, and says how each went.
 const recFloor = () => globalThis.__stuntdoubleHoverFloor || null;
@@ -255,6 +256,9 @@ async function recPutBackOff(A, state, after, want, d, first, fix, now, pic) {
   return false;
 }
 async function recAddState(A, id, sig) {
+  // A page's first save after it loads waits for the counts its recording shows (capCounts): else a note.
+  const C = recCounts();
+  if (C) { const r = await C.gate(A.page, A.id, id).catch(() => null); if (r && r.missing.length) for (const m of r.missing) REC.notes.push(`${A.id}: "${m.base}" shows no count; the recording has "${m.name}"`); }
   const tSnap = Date.now();
   await H.snap(A.page, id, { clean: true });
   (REC.openFp = REC.openFp || {})[id] = await A.page.mainFrame().evaluate(OPEN_STATE).catch(() => null);

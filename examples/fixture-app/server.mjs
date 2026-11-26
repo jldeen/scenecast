@@ -336,6 +336,9 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         Teams' Find in channel), a "Fill box" menu that also fills the side section's Ask box (as a suggestion fills
 //         Copilot's composer), and a status button ("Your status Away") with a menu.
 //         Chips three always has an avatar ("Profile picture of Pat Doe.") whose people card shows after 0.3 s.
+//         counts('late' | 'never'): the home screen's Inbox button is named with its count ("Inbox, 2 unread items")
+//         8 s after the page loads (after the run's first save of it), or never (just "Inbox"), as admin's bell loads
+//         its count; by default, at once.
 //         notice('close' | 'stuck'): 0.3 s after Chips is clicked, Teams' "Loading latest updates…" notice comes on top
 //         of the page and stays, with its own Close button ('close') or none ('stuck').
 //         status(text): the page also shows your own status on a "Me" button ("Your profile, status <text>", as Teams'
@@ -347,7 +350,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 const chipsPart = (n, moving = false, extras = null) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && extras ? `<p class="menus"><button type="button" data-testid="find-toggle-button" aria-pressed="false" aria-label="Find here">Find</button>${['A', 'B', 'C', 'D'].map(x => `<button type="button" class="mb" aria-haspopup="menu" aria-expanded="false">Menu ${x}</button>`).join('')}<button type="button" aria-haspopup="menu">Dud menu</button><button type="button" aria-haspopup="menu" id="away">Elsewhere</button><button type="button" class="mb" aria-haspopup="menu" aria-expanded="false" data-fill="Prompt text">Fill box</button><button type="button" class="mb" data-tid="me-btn" aria-label="Your status Away" aria-haspopup="menu" aria-expanded="false">PD</button></p>` : ''}${n === 2 && extras ? '<p><button id="helpb">Help</button></p>' : ''}${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button><button id="pat" aria-label="Profile picture of Pat Doe.">PD</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
-const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null, extras = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null, extras = null, counts = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
 main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
@@ -361,7 +364,7 @@ textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px so
 ${status ? `<p><button id="me" aria-label="Your profile, status ${status}">Me</button></p>` : ''}
 <div class="bar"><button role="switch" aria-checked="false" aria-label="Sync" id="sync">Sync</button><span id="syncText">Sync is off</span>
 <button aria-label="Refresh" id="refresh">Refresh</button><button aria-label="Archive all" id="archive">Archive all</button>
-<a href="http://localhost:${port}/help" id="help">Help</a>${chips ? '<button id="chipsbtn">Chips</button>' : ''}<span id="fresh" role="status"></span></div>
+<a href="http://localhost:${port}/help" id="help">Help</a>${chips ? '<button id="chipsbtn">Chips</button>' : ''}<button id="inbox" aria-label="${counts ? 'Inbox' : 'Inbox, 2 unread items'}">Inbox</button><span id="fresh" role="status"></span></div>
 <ul id="list" aria-label="Task list"></ul>
 <p id="none">No tasks yet</p>
 <textarea aria-label="New task" id="box" rows="2" placeholder="New task"></textarea>
@@ -372,6 +375,7 @@ ${suggest ? '<h2>Suggested</h2><p id="sugCount"></p><ul id="sug" aria-label="Sug
 const $ = id => document.getElementById(id);
 let AUTH = '';
 const EXTRAS = ${JSON.stringify(extras)};
+if (${JSON.stringify(counts)} === 'late') setTimeout(() => { const b = $('inbox'); if (b) b.setAttribute('aria-label', 'Inbox, 2 unread items'); }, 8000);
 if (EXTRAS !== 'stuck') try { sessionStorage.removeItem('fx-pane'); } catch (e) {}
 if ($('chipsbtn')) {
   // The chips screens, in place: Slow chip's card shows 1.5 s after the pointer arrives.
@@ -478,7 +482,7 @@ load();
 </script></body></html>`;
 
 export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
-  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null, chips: false, moving: false, notice: null, extras: null };
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null, chips: false, moving: false, notice: null, extras: null, counts: null };
   const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
   const log = [];
   const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
@@ -487,9 +491,9 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
   const server = createServer(async (q, s) => {
     const path = q.url.split('?')[0];
     log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
-    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips, st.notice, st.extras));
+    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips, st.notice, st.extras, st.counts));
     if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
-    if (q.method === 'GET' && /^\/chips\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, true, null, st.extras));
+    if (q.method === 'GET' && /^\/chips\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, true, null, st.extras, st.counts));
     if (q.method === 'GET' && /^\/chips-part\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', chipsPart(+path.slice(-1), st.moving, st.extras));
     if (q.method === 'GET' && path === '/api/status') return send(s, 200, 'application/json', JSON.stringify({ status: st.status }));
     if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
@@ -551,6 +555,7 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     moving: on => { st.moving = !!on; },
     notice: mode => { st.notice = mode || null; },
     extras: mode => { st.extras = mode || null; },
+    counts: mode => { st.counts = mode || null; },
     close: () => { server.close(); notes.close(); },
   };
 }

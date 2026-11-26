@@ -278,6 +278,9 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   let floor = null;
   // Notices a replica never keeps (capNotices): per app, their words and close buttons; what each save found; the stop.
   let notices = null;
+  // Counts a page loads after itself (capCounts): per app, the recording's controls named with a count or status
+  // ("Notifications, 1 unread items"); the first save after each page load waits for them.
+  let counts = null;
   const pageText = p => p.mainFrame().evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
   const noticeStop = () => { throw new Error(`A notice stopped the take: ${notices.stopped.why}`); };
   const noticeGate = async (p, app, what, html = null) => {
@@ -492,6 +495,42 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     // { apps: { <app>: { label, notices: [{ words, close, waitS }] } }, shots } arms the gate the recorder calls before
     // each save; { apps: {} } disarms it; { read: { tab, notices } } says which shows on a tab now (a walk, a check:
     // noted, never a stop); {} reads what each save found, and the stop.
+    // The first save of a page after it loads (a start screen, the first save after a reload) waits up to waitS (20 s)
+    // while a control the recording names with a count or status shows only its bare name (admin's bell: "Notifications"
+    // until its count loads, "Notifications, 1 unread items" in the recording), then saves; one that never gets one is
+    // a note, not a stop. c.apps: { <app>: [{ base, name }] }; {} → the log.
+    async capCounts(c) {
+      if (c.apps) {
+        const apps = Object.fromEntries(Object.entries(c.apps).map(([id, l]) => [id, [].concat(l || []).filter(x => x && typeof x.base === 'string' && x.base && typeof x.name === 'string')]).filter(([, l]) => l.length));
+        if (!Object.keys(apps).length) { counts = null; globalThis.__stuntdoubleCounts = undefined; return { on: false }; }
+        counts = { apps, waitS: c.waitS === undefined ? 20 : +c.waitS, loads: new WeakMap(), log: [] };
+        const gate = async (p, app, what) => {
+          const S = counts, list = S && S.apps[app];
+          if (!list || !p) return null;
+          // Once per page load (its document's time origin).
+          const origin = await p.evaluate(() => performance.timeOrigin).catch(() => null);
+          if (origin !== null && S.loads.get(p) === origin) return null;
+          if (origin !== null) S.loads.set(p, origin);
+          const bare = () => p.evaluate(l => {
+            const vis = e => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(e).visibility !== 'hidden'; };
+            const names = [...document.querySelectorAll('button,[role=button],a[href],[role=link],[role=tab],[aria-label]')].filter(vis).map(e => (e.getAttribute('aria-label') || e.innerText || '').replace(/\s+/g, ' ').trim());
+            return l.filter(x => names.includes(x.base) && !names.some(n => n.startsWith(x.base + ',') || n.startsWith(x.base + ' (')));
+          }, list).catch(() => []);
+          const t0 = Date.now();
+          let missing = await bare();
+          if (!missing.length) return null;
+          while (missing.length && Date.now() - t0 < S.waitS * 1000) { await new Promise(r => setTimeout(r, 1000)); missing = await bare(); }
+          const e = { at: at(), app, what, waitedS: Math.round((Date.now() - t0) / 1000), missing: missing.map(x => ({ base: x.base, name: x.name })) };
+          S.log.push(e);
+          log(`counts: ${app} ${what}: ${missing.length ? `no count on ${missing.map(x => `"${x.base}"`).join(', ')} after ${e.waitedS} s` : `counts in after ${e.waitedS} s`}`);
+          return e;
+        };
+        globalThis.__stuntdoubleCounts = { gate };
+        log(`counts on: ${Object.entries(apps).map(([id, l]) => `${id} (${l.map(x => `"${x.base}"`).join(', ')})`).join(', ')}`);
+        return { on: true, apps: Object.fromEntries(Object.entries(apps).map(([id, l]) => [id, l.length])) };
+      }
+      return counts ? { on: true, log: counts.log.slice() } : { on: false, log: [] };
+    },
     async capNotices(c) {
       if (c.read) { const t = await pageText(await tabOf(c.read.tab)); return { showing: [].concat(c.read.notices || []).filter(x => noticeIn(t, x.words)).map(x => x.words) }; }
       if (c.apps) {

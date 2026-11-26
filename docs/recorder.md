@@ -312,6 +312,12 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   it reads as stuck. A recorded menu that visibly opened and read as nothing is pressed once more with the learned
   churn forgotten. What stayed when a click was stuck is in the recording (`sides.clicks[].results[].stayed`). The recording: `putBack` (each screen, after what, what it found, and how it was put
   back); run.json: `stopped.kind: 'put-back'`.
+- **Counts a page loads after itself** (admin's bell: "Notifications" until its count loads; the recording has
+  "Notifications, 1 unread items"). The controls the recording's screens name with a count or status after a comma
+  (starting with a number or "status") are armed per app (`capCounts`). A page's first save after it loads (a start
+  screen, the first save after a reload) waits up to `record.countWaitS` (20 s) while one shows only its bare name,
+  then saves; one that never gets its count saves anyway with a note: `admin: "Notifications" shows no count; the
+  recording has "Notifications, 1 unread items"`. run.json: `counts` (the controls, and each wait).
 - **A page that moves while it's swept** (a banner on top, a list that loads): every hover and every click reads its
   control's point again just before the pointer goes there, and uses where it is now; one that has gone from there is
   found once more by its kind and words (`hover-page.js` `pos`, `ctlPos`).
