@@ -40,3 +40,8 @@ test('the guide reads them as a script: one beat each, with its steps under Do',
   assert.equal(s.beats[0].title, 'Copilot: start');
   assert.match(s.beats[0].do.map(d => d.text).join(' | '), /Type `Summarize/);
 });
+
+test('every beat of a script has its time, minutes and seconds too', () => {
+  const s = parseScript('# Demo\n\n## 1. Open · ~10s\n\n## 2. The payoff · ~1m15s\n\n## 3. Close · (1 min 5 s)\n', 'script.md');
+  assert.deepEqual(s.beats.map(b => [b.title, b.start, b.end]), [['Open', 0, 10], ['The payoff', 10, 85], ['Close', 85, 150]]);
+});

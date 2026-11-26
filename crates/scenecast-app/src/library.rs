@@ -63,6 +63,10 @@ pub struct ChecksScore {
 #[serde(rename_all = "camelCase")]
 pub struct DemoStatus {
     pub recorded: bool,
+    /// The raw recording is on this computer: building and comparing need it (a shared demo has only the build's copy
+    /// of the take).
+    #[serde(default)]
+    pub raw: bool,
     /// Milliseconds since the Unix epoch.
     pub recorded_at: Option<u64>,
     /// Screens in the recording.
@@ -506,18 +510,22 @@ pub fn set_slot(dir: &Path, slot: Option<u32>) -> Result<(), AppError> {
 /// Where a demo stands: recorded, built, its fidelity score, its focus points, when it was last checked.
 pub fn status(dir: &Path, manifest: Option<&scenecast_core::BundleManifest>) -> DemoStatus {
     let mut s = DemoStatus::default();
-    if let Ok(raw) = scenecast_build::build::raw_dir(dir) {
-        let recording = raw.join("recording.json");
-        if recording.is_file() {
-            s.recorded = true;
-            s.recorded_at = millis(&recording);
-            let r = read_json(&recording);
-            s.screens = r
-                .as_ref()
-                .and_then(|r| r["states"].as_object().map(|o| o.len()))
-                .unwrap_or(0);
-            s.timing = crate::timeline::summary(dir, r.as_ref());
-        }
+    // The take: the raw recording, else the demo's own copy of it (the build's; a shared demo has only that).
+    let raw = scenecast_build::build::raw_dir(dir)
+        .ok()
+        .map(|raw| raw.join("recording.json"))
+        .filter(|r| r.is_file());
+    s.raw = raw.is_some();
+    let recording = raw.unwrap_or_else(|| dir.join("recording.json"));
+    if recording.is_file() {
+        s.recorded = true;
+        s.recorded_at = millis(&recording);
+        let r = read_json(&recording);
+        s.screens = r
+            .as_ref()
+            .and_then(|r| r["states"].as_object().map(|o| o.len()))
+            .unwrap_or(0);
+        s.timing = crate::timeline::summary(dir, r.as_ref());
     }
     if let Some(m) = manifest {
         for scene in &m.graph.scenes {
@@ -731,6 +739,25 @@ mod tests {
         assert_eq!(lib.own_recording("b"), None, "no recording yet");
         point(&b, &raw);
         assert_eq!(lib.own_recording("a"), None, "B records there too");
+    }
+
+    #[test]
+    fn a_demo_with_the_builds_copy_of_its_take_and_no_raw_recording_is_recorded() {
+        let (tmp, lib) = lib();
+        let d = lib.create(&new_demo("Shared")).unwrap();
+        let file = d.dir.join("demo.json");
+        let mut cfg: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        cfg["raw"] = Value::from(tmp.path().join("no-raw").display().to_string());
+        fs::write(&file, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+        assert!(!lib.get("shared").unwrap().status.recorded);
+        fs::write(
+            d.dir.join("recording.json"),
+            r#"{"states":{"chat-start":{},"chat-01-ask":{}}}"#,
+        )
+        .unwrap();
+        let s = lib.get("shared").unwrap().status;
+        assert!(s.recorded && s.recorded_at.is_some() && !s.raw);
+        assert_eq!((s.screens, s.stage.as_str()), (2, "recorded"));
     }
 
     #[test]

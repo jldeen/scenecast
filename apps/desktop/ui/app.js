@@ -1426,7 +1426,8 @@ Object.assign(REGIONS, {
     const comparing = r.comparing || c?.checking === 'compare';
     const ev = J(d.id).fidelity?.events || [];
     const of = ev.find(e => e.event === 'compare-start')?.data?.items, sofar = ev.filter(e => e.event === 'compared').length;
-    const primary = comparing ? `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`
+    // Comparing and fixing need the recording's own pictures: a shared demo has its results, not the recording.
+    const primary = comparing || !d.status.raw ? `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`
       : r.differ || r.viewsDiffer ? `<button class="btn primary" data-action="review-fix" data-test="review-fix" ${fixing ? 'disabled' : ''}>Fix it for me ${I.arrow}</button>`
       : !r.compared ? `<button class="btn primary" data-action="review-compare" data-test="review-compare" ${fixing ? 'disabled' : ''}>Compare with the real product ${I.arrow}</button>`
       : `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`;
@@ -1443,7 +1444,7 @@ Object.assign(REGIONS, {
     // Compared before 0.5.3 (drawn headless): text can read about 1% different though it matches. One button checks it
     // again, drawn in Chrome or Edge as it was recorded.
     const all = [...r.beats.flatMap(b => b.screens), ...r.others];
-    const oldCheck = r.compared && !comparing && all.some(x => x.pass != null) && !all.some(x => x.realChecker)
+    const oldCheck = d.status.raw && r.compared && !comparing && all.some(x => x.pass != null) && !all.some(x => x.realChecker)
       ? `<p class="small muted" data-test="review-old-check">Checked by an older Scenecast, which draws text a little differently. <button class="link" data-action="review-recheck" data-test="review-recheck" ${fixing ? 'disabled' : ''}>Check again in Chrome</button></p>` : '';
     const sub = comparing ? `Comparing each screen with the real product${of ? `: ${sofar} of ${of}` : ''}\u2026 It\u2019s ready to present meanwhile.`
       : !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
@@ -1554,8 +1555,8 @@ Object.assign(REGIONS, {
 PANELS.build = async (panel, d) => {
   panel.innerHTML = `<div class="card"><h2>Build the replica</h2>
       <p class="muted">Turns the recording into the replica: every screen a real captured page. Secrets and personal data are scrubbed on the way; a password, key or token stops the build.</p>
-      <div class="row"><button class="btn primary" data-action="build" data-test="build" ${d.status.recorded ? '' : 'disabled'}>${d.status.built ? 'Build again' : 'Build'}</button>
-        ${d.status.recorded ? '' : '<span class="muted small">Record the demo first.</span>'}</div>
+      <div class="row"><button class="btn primary" data-action="build" data-test="build" ${d.status.raw ? '' : 'disabled'}>${d.status.built ? 'Build again' : 'Build'}</button>
+        ${d.status.raw ? '' : '<span class="muted small">Record the demo first.</span>'}</div>
       <div data-region="build" style="margin-top:12px"></div></div>
     <div class="card"><h2>Scrub report</h2><p class="muted">What was taken out of the replica before anyone sees it.</p><div data-region="scrub"></div></div>
     <div class="card"><h2>Checks</h2><p class="muted">The replica in a headless browser: each step landing where the recording did, presenter keys, focus points, menus and lists, the presenter guide, no errors and nothing fetched from outside. After a build, an edit or a new script, the checks for what changed run on their own (a few minutes at most). Every check, two identical runs and every zoom included, runs once: when you export.</p>

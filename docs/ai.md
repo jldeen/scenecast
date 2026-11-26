@@ -56,8 +56,9 @@ a catalog, a team, emails from a sender), goes under **Leave out** in `reset.md`
 browser, nothing in your tenant changes, and the review lists it under **Left out of your replica**. Once the demo is
 built, the finish: your script for the presenter guide with its Do lines in presenter keys, ⌥1–⌥9 on your beats, the
 focus points, and one page to look at (`.out/review/index.html`): every screen, the timings (how long each beat takes
-to say against the time your script gives it), and anything that needs you. One walkthrough works the same way
-(`scenecast ai plan --walkthrough recording.json`).
+to say against the time your script gives it), and anything that needs you. The beats are the plan's, the one the take
+ran: a beat of your script that isn't in it isn't in the guide or on a key, and each beat starts where the take was
+when it began. One walkthrough works the same way (`scenecast ai plan --walkthrough recording.json`).
 
 ## GitHub Copilot, through your own sign-in
 

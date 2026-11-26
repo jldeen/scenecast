@@ -23,19 +23,52 @@ export const MARK = '<!-- Made by Scenecast from your talk track and the plan. E
 // The element around words a Focus names: "the card around …", "the row around …".
 const AROUND = { card: 'section,article,[role=group],[role=article],[role=region],[role=dialog]', row: 'li,tr,[role=row],[role=listitem]', list: 'ul,ol,[role=list]', item: 'li,[role=listitem],[role=option]', button: 'button,[role=button],a', pane: 'aside,[role=complementary],[role=region]', section: 'section,[role=region]' };
 
-// Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins).
+// A plan step and a recorded step, by what they do: the take records the plan's app switches, typing, Enter, clicks
+// and keys, in order, but not every one (a click into a box to type in, a switch to the app it's on, a click that
+// changes nothing). A step is the take's next recorded one when that does the same: the same app, the same words
+// typed, a click on the control it names, the same key.
+const stepKind = s => s.kind === 'app' ? 'app' : s.kind === 'type' ? 'type' : s.kind === 'press' ? (s.key === 'Enter' ? 'enter' : 'key') : s.kind === 'click' ? 'click' : null;
+const pathKind = p => p.type ? 'type' : p.enter ? 'enter' : p.click ? 'click' : p.key ? 'key' : p.app ? 'app' : null;
+const bare = t => norm(String(t || '').replace(/[\u200B-\u200D\u2060\uFEFF]/g, ''));
+const sameStep = (s, p) => {
+  const k = stepKind(s);
+  if (!k || k !== pathKind(p)) return false;
+  if (k === 'app') return p.app === s.app;
+  if (k === 'type') return !s.value || bare(p.text) === bare(s.value);
+  if (k === 'key') return p.key === s.key;
+  if (k === 'click') { const a = bare(specName(p.click)), b = bare(s.target); return !a || !b || a.includes(b) || b.includes(a); }
+  return true;
+};
+
+// Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins). A step
+// lands on the screen the plan names when the recording has it, else on the one the take recorded for it (a plan
+// made from another recording names that recording's screens).
 export function beatStarts(plan, flow) {
   const b0 = (flow.beats || [])[0];
   if (!b0) return [];
+  const S = flow.states || {}, path = flow.path || [];
   const cur = { ...b0.states };
-  let active = b0.active;
+  let active = b0.active, at = 0;
+  const recorded = s => {
+    if (at >= path.length || !sameStep(s, path[at])) return null;
+    return path[at++].checkpoint;
+  };
   return plan.beats.map(b => {
     const first = b.steps.find(s => s.kind === 'app');
     const start = { active: first && b.steps.indexOf(first) === 0 ? first.app : active, states: { ...cur } };
-    for (const s of b.steps) { if (s.kind === 'app') active = s.app; if (s.lands && s.lands.screen && (flow.states || {})[s.lands.screen]) { cur[flow.states[s.lands.screen].app] = s.lands.screen; active = flow.states[s.lands.screen].app; } }
+    for (const s of b.steps) {
+      if (s.kind === 'app') active = s.app;
+      const took = recorded(s);
+      const screen = s.lands && S[s.lands.screen] ? s.lands.screen : S[took] ? took : null;
+      if (screen) { cur[S[screen].app] = screen; active = S[screen].app; }
+    }
     return start;
   });
 }
+
+// Her talk track's beat for each beat of the plan: by its title, else in order. The plan is what the take ran: a beat
+// she left out of it (or that the take couldn't do) isn't in it.
+export const trackBeats = (track, plan) => plan.beats.map((b, i) => track.beats.find(tb => norm(tb.title) === norm(b.title)) || track.beats[i] || null);
 
 // The plan's Focus lines as focus points (packages/player/app/focus.js): the words, the element around them, an arrow,
 // a step group to open first, or `via` for a screen one step on.
@@ -92,8 +125,9 @@ function presenterStep(s, flow, apps = []) {
 // Her script in the guide's format: beats with times, Do (presenter keys, ⌥F points), Say (her words).
 export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
   const md = [`# ${track.title || plan.title || 'Demo'}`, '', MARK, ''];
-  track.beats.forEach((tb, i) => {
-    const b = plan.beats[i] || { steps: [], lines: [] };
+  const tbs = trackBeats(track, plan);
+  plan.beats.forEach((b, i) => {
+    const tb = tbs[i] || { title: b.title, time: '', screen: '', stage: [], lines: (b.lines || []).map(l => ({ say: l.text })) };
     md.push(`## ${i + 1}. ${tb.title}${tb.time ? ` · ${tb.time}` : ''}`, '');
     const screen = tb.screen || '';
     if (screen || keys[i]) md.push(`*Screen:* ${screen || 'where the beat starts'}${keys[i] ? ` (**${keys[i]}**)` : ''}`, '');
@@ -223,11 +257,14 @@ export async function finish({ demo, packs, emit = () => {} }) {
   if (existsSync(src)) {
     const text = readFileSync(src, 'utf8'), name = (/^<!-- From: (.+?) -->/.exec(text) || [, 'source.md'])[1];
     const track = parseTalkTrack(text.replace(/^<!-- From: .+? -->\s*/, ''), name.replace(/\.docx$/i, '.md'));
-    slots = plan.beats.map((b, i) => (track.beats.find(tb => norm(tb.title) === norm(b.title)) || track.beats[i] || {}).time);
+    const tbs = trackBeats(track, plan);
+    slots = tbs.map(tb => (tb || {}).time);
     const starts = beatStarts(plan, flow);
-    // The beat keys: ⌥n starts her beat n where it starts (flow.editor.json; edits and other beats kept).
+    // The beat keys: ⌥n starts her beat n where it starts, named as her guide names it (flow.editor.json; edits kept).
+    // They're the show's beats: none after the plan's last (the recording's own beats, or a longer plan's from before).
     const ed = readEditorOverrides(demo.dir);
-    starts.slice(0, 9).forEach((st, i) => { ed.beats[String(i + 1)] = { active: st.active, states: st.states }; });
+    for (const n of Object.keys(ed.beats)) if (+n > starts.length) delete ed.beats[n];
+    starts.slice(0, 9).forEach((st, i) => { ed.beats[String(i + 1)] = { active: st.active, states: st.states, label: (tbs[i] || plan.beats[i]).title }; });
     writeJsonAtomic(join(demo.dir, EDITOR_JSON), { version: 1, ...ed });
     result.beats = Math.min(9, starts.length);
     const keys = starts.map((st, i) => i < 9 ? `⌥${i + 1}` : null);
