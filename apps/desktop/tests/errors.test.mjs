@@ -55,7 +55,7 @@ const KNOWN = [
   ['not opening https://github.com/login/device', 'cant-open-url'],
   ['can\u2019t show /Users/j/Documents/Scenecast/x: No such file', 'cant-open-file'],
   ['update: error sending request for url', 'update-check'],
-  ['Node.js 20 or later is needed (https://nodejs.org); `node` was not found', 'node-missing'],
+  ['Node.js 22 or later is needed (https://nodejs.org); `node` was not found', 'node-missing'],
   ['ENOSPC: no space left on device, write', 'disk-full'],
   ['EACCES: permission denied, open /x', 'no-permission'],
   ['the engine\u2019s build stopped with exit code 1', 'step-stopped'],
