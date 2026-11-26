@@ -260,7 +260,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   The controls that are it or sit inside it, and the nearest control around it, are never skipped that way, nor by a
   screen's cap or time: while any is left, the next one hovered is theirs. Their first tries don't count against the
   screen's budget (`auto.maxS`): the clicks after them get the time they had without them (Nov 25: Teams' 47
-  recorded hovers took 208 s on its start screen and left the rest of it out of time). Zoom, lists and drags have
+  recorded hovers took 208 s on its start screen and left the rest of it out of time). Zoom and lists run before
+  hovers and clicks (both save the screen again: a click audit once opened admin's notifications first, and the
+  list's save kept the bell without its count). Zoom, lists and drags have
   their own time, outside the budget (zoom: `auto.zoomMaxS`, 90 s), and a kind of screen's zoom, chips and drags count
   as done only once they've run, so a screen whose sweep stopped short leaves them to that kind's next screen. One that
   shows nothing, or whose controls couldn't be pointed at, or whose one control showed another card (a card left from

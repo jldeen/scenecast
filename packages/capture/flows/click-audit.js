@@ -249,6 +249,8 @@ if (ARGS.probeSend) {
   out.sendProbe = { empty: probe.empty && probe.empty.attrs, typed: probe.typed && probe.typed.attrs, boxText: probe.boxText };
 }
 await move(...NEUTRAL); await quiet(300, 1500);
+// Its mark off the last control it clicked (a later save of the screen must never carry it).
+await ev(() => document.querySelectorAll('[data-d1-ctl]').forEach(e => e.removeAttribute('data-d1-ctl'))).catch(() => {});
 if (ARGS.snapId && out.n) out.snap = (await H.snap(p, ARGS.snapId, { shot: false })).docs.slice(0, 3);
 out.frameUrl = f === p.mainFrame() ? null : f.url().split('?')[0];
 out.secs = Math.round((Date.now() - t0) / 1000);
