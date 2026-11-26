@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { findItem, nameFits, composer, searchBox, norm, groupPick } from './find.mjs';
+import { findItem, nameFits, composer, searchBox, norm, groupPick, timelineHead } from './find.mjs';
 import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
@@ -314,7 +314,24 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         let { el, o } = given ? { el: given, o: await controls(id) } : await locate(id, step.target);
         // A step group by its place among the screen's groups (groupIndex: the plan's), when its label changed.
         let group = null;
-        if (!given && Number.isInteger(step.groupIndex)) { const o2 = await controls(id); const g = groupPick(o2.items, step.target, step.groupIndex); if (g) { el = g; o = o2; group = g.name; } }
+        if (!given && Number.isInteger(step.groupIndex)) {
+          let o2 = await controls(id), g = groupPick(o2.items, step.target, step.groupIndex), head = null;
+          // None on the screen: today's answers fold their step groups under a timeline header ("Worked for 1m 36s").
+          // It's opened first (it only shows the steps), then the group is picked again.
+          if (!g && (head = timelineHead(o2.items))) {
+            const uh = await uncovered(id, head, head.name);
+            if (uh.ok) {
+              await send(id, 'click', { x: uh.el.x, y: uh.el.y }, 30, { ...hitOf(head, step, head.name), landed: uh.hit });
+              await settle(id, 60);
+              log(`${id}: opened "${head.name}" (the answer's timeline) to find "${step.target}"`);
+              o2 = await controls(id); g = groupPick(o2.items, step.target, step.groupIndex);
+            }
+          }
+          if (g) { el = g; o = o2; group = g.name; }
+          // A step group is never a near name ("Supply chain disruption" for "21 items complete, using … Supply chain
+          // disruption, expand" opened a skill preview, run 15).
+          else return { missing: true, why: `no step group #${step.groupIndex + 1} ("${step.target}") on this screen${head ? `, with "${head.name}" open` : ''}` };
+        }
         if (!el) return { missing: true, why: `no "${step.target}" on this screen` };
         const hit = hitOf(el, step);
         if (step.kind === 'hover') { await send(id, 'hover', { x: el.x, y: el.y }, 30, hit); await settle(id, 30); return { did: 'hovered', on: el.name, hit }; }

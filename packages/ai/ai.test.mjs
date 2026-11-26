@@ -361,3 +361,37 @@ test('recording, a click waits for the recorder; one it held back goes once more
   await wr.w.act('admin', { ...parseStep('Click "Supply chain disruption"'), writes: 'opens it · fixture:open' }, { write: true });
   assert.equal(wr.clicks.length, 1);
 });
+
+test("a step group folded under the answer's timeline: the header opened first; never a near name", async () => {
+  const { liveWalker } = await import('./live.mjs');
+  const make = ({ folded }) => {
+    let open = false;
+    const clicks = [];
+    const head = () => ({ role: 'button', name: 'Worked for 1m 36s', expanded: open, x: 700, y: 300 });
+    const groups = [{ role: 'button', name: '17 items complete, using Caldova IQ, Supply chain disruption, expand', expanded: false, x: 700, y: 340 },
+      { role: 'button', name: '5 items complete, using Supply chain disruption, Fabric IQ, expand', expanded: false, x: 700, y: 380 }];
+    const near = { role: 'button', name: 'Supply chain disruption', x: 1600, y: 125 };
+    const items = () => [near, ...(folded ? [head()] : []), ...(open ? groups : [])];
+    const cmd = async (op, a) => {
+      if (op === 'observe') return { url: 'https://copilot.example.test/task', vw: 1920, vh: 1080, items: items() };
+      if (op === 'js') {
+        const m = /const lx = (-?[\d.]+) - ox, ly = (-?[\d.]+) - oy/.exec(a.code || '');
+        if (!m) return true;
+        const it = items().find(i => i.x === +m[1] && i.y === +m[2]);
+        return it ? { role: it.role, name: it.name, chain: [{ role: it.role, name: it.name }], frame: 'page' } : null;
+      }
+      if (op === 'click') { const it = items().find(i => i.x === a.x && i.y === a.y); clicks.push(it && it.name); if (it && it.name === head().name) open = true; return {}; }
+      return {};
+    };
+    return { w: liveWalker({ demo: { cfg: { apps: [{ id: 'copilot', url: 'https://copilot.example.test/' }] } }, cmd }), clicks };
+  };
+  const step = { ...parseStep('Click "6 items complete, using Supply chain disruption, Fabric IQ, expand"'), groupIndex: 1 };
+  const a = make({ folded: true });
+  const r = await a.w.act('copilot', step);
+  assert.deepEqual(a.clicks, ['Worked for 1m 36s', '5 items complete, using Supply chain disruption, Fabric IQ, expand']);
+  assert.equal(r.did, 'clicked');
+  const b = make({ folded: false });
+  const r2 = await b.w.act('copilot', step);
+  assert.equal(r2.missing, true);
+  assert.deepEqual(b.clicks, []);
+});

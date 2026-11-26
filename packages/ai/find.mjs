@@ -32,6 +32,13 @@ export function findItem(items, want, kind) {
 // plugin lists change with every answer. The one by that exact name, else the index-th group on the screen, top to
 // bottom (the plan's index-th group label in its beat). → the item, or null.
 export const GROUP_LABEL = /^\d+ (?:items?|background tasks?) complete\b/i;
+// An answer's timeline header, folded ("Worked for 1m 36s"): today's Copilot keeps an answer's step groups under it.
+// The newest (lowest on the page) that's closed, or null.
+export const TIMELINE_HEAD = /^(?:worked|background task ran) for \d/i;
+export function timelineHead(items) {
+  return (items || []).filter(it => !it.disabled && it.expanded === false && TIMELINE_HEAD.test(String(it.name || '').trim()))
+    .sort((a, b) => (b.y - a.y) || (b.x - a.x))[0] || null;
+}
 export function groupPick(items, want, index) {
   const w = norm(want);
   const exact = (items || []).find(it => norm(it.name) === w);

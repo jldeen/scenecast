@@ -200,6 +200,10 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   leftover, undone by its group's Names or, under a name no run recorded, the reset fails there (add it to the
   Names). The checks after a run look for what the run named, too. The checks after a run load each app again at its start (a real page load, not only a route) and
   prove it's there before reading its lines.
+- **Step groups by their place, under a folded timeline.** A plan's step-group click ("21 items complete, using …")
+  takes the screen's group in the same place when its count or plugins changed. Today's Copilot folds an answer's
+  steps under a timeline header ("Worked for 1m 36s"): with no group on the screen, that header is opened first (it
+  only shows the steps). A step group is never a near name: with none, the step stops as missing.
 - **Waits for the recorder before each click and key.** While it captures a screen, the recorder holds a click's or a
   key's press back from the page, so a click would land bare, with no pointerdown. An unattended
   pass waits until the recorder is settled right before each one; a click it held back all the same goes once more,
