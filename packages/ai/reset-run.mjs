@@ -263,7 +263,12 @@ export async function checkLines({ demo, cmd, walker, lines, plan, packs = null,
       return { why: `on the way there, ${formatStep(s)}: ${r.why || "it didn't land"}` };
     }
     await walker.quiet(app, 800, 15000);
-    if (route.lands && !norm(await walker.words(app).catch(() => '')).includes(norm(route.lands))) return { why: `"${route.lands}" isn't on the screen: not the page this check reads` };
+    // Its page's words, given a little time: a page that draws a count late (Copilot's "Added (3)").
+    if (route.lands) {
+      let on = false;
+      for (const t0 = Date.now(); !(on = norm(await walker.words(app).catch(() => '')).includes(norm(route.lands))) && Date.now() - t0 < 15000;) await sleep(1500);
+      if (!on) return { why: `"${route.lands}" isn't on the screen: not the page this check reads` };
+    }
     const sc = await claimScreen(walker, cmd, appTab(demo, app), app);
     const picture = shot ? await shot(app, `check-${++n}-${app}`).catch(() => null) : null;
     return { sc, picture };
