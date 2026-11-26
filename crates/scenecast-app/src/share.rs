@@ -63,6 +63,18 @@ fn files(root: &Path) -> std::io::Result<Vec<(String, PathBuf)>> {
             }
         }
     }
+    // The library shows the newer of the two checklists; the file doesn't keep when each ran, so it carries only that one.
+    let modified = |f: &str| fs::metadata(root.join(f)).and_then(|m| m.modified()).ok();
+    if let (Some(whole), Some(quick)) =
+        (modified(".out/fidelity.json"), modified(".out/quick.json"))
+    {
+        let older = if quick > whole {
+            ".out/fidelity.json"
+        } else {
+            ".out/quick.json"
+        };
+        out.retain(|(rel, _)| rel != older);
+    }
     out.sort();
     Ok(out)
 }
@@ -211,9 +223,22 @@ mod tests {
         .unwrap();
         fs::write(
             d.dir.join(".out/quick.json"),
-            r#"{"pass":true,"items":[{"id":"links","status":"pass"}]}"#,
+            r#"{"pass":false,"items":[{"id":"links","status":"fail"}]}"#,
         )
         .unwrap();
+        // The whole checklist ran after the quick one (before sharing): it's the one that goes.
+        fs::write(
+            d.dir.join(".out/fidelity.json"),
+            r#"{"pass":true,"items":[{"id":"links","status":"pass"},{"id":"notes","status":"pass"}]}"#,
+        )
+        .unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(d.dir.join(".out/fidelity.json"))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
         fs::write(d.dir.join("ai.json"), r#"{"goal":"private"}"#).unwrap();
         fs::create_dir_all(d.dir.join("presenter")).unwrap();
         fs::write(d.dir.join("presenter/notes.json"), "{}").unwrap();
@@ -229,7 +254,8 @@ mod tests {
         assert!(names.contains(&"scenecast.json".to_owned()));
         assert!(names.contains(&"demo/presenter/notes.json".to_owned()));
         assert!(names.contains(&"demo/.out/fidelity/report.json".to_owned()));
-        assert!(names.contains(&"demo/.out/quick.json".to_owned()));
+        assert!(names.contains(&"demo/.out/fidelity.json".to_owned()));
+        assert!(!names.contains(&"demo/.out/quick.json".to_owned()));
         assert!(
             !names
                 .iter()
@@ -259,7 +285,7 @@ mod tests {
             a.status
                 .checks
                 .as_ref()
-                .is_some_and(|c| c.pass && c.passed == 1)
+                .is_some_and(|c| c.pass && c.passed == 2 && !c.quick)
         );
         assert!(!theirs.root.read_dir().unwrap().any(|e| {
             e.unwrap()
