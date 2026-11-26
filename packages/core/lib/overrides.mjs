@@ -2,7 +2,8 @@
 // is fine too):
 //   focus.json         { version: 1, script, points: [focus point…] }   points from `scenecast script` (source: 'script'),
 //                      the editor's dots (source: 'dot') and script points moved in the editor (source: 'edited')
-//   flow.editor.json   { version: 1, edits: [{ replace: [a, b] }…], beats: { "<n>": { active, states: { app: state } } } }
+//   flow.editor.json   { version: 1, edits: [{ replace: [a, b] }…], beats: { "<n>": { active, states: { app: state }, label? } } }
+//                      (a beat with a label is one of the show's own beats, as the plan the take ran names them)
 // Both are read by the flow compiler (compile/flow.mjs) after flow.overrides.mjs, and served live (no build).
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -60,14 +61,18 @@ export function checkEditorOverrides(v) {
 }
 
 // The editor's edits go after the flow's own; its beat starts replace a beat's screens (a new beat after the last
-// takes the last beat's other screens).
+// takes the last beat's other screens). Named beats (the plan's) are the show's beats: the recording's after the last
+// of them go, so ⌥n never jumps to a screen the show doesn't have as a beat.
 export function applyEditorOverrides(flow, o) {
   if (o.edits.length) flow.edits = [...(flow.edits || []), ...o.edits.map(e => ({ replace: [e.replace[0], e.replace[1]] }))];
+  let last = 0, named = false;
   for (const [n, b] of Object.entries(o.beats).sort((a, b) => +a[0] - +b[0])) {
     const k = +n, beats = flow.beats || (flow.beats = []);
     if (k > beats.length) continue;
     const prev = beats[k] || { label: `${k} ${b.active}`, states: { ...(beats[k - 1] || beats[0] || { states: {} }).states } };
-    beats[k] = { ...prev, active: b.active, states: { ...prev.states, ...b.states } };
+    beats[k] = { ...prev, active: b.active, states: { ...prev.states, ...b.states }, ...(b.label ? { label: `${k} ${b.label}` } : {}) };
+    last = k; named = named || !!b.label;
   }
+  if (named && flow.beats.length > last + 1) flow.beats.length = last + 1;
   return flow;
 }

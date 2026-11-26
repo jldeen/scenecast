@@ -615,6 +615,19 @@ test('each beat of a take starts where the take was when it began, and the guide
   assert.deepEqual(notes.beats.slice(1, -1).map(b => shots[b.shot]), ['chat-home', 'chat-answer', 'admin-home']);
 });
 
+test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 start them, none of the recording\'s after them', async () => {
+  const { demo, flow, home } = takeDemo();
+  // Her talk track has a beat this take left out; the beat keys from a longer plan before are still there.
+  writeFileSync(join(demo.dir, 'source.md'), '# Delay demo\n\n## 1. The question · ~10s\n\n> Our supplier moved the ship date.\n\n## 2. Save it · ~20s\n\n> I save it.\n\n## 3. A part this take left out · ~30s\n\n> Not in this take.\n\n## 4. Certify it · ~1m15s\n\n> I certify it.\n');
+  writeFileSync(join(demo.dir, 'flow.editor.json'), JSON.stringify({ version: 1, edits: [], beats: { 4: { active: 'admin', states: home } } }));
+  await finish({ demo, packs: null });
+  const script = readFileSync(join(demo.dir, 'script.md'), 'utf8');
+  assert.deepEqual(guideParse(script, 'script.md').beats.map(b => [b.title, b.start, b.end]), [['The question', 0, 10], ['Save it', 10, 30], ['Certify it', 30, 105]]);
+  const ed = readEditorOverrides(demo.dir);
+  assert.deepEqual(Object.entries(ed.beats).map(([n, b]) => [n, b.label]), [['1', 'The question'], ['2', 'Save it'], ['3', 'Certify it']]);
+  assert.deepEqual(applyEditorOverrides(structuredClone(flow), ed).beats.map(b => b.label), ['0 Reset', '1 The question', '2 Save it', '3 Certify it']);
+});
+
 test('proofs on today\'s product: kept, new, today only, behind a write, missed; never a greeting, a passing tip or a page the guard broke', () => {
   // A shop, recorded; then a read-only walk of it today: its catalog's heading, an item's heading and a link renamed,
   // another greeting on the home screen, and a tip that changes between the walk's two reads.

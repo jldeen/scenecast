@@ -190,7 +190,7 @@ export default function editor(api) {
       const prev = beats[n] || { label: `${n} ${c.id}: ${c.state}`, states: { ...beats[n - 1].states } };
       beats[n] = { ...prev, active: c.id, states: { ...prev.states, [c.id]: c.state } };
       const o = st.overrides.beats[n] || { states: {} };
-      st.overrides.beats[n] = { active: c.id, states: { ...o.states, [c.id]: c.state } };
+      st.overrides.beats[n] = { ...o, active: c.id, states: { ...o.states, [c.id]: c.state } };
     });
   }
 

@@ -299,6 +299,9 @@ run-through, keeping the order within a screen (`packages/player/app/focus-order
   "beats": { "2": { "active": "chat", "states": { "chat": "chat-02" } } } }  // where ⌥2 starts (a new beat may follow the last)
 ```
 
+A beat with a `label` (the finish writes the plan's beats so) is named by it, and named beats are the show's: the
+recording's beats after the last of them go, so ⌥n never jumps to a screen that isn't one of its beats.
+
 ### Serve-time tweaks and `data/build.json`
 
 `replica serve` re-reads `flow.overrides.mjs` (and the demo's other `.mjs`/`.json`) on every reload and recompiles

@@ -59,6 +59,10 @@ export function beatStarts(plan, flow) {
   });
 }
 
+// Her talk track's beat for each beat of the plan: by its title, else in order. The plan is what the take ran: a beat
+// she left out of it (or that the take couldn't do) isn't in it.
+export const trackBeats = (track, plan) => plan.beats.map((b, i) => track.beats.find(tb => norm(tb.title) === norm(b.title)) || track.beats[i] || null);
+
 // The plan's Focus lines as focus points (packages/player/app/focus.js): the words, the element around them, an arrow,
 // a step group to open first, or `via` for a screen one step on.
 export function pointsFromPlan(plan, flow) {
@@ -114,8 +118,9 @@ function presenterStep(s, flow, apps = []) {
 // Her script in the guide's format: beats with times, Do (presenter keys, ⌥F points), Say (her words).
 export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
   const md = [`# ${track.title || plan.title || 'Demo'}`, '', MARK, ''];
-  track.beats.forEach((tb, i) => {
-    const b = plan.beats[i] || { steps: [], lines: [] };
+  const tbs = trackBeats(track, plan);
+  plan.beats.forEach((b, i) => {
+    const tb = tbs[i] || { title: b.title, time: '', screen: '', stage: [], lines: (b.lines || []).map(l => ({ say: l.text })) };
     md.push(`## ${i + 1}. ${tb.title}${tb.time ? ` · ${tb.time}` : ''}`, '');
     const screen = tb.screen || '';
     if (screen || keys[i]) md.push(`*Screen:* ${screen || 'where the beat starts'}${keys[i] ? ` (**${keys[i]}**)` : ''}`, '');
@@ -245,11 +250,14 @@ export async function finish({ demo, packs, emit = () => {} }) {
   if (existsSync(src)) {
     const text = readFileSync(src, 'utf8'), name = (/^<!-- From: (.+?) -->/.exec(text) || [, 'source.md'])[1];
     const track = parseTalkTrack(text.replace(/^<!-- From: .+? -->\s*/, ''), name.replace(/\.docx$/i, '.md'));
-    slots = plan.beats.map((b, i) => (track.beats.find(tb => norm(tb.title) === norm(b.title)) || track.beats[i] || {}).time);
+    const tbs = trackBeats(track, plan);
+    slots = tbs.map(tb => (tb || {}).time);
     const starts = beatStarts(plan, flow);
-    // The beat keys: ⌥n starts her beat n where it starts (flow.editor.json; edits and other beats kept).
+    // The beat keys: ⌥n starts her beat n where it starts, named as her guide names it (flow.editor.json; edits kept).
+    // They're the show's beats: none after the plan's last (the recording's own beats, or a longer plan's from before).
     const ed = readEditorOverrides(demo.dir);
-    starts.slice(0, 9).forEach((st, i) => { ed.beats[String(i + 1)] = { active: st.active, states: st.states }; });
+    for (const n of Object.keys(ed.beats)) if (+n > starts.length) delete ed.beats[n];
+    starts.slice(0, 9).forEach((st, i) => { ed.beats[String(i + 1)] = { active: st.active, states: st.states, label: (tbs[i] || plan.beats[i]).title }; });
     writeJsonAtomic(join(demo.dir, EDITOR_JSON), { version: 1, ...ed });
     result.beats = Math.min(9, starts.length);
     const keys = starts.map((st, i) => i < 9 ? `⌥${i + 1}` : null);
