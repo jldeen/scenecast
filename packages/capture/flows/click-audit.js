@@ -175,7 +175,15 @@ for (const c of controls) {
     // same element, or one drawn in its place that says it's on: aria-pressed or aria-expanded true, or "toggle" in its
     // test id, as Teams' Find in channel), the close button of what it opened, then a control that says it opens or
     // closes something.
-    if (!restore && !c.noEscape) { await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await left())) restore = 'escape'; }
+    if (!restore && !c.noEscape) {
+      await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await left())) restore = 'escape';
+      // Once more, from inside what it opened (a search box clears on the first Escape and closes on the second; a
+      // dialog that didn't take focus closes once it has it: Teams' Find in channel, its account menu).
+      if (!restore) {
+        await ev(() => { const o = [...document.querySelectorAll('[role=dialog],[role=menu],[aria-modal=true],[role=search]')].filter(e => { const b = e.getBoundingClientRect(); return b.width > 2 && b.height > 2; }).pop(); const t = o && (o.querySelector('input,textarea,[tabindex]:not([tabindex="-1"]),button') || o); if (t && t.focus && !(o && o.contains(document.activeElement))) t.focus(); }).catch(() => {});
+        await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await left())) restore = 'escape';
+      }
+    }
     if (!restore) {
       let again = await ev(() => { const e = window.__d1h.ctl; if (!e || !e.isConnected) return null; const b = e.getBoundingClientRect(); return b.width > 2 ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null; });
       if (!again) {
@@ -192,6 +200,9 @@ for (const c of controls) {
       await move(cand.x, cand.y, 3); await sleep(100); await p.mouse.click(off.x + cand.x, off.y + cand.y); await sleep(200); await move(...NEUTRAL); await settle(2500);
       if (!(await left())) { restore = 'reopen'; reopen = cand.spec; }
     }
+    // A click on the empty spot the sweep rests on, as a person dismisses a popup. Kept as 'escape' (the replica
+    // closes it on Escape or a click elsewhere; the build and player know no other way for it), marked dismissed.
+    if (!restore) { await move(...NEUTRAL, 3); await sleep(100); await p.mouse.click(off.x + NEUTRAL[0], off.y + NEUTRAL[1]); await sleep(200); await settle(2000); if (!(await left())) { restore = 'escape'; r.dismissed = true; } }
     // Stuck: what stayed (for the record), then a reload as the last resort.
     if (!restore) { restore = 'stuck'; r.stuckOps = await vis(); r.stayed = await ev(() => window.__d1h.visibleOpsList().slice(0, 6).map(x => x.slice(0, 160))).catch(() => null); await backToRest(); }
     await H.post('/hover', { page: 'click-' + ARGS.page, n: out.n, kind: 'click', cand: { text: c.name }, ctl, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, restore, reopen, revertMs, clickMs: r.ms, auto: c.auto || null, shot, css, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });

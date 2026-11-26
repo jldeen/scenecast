@@ -301,7 +301,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   title at the same address. Before it reloads at all, it closes what a click opened in order: the recorded way
   (Escape, or the control again), the control again (the same element, or one drawn in its place that says it's on:
   `aria-pressed`/`aria-expanded` true, or "toggle" in its test id, as Teams' Find in channel), the close button of what
-  it opened (Close, Dismiss, Cancel alone, an ×), then a control that says it opens or closes something. Closed means
+  it opened (Close, Dismiss, Cancel alone, an ×), then a control that says it opens or closes something, then a click
+  on the empty spot the sweep rests on (kept as Escape, marked `dismissed`); Escape goes twice, the second time from
+  inside what opened (a search box clears first; a dialog that didn't take focus). Closed means
   nothing the click opened is left: no part added or removed, no state attribute (expanded, pressed, selected, hidden,
   open…) still changed; an app's own churn on other attributes (Teams' rotating search placeholder, generated ids, a
   status in a name) doesn't count, since put-back checks the screen after the kind. After a

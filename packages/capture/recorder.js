@@ -926,7 +926,7 @@ async function recSide(A, c) {
       const out = await SIDE_CLICKS({ ...c, p, page, snapId: 'hov-click-' + page, skip: c.skip || REC.opts.groups.button });
       let frame = null;
       if (out.frameUrl) { const f = p.frames().find(x => x.url().split('?')[0] === out.frameUrl); if (f) frame = await recFrameKey(p, f); }
-      const results = out.results.map(r => ({ name: r.name, n: r.n, restore: r.restore, ops: r.ops, portals: r.portals, lazyCss: r.lazyCss, skip: r.skip, effect: r.effect, navigated: r.navigated, ...(r.stayed ? { stayed: r.stayed } : {}), ...(r.again ? { again: true } : {}), error: r.error }));
+      const results = out.results.map(r => ({ name: r.name, n: r.n, restore: r.restore, ops: r.ops, portals: r.portals, lazyCss: r.lazyCss, skip: r.skip, effect: r.effect, navigated: r.navigated, ...(r.stayed ? { stayed: r.stayed } : {}), ...(r.again ? { again: true } : {}), ...(r.dismissed ? { dismissed: true } : {}), error: r.error }));
       // Every control tried is known now (another screen of the app won't try it again); a page only if one opened.
       const seen = recSeen('clicks', A.id + (out.frameUrl || '')); for (const r of out.results) if (!r.floor) seen.add(r.name);
       const F = recFloor();
