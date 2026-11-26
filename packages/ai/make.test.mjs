@@ -632,6 +632,14 @@ test('each beat of a take starts where the take was when it began, and the guide
   assert.deepEqual(notes.beats.slice(1, -1).map(b => shots[b.shot]), ['chat-home', 'chat-answer', 'admin-home']);
 });
 
+test('a recorded click with no name, at the end of a beat, isn\'t the next beat\'s click', () => {
+  const { flow, plan } = takeDemo();
+  // A click on a test id only, between the answer and the save: the save's step mustn't take it.
+  const i = flow.path.findIndex(p => p.click);
+  flow.path.splice(i, 0, { click: { sel: '[data-testid="noop"]' }, checkpoint: 'chat-answer' });
+  assert.equal(beatStarts(plan, flow)[2].states.chat, 'chat-saved');
+});
+
 test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 start them, none of the recording\'s after them', async () => {
   const { demo, flow, home } = takeDemo();
   // Her talk track has a beat this take left out; the beat keys from a longer plan before are still there.

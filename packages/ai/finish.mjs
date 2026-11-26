@@ -36,7 +36,8 @@ const sameStep = (s, p) => {
   if (k === 'app') return p.app === s.app;
   if (k === 'type') return !s.value || bare(p.text) === bare(s.value);
   if (k === 'key') return p.key === s.key;
-  if (k === 'click') { const a = bare(specName(p.click)), b = bare(s.target); return !a || !b || a.includes(b) || b.includes(a); }
+  // A recorded click with no name (a test id only) isn't the one a plan step names.
+  if (k === 'click') { const a = bare(specName(p.click)), b = bare(s.target); return !!a && (!b || a.includes(b) || b.includes(a)); }
   return true;
 };
 
@@ -50,6 +51,9 @@ export function beatStarts(plan, flow) {
   const cur = { ...b0.states };
   let active = b0.active, at = 0;
   const recorded = s => {
+    // A recorded click with no name (a test id only) that no plan step can be matched to is passed over when the
+    // take's next step is this one.
+    if (at + 1 < path.length && pathKind(path[at]) === 'click' && !bare(specName(path[at].click)) && sameStep(s, path[at + 1])) at++;
     if (at >= path.length || !sameStep(s, path[at])) return null;
     return path[at++].checkpoint;
   };
