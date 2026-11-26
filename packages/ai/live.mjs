@@ -284,7 +284,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   const refuse = (step, w) => { throw Object.assign(new Error(`a walker doesn't write: ${formatStep(step)}: ${w.why}`), { code: 'WRITE', write: w }); };
 
   let lastField = null;
-  async function act(id, step, { write = false, el: given = null } = {}) {
+  async function act(id, step, { write = false, el: given = null, sent = null } = {}) {
     switch (step.kind) {
       case 'app': { await cmd('front', { tab: tab(id) }, 30); await quiet(id, 500, 6000); return { did: 'switched' }; }
       case 'wait': await settle(id, 300); if (!recording) await quiet(id, 1500, 180000); return { did: 'waited' };
@@ -310,6 +310,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const before = await actions();
         await send(id, 'click', { x: u.el.x, y: u.el.y }, 60, { ...hit, landed: u.hit });
         await seen(before);
+        if (sent) sent();
         await settle(id, 120);
         return { did: 'clicked', on: el.name, hit, wrote: !!w };
       }
@@ -343,6 +344,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const before = await actions();
         await send(id, 'press', { key: step.key }, 30, { for: formatStep(step), on: field ? field.name : null });
         if (/^(Enter|Escape)$/.test(step.key)) await seen(before);
+        if (sent) sent();
         if (step.key === 'Enter') { lastField = null; delete typedIn[id]; }
         await settle(id, 120);
         return { did: 'pressed', key: step.key, wrote: !!w };
@@ -477,9 +479,24 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     }
     const before = await controls(id).catch(() => ({}));
     let id1 = null;
+    const openedAt = Date.now();
     try { const o = await cmd('capOpen', { hosts: hosts || [...hostsOf(id)], entries: opensOf(id, step, lastField) }, 30); if (o.refused) return { missing: true, why: `the guard won't open: ${o.refused}` }; id1 = o.id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }
-    let r;
-    try { r = await act(id, step, { write: true, el: target }); } finally { await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
+    // The guard closes again once the write's own call has gone out (2 s on, for a retry or a companion call), at most
+    // 15 s after its control was used: never for as long as the recorder settles on the screen after it (an answer can
+    // take minutes, and the app's other calls in that while aren't the write's).
+    const closeSoon = async () => {
+      const t0 = Date.now();
+      let out = null;
+      while (Date.now() - t0 < 15000) {
+        const l = await cmd('capLog', { since: 1e9 }, 30).catch(() => null);
+        if (!out && l && (l.passed || []).some(p => p.by === 'a planned write' && Date.parse(p.at) >= openedAt)) out = Date.now();
+        if (out && Date.now() - out >= 2000) break;
+        await sleep(400);
+      }
+      await cmd('capClose', { id: id1 }, 30).catch(() => {});
+    };
+    let r, closing = null;
+    try { r = await act(id, step, { write: true, el: target, sent: () => { if (id1 && !closing) closing = closeSoon(); } }); } finally { if (closing) await closing; await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
     if (r.missing || r.needsYou) return r;
     const after = await controls(id).catch(() => ({}));
     // What it made, by the ids in its address: the path's, and a hash route's (Cowork's /cowork/#/task/<id>, its id

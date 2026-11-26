@@ -136,7 +136,8 @@ function writeStepper({ walker, approval, results = {}, did, apiUndo = null }) {
     if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
     if (filled.kind === 'manual') return { ok: false, why: `${formatStep(filled)}: a person's step, and nobody's there` };
     if (filled.kind === 'free') return { ok: false, why: /^undo with the app pack/i.test(filled.text) ? `${filled.text}: the pack's API undo isn't run by the capture pass yet` : `"${filled.text}" isn't a step it can do on its own` };
-    const r = await walker.write(app, filled);
+    // Going to an app, waiting, scrolling or pointing changes nothing: run as a step, the guard holding as it does.
+    const r = /^(app|wait|scroll|hover)$/.test(filled.kind) && walker.act ? await walker.act(app, filled) : await walker.write(app, filled);
     if (r.missing) return { ok: false, missing: true, why: r.why };
     if (r.needsYou) return { ok: false, why: r.why };
     did.push(`${app}: ${formatStep(filled)}`);
