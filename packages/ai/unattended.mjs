@@ -385,6 +385,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const r = await leaveOn(cmd, lo, { shots: stops }).catch(e => ({ on: false, refused: e.message }));
       if (!r.on) { run.stopped = { kind: 'leave-out', why: `Leave out couldn't start: ${r.refused || 'the capture browser said no'}` }; emit({ event: 'stopped', ...run.stopped }); break main; }
     }
+    // Her own presence as the recording shows it, before the apps open again (the reset, the start screens).
+    { const pr = await presenceOn({ demo, cmd, packs, inPlan }); if (pr) run.presence = { on: !!pr.on, ...(pr.rules ? { rules: pr.rules } : {}), ...(pr.who ? { who: pr.who } : {}), ...(pr.error ? { error: pr.error } : {}) }; }
     // The apps that need it opened first, before anything runs: each with a Leave out line (what it shows comes
     // filtered from here on, and its filters work) and each with a start service (it answers). Either failing stops
     // the run here: the tenant untouched, nothing to put back.
@@ -697,6 +699,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (run.ownStatus && !Object.keys(run.ownStatus.beat1).length) delete run.ownStatus.beat1;
       await cmd('capOwnStatus', { apps: {} }, 30).catch(() => {});
     }
+    if (run.presence) { const l = await presenceOff(cmd); if (l) run.presence.log = l; }
     if (run.counts) {
       const r = await cmd('capCounts', {}, 30).catch(() => null);
       if (r && r.on) run.counts.waits = r.log || [];
@@ -859,6 +862,18 @@ async function guardOff(cmd, hosts, appOf = () => null) {
   return out;
 }
 
+// Her own presence (capPresence), for the plan's apps whose pack names where it comes from: her entry in those answers
+// reads as the status the recording shows, so nobody needs to be at the computer. The own-status gate stays the
+// backstop. → capPresence's answer, or null when no app has it
+export async function presenceOn({ demo, cmd, packs, inPlan, recorded }) {
+  const list = (packs && packs.presenceFor ? packs.presenceFor(demo.cfg) : []).filter(x => inPlan.has(x.app));
+  if (!list.length) return null;
+  const own = ownStatusApps(demo, packs, inPlan, recorded), apps = {};
+  for (const x of list) { const o = own.find(y => y.app === x.app), status = o && o.expect[0]; if (status) apps[x.app] = { tab: appTab(demo, x.app), status, rules: x.rules }; }
+  if (!Object.keys(apps).length) return null;
+  return cmd('capPresence', { apps }, 30).catch(e => ({ on: false, error: e.message }));
+}
+export const presenceOff = async cmd => { const r = await cmd('capPresence', {}, 30).catch(() => null); await cmd('capPresence', { apps: {} }, 30).catch(() => {}); return r && r.on ? r.log : null; };
 // Her own status on each app's tab now, for the plan's apps whose pack names its control: noted (a walk, a check),
 // never a stop. → [{ app, status, expect, ok }]
 export async function ownStatusNote({ demo, cmd, packs, plan, recorded }) {
@@ -909,9 +924,11 @@ export async function checkLive({ demo, emit = () => {}, cmd: viaCmd, packs }) {
   const g = await guardOn(demo, cmd, packs);
   const t0 = Date.now(), shots = join(aiDir(demo), 'check');
   rmSync(shots, { recursive: true, force: true });
-  let out = null;
+  let out = null, presence = null;
   try {
     if (lo.rules.length) { const r = await leaveOn(cmd, lo, { shots }).catch(e => ({ on: false, refused: e.message })); if (!r.on) throw new Error(`Leave out couldn't start: ${r.refused || 'the capture browser said no'}`); }
+    // Her own presence as a run has it: the check reads her status as a run would see it.
+    presence = await presenceOn({ demo, cmd, packs, inPlan: planApps(plan, demo.cfg.apps.map(a => a.id)) });
     emit({ event: 'stage', name: 'check', label: 'Checking the demo starts as it should' });
     const w = liveWalker({ demo, cmd, packs, log: text => emit({ event: 'note', text }) });
     out = (await liveCheck({ demo, cmd, w, packs, plan, shots })) || { pass: 0, wrong: 0, cant: 0, lines: [] };
@@ -921,6 +938,7 @@ export async function checkLive({ demo, emit = () => {}, cmd: viaCmd, packs }) {
     if (nt.length) out.notices = nt;
     out.inputs = w.inputs();
   } finally {
+    if (presence) { const l = await presenceOff(cmd); out = { ...(out || {}), presence: { on: !!presence.on, ...(presence.who ? { who: presence.who } : {}), ...(l ? { log: l } : {}) } }; }
     if (lo.rules.length) await cmd('capLeaveOut', { rules: [] }, 60).catch(() => {});
     const off = await guardOff(cmd, g.hosts, senderApps(demo.cfg, packs));
     out = { ...(out || {}), secs: +((Date.now() - t0) / 1000).toFixed(1), guard: { held: (off.held || []).length, passed: (off.passed || []).length } };
@@ -952,6 +970,8 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     const r = await leaveOn(cmd, lo, { shots }).catch(e => ({ on: false, refused: e.message }));
     if (!r.on) { await guardOff(cmd, g.hosts); throw new Error(`Leave out couldn't start: ${r.refused || 'the capture browser said no'}`); }
   }
+  // Her own presence as a run has it.
+  const presence = await presenceOn({ demo, cmd, packs, inPlan });
   const leaveChecks = [];
   const { leaveHits } = lo.rules.length ? await import('./leave-check.mjs') : {};
   // Every screen it lands on, and each app's start screen, as it is today (local only, under .out): for re-grounding a
@@ -1084,6 +1104,7 @@ export async function walkLive({ demo, emit = () => {}, cmd: viaCmd, packs, plan
     const nets = stepNets(walked.map(s => ({ from: s.window.from, app: s.app })), netAll, new Date().toISOString());
     walked.forEach((s, i) => { if (nets[i].length) s.net = nets[i]; });
     if (walk) walk.starts = seenAt.starts || [];
+    if (presence) await presenceOff(cmd);
     let leaveOut;
     if (lo.rules.length) {
       const l = await leaveLog(cmd);

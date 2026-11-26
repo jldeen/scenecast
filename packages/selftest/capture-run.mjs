@@ -83,7 +83,7 @@ mkdirSync(join(tmp, 'packs', 'fixture-tasks'), { recursive: true });
 // store (Teams). taskLook: new-task's check as a machine reads it (a look, its page's words); find: its API undo finds
 // the script's own tasks by name when no run recorded them. ownStatus ({ waitS }): the page's "Me" button names your
 // status, as Teams' avatar does.
-const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false, taskLook = false, find = false, ownStatus = null, notices = null } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
+const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHeld = null, taskCheck = false, filters = false, taskLook = false, find = false, ownStatus = null, notices = null, presence = false } = {}) => writeFileSync(join(tmp, 'packs', 'fixture-tasks', 'pack.json'), JSON.stringify({
   kind: 'stuntdouble-app-pack', version: 1, id: 'fixture-tasks', title: 'Fixture Tasks', names: ['Tasks'], match: [HOST],
   writes: [
     { id: 'new-task', what: 'Adds a task', on: { kind: 'press', key: 'Enter', field: 'New task' }, makes: 'task', undo: { steps: ['Click "Delete {typed}"'], ...(apiPath ? { api: { use: 'tasks', method: 'DELETE', path: apiPath } } : {}), ...(find ? { find: { use: 'tasks', path: '/api/tasks', list: 'tasks', name: 'name', id: 'id', as: 'taskId', by: 'typed' } } : {}) }, ...(taskCheck ? { check: { api: { use: 'tasks', method: 'GET', path: '/api/tasks', made: 200 } } } : {}), ...(taskLook ? { check: { open: `http://${HOST}/`, look: { absent: '{typed}' }, lands: 'Tasks', expect: 'No task the run added.' } } : {}) },
@@ -101,6 +101,7 @@ const writePack = ({ frameHost = true, apiPath = null, notesApi = false, stayHel
     { id: 'team-tree', kind: 'dom', why: 'The Teams tree, drawn from the page\'s own store.', list: '[role=tree] [role=treeitem][aria-level="2"]' },
   ] } : {}),
   ...(ownStatus ? { ownStatus: { why: 'The Me button names your status.', role: 'button', name: '/^Your profile, status (.+)$/', expect: ['Available'], waitS: ownStatus.waitS } } : {}),
+  ...(presence ? { presence: [{ id: 'presence', url: '*/api/presence*', match: `/^POST ${HOST.replace(/\./g, '\\.')}\\/api\\/presence$/`, why: 'The page asks the presence service for its account and a colleague.' }] } : {}),
   ...(notices ? { notices: [{ words: 'Loading latest updates', why: "The page's notice while it catches up, as Teams'.", close: '/^close/i', waitS: notices.waitS }] } : {}),
 }, null, 1));
 writePack();
@@ -778,7 +779,7 @@ try {
   // The recording's home screen names Inbox with its count; the page's first save waits for it: 'late' (8 s after load),
   // saved with the count; 'never', saved after the cap (4 s here) with a note, and the run goes on.
   for (const mode of ['late', 'never']) {
-    const c = JSON.parse(cfg0); c.record.countWaitS = 4; writeFileSync(cfgF, JSON.stringify(c, null, 2));
+    const c = JSON.parse(cfg0); c.record.countWaitS = mode === 'never' ? 4 : 20; writeFileSync(cfgF, JSON.stringify(c, null, 2));
     writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Home\n\n- Go to tasks\n  Lands on: "No tasks yet"\n'); writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
     tasks.counts(mode); tasks.seed({});
     await run(['ai', 'approve', '--demo', DEMO], { env: E });
@@ -792,6 +793,25 @@ try {
     else check("one that never comes: saved after the cap, with a note, and the run goes on", qr.code === 0 && !qj.stopped && start.length > 0 && waits.some(w => w.missing.some(m => m.base === 'Inbox')) && ((qRec && qRec.notes) || []).some(n => n === 'tasks: "Inbox" shows no count; the recording has "Inbox, 2 unread items"'), JSON.stringify(why));
     tasks.counts(null); tasks.seed({});
     writeFileSync(cfgF, cfg0);
+  }
+
+  // 1r · Her own presence (a pack's presence, as Teams' getpresence): the service says Away for her and Busy for a
+  // colleague. In the capture browser her own entry reads as the status the recording expects (Available), so the run
+  // goes on without her: the saved screen shows her Available and the colleague still Busy, and every request went out
+  // exactly as the page sent it.
+  { writePack({ ownStatus: { waitS: 8 }, presence: true });
+    writeFileSync(join(DEMO, 'plan.md'), '# Tasks demo\n\n## Beat 1 · Home\n\n- Go to tasks\n  Lands on: "No tasks yet"\n'); writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
+    tasks.presence({ self: 'Away', other: 'Busy' }); tasks.seed({});
+    await run(['ai', 'approve', '--demo', DEMO], { env: E });
+    freshRaw();
+    const rr = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+    const rj = readRun(DEMO), [rRaw] = keepRaw('presence-raw');
+    const start = rawTexts(rRaw).filter(([f]) => { const parts = f.slice(rRaw.length).split(/[\\/]/); return parts.includes('snaps') && /^tasks-start/.test(parts[parts.length - 1]); });
+    const sent = JSON.stringify({ mris: ['8:orgid:00000000-0000-0000-0000-0000000000aa', '8:orgid:00000000-0000-0000-0000-0000000000bb'] }), bodies = tasks.presenceBodies();
+    const why = { code: rr.code, stopped: rj.stopped, presence: rj.presence, own: rj.ownStatus, start: start.map(([f, t]) => [f.slice(rRaw.length), (/Your profile, status \w+/.exec(t) || [])[0], (/Pat Doe: \w+/.exec(t) || [])[0]]), bodies: bodies.length, odd: bodies.filter(b => b !== sent).slice(0, 2), err: String(rr.err || '').slice(-400) };
+    check("her own presence reads as the recording's: the run goes on without her, the saved screen shows her Available and the colleague as the service says", rr.code === 0 && !rj.stopped && start.length > 0 && start.every(([, t]) => /Your profile, status Available/.test(t) && /Pat Doe: Busy/.test(t)) && ((rj.presence || {}).log || []).some(l => l.changed > 0), JSON.stringify(why));
+    check('and every presence request went out exactly as the page sent it', bodies.length > 0 && bodies.every(x => x === sent), JSON.stringify(why));
+    tasks.presence(null); tasks.seed({}); writePack();
   }
   writeFileSync(join(DEMO, 'plan.md'), PLAN('')); writeFileSync(join(DEMO, 'reset.md'), RESET);
   await run(['ai', 'approve', '--demo', DEMO], { env: E });

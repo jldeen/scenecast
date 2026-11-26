@@ -29,6 +29,7 @@
 //   cb.info(), cb.cpu(), cb.close()
 //   signInWindow({ profile, apps, timeoutS }) → { ok, secs, apps, cookies }   the one window that shows on her screen
 //   launchRealChrome({ zoom, channel, log }) → { browser, ctx, newPage(), close() }   the checker's shape (Phase 6)
+import { presenceBody } from './presence.mjs';
 import { chromium } from 'playwright-core';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
@@ -191,6 +192,13 @@ export function pinnedAuthorizeUrl(url, { loginHint = null, domainHint = null } 
 const GUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const HOME_ACCOUNT = new RegExp(`(${GUID})\\.(${GUID})(?=[-|]login\\.)`, 'gi');
 export const isTenantId = v => new RegExp(`^${GUID}$`, 'i').test(String(v || ''));
+// The signed-in accounts' own object ids, from the same keys (the first id of "<object id>.<tenant id>"): who "she" is
+// in an app's presence answers (presence.mjs). Never written anywhere but the log's count.
+export function selfIdsInKeys(keys) {
+  const out = new Set();
+  for (const k of keys) for (const m of String(k).matchAll(HOME_ACCOUNT)) out.add(m[1].toLowerCase());
+  return [...out];
+}
 export function tenantsInKeys(keys) {
   const out = new Set();
   for (const k of keys) for (const m of String(k).matchAll(HOME_ACCOUNT)) out.add(m[2].toLowerCase());
@@ -687,6 +695,34 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     return me;
   }
 
+  // Her own presence (presence.mjs): in each rule's answers (url, a browser request pattern; match, a guard entry over
+  // "METHOD host/path"), the entries naming one of ids read as status. Requests go out unchanged; only the body the
+  // page is given changes. → { log(), stop() }
+  let presencing = null;
+  async function presence(rules = []) {
+    const prev = presencing;
+    const st = { rules: rules.map(r => ({ id: r.id, app: r.app || null, answers: 0, changed: 0, failures: [] })) };
+    const remove = rules.length ? await addHook({ response: true, patterns: rules.map(r => ({ urlPattern: r.url, requestStage: 'Response' })), on: async (e, from) => {
+      if (e.responseStatusCode < 200 || e.responseStatusCode >= 300) return null;
+      const r = rules.find(x => allowedBy({ method: e.request.method, url: e.request.url }, [x.match]));
+      if (!r) return null;
+      const l = st.rules.find(x => x.id === r.id);
+      let text; try { text = await from.body(); } catch (x) { l.failures.push({ at: new Date().toISOString(), why: `its body couldn't be read (${String(x.message || x).split('\n')[0]})` }); return null; }
+      const ids = typeof r.ids === 'function' ? await r.ids().catch(() => []) : r.ids;
+      const f = presenceBody(text, ids, r.status);
+      l.answers++;
+      if (!f.ok) { l.failures.push({ at: new Date().toISOString(), why: f.why }); return null; }
+      if (!f.changed) return null;
+      l.changed++;
+      return { body: f.body };
+    } }) : async () => {};
+    presencing = { log: () => JSON.parse(JSON.stringify(st.rules)), async stop() { await remove(); if (presencing === me) presencing = null; } };
+    const me = presencing;
+    if (prev) await prev.stop();
+    return me;
+  }
+  const selfIdsOf = async p => selfIdsInKeys(await storageKeys(p));
+
   // The demo's account, pinned at Entra's sign-in (pinnedAuthorizeUrl): no account picker, whatever else the
   // profile holds. Counts how often it pinned.
   async function pinAccount({ loginHint = null, domainHint = null } = {}) {
@@ -722,7 +758,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     killAll('SIGKILL');
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
-  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, leaveOut, pinAccount, denyNotifications, tenantsOf, info, cpu, close, dir };
+  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, leaveOut, presence, selfIdsOf, pinAccount, denyNotifications, tenantsOf, info, cpu, close, dir };
 }
 
 // The one window that shows on her screen: the capture profile, visible, on the first app that needs a sign-in. She

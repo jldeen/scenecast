@@ -336,6 +336,10 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         Teams' Find in channel), a "Fill box" menu that also fills the side section's Ask box (as a suggestion fills
 //         Copilot's composer), and a status button ("Your status Away") with a menu.
 //         Chips three always has an avatar ("Profile picture of Pat Doe.") whose people card shows after 0.3 s.
+//         presence({ self, other }): the page keeps a sign-in library's account key (its account 00…aa) and asks
+//         POST /api/presence for its account and a colleague's every 2 s, as Teams' getpresence: the Me button names
+//         your status from the answer ("Your profile, status <self>") and "Pat Doe: <other>" shows the colleague's.
+//         Each request body is kept (presenceBodies), to check it went out as the page sent it.
 //         counts('late' | 'never'): the home screen's Inbox button is named with its count ("Inbox, 2 unread items")
 //         8 s after the page loads (after the run's first save of it), or never (just "Inbox"), as admin's bell loads
 //         its count; by default, at once.
@@ -350,7 +354,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 const chipsPart = (n, moving = false, extras = null) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && extras ? `<p class="menus"><button type="button" data-testid="find-toggle-button" aria-pressed="false" aria-label="Find here">Find</button>${['A', 'B', 'C', 'D'].map(x => `<button type="button" class="mb" aria-haspopup="menu" aria-expanded="false">Menu ${x}</button>`).join('')}<button type="button" aria-haspopup="menu">Dud menu</button><button type="button" aria-haspopup="menu" id="away">Elsewhere</button><button type="button" class="mb" aria-haspopup="menu" aria-expanded="false" data-fill="Prompt text">Fill box</button><button type="button" class="mb" data-tid="me-btn" aria-label="Your status Away" aria-haspopup="menu" aria-expanded="false">PD</button></p>` : ''}${n === 2 && extras ? '<p><button id="helpb">Help</button></p>' : ''}${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button><button id="pat" aria-label="Profile picture of Pat Doe.">PD</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
-const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null, extras = null, counts = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null, extras = null, counts = null, presence = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
 <link rel="icon" href="/icon.png"><style>
 body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
 main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
@@ -361,7 +365,7 @@ textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px so
 .card{position:fixed;background:#fff;border:1px solid #c9ccd1;border-radius:6px;padding:8px 10px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
 </style></head><body><main>
 <h1>Tasks</h1>
-${status ? `<p><button id="me" aria-label="Your profile, status ${status}">Me</button></p>` : ''}
+${status ? `<p><button id="me" aria-label="Your profile, status ${status}">Me</button></p>` : ''}${presence ? '<p><button id="me" aria-label="Your profile, status Unknown">Me</button> <span id="pat">Pat Doe: Unknown</span></p>' : ''}
 <div class="bar"><button role="switch" aria-checked="false" aria-label="Sync" id="sync">Sync</button><span id="syncText">Sync is off</span>
 <button aria-label="Refresh" id="refresh">Refresh</button><button aria-label="Archive all" id="archive">Archive all</button>
 <a href="http://localhost:${port}/help" id="help">Help</a>${chips ? '<button id="chipsbtn">Chips</button>' : ''}<button id="inbox" aria-label="${counts ? 'Inbox' : 'Inbox, 2 unread items'}">Inbox</button><span id="fresh" role="status"></span></div>
@@ -375,6 +379,15 @@ ${suggest ? '<h2>Suggested</h2><p id="sugCount"></p><ul id="sug" aria-label="Sug
 const $ = id => document.getElementById(id);
 let AUTH = '';
 const EXTRAS = ${JSON.stringify(extras)};
+// Presence, as Teams': the sign-in library's key for this account, then the presence service every 2 s.
+const PKEY = '00000000-0000-0000-0000-0000000000aa.99999999-0000-0000-0000-000000000099-login.windows.net-idtoken-fixture-99999999-0000-0000-0000-000000000099---';
+if (${JSON.stringify(!!presence)}) {
+  try { localStorage.setItem(PKEY, '1'); } catch (e) {}
+  const ask = () => fetch('/api/presence', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mris: ['8:orgid:00000000-0000-0000-0000-0000000000aa', '8:orgid:00000000-0000-0000-0000-0000000000bb'] }) }).then(r => r.json()).then(list => {
+    for (const e of list) { const a = (e.presence || {}).availability; if (/00000000-0000-0000-0000-0000000000aa/.test(e.mri)) document.getElementById('me').setAttribute('aria-label', 'Your profile, status ' + a); else document.getElementById('pat').textContent = 'Pat Doe: ' + a; }
+  }).catch(() => {});
+  ask(); setInterval(ask, 2000);
+} else try { localStorage.removeItem(PKEY); } catch (e) {}
 if (${JSON.stringify(counts)} === 'late') setTimeout(() => { const b = $('inbox'); if (b) b.setAttribute('aria-label', 'Inbox, 2 unread items'); }, 8000);
 if (EXTRAS !== 'stuck') try { sessionStorage.removeItem('fx-pane'); } catch (e) {}
 if ($('chipsbtn')) {
@@ -482,7 +495,7 @@ load();
 </script></body></html>`;
 
 export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
-  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null, chips: false, moving: false, notice: null, extras: null, counts: null };
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null, chips: false, moving: false, notice: null, extras: null, counts: null, presence: null, presenceBodies: [] };
   const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
   const log = [];
   const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
@@ -491,10 +504,11 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
   const server = createServer(async (q, s) => {
     const path = q.url.split('?')[0];
     log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
-    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips, st.notice, st.extras, st.counts));
+    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips, st.notice, st.extras, st.counts, !!st.presence));
     if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
     if (q.method === 'GET' && /^\/chips\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, true, null, st.extras, st.counts));
     if (q.method === 'GET' && /^\/chips-part\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', chipsPart(+path.slice(-1), st.moving, st.extras));
+    if (q.method === 'POST' && path === '/api/presence') { let b = ''; for await (const d of q) b += d; st.presenceBodies.push(b); const p = st.presence || {}; return send(s, 200, 'application/json', JSON.stringify([{ mri: '8:orgid:00000000-0000-0000-0000-0000000000aa', presence: { availability: p.self || 'Away', activity: p.self || 'Away' } }, { mri: '8:orgid:00000000-0000-0000-0000-0000000000bb', presence: { availability: p.other || 'Busy', activity: 'InAMeeting' } }])); }
     if (q.method === 'GET' && path === '/api/status') return send(s, 200, 'application/json', JSON.stringify({ status: st.status }));
     if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
     if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
@@ -556,6 +570,8 @@ export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
     notice: mode => { st.notice = mode || null; },
     extras: mode => { st.extras = mode || null; },
     counts: mode => { st.counts = mode || null; },
+    presence: p => { st.presence = p || null; st.presenceBodies = []; },
+    presenceBodies: () => st.presenceBodies.slice(),
     close: () => { server.close(); notes.close(); },
   };
 }

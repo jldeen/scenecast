@@ -249,6 +249,14 @@
     "expect": ["Available"],
     "waitS": 90
   },
+  "presence": [
+    {
+      "id": "getpresence",
+      "why": "Teams shows your status from the presence service (getpresence: a list of people in, their status out), and in the capture browser it reads Away whenever you're away from your own Teams app (Nov 25: the capture browser's Teams never reports you active). The capture browser's answer gives your own entry the status the recording shows (Available), so a run doesn't need you at the Mac; everyone else's status stays real, and the request goes out unchanged.",
+      "url": "*://teams.cloud.microsoft/ups/*",
+      "match": "/^POST teams\\.cloud\\.microsoft\\/ups\\/[a-z]+\\/v1\\/presence\\/getpresence\\/?$/"
+    }
+  ],
   "notices": [
     {
       "words": "Loading latest updates",

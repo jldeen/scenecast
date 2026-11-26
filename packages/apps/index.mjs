@@ -260,6 +260,19 @@ export function noticesFor(cfg, list = packs()) {
   return out;
 }
 
+// Her own presence, for each of a demo's apps whose pack names where it comes from (presence: [{ id, url, match, why }]:
+// url, a browser request pattern; match, a guard entry over "METHOD host/path"): in the capture browser, her entry in
+// those answers reads as the status her recording shows (capture/presence.mjs). → [{ app, pack, rules: [{ id, url, match }] }]
+export function presenceFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id], rs = ((p && p.presence) || []).filter(r => r && r.id && r.url && r.match);
+    if (!rs.length || !p.ownStatus) continue;
+    out.push({ app: a.id, pack: p.id, rules: rs.map(r => ({ id: r.id, url: r.url, match: r.match })) });
+  }
+  return out;
+}
+
 // A demo's pack filters, for reset.md's Leave out: what an app shows of the tenant's own data that a demo can leave out
 // of its replica, in the capture browser only (packages/capture/leave-out.mjs). A pack's filters: [{ id, why, and either
 // url (where its responses come from, a browser request pattern), match (a guard entry over "METHOD host/path"), items
@@ -357,6 +370,18 @@ export function checkPack(p) {
       if (n && n.waitS !== undefined && !(+n.waitS >= 0)) out.push('notices: waitS (seconds a save waits for it to go)');
       if (!n || !n.why) out.push('notices: why (plain words, with the evidence)');
     }
+  }
+  // Her own presence: where it comes from (a request pattern and a guard entry over one answer, never everything), why,
+  // and only with ownStatus (the status it reads as).
+  if (p.presence !== undefined) {
+    if (!Array.isArray(p.presence)) out.push('presence: a list ([{ id, url, match, why }])');
+    else for (const r of p.presence) {
+      if (!r || !r.id || !/^[a-z0-9][a-z0-9-]*$/.test(r.id)) out.push('presence: every entry has an id (lowercase letters, digits and dashes)');
+      if (!r || typeof r.url !== 'string' || !r.url || r.url === '*') out.push(`presence ${(r && r.id) || '?'}: url (a browser request pattern for its answers, never every request)`);
+      if (!r || typeof r.match !== 'string' || !/^\/\^.+\$\/[a-z]*$/.test(r.match)) out.push(`presence ${(r && r.id) || '?'}: match (an anchored /^…$/ over "METHOD host/path")`);
+      if (!r || !r.why) out.push(`presence ${(r && r.id) || '?'}: why (plain words, with the evidence)`);
+    }
+    if (!p.ownStatus) out.push('presence: only with ownStatus (the status her entry reads as)');
   }
   // A filter (Leave out): why, and the one response it reads (a pattern over "METHOD host/path", never everything) and
   // where its items are; or a DOM list. Never which items: those are a demo's.

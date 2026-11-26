@@ -281,6 +281,8 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
   // Counts a page loads after itself (capCounts): per app, the recording's controls named with a count or status
   // ("Notifications, 1 unread items"); the first save after each page load waits for them.
   let counts = null;
+  // Her own presence (capPresence): the response rules on, per app, and what they changed.
+  let presencing = null;
   const pageText = p => p.mainFrame().evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
   const noticeStop = () => { throw new Error(`A notice stopped the take: ${notices.stopped.why}`); };
   const noticeGate = async (p, app, what, html = null) => {
@@ -499,6 +501,30 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     // while a control the recording names with a count or status shows only its bare name (admin's bell: "Notifications"
     // until its count loads, "Notifications, 1 unread items" in the recording), then saves; one that never gets one is
     // a note, not a stop. c.apps: { <app>: [{ base, name }] }; {} → the log.
+    // Her own presence: c.apps { <app>: { tab, status, rules: [{ id, url, match }] } }. Who she is: the signed-in
+    // account's object id on the app's tab, read now (never kept but in memory). {} → what each rule changed.
+    async capPresence(c) {
+      if (c.apps) {
+        if (presencing) { await presencing.stop(); presencing = null; }
+        const rules = [], who = {};
+        for (const [app, x] of Object.entries(c.apps)) {
+          if (!x || !x.status || !(x.rules || []).length) continue;
+          // Read now, else at its first answer (an app's sign-in can keep its account a little later): until then its
+          // answers stay as they come.
+          let ids = [];
+          const read = async () => { if (!ids.length) { const p = await tabOf(x.tab).catch(() => null); ids = p && cb.selfIdsOf ? await cb.selfIdsOf(p).catch(() => []) : []; if (ids.length) who[app] = ids.length; } return ids; };
+          await read();
+          who[app] = ids.length;
+          if (!ids.length) log(`presence: ${app}: can't tell yet who's signed in; read again at its first answer`);
+          for (const r of x.rules) rules.push({ id: `${app}:${r.id}`, app, url: r.url, match: r.match, ids: read, status: x.status });
+        }
+        if (!rules.length) return { on: false, who };
+        presencing = await cb.presence(rules);
+        log(`presence on: ${rules.map(r => `${r.id} (as ${r.status})`).join(', ')}`);
+        return { on: true, rules: rules.map(r => r.id), who };
+      }
+      return presencing ? { on: true, log: presencing.log() } : { on: false, log: [] };
+    },
     async capCounts(c) {
       if (c.apps) {
         const apps = Object.fromEntries(Object.entries(c.apps).map(([id, l]) => [id, [].concat(l || []).filter(x => x && typeof x.base === 'string' && x.base && typeof x.name === 'string')]).filter(([, l]) => l.length));

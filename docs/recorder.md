@@ -238,6 +238,12 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   "Teams showed you as Away. Start again while you're using your Mac, with Teams open." (PC on Windows) and runs the
   reset after. A screen without the control saves as it is. run.json: `ownStatus` (each read, the stop); the summary
   prints what the start screens (with their sweeps) and beat 1 showed. A live walk and `ai check` only note it.
+  Where her pack names where her presence comes from (Teams' `presence`: getpresence), the capture browser gives her
+  own entry in those answers the status the recording shows (`capPresence`, `capture/presence.mjs`): who she is is the
+  signed-in account's object id, read from the page's sign-in at run time; only her entry's availability and
+  activity change; everyone else's status stays as the service says; the request goes out unchanged. So nobody has to
+  be at the computer; the status check above stays as the backstop. run.json, check.json: `presence` (each rule's
+  answers and how many it changed).
 - **Notices a replica never keeps** (an app pack's `notices`: Teams' "Loading latest updates… in the meantime, you can
   still send and respond to messages", which comes across the top of a channel while Teams catches up and moves the
   whole page down). Before the recorder saves a screen, or a stream's frame, of that app, it looks for the notice's

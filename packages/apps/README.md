@@ -212,6 +212,20 @@ another status (docs/recorder.md, "Your own status").
 
 `ownStatusFor(cfg)` gives a demo's: `[{ app, pack, label, name, role, expect, waitS }]`.
 
+### Her own presence (`presence`)
+
+Where an app's status for the signed-in person comes from, so the capture browser can show her as the recording does
+(Available) whether or not she's at her computer: `[{ id, url, match, why }]`, `url` a browser request pattern for its
+answers and `match` an anchored guard entry over `METHOD host/path`. Only with `ownStatus` (the status it reads as).
+In those answers, her own entry (the one naming the signed-in account's object id, read at run time, never stored)
+gets that availability and activity; nobody else's changes, and the request goes out as it is.
+
+```json
+"presence": [{ "id": "getpresence", "url": "*://teams.cloud.microsoft/ups/*", "match": "/^POST teams\\.cloud\\.microsoft\\/ups\\/[a-z]+\\/v1\\/presence\\/getpresence\\/?$/", "why": "…" }]
+```
+
+`presenceFor(cfg)` gives a demo's: `[{ app, pack, rules: [{ id, url, match }] }]`.
+
 ### Notices (`notices`)
 
 What the app shows for a while that a replica must never keep (Teams' "Loading latest updates… in the meantime, you
@@ -267,6 +281,7 @@ allow-list and native-call defaults per app build, pre-release hosts (IQ's daily
 | `filtersFor(cfg)` | what a demo's apps can leave out, from their packs (`{ "<pack>:<filter>": filter }`) |
 | `ownStatusFor(cfg)` | where a demo's apps show the person's own status, from their packs (`[{ app, name, role, expect, waitS }]`) |
 | `noticesFor(cfg)` | the notices a demo's apps show that a replica never keeps, from their packs (`[{ app, label, notices }]`) |
+| `presenceFor(cfg)` | where each of a demo's apps gets her own presence from, for the capture browser to show her as the recording does (`[{ app, rules }]`) |
 | `checkPack(pack)` | what's wrong with a pack (empty when it's fine) |
 
 `build.mjs`: `flowPacks(flow, cfg)` / `flowDefaults(flow, appPacks)` (flow compile and the build; running twice

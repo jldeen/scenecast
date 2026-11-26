@@ -81,7 +81,7 @@ const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https:
 export async function walkerPacks() {
   try {
     const m = await import('@stuntdouble/apps/index.mjs');
-    return { packFor: url => m.packFor(url), writeFor: m.writeFor, safeFor: m.safeFor, guardFor: m.guardFor, packsForDemo: m.packsForDemo, servicesFor: m.servicesFor, filtersFor: m.filtersFor, ownStatusFor: m.ownStatusFor, noticesFor: m.noticesFor };
+    return { packFor: url => m.packFor(url), writeFor: m.writeFor, safeFor: m.safeFor, guardFor: m.guardFor, packsForDemo: m.packsForDemo, servicesFor: m.servicesFor, filtersFor: m.filtersFor, ownStatusFor: m.ownStatusFor, noticesFor: m.noticesFor, presenceFor: m.presenceFor };
   } catch (e) { return null; }
 }
 
