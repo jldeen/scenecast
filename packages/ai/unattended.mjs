@@ -299,7 +299,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
-  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [], ...(lo.rules.length || lo.skipped.length ? { leaveOut: { lines: lo.lines.map(l => ({ app: l.app, what: l.what, from: l.from, shows: l.shows })), ...(lo.skipped.length ? { skipped: lo.skipped } : {}) } } : {}), apps: [...inPlan] };
+  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], marked: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [], ...(lo.rules.length || lo.skipped.length ? { leaveOut: { lines: lo.lines.map(l => ({ app: l.app, what: l.what, from: l.from, shows: l.shows })), ...(lo.skipped.length ? { skipped: lo.skipped } : {}) } } : {}), apps: [...inPlan] };
   const save = () => writeFileSync(join(out, 'run.json'), JSON.stringify(run, null, 1));
   // Leave out's record (per rule: the requests it filtered and what it took out; the checks before each save; a leak).
   const leakWhy = leak => `left out of the replica, and ${leak.why}: nothing after it was saved`;
@@ -569,7 +569,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (doubt) {
         const before = `the step before it (${doubt.text}) couldn't be proven (${doubt.why})`;
         if (wr) return { kind: 'unprovable', why: `${before}, and a write never follows a step it couldn't prove`, beforeWrite: true };
-        if (step.kind !== 'app') { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; byControl = true; }
+        // A step with a control goes on by that control only (exactly one, by its exact name); a scroll or a wait has
+        // none, and can't write, so it goes on.
+        if (step.kind !== 'app' && step.target) { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; byControl = true; }
       }
       let r, checked = null;
       if (wr) {
@@ -652,6 +654,18 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (stop && stop.notice) { noticeStopRun(stop.notice, at); break outer; }
         if (stop && !stop.own && !stop.leak && !stop.notice && !stop.unrestored) { const u = await unrestored(); if (u) stop = { kind: 'put-back', unrestored: u }; }
         if (stop && stop.unrestored) { restoreStopRun(stop.unrestored, at); break outer; }
+        // A doubt no write follows (a step it couldn't prove, words that aren't there, a control that isn't): the run
+        // keeps the screen as it is, marks the beat for Review, and goes on. A write never follows it (the doubt
+        // stops that write), and anything else still stops the run.
+        if (stop && /^(unprovable|elsewhere|missing)$/.test(stop.kind) && !stop.beforeWrite) {
+          const mark = { beat: bi + 1, step: si, text: at.text, app, kind: stop.kind, why: stop.why, picture: await shot(app, `${bi + 1}-${si + 1}-mark-${stop.kind}`) };
+          run.marked.push(mark);
+          emit({ event: 'marked', ...mark });
+          doubt = { text: at.text, why: stop.why };
+          run.steps.push({ ...at, app, did: 'marked', secs: +((Date.now() - ts) / 1000).toFixed(1), screen: null });
+          emit({ event: 'step-done', beat: bi, step: si, did: 'marked' });
+          continue;
+        }
         if (stop) {
           await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
           // Leave out's own picture, taken as it refused the save, and where on the screen it was.

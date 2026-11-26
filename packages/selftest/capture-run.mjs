@@ -860,6 +860,14 @@ try {
   const un = (rj.unprovable || []).map(u => u.text);
   check('a step it can\'t prove: it goes on by the next control, and stops before a write, with a picture', rj.stopped && rj.stopped.kind === 'unprovable' && /a write never follows/.test(rj.stopped.why) && /Delete Call Kestrel/.test(rj.stopped.at && rj.stopped.at.text || '') && rj.stopped.picture && existsSync(rj.stopped.picture) && un.length === 2 && un.every(t => t === 'Click "Refresh"'), JSON.stringify({ stopped: rj.stopped, unprovable: rj.unprovable }));
   check('and the delete never ran: the reset after removed the run\'s task', count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ log: tasks.log, after: rj.reset.after }));
+  // 3c · A doubt no write follows: a control that isn't there, then words that never show. The run marks the beat, with
+  // a picture of each, and goes on to the end; the reset after puts the demo back.
+  writeFileSync(join(DEMO, 'plan.md'), PLAN('- Click "No such button"\n- Click "Refresh"\n  Lands on: "Words that never show"\n'));
+  await run(['ai', 'approve', '--demo', DEMO], { env: E });
+  res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
+  rj = readRun(DEMO);
+  const mk = (rj.marked || []).map(m => `${m.text} ${m.kind}`);
+  check('a doubt no write follows: the run marks the beat with a picture and goes on to the end', res.code === 0 && !rj.stopped && JSON.stringify(mk) === JSON.stringify(['Click "No such button" missing', 'Click "Refresh" elsewhere']) && rj.marked.every(m => m.beat === 2 && m.picture && existsSync(m.picture)) && rj.steps.length === 6 && rj.reset.after && rj.reset.after.ok && tasks.state().tasks.length === 0, JSON.stringify({ code: res.code, stopped: rj.stopped, marked: rj.marked, steps: (rj.steps || []).map(x => x.did), after: rj.reset.after }));
   // A step its plan proves, but only by a live region's words ("Up to date": a status line): the check passes, the
   // landing isn't strong. The write after it doesn't run on its own: the run stops before it, keeps a picture and
   // both reads, lists it for her, and the reset after puts the demo back.
