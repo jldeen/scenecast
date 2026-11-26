@@ -28,7 +28,7 @@ export function findItem(items, want, kind) {
   return bs >= 15 ? best : null;
 }
 
-// Copilot's step groups ("21 items complete, using Caldova IQ, Supply chain disruption, expand"): their counts and
+// Copilot's step groups ("21 items complete, using Ledger IQ, Supply chain disruption, expand"): their counts and
 // plugin lists change with every answer. The one by that exact name, else the index-th group on the screen, top to
 // bottom (the plan's index-th group label in its beat). → the item, or null.
 export const GROUP_LABEL = /^\d+ (?:items?|background tasks?) complete\b/i;

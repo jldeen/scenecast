@@ -189,7 +189,7 @@ test("what a write's call asked for: a server function's action, a GraphQL opera
   assert.equal(postAction(fn('SetUserStorageState')), 'SetUserStorageState');
   assert.equal(postAction('{"query":"mutation SaveSkill { x }"}'), 'SaveSkill');
   assert.equal(postAction('{"ConversationId":"c","clientData":{"Verb":"list_plugins","Data":{}}}'), 'list_plugins');
-  assert.equal(postAction('{"message":"Eren asked me about PO-1"}'), null);
+  assert.equal(postAction('{"message":"Sam asked me about PO-1"}'), null);
   assert.equal(postAction('not json'), null);
 });
 

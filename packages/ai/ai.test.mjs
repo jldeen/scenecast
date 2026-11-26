@@ -20,8 +20,8 @@ import { settled } from './run.mjs';
 test("Copilot's step groups: the plan's label, else the plan's index-th group on the screen, top to bottom", () => {
   const b = (name, y) => ({ role: 'button', name, x: 700, y });
   const today = [b('Copy message', 900), b('5 items complete, using Supply chain disruption, expand', 610), b('17 items complete, using Supply chain disruption, Fabric IQ, expand', 320), b('Plugins', 80)];
-  // Her take's labels (other counts, Caldova IQ gone): the 1st and 2nd groups, in order.
-  assert.equal(groupPick(today, '21 items complete, using Caldova IQ, Supply chain disruption, expand', 0).name, '17 items complete, using Supply chain disruption, Fabric IQ, expand');
+  // Her take's labels (other counts, Ledger IQ gone): the 1st and 2nd groups, in order.
+  assert.equal(groupPick(today, '21 items complete, using Ledger IQ, Supply chain disruption, expand', 0).name, '17 items complete, using Supply chain disruption, Fabric IQ, expand');
   assert.equal(groupPick(today, '6 items complete, using Supply chain disruption, Fabric IQ, expand', 1).name, '5 items complete, using Supply chain disruption, expand');
   // The exact label wins wherever it is; no such group: none.
   assert.equal(groupPick(today, '5 items complete, using Supply chain disruption, expand', 0).y, 610);
@@ -368,7 +368,7 @@ test("a step group folded under the answer's timeline: the header opened first; 
     let open = false;
     const clicks = [];
     const head = () => ({ role: 'button', name: 'Worked for 1m 36s', expanded: open, x: 700, y: 300 });
-    const groups = [{ role: 'button', name: '17 items complete, using Caldova IQ, Supply chain disruption, expand', expanded: false, x: 700, y: 340 },
+    const groups = [{ role: 'button', name: '17 items complete, using Ledger IQ, Supply chain disruption, expand', expanded: false, x: 700, y: 340 },
       { role: 'button', name: '5 items complete, using Supply chain disruption, Fabric IQ, expand', expanded: false, x: 700, y: 380 }];
     const near = { role: 'button', name: 'Supply chain disruption', x: 1600, y: 125 };
     const items = () => [near, ...(folded ? [head()] : []), ...(open && inside ? groups : [])];
