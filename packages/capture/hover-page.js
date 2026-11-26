@@ -392,6 +392,11 @@
     // What's on screen that wasn't at rest (ignoring things that aren't visible).
     visibleOpsList() { const keep = H._vis(); return keep.map(o => o.kind + ' ' + (o.host && o.host.nodeType === 1 ? o.host.localName + '.' + (o.host.getAttribute('role') || '') + (o.host.getAttribute('data-tid') ? '[' + o.host.getAttribute('data-tid') + ']' : '') : '') + ' ' + (o.set ? JSON.stringify(o.set).slice(0, 160) : o.kind === 'add' && o.host.nodeType === 1 ? o.host.outerHTML.slice(0, 200) : o.rest ? (o.rest.outerHTML || o.rest.data || '').slice(0, 160) : o.host && o.host.data)); },
     visibleOps() { return H._vis().length; },
+    // What a click left open: parts added or removed, text changed, or a state attribute (expanded, pressed,
+    // selected, checked, current, hidden, open, disabled, data-state, value). Not an app's own churn on other
+    // attributes: Teams' search box rotating its placeholder, a status in a button's name, generated ids, a focus
+    // class on body, a popover's anchor style.
+    openOps() { const STATE = /^(aria-(expanded|pressed|selected|checked|current|modal)|hidden|open|disabled|data-state|value)$/; return H._vis().filter(o => o.kind !== 'attr' || Object.keys(o.set || {}).some(k => STATE.test(k))).length; },
     _vis() {
       // Empty containers a popup leaves behind, and the control's own focus styling, don't count.
       // Tooltips don't count either: Escape gives the control focus back, and focus shows its tooltip.

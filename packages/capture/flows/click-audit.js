@@ -74,6 +74,9 @@ async function settle(maxMs = 3000) {
   while (Date.now() - s < maxMs) { await H.poll(150); const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500) break; }
 }
 const vis = () => ev(() => window.__d1h.visibleOps());
+// Put back: nothing the click opened left (an app's own churn on other attributes aside; put-back checks the screen
+// after the kind).
+const left = () => ev(() => window.__d1h.openOps());
 // Back on the screen the audit is on (ARGS.reland, the saved screen: its address and title) after a reload or a click
 // that went elsewhere (Teams opens its last conversation, its address unchanged): out.relanded / out.lost.
 const reland = async () => {
@@ -167,19 +170,19 @@ for (const c of controls) {
     if (c.snap) { try { await H.snap(p, c.snap, { shot: false }); r.snap = c.snap; } catch (e) { r.snapError = String(e).slice(0, 120); } }
     // Putting it back, the way the page does.
     let restore = null, reopen = null, revertMs = null;
-    if (c.auto) { const s = Date.now(); while (Date.now() - s < c.auto) { await sleep(150); if (!(await vis())) { restore = 'auto'; revertMs = Date.now() - tc; break; } } }
+    if (c.auto) { const s = Date.now(); while (Date.now() - s < c.auto) { await sleep(150); if (!(await left())) { restore = 'auto'; revertMs = Date.now() - tc; break; } } }
     // In order, before any reload: its recorded way (Escape, or for a toggle the control again), the control again (the
     // same element, or one drawn in its place that says it's on: aria-pressed or aria-expanded true, or "toggle" in its
     // test id, as Teams' Find in channel), the close button of what it opened, then a control that says it opens or
     // closes something.
-    if (!restore && !c.noEscape) { await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await vis())) restore = 'escape'; }
+    if (!restore && !c.noEscape) { await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await left())) restore = 'escape'; }
     if (!restore) {
       let again = await ev(() => { const e = window.__d1h.ctl; if (!e || !e.isConnected) return null; const b = e.getBoundingClientRect(); return b.width > 2 ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null; });
       if (!again) {
         const m1 = await mOf(), g = m1 ? await ev(m => window.__d1h.markCtl(m), m1).catch(() => null) : null, at = (g && g.attrs) || {};
         if (g && (at['aria-pressed'] === 'true' || at['aria-expanded'] === 'true' || /toggle/i.test(`${at['data-testid'] || ''} ${at['data-tid'] || ''}`))) again = g;
       }
-      if (again) { await move(again.x, again.y, 3); await sleep(100); await p.mouse.click(off.x + again.x, off.y + again.y); await sleep(200); await move(...NEUTRAL); await settle(2000); if (!(await vis())) restore = 'toggle'; }
+      if (again) { await move(again.x, again.y, 3); await sleep(100); await p.mouse.click(off.x + again.x, off.y + again.y); await sleep(200); await move(...NEUTRAL); await settle(2000); if (!(await left())) restore = 'toggle'; }
     }
     // Only a control that says it opens, closes, expands or shows something: never a menu or list item. What it opened
     // has its own close button first (Close, Dismiss, Cancel alone, or an ×).
@@ -187,7 +190,7 @@ for (const c of controls) {
     const cand = closer || newCtls.find(x => /^(open|close|expand|show|collapse|hide|back)\b/i.test(x.label || ''));
     if (!restore && cand) {
       await move(cand.x, cand.y, 3); await sleep(100); await p.mouse.click(off.x + cand.x, off.y + cand.y); await sleep(200); await move(...NEUTRAL); await settle(2500);
-      if (!(await vis())) { restore = 'reopen'; reopen = cand.spec; }
+      if (!(await left())) { restore = 'reopen'; reopen = cand.spec; }
     }
     // Stuck: what stayed (for the record), then a reload as the last resort.
     if (!restore) { restore = 'stuck'; r.stuckOps = await vis(); r.stayed = await ev(() => window.__d1h.visibleOpsList().slice(0, 6).map(x => x.slice(0, 160))).catch(() => null); await backToRest(); }

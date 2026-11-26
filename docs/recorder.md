@@ -301,7 +301,10 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   title at the same address. Before it reloads at all, it closes what a click opened in order: the recorded way
   (Escape, or the control again), the control again (the same element, or one drawn in its place that says it's on:
   `aria-pressed`/`aria-expanded` true, or "toggle" in its test id, as Teams' Find in channel), the close button of what
-  it opened (Close, Dismiss, Cancel alone, an ×), then a control that says it opens or closes something. After a
+  it opened (Close, Dismiss, Cancel alone, an ×), then a control that says it opens or closes something. Closed means
+  nothing the click opened is left: no part added or removed, no state attribute (expanded, pressed, selected, hidden,
+  open…) still changed; an app's own churn on other attributes (Teams' rotating search placeholder, generated ids, a
+  status in a name) doesn't count, since put-back checks the screen after the kind. After a
   reload it waits for the app to go quiet (15 s at most) before learning its own churn again, else every click after
   it reads as stuck. A recorded menu that visibly opened and read as nothing is pressed once more with the learned
   churn forgotten. What stayed when a click was stuck is in the recording (`sides.clicks[].results[].stayed`). The recording: `putBack` (each screen, after what, what it found, and how it was put
