@@ -220,6 +220,56 @@ test("an API undo filled in: the demo's values win, each one a single encoded se
   assert.deepEqual(fillApi(api, {}, { pluginId: 'p1' }).left, ['{section}', '{item}']);
 });
 
+// The reset after a run, with an app pack of its own whose API undo's find has a where (her own skills only): the
+// calls it made, and what it said. The API lists her own skills in `mine`; a DELETE takes one away.
+async function undoAfter({ ran = [], results = {}, values = {} }) {
+  const { runReset } = await import('./reset-run.mjs');
+  const { resetPacks } = await import('@stuntdouble/apps/index.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'sc-undo-')), packsDir = join(root, 'packs'), dir = join(root, 'demo');
+  mkdirSync(join(packsDir, 'skills-app'), { recursive: true });
+  mkdirSync(dir);
+  writeFileSync(join(packsDir, 'skills-app', 'pack.json'), JSON.stringify({ id: 'skills-app', match: ['skills.example.test'], apis: { rt: { open: 'https://skills.example.test/', host: 'api.skills.example.test' } },
+    writes: [{ id: 'save-skill', what: 'Saves a skill', on: { kind: 'click', target: 'Save' }, undo: { api: { use: 'rt', method: 'DELETE', path: '/v1/skills/{skill}' }, find: { use: 'rt', path: '/v1/skills', list: 'skills', name: 'name', id: 'name', as: 'skill', by: 'skill', where: { source: 'mine' } } } }] }));
+  writeFileSync(join(dir, 'reset.md'), '# Reset\n\n## Undo · Skills\n\n- Go to skills\n- Undo with the app pack: skills-app:save-skill\n  Undoes: beat 2, Click "Save"\n  Names: "Weekly digest"\n');
+  const demo = { dir, cfg: { apps: [{ id: 'skills', url: 'https://skills.example.test/', pack: 'skills-app', values }] } };
+  const approval = { reset: [{ part: 'undo', text: 'Undo with the app pack: skills-app:save-skill' }, { part: 'undo', text: 'Find by name: "Weekly digest"' }] };
+  let mine = ['Weekly digest'];
+  const calls = [];
+  const cmd = async (op, a) => {
+    if (op !== 'capApi') return {};
+    calls.push(`${a.method} ${a.path}`);
+    if (a.method === 'GET') return { ok: true, status: 200, found: a.find.all ? mine : mine.filter(n => (a.find.names || a.find.ids || []).includes(n)) };
+    mine = mine.filter(n => a.path !== `/v1/skills/${encodeURIComponent(n)}`);
+    return { ok: true, status: 204 };
+  };
+  const walker = { home: async () => [], act: async () => ({}), write: async () => ({}) };
+  const was = process.env.STUNTDOUBLE_PACKS;
+  process.env.STUNTDOUBLE_PACKS = packsDir;
+  resetPacks();
+  try {
+    const r = await runReset({ demo, cmd, walker, phase: 'after', approval, ran, results });
+    return { r, deletes: calls.filter(c => c.startsWith('DELETE')) };
+  } finally {
+    if (was === undefined) delete process.env.STUNTDOUBLE_PACKS; else process.env.STUNTDOUBLE_PACKS = was;
+    resetPacks();
+  }
+}
+
+test("an API undo whose find has a where, for a group no write of the run is under: only what its find picks by name, never the run's results on their own", async () => {
+  // The run recorded another skill (a plugin's, say); her own leftover is only found by the group's Names.
+  const { r, deletes } = await undoAfter({ results: { skill: 'Team notes' } });
+  assert.deepEqual(deletes, ['DELETE /v1/skills/Weekly%20digest']);
+  assert.equal(r.ok, true, r.why);
+});
+
+test("an API undo calls with the id its find picked, even when the demo's values name another under the same name", async () => {
+  // The demo names a skill its Check lines read; the run's write saved "Weekly digest", and the find saw it there.
+  const ran = [{ beat: 2, text: 'Click "Save"', app: 'skills', values: { skill: 'Weekly digest' } }];
+  const { r, deletes } = await undoAfter({ ran, results: { skill: 'Weekly digest' }, values: { skill: 'Team notes' } });
+  assert.deepEqual(deletes, ['DELETE /v1/skills/Weekly%20digest']);
+  assert.equal(r.ok, true, r.why);
+});
+
 test("a Check line reads the same from either parser: a string, or { app, screen, text } with the claim alone", () => {
   assert.equal(checkLine('tasks: no "Call Kestrel"'), 'tasks: no "Call Kestrel"');
   assert.equal(checkLine({ app: 'tasks', screen: 'tasks-home', text: 'no "Call Kestrel"' }), 'tasks: no "Call Kestrel"');
@@ -360,6 +410,45 @@ test('recording, a click waits for the recorder; one it held back goes once more
   const wr = make({ blockFirst: true });
   await wr.w.act('admin', { ...parseStep('Click "Supply chain disruption"'), writes: 'opens it · fixture:open' }, { write: true });
   assert.equal(wr.clicks.length, 1);
+});
+
+test('recording, a write waits for the recorder before the guard opens, not while it is open', async () => {
+  const { liveWalker } = await import('./live.mjs');
+  const { READ_DOCS_SRC } = await import('@stuntdouble/capture/page-read.mjs');
+  const st = { busy: 3, actions: 0 }, opened = [];
+  const cmd = async (op, a) => {
+    if (op === 'recordStatus') { const busy = st.busy > 0; if (busy) st.busy--; return { recording: true, busy, typing: [], actions: st.actions, blocked: 0 }; }
+    if (op === 'observe') return { url: 'https://chat.example.test/', vw: 1920, vh: 1080, items: [{ role: 'textbox', name: 'Message', focused: true, editable: 'content', x: 900, y: 1000 }] };
+    if (op === 'js') return a.code === READ_DOCS_SRC ? [{ key: 'main', html: '<!doctype html><html><body><div role="textbox" contenteditable="true" aria-label="Message"></div></body></html>' }] : true;
+    if (op === 'capOpen') { opened.push({ busyLeft: st.busy }); return { id: 'w1' }; }
+    if (op === 'capLog') return { passed: [{ by: 'a planned write', at: new Date().toISOString() }] };
+    if (op === 'press') { st.actions++; return {}; }
+    return {};
+  };
+  const w = liveWalker({ demo: { cfg: { apps: [{ id: 'chat', url: 'https://chat.example.test/' }] } }, cmd, recording: true });
+  const r = await w.write('chat', { ...parseStep('Press Enter'), writes: 'sends it · chat-app:send' });
+  assert.equal(r.wrote, true, r.why);
+  assert.deepEqual(opened, [{ busyLeft: 0 }]);
+});
+
+test("a write's Enter goes only from the box the plan typed in, by its exact name, never one a near name found", async () => {
+  const { liveWalker } = await import('./live.mjs');
+  const { READ_DOCS_SRC } = await import('@stuntdouble/capture/page-read.mjs');
+  const opened = [], box = { role: 'textbox', name: 'New task list', editable: 'plain', focused: true, x: 400, y: 200 };
+  const cmd = async (op, a) => {
+    if (op === 'observe') return { url: 'https://tasks.example.test/', vw: 1600, vh: 900, items: [box] };
+    // No "New task" anywhere in the page or its frames; the reader names the box as the page does.
+    if (op === 'js') return a.code === READ_DOCS_SRC ? [{ key: 'main', html: '<!doctype html><html><body><input aria-label="New task list"></body></html>' }] : /const out = \[\], frames = page\.frames\(\)/.test(a.code) ? [] : true;
+    if (op === 'capOpen') { opened.push(a); return { id: 'w1' }; }
+    if (op === 'capLog') return { passed: [{ by: 'a planned write', at: new Date().toISOString() }] };
+    return {};
+  };
+  const w = liveWalker({ demo: { cfg: { apps: [{ id: 'tasks', url: 'https://tasks.example.test/' }] } }, cmd });
+  // Typing is read-only: a near name will do.
+  assert.equal((await w.act('tasks', parseStep('Type "Plan the offsite" in "New task"'))).in, 'New task list');
+  const r = await w.write('tasks', { ...parseStep('Press Enter'), writes: 'adds a task · tasks-app:new-task' });
+  assert.equal(r.missing, true);
+  assert.deepEqual(opened, []);
 });
 
 test("a step group folded under the answer's timeline: the header opened first; never a near name", async () => {

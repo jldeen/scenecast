@@ -79,6 +79,7 @@ import { READ_DOCS_SRC } from './page-read.mjs';
 import { CONTROL_NAME_SRC } from './page-naming.mjs';
 import { cardIn, shownIn } from './cards.mjs';
 import { cardMatch } from './hover-card.mjs';
+import { barOutsideGroups } from '@stuntdouble/apps/index.mjs';
 
 const LEAVE_PAGE = readFileSync(new URL('./leave-out-page.js', import.meta.url), 'utf8').replace(/^\/\/.*\n/gm, '');
 const AsyncFn = Object.getPrototypeOf(async () => {}).constructor;
@@ -367,7 +368,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
       if (!Array.isArray(c.hosts) || !c.hosts.length) return { id: null, refused: 'a write opens the guard only on named hosts' };
       // Its own calls to a service of its app's: each a /^METHOD host/path$/ pattern for one kind of write call.
       const entries = Array.isArray(c.entries) ? c.entries : [];
-      const bad = entries.find(e => typeof e !== 'string' || !/^\/\^(?:\(\?:)?(?:POST|PUT|PATCH|DELETE)(?:\|(?:POST|PUT|PATCH|DELETE))*\)? .+\$\/[a-z]*( when body \/.+\/[a-z]*)?$/.test(e));
+      const bad = entries.find(e => typeof e !== 'string' || !/^\/\^(?:\(\?:)?(?:POST|PUT|PATCH|DELETE)(?:\|(?:POST|PUT|PATCH|DELETE))*\)? .+\$\/[a-z]*( when body \/.+\/[a-z]*)?$/.test(e) || barOutsideGroups(e.split(' when body ')[0]));
       if (bad !== undefined) return { id: null, refused: `a write's call is a /^METHOD host/path$/ pattern, not ${JSON.stringify(bad)}` };
       const id = `w${++n}`;
       let close;

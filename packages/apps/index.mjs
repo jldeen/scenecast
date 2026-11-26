@@ -185,6 +185,21 @@ export function writeFor(pack, step, field) {
   if (!pack || !step) return null;
   return (pack.writes || []).find(w => stepIs(w.on, step, field)) || null;
 }
+// A | outside every group in a "/pattern/": it splits the whole pattern, so its ^ and $ no longer hold
+// ("/^POST a\/b$|.*x$/" passes any call ending in x).
+export function barOutsideGroups(src) {
+  let depth = 0, inClass = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '\\') i++;
+    else if (inClass) inClass = c !== ']';
+    else if (c === '[') inClass = true;
+    else if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === '|' && depth <= 0) return true;
+  }
+  return false;
+}
 // A "/body/flags" string as a RegExp (extra flags added), or null.
 const reOf = (src, extra = '') => {
   const m = typeof src === 'string' ? /^\/(.+)\/([a-z]*)$/s.exec(src) : null;
@@ -351,7 +366,7 @@ export function checkPack(p) {
       // A write's own calls to a service of its app's: each one kind of call (a method, a host, a path), with a why.
       for (const e of (what === 'writes' && w.opens) || []) {
         const [x] = typeof e === 'string' ? e.split(' when body ') : [null];
-        if (typeof x !== 'string' || !/^\/\^(?:\(\?:)?(?:POST|PUT|PATCH|DELETE)(?:\|(?:POST|PUT|PATCH|DELETE))*\)? [a-z0-9\\[\]+.-]+\\\/.+\$\/[a-z]*$/i.test(x) || /\.\*\$\/[a-z]*$|\\\/\.\+\$\/[a-z]*$/.test(x)) out.push(`${at}: opens "${e}": a /^METHOD host\\/path$/ pattern for one kind of call, never every path`);
+        if (typeof x !== 'string' || !/^\/\^(?:\(\?:)?(?:POST|PUT|PATCH|DELETE)(?:\|(?:POST|PUT|PATCH|DELETE))*\)? [a-z0-9\\[\]+.-]+\\\/.+\$\/[a-z]*$/i.test(x) || barOutsideGroups(x) || /\.\*\$\/[a-z]*$|\\\/\.\+\$\/[a-z]*$/.test(x)) out.push(`${at}: opens "${e}": a /^METHOD host\\/path$/ pattern for one kind of call, never every path`);
         else if (!(((p.guard || {}).why) || {})[e]) out.push(`${at}: opens "${e}": a why in guard.why (what the write sends there)`);
       }
     }

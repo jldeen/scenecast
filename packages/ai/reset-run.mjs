@@ -345,14 +345,18 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     const api = pw && pw.undo && pw.undo.api, at = api && pack.apis && pack.apis[api.use];
     if (!api || !at) return fall(`the ${m[1]} pack has no API undo for ${m[2]}`);
     const appCfg = (demo.cfg.apps || []).find(a => a.id === app) || {};
-    const call = async (vals, label) => {
-      const fl = fillApi(api, vals, appCfg.values);
+    // found: the id its find picked, over the demo's values too (a value of the same name never stands in for it).
+    const call = async (vals, label, found = {}) => {
+      const fl = fillApi(api, vals, { ...(appCfg.values || {}), ...found });
       if (fl.left.length) return { ok: false, left: fl.left };
       const r = await cmd('capApi', { tab: appTab(demo, app), open: at.open, host: at.host, hostPattern: at.hostPattern, from: at.from || null, method: api.method, path: fl.path, body: fl.body }, 150).catch(e => ({ ok: false, why: e.message }));
       if (r.ok) did.push(`${app}: ${s.text}${label} (${api.method}, ${r.status})`);
       return r;
     };
     const find = pw.undo.find, fat = find && pack.apis && pack.apis[find.use];
+    // A find with a where (only her own skills, never a plugin's): nothing is undone until the find has seen it there,
+    // never called on its own.
+    const viaFind = !!(find && fat && find.where);
     // The pack's find (a GET of its list), by ids (the one a write recorded, or a ':' part of it) or by names. → the
     // ids it found, or { why } when it didn't answer with a list: a failed find is never "nothing to undo".
     const findIn = async by => {
@@ -370,9 +374,6 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     if (writes.length) {
       for (const w of writes) {
         const vals = { ...results, ...(w.values || {}) }, label = ` (beat ${w.beat})`;
-        // A find with a where (only her own skills, never a plugin's): what the run recorded is undone only once the
-        // find has seen it there, never called on its own.
-        const viaFind = !!(find && fat && find.where);
         const r = viaFind ? (fl => fl.left.length ? { ok: false, left: fl.left } : { ok: false, why: 'only through its find' })(fillApi(api, vals, appCfg.values)) : await call(vals, label);
         if (r.ok) continue;
         if (!find || !fat) return fall(r.left ? `the run didn't record ${r.left.join(', ')}` : r.why || `the API answered ${r.status}`);
@@ -396,14 +397,14 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
           else if (!f) return fall(`the run didn't record ${(r.left || [find.as]).join(', ')}, and ${n.why}`);
         }
         if (!f.found.length) { did.push(`${app}: ${s.text}${label}: nothing to undo (its list answered, with ${id ? `no ${find.as} ${id}` : ''}${id && by.names ? ' and ' : ''}${by.names ? `nothing called ${by.names.map(x => `"${x}"`).join(', ')}` : ''})`); continue; }
-        for (const fid of f.found) { const u = await call({ ...vals, [find.as]: fid }, `${label}, found by ${by.names ? 'name' : 'id'}`); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
+        for (const fid of f.found) { const u = await call(vals, `${label}, found by ${by.names ? 'name' : 'id'}`, { [find.as]: fid }); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
       }
       return { ok: true };
     }
-    const first = await call(results, '');
+    const first = viaFind ? { ok: false, why: 'only through its find' } : await call(results, '');
     if (first.ok) return { ok: true };
     // Nothing recorded (the reset before, or a write the run never recorded): its leftovers by name, before or after.
-    if (first.left && find && fat && names.length) {
+    if ((first.left || viaFind) && find && fat && names.length) {
       const findText = `Find by name: ${names.map(x => `"${x}"`).join(', ')}`;
       if (!allowed(part, findText)) return { ok: false, why: `"${findText}" isn't in the approved reset` };
       const start = recorded && recorded.start(app), sc0 = start ? recorded.screen(start) || recorded.shown(start) : null;
@@ -414,7 +415,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
       if (fl.left.length) return fall(`its find needs ${fl.left.join(', ')}`);
       const r = await cmd('capApi', { tab: appTab(demo, app), open: fat.open, host: fat.host, hostPattern: fat.hostPattern, from: fat.from || null, method: 'GET', path: fl.path, find: { list: find.list, name: find.name, id: find.id, names: mine, where: find.where || null } }, 150).catch(e => ({ ok: false, why: e.message }));
       if (!r.ok || !Array.isArray(r.found)) return fall(`finding ${mine.join(', ')} by name: ${r.why || (r.status ? `the API answered ${r.status}` : 'no list in its answer')}`);
-      for (const id of r.found) { const u = await call({ ...results, [find.as]: id }, ' (found by name)'); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
+      for (const id of r.found) { const u = await call(results, ' (found by name)', { [find.as]: id }); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
       if (!r.found.length) did.push(`${app}: ${s.text}: nothing by those names`);
       return { ok: true };
     }

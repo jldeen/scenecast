@@ -312,7 +312,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       case 'manual': return { needsYou: true, why: `"${formatStep(step)}" is the presenter's to do` };
       case 'free': return { needsYou: true, why: `"${step.text}" isn't a step it can do on its own` };
       case 'click': case 'hover': {
-        if (step.kind === 'click') await ready();
+        if (step.kind === 'click' && !write) await ready();
         let { el, o } = given ? { el: given, o: await controls(id) } : Number.isInteger(step.groupIndex) ? { el: null, o: await controls(id) } : await locate(id, step.target);
         // A step group by its place among the screen's groups (groupIndex: the plan's), when its label changed.
         let group = null;
@@ -401,7 +401,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const before = await actions();
         await send(id, 'type', { text: step.value, delay: 18 }, 180, hit);
         await seen(before, 15);
-        lastField = field; lastTyped[id] = step.value; typedIn[id] = field.name;
+        lastField = field; lastTyped[id] = step.value; typedIn[id] = field.name; typedAs[id] = step.target || null;
         await settle(id, 30);
         return { did: 'typed', in: field.name, on: field.name, hit };
       }
@@ -410,13 +410,13 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const field = focusedField(o) || (step.key === 'Enter' ? lastField : null);
         const w = writeOf(step, null, field, o.url);
         if (w && !write) refuse(step, w);
-        await ready();
+        if (!write) await ready();
         const before = await actions();
         if (dispatched) dispatched();
         await send(id, 'press', { key: step.key }, 30, { for: formatStep(step), on: field ? field.name : null });
         if (/^(Enter|Escape)$/.test(step.key)) await seen(before);
         if (sent) sent();
-        if (step.key === 'Enter') { lastField = null; delete typedIn[id]; }
+        if (step.key === 'Enter') { lastField = null; delete typedIn[id]; delete typedAs[id]; }
         await settle(id, 600);
         return { did: 'pressed', key: step.key, wrote: !!w };
       }
@@ -545,10 +545,14 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       const o = await controls(id);
       const field = focusedField(o) || lastField;
       if (!field) return { missing: true, why: 'no box with the focus for Enter to send' };
+      // The box the plan typed in, by its exact name, as a write's click is: never one a near name found.
+      if (typedAs[id] && norm(field.name) !== norm(typedAs[id])) return { missing: true, why: `Enter would send from "${field.name}", not "${typedAs[id]}": a write goes only from the box by its exact name` };
       const ra = await readerAgrees(id, field.name, field.role);
       if (!ra.ok) return { missing: true, why: `${ra.why}: a write runs only where the reader and the page name its control alike` };
     }
     const before = await controls(id).catch(() => ({}));
+    // The recorder settled first: the guard never stays open while it captures (act's click or key doesn't wait again).
+    await ready();
     let id1 = null;
     const openedAt = Date.now();
     try { const o = await cmd('capOpen', { hosts: hosts || [...hostsOf(id)], entries: opensOf(id, step, lastField) }, 30); if (o.refused) return { missing: true, why: `the guard won't open: ${o.refused}` }; id1 = o.id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }
@@ -599,6 +603,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   const lastTyped = {};
   // What it typed and hasn't sent, by app: a beat that stops before its Enter clears it, so no run leaves a draft.
   const typedIn = {};
+  // The box each app's typing went to, by the plan's name for it (none for the composer): a write's Enter checks it.
+  const typedAs = {};
   async function clearTyped(app) {
     const id = appOf(app) || app;
     const name = typedIn[id];

@@ -507,9 +507,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       return api && at2 && api.made !== undefined && /^(GET|HEAD)$/i.test(api.method || 'GET') ? { api, at: at2 } : null;
     };
     // The pack's check of what the write made (check.api.made: a status, or the number and true/false fields it
-    // names), in the app's own session as the write's own calls carried it, the page left where it is.
-    const runPackCheck = async (pc, id) => {
-      const f = fillApi(pc.api, results, ((demo.cfg.apps || []).find(a => a.id === id) || {}).values);
+    // names), in the app's own session as the write's own calls carried it, the page left where it is. vals: that
+    // write's own values, never an earlier write's.
+    const runPackCheck = async (pc, id, vals) => {
+      const f = fillApi(pc.api, vals, ((demo.cfg.apps || []).find(a => a.id === id) || {}).values);
       if (f.left.length) { await cmd('capAuthWatch', { off: true }, 30).catch(() => {}); return { ok: false, why: `it needs ${f.left.join(', ')}` }; }
       const made = pc.api.made, pick = made && typeof made === 'object' ? Object.keys(made) : null;
       const r = await cmd('capApi', { tab: appTab(demo, id), armed: true, host: pc.at.host, hostPattern: pc.at.hostPattern, from: pc.at.from || null, method: pc.api.method || 'GET', path: f.path, pick, waitS: 20 }, 90).catch(e => ({ ok: false, why: e.message }));
@@ -592,10 +593,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const pc = packCheck(known);
         if (pc) await cmd('capAuthWatch', { host: pc.at.host, hostPattern: pc.at.hostPattern, from: pc.at.from || null }, 30).catch(() => {});
         r = await w.write(app, step);
-        if (pc) checked = r.wrote ? await runPackCheck(pc, app) : (await cmd('capAuthWatch', { off: true }, 30).catch(() => {}), null);
+        const vals = { ...namesOf(known.write, r.result), ...named.values };
+        if (pc) checked = r.wrote ? await runPackCheck(pc, app, vals) : (await cmd('capAuthWatch', { off: true }, 30).catch(() => {}), null);
         if (r.wrote) {
           const rec = { beat: bi + 1, step: si, text: at.text, writes: step.writes || wr.why, pack: known.pack, write: known.write, undo: step.undo || known.undo || null, result: r.result, ...(Object.keys(named.values).length ? { made: named.values } : {}) };
-          const vals = { ...namesOf(known.write, r.result), ...named.values };
           run.writes.push(rec); ran.push({ beat: bi + 1, text: at.text, app, values: vals, made: named.values });
           Object.assign(results, vals);
           emit({ event: 'wrote', ...rec });

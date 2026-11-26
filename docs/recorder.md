@@ -171,7 +171,8 @@ fill in what the demo's `capture` leaves out, so a demo made in the app records 
 
 - **Approved, all of it.** The plan word for word, and the list of every write by beat and step, with reset.md's
   undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
-  app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
+  app's pack knows it, and exactly one control on the fresh screen has its name (an Enter, the box the plan typed in,
+  by that exact name); the guard opens the app's own hosts
   for that one step, and the write's own calls to a service of its app's (its pack write's `opens`: Copilot's send is
   `POST <runtime>/v1/messages`, not its page's host). A write that isn't approved stops the run before it, with a
   picture. Once its control is used, it's a write even if the step then fails (the reset after undoes what it made).
@@ -241,7 +242,8 @@ fill in what the demo's `capture` leaves out, so a demo made in the app records 
   `unprovable`. The run goes on only if the next step's control is the one (exactly one by its exact name, of its
   kind; for a hover, anything focusable with that name, as Copilot's Workspace chips are), and a write never follows
   it. A wait, a hover, a scroll or a step group's expand moves nothing: after a proven step, or one its own exact
-  control proved, the screen stays proven (its landing is "carried", which `writeGate` counts as proven). A click whose
+  control proved, the screen stays proven (its landing is "carried", which `writeGate` counts as proven; right after a
+  write, only as proven as the write's own landing). A click whose
   only match in view is a near name takes the exact one from elsewhere on the page, brought into view, if there is one. Copilot's step groups ("21 items complete, using …") change their count and
   plugins with every answer: a click on one is the plan's index-th group label in its beat, found as today's
   index-th group on the screen, top to bottom, when its exact label isn't there (the run's log names the one).

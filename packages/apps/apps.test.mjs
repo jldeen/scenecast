@@ -129,6 +129,8 @@ test('a plan step maps to the write it makes, and checks only look', () => {
   assert.equal(op('/^POST rt\\.example\\.com\\/.*$/').length, 1);
   assert.equal(op('/^GET rt\\.example\\.com\\/v1\\/x$/').length, 1);
   assert.equal(op('rt.example.com/v1/messages').length, 1);
+  assert.equal(op('/^POST rt\\.example\\.com\\/v1\\/x$|.*x$/').length, 1);
+  assert.deepEqual(op('/^POST rt\\.example\\.com\\/v1\\/(?:x|y)$/'), []);
   assert.equal(checkPack({ ...cop, writes: [{ ...cop.writes[0], opens: ['/^POST rt\\.example\\.com\\/v1\\/x$/'] }] }).filter(p => /opens/.test(p)).length, 1);
   // What a write makes, named from the screen just before it: Copilot names a skill differently each run.
   const save = cop.writes.find(w => w.id === 'save-skill');
