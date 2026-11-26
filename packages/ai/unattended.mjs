@@ -721,7 +721,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       try { run.reset.after = await runReset({ demo, cmd, walker: liveWalker({ demo, cmd, packs, log }), phase: 'after', approval: ap, ran, results, emit }); } catch (e) { run.reset.after = { ok: false, why: e.message }; }
     }
     if (lo.rules.length) { await leaveNow().catch(() => {}); await cmd('capLeaveOut', { rules: [] }, 60).catch(() => {}); }
-    { const off = await guardOff(cmd, g.hosts, senderApps(demo.cfg, packs)); keepBodiesOut(demo, off.bodies); Object.assign(run.guard, off); }
+    { const off = await guardOff(cmd, g.hosts, senderApps(demo.cfg, packs)); keepBodiesOut(demo, off.bodies); keepBodiesOut(demo, off.writeBodies, 'write-bodies.json'); Object.assign(run.guard, off); }
     if (wRun) run.inputs = wRun.inputs();
     try { const appOf = senderApps(demo.cfg, packs); run.events = (await cmd('capEvents', {}, 30)).events.filter(e => e.kind !== 'navigated').map(e => ({ ...e, app: appOf({ tab: e.host }) })); } catch (e) {}
     save();
@@ -813,8 +813,8 @@ async function guardOn(demo, cmd, packs) {
   return g;
 }
 // What the guard held, and every host the browser reached that isn't one of the apps' own.
-// The held requests' bodies a demo asked to keep (capture.keepBodies), and every body a planned write let through
-// (passed: 'a planned write'), in .out/ai/held-bodies.json: local only, for a person reviewing an allow entry or what a
+// The held requests' bodies a demo asked to keep (capture.keepBodies), in .out/ai/held-bodies.json, and every body a
+// planned write let through, in .out/ai/write-bodies.json: local only, for a person reviewing an allow entry or what a
 // write sent. None: no file.
 // The steps whose app's page may have been broken today, not by the product: the re-ground's suspect rule
 // (reground.mjs), on this walk and its screens. It compares with the recording, so a demo without one says why.
@@ -828,8 +828,8 @@ export function suspectSteps({ demo, plan, walk, screensDir, packs = null }) {
     return { steps: rows.filter(r => r.basis === 'suspect').map(r => ({ step: `${r.beat}-${r.step}`, text: r.text, status: r.status, held: r.held || [], why: r.why })) };
   } catch (e) { return { none: e.message }; }
 }
-function keepBodiesOut(demo, bodies) {
-  const f = join(aiDir(demo), 'held-bodies.json');
+function keepBodiesOut(demo, bodies, name = 'held-bodies.json') {
+  const f = join(aiDir(demo), name);
   if (bodies && bodies.length) { mkdirSync(aiDir(demo), { recursive: true }); writeFileSync(f, JSON.stringify(bodies, null, 1)); }
   else rmSync(f, { force: true });
 }
@@ -855,6 +855,7 @@ async function guardOff(cmd, hosts, appOf = () => null) {
     out.held = named(l.held); out.counts = l.counts; out.passed = named(l.passed);
     // Kept bodies go in a file of their own (keepBodiesOut), never in run.json or walk.json.
     if (l.bodies && l.bodies.length) Object.defineProperty(out, 'bodies', { value: l.bodies, enumerable: false });
+    if (l.writeBodies && l.writeBodies.length) Object.defineProperty(out, 'writeBodies', { value: l.writeBodies, enumerable: false });
     const own = h => hosts.some(x => h === x || h.replace(/:\d+$/, '') === x || h.replace(/:\d+$/, '').endsWith('.' + x));
     const away = {};
     for (const [k, n] of Object.entries(l.counts || {})) { const host = k.split(' ').pop(); if (host && host !== '?' && !own(host)) away[k] = n; }

@@ -252,7 +252,7 @@ try {
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
   rj = readRun(DEMO);
   const apiDid = ((rj.reset.after || {}).did || []).join(' | ');
-  check('an API undo: the run\'s task deleted by the pack\'s call, in the page\'s own session', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Undo with the app pack: fixture-tasks:new-task \(DELETE, 200\)/.test(apiDid) && count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && !tasks.log.some(l => / 401$/.test(l)) && tasks.state().tasks.length === 0, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET')) }));
+  check('an API undo: the run\'s task deleted by the pack\'s call, in the page\'s own session', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Undo with the app pack: fixture-tasks:new-task(?: \(beat \d+\))? \(DELETE, 200\)/.test(apiDid) && count(tasks.log, 'DELETE /api/tasks/{id}') === 1 && !tasks.log.some(l => / 401$/.test(l)) && tasks.state().tasks.length === 0, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET')) }));
   writePack({ apiPath: '/api/nope/{taskId}' });
   tasks.log.length = 0;
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
@@ -274,7 +274,7 @@ try {
   const nst = tasks.state();
   tasks.notePing(false);
   const pinDid = ((rj.reset.after || {}).did || []).join(' | ');
-  check('an API undo in a frame\'s own session goes from that frame', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Undo with the app pack: fixture-tasks:pin-note \(POST, 200\)/.test(pinDid) && count(tasks.log, 'POST notes/api/unpin') === 1 && !tasks.log.some(l => / 401$/.test(l)) && nst.pinned === false, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET') && !/api\/seen/.test(l)) }));
+  check('an API undo in a frame\'s own session goes from that frame', !rj.stopped && rj.reset.after && rj.reset.after.ok && /Undo with the app pack: fixture-tasks:pin-note(?: \(beat \d+\))? \(POST, 200\)/.test(pinDid) && count(tasks.log, 'POST notes/api/unpin') === 1 && !tasks.log.some(l => / 401$/.test(l)) && nst.pinned === false, JSON.stringify({ stopped: rj.stopped, after: rj.reset.after, log: tasks.log.filter(l => !l.startsWith('GET') && !/api\/seen/.test(l)) }));
   const [u0, u1] = nst.unpins[nst.unpins.length - 1] || [0, 0];
   const seenIn = nst.seen.filter(t => t >= u0 && t <= u1).length;
   const heldIn = (rj.guard.held || []).filter(h => h.host === NOTES_HOST && h.path === '/api/seen' && Date.parse(h.at) >= u0 && Date.parse(h.at) <= u1).length;

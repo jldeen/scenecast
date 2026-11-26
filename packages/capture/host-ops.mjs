@@ -379,7 +379,7 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     // Back to the start's guard (in before the run's comes out), or none.
     async capGuardOff() { for (const close of opens.values()) close(); opens.clear(); if (base) await base(); else if (guard) await guard.stop(); guard = null; return { on: !!base }; },
     // A run's guard, else the one on from the start.
-    async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {}, passed: g && g.passed ? g.passed() : [], bodies: g && g.bodies ? g.bodies() : [] }; },
+    async capLog(c) { const g = guard || (base && base.guard); const held = g ? g.held() : []; return { held: held.slice(c.since || 0), total: held.length, counts: g ? g.counts() : {}, passed: g && g.passed ? g.passed() : [], bodies: g && g.bodies ? g.bodies() : [], writeBodies: g && g.writeBodies ? g.writeBodies() : [] }; },
     async capEvents(c) { return { events: events.slice(c.since || 0), total: events.length }; },
     // Arm catching the app's own session for a pack check after a write (the write's own calls carry it): capApi
     // with armed then uses it without opening the page again. { off: true } disarms.

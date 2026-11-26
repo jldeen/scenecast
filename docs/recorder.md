@@ -172,7 +172,7 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   the tab, the frame and the app it came from (by the request's own target and document, never by when it came: a
   background tab sends during another app's step), and each passed non-read with the allow entry that let it through
   (or, for a write's, what it asked for: a server function's action, a GraphQL operation, a body's Verb; its body
-  kept in `.out/ai/held-bodies.json`, local only). A pack's `guard.stayHeld` stays held even during a write's step
+  kept in `.out/ai/write-bodies.json`, local only). A pack's `guard.stayHeld` stays held even during a write's step
   (the app's own background calls to the host the write opens).
 - **Writes in frames too** (Microsoft IQ's Power BI frame): exactly one control by that name in the page and its
   frames, the reader agreeing in that frame's markup, the click hit-tested through the frames, and the guard open for

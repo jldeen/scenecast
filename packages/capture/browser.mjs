@@ -616,7 +616,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   // keepBodies: entries (as allow's) whose held requests' bodies it keeps, for a person to review (local only).
   async function guard({ hosts = null, allow = [], stayHeld = [], keepBodies = [], mode: gm = 'hold', local = false } = {}) {
     const prev = guarding;
-    const st = { open: [], counts: {}, held: [], passed: [], bodies: [], authFor: null, authFrom: null, auth: null };
+    const st = { open: [], counts: {}, held: [], passed: [], bodies: [], writeBodies: [], authFor: null, authFrom: null, auth: null };
     // What's open: a planned write's hosts, or one call (its method and exact address). Never every host.
     const passing = (u, method, body) => openFor(st.open, u, method, body);
     const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData, headers }, url, from = {}) => {
@@ -645,7 +645,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       // write's opening.
       else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by, ...sender, ...(by === 'allowed' && /graphql/i.test(u.pathname) && graphqlOperation(postData) ? { operation: graphqlOperation(postData) } : {}), ...(by === 'allowed' ? { entry: allowedBy({ method, url, body: postData }, allow) } : {}), ...(by === 'a planned write' && postAction(postData) ? { action: postAction(postData) } : {}) });
       // What a planned write let through, its body kept for a person's review (local only, as held ones are).
-      if (v === 'pass' && by === 'a planned write' && u && !READS.has(String(method).toUpperCase())) st.bodies.push({ method, host: u.host, path: u.pathname, at: new Date().toISOString(), passed: by, body: postData == null ? null : String(postData).slice(0, 4000) });
+      if (v === 'pass' && by === 'a planned write' && u && !READS.has(String(method).toUpperCase())) st.writeBodies.push({ method, host: u.host, path: u.pathname, at: new Date().toISOString(), body: postData == null ? null : String(postData).slice(0, 4000) });
       if (v === 'hold' && gm === 'hold') return { fail: true };
       return null;
     } });
@@ -662,6 +662,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       held: () => st.held.slice(),
       passed: () => st.passed.slice(),
       bodies: () => st.bodies.slice(),
+      writeBodies: () => st.writeBodies.slice(),
       // Arm (a host pattern) or disarm (null) catching an API's session; take() hands it over once and forgets it.
       // from: only a call sent by the page or frame on that host (IQ's Power BI frame, not the portal around it).
       watchAuth(re, from = null) { st.authFor = re; st.authFrom = from; st.auth = null; },
