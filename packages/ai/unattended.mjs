@@ -581,6 +581,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
           Object.assign(results, vals);
           emit({ event: 'wrote', ...rec });
         }
+        // Its control was used and then the step failed: recorded above (the reset after undoes it), then the run stops.
+        if (r.error) return { kind: 'error', why: `${at.text}: ${r.error}` };
       } else r = await w.act(app, step);
       if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why };
       const c = await w.check(app, step);

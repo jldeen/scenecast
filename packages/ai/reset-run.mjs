@@ -388,7 +388,8 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     }
     const first = await call(results, '');
     if (first.ok) return { ok: true };
-    if (first.left && find && fat && names.length && phase === 'before') {
+    // Nothing recorded (the reset before, or a write the run never recorded): its leftovers by name, before or after.
+    if (first.left && find && fat && names.length) {
       const findText = `Find by name: ${names.map(x => `"${x}"`).join(', ')}`;
       if (!allowed(part, findText)) return { ok: false, why: `"${findText}" isn't in the approved reset` };
       const start = recorded && recorded.start(app), sc0 = start ? recorded.screen(start) || recorded.shown(start) : null;

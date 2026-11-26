@@ -284,7 +284,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   const refuse = (step, w) => { throw Object.assign(new Error(`a walker doesn't write: ${formatStep(step)}: ${w.why}`), { code: 'WRITE', write: w }); };
 
   let lastField = null;
-  async function act(id, step, { write = false, el: given = null, sent = null } = {}) {
+  async function act(id, step, { write = false, el: given = null, sent = null, dispatched = null } = {}) {
     switch (step.kind) {
       case 'app': { await cmd('front', { tab: tab(id) }, 30); await quiet(id, 500, 6000); return { did: 'switched' }; }
       case 'wait': await settle(id, 300); if (!recording) await quiet(id, 1500, 180000); return { did: 'waited' };
@@ -308,10 +308,12 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const u = await uncovered(id, el, step.target, undefined, again);
         if (!u.ok) return { missing: true, why: u.why, hit: { ...hit, covered: u.hit } };
         const before = await actions();
+        if (dispatched) dispatched();
         await send(id, 'click', { x: u.el.x, y: u.el.y }, 60, { ...hit, landed: u.hit });
         await seen(before);
         if (sent) sent();
-        await settle(id, 120);
+        // A new screen's sweep (its hovers, menus, zoom) or an answer streaming in can take minutes.
+        await settle(id, 600);
         return { did: 'clicked', on: el.name, hit, wrote: !!w };
       }
       case 'type': {
@@ -342,11 +344,12 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const w = writeOf(step, null, field, o.url);
         if (w && !write) refuse(step, w);
         const before = await actions();
+        if (dispatched) dispatched();
         await send(id, 'press', { key: step.key }, 30, { for: formatStep(step), on: field ? field.name : null });
         if (/^(Enter|Escape)$/.test(step.key)) await seen(before);
         if (sent) sent();
         if (step.key === 'Enter') { lastField = null; delete typedIn[id]; }
-        await settle(id, 120);
+        await settle(id, 600);
         return { did: 'pressed', key: step.key, wrote: !!w };
       }
       default: return { needsYou: true, why: `"${formatStep(step)}" isn't a step it knows` };
@@ -495,8 +498,12 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       }
       await cmd('capClose', { id: id1 }, 30).catch(() => {});
     };
-    let r, closing = null;
-    try { r = await act(id, step, { write: true, el: target, sent: () => { if (id1 && !closing) closing = closeSoon(); } }); } finally { if (closing) await closing; await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
+    // Once its control was used, the write may have gone out even if the step then fails: it's a write, with what it
+    // made, so the reset after undoes it; the step's error comes with it.
+    let r, closing = null, used = false;
+    try { r = await act(id, step, { write: true, el: target, dispatched: () => { used = true; }, sent: () => { if (id1 && !closing) closing = closeSoon(); } }); }
+    catch (e) { if (!used) throw e; r = { error: e.message }; }
+    finally { if (closing) await closing; await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
     if (r.missing || r.needsYou) return r;
     const after = await controls(id).catch(() => ({}));
     // What it made, by the ids in its address: the path's, and a hash route's (Cowork's /cowork/#/task/<id>, its id

@@ -159,7 +159,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
   for that one step, and the write's own calls to a service of its app's (its pack write's `opens`: Copilot's send is
   `POST <runtime>/v1/messages`, not its page's host). A write that isn't approved stops the run before it, with a
-  picture.
+  picture. Once its control is used, it's a write even if the step then fails (the reset after undoes what it made).
+  After a click or Enter, the run waits up to 10 minutes for the recorder: an answer streaming in, then the new
+  screen's sweep, takes minutes.
 - **Services the apps need** (a pack's `services`: IQ's plugin service). First, before the reset before (so a
   failing service costs nothing: no write, nothing to put back), each app with one is opened and the page's own call
   has to answer 2xx (it waits up to 90 s for it); again once the reset is done, at its start screen. Else nothing is
@@ -188,7 +190,8 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   approval list shows them). After a run, it undoes each write the group covers with what that write made (its own
   ids, read from its address too: Cowork's `/cowork/#/task/<id>`). If the API won't take an id, or the run recorded
   none (the write's call was held, or its address had no id), the pack's `undo.find` lists what's there: by that id
-  (whole or a `:` part), else by the group's Names (exactly, never one the recording's start screen shows). Found, it's
+  (whole or a `:` part), else by the group's Names (exactly, never one the recording's start screen shows). A group
+  whose write the run never recorded is found by its Names too, before a run or after it. Found, it's
   undone by the list's id; a list the API answered (2xx) with no match is nothing to undo; a find that failed falls to
   the Note's steps. The checks after a run load each app again at its start (a real page load, not only a route) and
   prove it's there before reading its lines.
