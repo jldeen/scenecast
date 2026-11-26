@@ -28,33 +28,37 @@
     st.textContent = '[data-d1-leaveout]{display:none !important}';
     (document.head || document.documentElement).appendChild(st);
   };
+  // The marks, worked out again from the rules and the names as they are now: a node the list reuses for an item she
+  // keeps, or a rule whose values changed, loses its mark. Only a mark that changed is written.
   const mark = () => {
-    style();
+    if (mine.length) style();
+    const want = new Map();
+    const put = (el, id) => { if (!want.has(el)) want.set(el, id); };
     for (const r of mine) {
       let els = [];
       try { els = document.querySelectorAll(r.list); } catch (e) { continue; }
-      const want = r.values.map(norm);
+      const vals = r.values.map(norm);
       for (const el of els) {
-        if (el.hasAttribute('data-d1-leaveout') || !namesOf(el).some(n => want.includes(n))) continue;
-        el.setAttribute('data-d1-leaveout', r.id);
+        if (!namesOf(el).some(n => vals.includes(n))) continue;
+        put(el, r.id);
         // What's under it, when the list draws that beside it rather than in it: the group right after it (a team's
         // channels), or the items after it one level down (a flat tree), up to the next at its level.
         const lvl = +el.getAttribute('aria-level') || 0;
         for (let next = el.nextElementSibling; next; next = next.nextElementSibling) {
-          if (next.getAttribute('role') === 'group') { next.setAttribute('data-d1-leaveout', r.id); break; }
+          if (next.getAttribute('role') === 'group') { put(next, r.id); break; }
           if (!(lvl && +next.getAttribute('aria-level') > lvl)) break;
-          next.setAttribute('data-d1-leaveout', r.id);
+          put(next, r.id);
         }
-        api.marked++;
       }
     }
+    for (const el of document.querySelectorAll('[data-d1-leaveout]')) if (!want.has(el)) el.removeAttribute('data-d1-leaveout');
+    for (const [el, id] of want) if (el.getAttribute('data-d1-leaveout') !== id) { el.setAttribute('data-d1-leaveout', id); api.marked++; }
   };
   api.set = rs => {
     mine = (rs || []).filter(r => (r.hosts || []).some(h => location.host === h || location.host.endsWith('.' + h)));
-    const ids = new Set(mine.map(r => r.id));
-    for (const el of document.querySelectorAll('[data-d1-leaveout]')) if (!ids.has(el.getAttribute('data-d1-leaveout'))) el.removeAttribute('data-d1-leaveout');
-    if (mine.length) mark();
+    mark();
   };
-  new MutationObserver(() => { if (mine.length) mark(); }).observe(document, { childList: true, subtree: true, characterData: true });
+  // Its name can change in place too (an aria-label); its own marks aren't watched, so writing one never runs it again.
+  new MutationObserver(() => { if (mine.length) mark(); }).observe(document, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-label'] });
   api.set(rules);
 })
