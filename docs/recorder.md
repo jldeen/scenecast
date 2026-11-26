@@ -308,7 +308,8 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   nothing the click opened is left: no part added or removed, no state attribute (expanded, pressed, selected, hidden,
   open…) still changed; an app's own churn on other attributes (Teams' rotating search placeholder, generated ids, a
   status in a name) doesn't count, since put-back checks the screen after the kind. After a
-  reload it waits for the app to go quiet (15 s at most) before learning its own churn again, else every click after
+  reload (a real one: an address with a `#/` route, the admin center's, would only change its route and keep what the
+  click changed) it waits for the app to go quiet (15 s at most) before learning its own churn again, else every click after
   it reads as stuck. A recorded menu that visibly opened and read as nothing is pressed once more with the learned
   churn forgotten. What stayed when a click was stuck is in the recording (`sides.clicks[].results[].stayed`). The recording: `putBack` (each screen, after what, what it found, and how it was put
   back); run.json: `stopped.kind: 'put-back'`.

@@ -92,8 +92,13 @@ const titleNow = () => p.mainFrame().evaluate(() => document.title).catch(() => 
 // with no change (15 s at most), then learns 2 s of what changes by itself. out.relearnMs: the time it took.
 const relearn = async () => { const s0 = Date.now(); await move(...NEUTRAL); await quiet(1000, ARGS.relearnMaxMs || 15000); await ev(() => window.__d1h.takeRest()); await sleep(2000); await ev(() => window.__d1h.noise()); out.relearnMs = (out.relearnMs || 0) + Date.now() - s0; out.relearns = (out.relearns || 0) + 1; };
 async function backToRest() {
-  // Reload as a last resort (the page's own state, nothing in the tenant).
-  await p.goto(url0, { waitUntil: 'domcontentloaded' }); await sleep(ARGS.reloadWaitMs || 9000);
+  // Reload as a last resort (the page's own state, nothing in the tenant). An address with a #/ route (the admin
+  // center's) only changes its route when it's opened again: no new page, and what a click changed stays (its bell's
+  // count, cleared when Notifications opened). Then a real reload.
+  const was = await p.mainFrame().evaluate(() => performance.timeOrigin).catch(() => null);
+  await p.goto(url0, { waitUntil: 'domcontentloaded' });
+  if (was !== null && was === await p.mainFrame().evaluate(() => performance.timeOrigin).catch(() => null)) { await p.reload({ waitUntil: 'domcontentloaded' }).catch(() => {}); out.hardReloads = (out.hardReloads || 0) + 1; }
+  await sleep(ARGS.reloadWaitMs || 9000);
   // Teams opens the last conversation after a reload: back to the channel the audit was on.
   if (ARGS.reopenText) { for (let i = 0; i < 30; i++) { const el = p.getByText(ARGS.reopenText, { exact: true }).first(); if (await el.isVisible().catch(() => false)) { const b = await el.boundingBox(); await p.mouse.click(b.x + b.width / 2, b.y + b.height / 2); await sleep(5000); break; } await sleep(1000); } }
   await reland();

@@ -935,7 +935,7 @@ async function recSide(A, c) {
       const seen = recSeen('clicks', A.id + (out.frameUrl || '')); for (const r of out.results) if (!r.floor) seen.add(r.name);
       const F = recFloor();
       if (F && F.seenClicks && Object.keys(out.floorClicks || {}).length) F.seenClicks({ app: A.id, state, page, floor: out.floorClicks });
-      if (results.some(r => r.restore)) REC.sides.clicks.push({ page, app: A.id, base: REC.states[state].snap, frame: frame || undefined, results, ...(out.relearns ? { relearns: out.relearns, relearnMs: out.relearnMs } : {}), ...(out.relanded ? { relanded: out.relanded } : {}), ...(out.lost ? { lost: out.lost } : {}) });
+      if (results.some(r => r.restore)) REC.sides.clicks.push({ page, app: A.id, base: REC.states[state].snap, frame: frame || undefined, results, ...(out.relearns ? { relearns: out.relearns, relearnMs: out.relearnMs } : {}), ...(out.relanded ? { relanded: out.relanded } : {}), ...(out.lost ? { lost: out.lost } : {}), ...(out.hardReloads ? { hardReloads: out.hardReloads } : {}) });
       await recInstall(p); await recSettle(p, 900, 12000);
       await recPutBack(A, state, 'click audit');
       return { page, frame, controls: out.controls, clicks: results.filter(r => r.restore).map(r => `${r.name}: closes by ${r.restore}${r.lazyCss ? `, ${r.lazyCss} lazy stylesheet(s)` : ''}`), skipped: results.filter(r => !r.restore).map(r => `${r.name}: ${r.skip || r.effect || r.navigated || r.error || 'no effect'}`), secs: out.secs };
