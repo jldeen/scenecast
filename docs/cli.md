@@ -239,6 +239,8 @@ scenecast ai finish --demo <dir>      # after the build: script.md for the guide
 scenecast ai record --demo <dir>      # Record for me: the approved plan, in the browser, while recording; then script.md
 scenecast ai record --demo <dir> --unattended   # the same in the capture browser with nobody there: the approved
                                       # writes only, the read-only guard, the reset before and after (.out/ai/run.json)
+scenecast ai check-script --demo <dir>          # Check my script: walk --live, then where a run would stop and the
+                                      # steps it couldn't prove, by the run's own rules (.out/ai/check-script.json)
 scenecast ai check  --demo <dir>      # reset.md's Check read live in the capture browser, read-only: each line
                                       # pass, wrong or can't, with a picture (.out/ai/check.json)
 scenecast ai walk   --demo <dir> [--live]       # a read-only walk of plan.md: the recording's screens, or the product

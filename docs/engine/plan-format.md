@@ -71,6 +71,10 @@ After the screen's name and ` · `, one proof, in plain words. Either part may b
 | `gone "words", still "words"` | Its words no longer include the first, and still include the second. The first were on the page before the step; the second, on it before and after, are the page's own (its heading, or a line that doesn't change between runs): it's the same page with something taken away, not a blank page, an error or somewhere else. | `{ screen, kind: 'gone', text: null, gone, still }` |
 | (none) | Nothing: the review lists the step under **Needs you**. | `{ screen, kind: null, text: null }` |
 
+- **On a screen a write made** (a prompt's answer, a save's card: after a step with `Writes:` in its beat), a plan's
+  proof is never the words the app wrote: a sentence (six words or more) or a quoted name changes from run to run.
+  Make it from my script takes a control or the product's own short phrase there (`control "Save: Save skill"`,
+  `"Background task ran for"`), else the step goes to **Needs you**; Check my script lists one that quotes them.
 - **The page's words:** what it shows in every frame (`innerText`), not what's in a closed dialog or a tooltip, and not
   a row a capture put back (below), nor what she leaves out of the replica ([the reset](#the-reset-resetmd)'s Leave
   out).

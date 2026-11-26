@@ -153,6 +153,19 @@ The tenant and the account live in the demo's own `demo.json`, never in this rep
 
 `scenecast ai record --unattended` (`packages/ai/unattended.mjs`) runs the approved plan in the capture browser with
 nobody there, while the recorder records. It's what the capture browser is for: no screen, no clicks, no waiting.
+The app runs it from Record › Copilot records **in a separate browser** (demo.json `recorder: "capture"` and its
+`capture.profile`): it makes reset.md from the plan when there's none, approves, and stops the capture browser after.
+
+- **Check my script first** (`ai check-script`, `packages/ai/check-script.mjs`): `ai walk --live`, then the run's own
+  rules over what it saw. A write after a step it couldn't prove (unproven, words drifted, a miss) stops; a write needs
+  its pack write with an undo; reset.md's Check and her own status must pass. Steps behind a write can't be walked, so
+  a proof there that quotes what the app wrote (a sentence, a quoted name) is a doubt. → `.out/ai/check-script.json`:
+  `{ stops, marks, unchecked }`.
+- **Doubts with no write after them are marks, not stops.** A step it couldn't prove, landing words that aren't
+  there, or a control that isn't: the run keeps the screen, records the beat in `run.marked` with a picture, and goes
+  on (a scroll or a wait goes on too). A write never follows the doubt.
+- **Stop** (the app's button, `.out/ai/stop`) ends it between two steps, never between a write and its record; the
+  reset after runs.
 
 - **Approved, all of it.** The plan word for word, and the list of every write by beat and step, with reset.md's
   undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
