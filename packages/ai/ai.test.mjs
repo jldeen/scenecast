@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parsePlan, parseStep, formatPlan, risk, writesOf, parseLands, formatLands } from './plan.mjs';
 import { redact, compactOutline, makeModel } from './model.mjs';
-import { findItem, nameFits, norm } from './find.mjs';
+import { findItem, nameFits, norm, groupPick } from './find.mjs';
 import { matches } from './coach.mjs';
 import { ask } from './stub.mjs';
 import { loginFlow } from './copilot.mjs';
@@ -16,6 +16,18 @@ import { fillApi, checkLine } from './reset-run.mjs';
 import { stepNets } from './walk.mjs';
 import { senderApps, serviceAnswer, suspectSteps, cardSteps, cardsVerdict, planApps, ownStatusApps, ownStatusSay, ownSeen, recordedHovers, hoverOutcomes } from './unattended.mjs';
 import { settled } from './run.mjs';
+
+test("Copilot's step groups: the plan's label, else the plan's index-th group on the screen, top to bottom", () => {
+  const b = (name, y) => ({ role: 'button', name, x: 700, y });
+  const today = [b('Copy message', 900), b('5 items complete, using Supply chain disruption, expand', 610), b('17 items complete, using Supply chain disruption, Fabric IQ, expand', 320), b('Plugins', 80)];
+  // Her take's labels (other counts, Caldova IQ gone): the 1st and 2nd groups, in order.
+  assert.equal(groupPick(today, '21 items complete, using Caldova IQ, Supply chain disruption, expand', 0).name, '17 items complete, using Supply chain disruption, Fabric IQ, expand');
+  assert.equal(groupPick(today, '6 items complete, using Supply chain disruption, Fabric IQ, expand', 1).name, '5 items complete, using Supply chain disruption, expand');
+  // The exact label wins wherever it is; no such group: none.
+  assert.equal(groupPick(today, '5 items complete, using Supply chain disruption, expand', 0).y, 610);
+  assert.equal(groupPick(today, '6 items complete, using Fabric IQ, expand', 2), null);
+  assert.equal(groupPick(today, 'Plugins', null).name, 'Plugins');
+});
 
 test('plan: plain words to steps and back', () => {
   const text = `# Demo\n\n## Beat 1 · The question\n\n- Go to chat\n- Click “Message”\n- Type "Summarize it" in "Message"\n- Press enter\n- Wait for the answer\n- You: sign in\n- Open the first tool\n\n> I ask about it.\n`;

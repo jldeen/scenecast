@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { findItem, nameFits, composer, searchBox, norm } from './find.mjs';
+import { findItem, nameFits, composer, searchBox, norm, groupPick } from './find.mjs';
 import { risk, formatStep, parseStep } from './plan.mjs';
 import { appTab, settled, sleep } from './run.mjs';
 import { landedOn } from '@stuntdouble/capture/browser.mjs';
@@ -300,7 +300,10 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       case 'manual': return { needsYou: true, why: `"${formatStep(step)}" is the presenter's to do` };
       case 'free': return { needsYou: true, why: `"${step.text}" isn't a step it can do on its own` };
       case 'click': case 'hover': {
-        const { el, o } = given ? { el: given, o: await controls(id) } : await locate(id, step.target);
+        let { el, o } = given ? { el: given, o: await controls(id) } : await locate(id, step.target);
+        // A step group by its place among the screen's groups (groupIndex: the plan's), when its label changed.
+        let group = null;
+        if (!given && Number.isInteger(step.groupIndex)) { const o2 = await controls(id); const g = groupPick(o2.items, step.target, step.groupIndex); if (g) { el = g; o = o2; group = g.name; } }
         if (!el) return { missing: true, why: `no "${step.target}" on this screen` };
         const hit = hitOf(el, step);
         if (step.kind === 'hover') { await send(id, 'hover', { x: el.x, y: el.y }, 30, hit); await settle(id, 30); return { did: 'hovered', on: el.name, hit }; }
@@ -315,6 +318,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         await send(id, 'click', { x: u.el.x, y: u.el.y }, 60, { ...hit, landed: u.hit });
         await seen(before);
         if (sent) sent();
+        if (group && norm(group) !== norm(step.target)) log(`${id}: "${step.target}" is the screen's group #${step.groupIndex + 1}, "${group}" today`);
         // A new screen's sweep (its hovers, menus, zoom) or an answer streaming in can take minutes.
         await settle(id, 600);
         return { did: 'clicked', on: el.name, hit, wrote: !!w };
@@ -607,6 +611,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     if (!['click', 'hover', 'type'].includes(s.kind) || !s.target) return { ok: false, why: `"${formatStep(s)}" has no control of its own to find` };
     const field = s.kind === 'type';
     const items = await pageControls(id, field ? 'field' : s.kind === 'hover' ? 'hover' : undefined).catch(() => null) || [];
+    // A step group: the plan's index-th, by its place on the screen (its count and plugins change with each answer).
+    if (s.kind === 'click' && Number.isInteger(s.groupIndex)) { const g = groupPick(items, s.target, s.groupIndex); return g ? { ok: true, group: g.name } : { ok: false, why: `no step group #${s.groupIndex + 1} ("${s.target}") on the screen` }; }
     const at = new Set();
     const same = items.filter(it => !it.disabled && norm(it.name) === norm(s.target) && (!field || it.editable || /textbox|searchbox|combobox/.test(it.role))).filter(it => { const k = `${Math.round(it.x / 4)},${Math.round(it.y / 4)}`; return at.has(k) ? false : (at.add(k), true); });
     return same.length === 1 ? { ok: true } : { ok: false, why: same.length ? `${same.length} controls are called "${s.target}"` : `no control is called exactly "${s.target}"` };

@@ -208,7 +208,11 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   write ran) passing is strong; it runs in the app's own session, as the write's own calls carried it.
 - **A step it can't prove** (not strong, and no proof or one that was already there before it) goes in run.json's
   `unprovable`. The run goes on only if the next step's control is the one (exactly one by its exact name, of its
-  kind), and a write never follows it.
+  kind; for a hover, anything focusable with that name, as Copilot's Workspace chips are), and a write never follows
+  it. A hover, a scroll or a step group's expand moves nothing: after a proven step, or one its own exact control
+  proved, the screen stays proven. Copilot's step groups ("21 items complete, using …") change their count and
+  plugins with every answer: a click on one is the plan's index-th group label in its beat, found as today's
+  index-th group on the screen, top to bottom, when its exact label isn't there (the run's log names the one).
 - **Writes only after strong landings** (`writeGate`): the landings in the write's app since its last write all
   strong. The run never asks: where it would, it stops before the write, keeps a picture and both reads of the page
   (`.out/ai/stops/`), runs the reset after, and lists the step in run.json's `needsYou`.

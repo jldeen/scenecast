@@ -28,6 +28,22 @@ export function findItem(items, want, kind) {
   return bs >= 15 ? best : null;
 }
 
+// Copilot's step groups ("21 items complete, using Caldova IQ, Supply chain disruption, expand"): their counts and
+// plugin lists change with every answer. The one by that exact name, else the index-th group on the screen, top to
+// bottom (the plan's index-th group label in its beat). → the item, or null.
+export const GROUP_LABEL = /^\d+ (?:items?|background tasks?) complete\b/i;
+export function groupPick(items, want, index) {
+  const w = norm(want);
+  const exact = (items || []).find(it => norm(it.name) === w);
+  if (exact) return exact;
+  if (!Number.isInteger(index) || index < 0) return null;
+  const seen = new Set();
+  const groups = (items || []).filter(it => !it.disabled && GROUP_LABEL.test(String(it.name || '').trim()))
+    .sort((a, b) => (a.y - b.y) || (a.x - b.x))
+    .filter(it => { const k = `${Math.round(it.x / 4)},${Math.round(it.y / 4)}`; return seen.has(k) ? false : (seen.add(k), true); });
+  return groups[index] || null;
+}
+
 // A control found by its name alone (in a frame, where there's no outline to go on), is it the one? Equal, starting
 // with it, or one inside the other when it's most of it ("SC Supply Chain Operations" for "Supply Chain
 // Operations"). Not a name that only contains it ("Search business plugins" for "Plugins") or a small part of it ("Our

@@ -27,6 +27,7 @@ import { runReset, fillApi, setBefore, setBeforeProblem, claimScreen, checkClaim
 import { leaveOutOf, leaveOn, leaveLog, leftFor, leaveApps, leaveFailure } from './leave-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { walkerFromDemo } from './walker.mjs';
+import { GROUP_LABEL } from './find.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
 import { readScreen } from '@scenecast/script/html.mjs';
 import { cardMatch, cardNorm, defCard } from '@stuntdouble/capture/hover-card.mjs';
@@ -554,10 +555,17 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         const el = step.kind === 'click' ? (await w.locate(app, step.target)).el : null;
         wr = w.writeOf(step, el, step.kind === 'press' ? w.focusedField(o) : null, o.url);
       } else if (step.writes) wr = w.writeOf(step, null, null, null);
+      // A step group's click (Copilot's "N items complete, using …"): the plan's index-th group label in this beat, so
+      // it finds today's group by its place when the count or plugins changed.
+      if (step.kind === 'click' && GROUP_LABEL.test(step.target || '') && !wr) {
+        const labels = [...new Set(plan.beats[bi].steps.filter(x => x.kind === 'click' && GROUP_LABEL.test(x.target || '')).map(x => x.target))];
+        step.groupIndex = labels.indexOf(step.target);
+      }
+      let byControl = false;
       if (doubt) {
         const before = `the step before it (${doubt.text}) couldn't be proven (${doubt.why})`;
         if (wr) return { kind: 'unprovable', why: `${before}, and a write never follows a step it couldn't prove`, beforeWrite: true };
-        if (step.kind !== 'app') { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; }
+        if (step.kind !== 'app') { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; byControl = true; }
       }
       let r, checked = null;
       if (wr) {
@@ -595,7 +603,10 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const url = (await w.controls(app).catch(() => ({}))).url || null;
       run.landings.push({ beat: bi + 1, index: si, app, step: at.text, expected: step.lands ? formatLands(step.lands) : null, got: { screen: c.screen || null, url, text: byCheck ? `the pack's check: ${checked.status}${checked.picked ? ` ${JSON.stringify(checked.picked)}` : ''}` : proofWords(lp.lands) }, ok: true, strength, basis: byCheck ? 'pack check' : 'live', ...(strength === 'strong' ? {} : { why: lp.why }), ...(r.wrote ? { wrote: true } : {}), ...(checked ? { check: checked } : {}) });
       if (step.kind === 'type' && step.value) typedSoFar.push(step.value);
-      const why = strength === 'strong' ? null : pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
+      // A hover, a scroll or a step group's expand moves nothing: after a proven step, or one its own exact control
+      // proved, the screen is still the proven one.
+      const carried = (['hover', 'scroll'].includes(step.kind) || Number.isInteger(step.groupIndex)) && (!doubt || byControl);
+      const why = strength === 'strong' || carried ? null : pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
       if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
       else doubt = null;
       Object.assign(lastDid, { did: r.did, screen: c.screen });
