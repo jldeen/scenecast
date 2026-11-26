@@ -493,3 +493,19 @@ test("a step group folded under the answer's timeline: the header opened first; 
   assert.deepEqual(did, ['open', 'open', 'open', 'closed']);
   assert.deepEqual(c.clicks, ['Worked for 1m 36s', 'Worked for 1m 36s']);
 });
+
+test("an unattended record with the extension recorder is refused before the check, which would fix things in her browser", async () => {
+  const { spawn } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const dir = mkdtempSync(join(tmpdir(), 'sc-unattended-'));
+  writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name: 'u', raw: join(dir, 'raw'), apps: [{ id: 'chat', url: 'https://chat.example.test/' }] }));
+  // The check stands in for preflight here: if it runs, it says so, and touches nothing.
+  const stub = 'data:text/javascript,export async function preflight() { throw new Error("the check ran") } export const notReady = () => ""';
+  const hook = `data:text/javascript,import { registerHooks } from 'node:module'; registerHooks({ resolve: (s, c, next) => s === '@stuntdouble/core/lib/preflight.mjs' ? { url: ${JSON.stringify(stub)}, shortCircuit: true } : next(s, c) });`;
+  const p = spawn(process.execPath, ['--import', hook, fileURLToPath(new URL('./cli.mjs', import.meta.url)), 'record', '--demo', dir, '--unattended'], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, SCENECAST_TEST_FENCE: dir } });
+  let out = ''; p.stdout.on('data', d => { out += d; });
+  await new Promise(res => p.on('exit', res));
+  const events = out.split('\n').filter(l => l.startsWith('@ai ')).map(l => JSON.parse(l.slice(4)));
+  assert.equal(events.some(e => e.event === 'stage' && e.name === 'check'), false, out);
+  assert.match((events.find(e => e.event === 'error') || {}).error || '', /needs the capture browser/);
+});

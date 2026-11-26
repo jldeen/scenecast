@@ -40,7 +40,8 @@ export async function nameParity({ demo, port = 47801, log = () => {} }) {
   const server = spawn(process.execPath, [at('player', 'serve.mjs'), '--demo', dir, '--port', String(port)], { stdio: 'ignore' });
   const base = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 60; i++) { try { if ((await fetch(base + '/manifest.json')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 250)); }
-  const browser = await chromium.launch({ channel: 'chromium', headless: true });
+  // One that won't start ends the server too: nothing is left on the port.
+  const browser = await chromium.launch({ channel: 'chromium', headless: true }).catch(e => { server.kill(); throw e; });
   const out = { screens: 0, controls: 0, same: 0, differ: [], zero: 0, zeroOn: [] };
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });

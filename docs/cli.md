@@ -6,7 +6,7 @@ JavaScript in `packages/`, under Node) and keeps the bundle manifest in step, an
 ## Install
 
 Presenters use the desktop app, which carries everything it needs. For the CLI, or to work on Scenecast: Rust
-(stable), Node 20 or later, and Google Chrome or Microsoft Edge.
+(stable), Node 22 or later, and Google Chrome or Microsoft Edge.
 
 ```bash
 git clone https://github.com/jldeen/scenecast && cd scenecast

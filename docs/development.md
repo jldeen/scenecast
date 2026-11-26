@@ -4,7 +4,7 @@ Building it, testing it, and releasing it. The repository layout is in [architec
 
 ## Set up
 
-Rust (stable), Node 20 or later, and Google Chrome or Microsoft Edge, on macOS, Windows or Linux.
+Rust (stable), Node 22 or later, and Google Chrome or Microsoft Edge, on macOS, Windows or Linux.
 
 ```bash
 git clone https://github.com/jldeen/scenecast && cd scenecast

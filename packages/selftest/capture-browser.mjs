@@ -112,7 +112,7 @@ try {
   const g = await cb.guard({ local: true });
   await sp.click('#send'); await sp.waitForFunction(() => document.title !== '', null, { timeout: 10000 }).catch(() => {});
   check('the guard holds a POST (from a page open before it)', await sp.title() === 'held' && !seen.includes('POST /send'), `${await sp.title()} ${seen.join(',')}`);
-  await g.pass(async () => { await sp.evaluate(() => { document.title = ''; }); await sp.click('#send'); await sp.waitForFunction(() => document.title !== '', null, { timeout: 10000 }).catch(() => {}); });
+  await g.pass(async () => { await sp.evaluate(() => { document.title = ''; }); await sp.click('#send'); await sp.waitForFunction(() => document.title !== '', null, { timeout: 10000 }).catch(() => {}); }, { hosts: [new URL(SIDE).host] });
   check('pass() lets a planned one through', (await sp.title()).startsWith('sent') && seen.includes('POST /send'), `${await sp.title()} ${seen.join(',')}`);
   check('the guard counts what it held and passed', Object.keys(g.counts()).some(k => k.startsWith('held POST')) && g.held().length === 1, JSON.stringify(g.counts()));
   await g.stop();
