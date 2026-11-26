@@ -23,10 +23,22 @@ export const MARK = '<!-- Made by Scenecast from your talk track and the plan. E
 // The element around words a Focus names: "the card around …", "the row around …".
 const AROUND = { card: 'section,article,[role=group],[role=article],[role=region],[role=dialog]', row: 'li,tr,[role=row],[role=listitem]', list: 'ul,ol,[role=list]', item: 'li,[role=listitem],[role=option]', button: 'button,[role=button],a', pane: 'aside,[role=complementary],[role=region]', section: 'section,[role=region]' };
 
-// A plan step and a recorded step, by what they do: the take records each of the plan's app switches, typing, Enter,
-// clicks and keys, in order.
+// A plan step and a recorded step, by what they do: the take records the plan's app switches, typing, Enter, clicks
+// and keys, in order, but not every one (a click into a box to type in, a switch to the app it's on, a click that
+// changes nothing). A step is the take's next recorded one when that does the same: the same app, the same words
+// typed, a click on the control it names, the same key.
 const stepKind = s => s.kind === 'app' ? 'app' : s.kind === 'type' ? 'type' : s.kind === 'press' ? (s.key === 'Enter' ? 'enter' : 'key') : s.kind === 'click' ? 'click' : null;
 const pathKind = p => p.type ? 'type' : p.enter ? 'enter' : p.click ? 'click' : p.key ? 'key' : p.app ? 'app' : null;
+const bare = t => norm(String(t || '').replace(/[\u200B-\u200D\u2060\uFEFF]/g, ''));
+const sameStep = (s, p) => {
+  const k = stepKind(s);
+  if (!k || k !== pathKind(p)) return false;
+  if (k === 'app') return p.app === s.app;
+  if (k === 'type') return !s.value || bare(p.text) === bare(s.value);
+  if (k === 'key') return p.key === s.key;
+  if (k === 'click') { const a = bare(specName(p.click)), b = bare(s.target); return !a || !b || a.includes(b) || b.includes(a); }
+  return true;
+};
 
 // Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins). A step
 // lands on the screen the plan names when the recording has it, else on the one the take recorded for it (a plan
@@ -38,13 +50,8 @@ export function beatStarts(plan, flow) {
   const cur = { ...b0.states };
   let active = b0.active, at = 0;
   const recorded = s => {
-    const k = stepKind(s);
-    if (!k) return null;
-    let j = at;
-    while (j < path.length && pathKind(path[j]) !== k) j++;
-    if (j >= path.length) return null;
-    at = j + 1;
-    return path[j].checkpoint;
+    if (at >= path.length || !sameStep(s, path[at])) return null;
+    return path[at++].checkpoint;
   };
   return plan.beats.map(b => {
     const first = b.steps.find(s => s.kind === 'app');

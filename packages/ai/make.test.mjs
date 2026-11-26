@@ -600,7 +600,7 @@ function takeDemo() {
     { label: '2 Chat: answer', active: 'chat', states: { ...home, chat: 'chat-answer' } }, { label: '3 Admin: start', active: 'admin', states: { ...home, chat: 'chat-saved' } },
     { label: '4 Admin: certified', active: 'admin', states: { chat: 'chat-saved', admin: 'admin-certified' } }];
   writeFileSync(join(demo.dir, 'flow.json'), JSON.stringify(flow));
-  const plan = `# Delay demo\n\n## Beat 1 · The question\n\n- Go to chat\n  Lands on: old-home · "New chat"\n- Type "What's changed on PO-1?" in "Message"\n  Lands on: old-typed · "What's changed"\n- Press Enter\n  Lands on: old-answer · "ship date"\n\n> Our supplier moved the ship date.\n\n## Beat 2 · Save it\n\n- Click "Save: Save note"\n  Lands on: old-saved · "saved"\n\n> I save it.\n\n## Beat 3 · Certify it\n\n- Go to admin\n  Lands on: old-admin · "Plugin admin"\n- Click "Certified"\n  Lands on: old-certified · "Certified by you"\n\n> I certify it.\n`;
+  const plan = `# Delay demo\n\n## Beat 1 · The question\n\n- Go to chat\n  Lands on: old-home · "New chat"\n- Click "Message"\n- Type "What's changed on PO-1?" in "Message"\n  Lands on: old-typed · "What's changed"\n- Press Enter\n  Lands on: old-answer · "ship date"\n\n> Our supplier moved the ship date.\n\n## Beat 2 · Save it\n\n- Click "Save: Save note"\n  Lands on: old-saved · "saved"\n\n> I save it.\n\n## Beat 3 · Certify it\n\n- Go to admin\n  Lands on: old-admin · "Plugin admin"\n- Click "Certified"\n  Lands on: old-certified · "Certified by you"\n\n> I certify it.\n`;
   writeFileSync(join(demo.dir, 'plan.md'), plan);
   return { demo, flow, plan: parsePlan(plan), home };
 }
