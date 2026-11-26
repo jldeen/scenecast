@@ -959,6 +959,9 @@ test('a landing proven on the live page: what the plan expects is strong, any ot
   assert.deepEqual(writeGate([L('weak'), L('strong', { wrote: true }), L('strong')], 'iq'), { ok: true, why: null });
   assert.deepEqual(writeGate([{ app: 'chat', strength: 'none', step: 'Press Escape' }, L('strong')], 'chat'), { ok: false, why: '“Press Escape” isn\'t proven' });
   assert.deepEqual(writeGate([], 'iq'), { ok: false, why: 'nothing in iq is proven yet' });
+  // A wait, hover or scroll right after a proven step is carried (the screen it proved): a write may follow it.
+  assert.deepEqual(writeGate([L('strong', { wrote: true }), L('carried', { step: 'Wait for the answer' }), L('carried'), L('strong')], 'iq'), { ok: true, why: null });
+  assert.equal(writeGate([L('strong', { wrote: true }), L('none', { step: 'Wait for the answer' }), L('strong')], 'iq').ok, false);
 });
 
 test('words only inside a message prove a step last, and say so, unless it\'s a write its app pack checks', () => {

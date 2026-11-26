@@ -157,6 +157,12 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     for (let i = 0; i < 6; i++) {
       o = await controls(id);
       const el = kind === 'composer' ? composer(o.items) : findItem(o.items, name, kind);
+      // Only a near name in view, and the exact one elsewhere on the page (below the fold: walk 17 clicked "Show more
+      // in Roles & Industry" for "Show more in Get started"): the exact one, brought into view.
+      if (el && kind !== 'composer' && name && norm(el.name) !== norm(name)) {
+        const ex = await exactInView(id, name, { kind }).catch(() => null);
+        if (ex && ex.el) { log(`${id}: "${name}" is below the fold; brought into view, not "${el.name}"`); return { el: ex.el, o: await controls(id) }; }
+      }
       if (el) return { el, o };
       // The rest of the page and its frames get the same few seconds (IQ's draw late, in Power BI's frames).
       if (i > 0 && kind !== 'composer' && name) { const f = await inPage(id, name, kind).catch(() => null); if (f) return { el: f, o }; }

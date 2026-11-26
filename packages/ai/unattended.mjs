@@ -599,13 +599,13 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (!c.ok) return { kind: c.kind, why: c.why };
       const lp = liveProof(step, { before: screensOf(before, step.kind === 'app' ? prev : app), afters: screensOf(afters, app), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
       const byCheck = !!(checked && checked.ok);
-      const strength = byCheck ? 'strong' : lp.strength;
+      // A wait, a hover, a scroll or a step group's expand moves nothing: after a proven step, or one its own exact
+      // control proved, the screen is still the proven one ("carried": writeGate counts it as proven).
+      const carried = (['wait', 'hover', 'scroll'].includes(step.kind) || Number.isInteger(step.groupIndex)) && (!doubt || byControl);
+      const strength = byCheck ? 'strong' : lp.strength === 'strong' || !carried ? lp.strength : 'carried';
       const url = (await w.controls(app).catch(() => ({}))).url || null;
       run.landings.push({ beat: bi + 1, index: si, app, step: at.text, expected: step.lands ? formatLands(step.lands) : null, got: { screen: c.screen || null, url, text: byCheck ? `the pack's check: ${checked.status}${checked.picked ? ` ${JSON.stringify(checked.picked)}` : ''}` : proofWords(lp.lands) }, ok: true, strength, basis: byCheck ? 'pack check' : 'live', ...(strength === 'strong' ? {} : { why: lp.why }), ...(r.wrote ? { wrote: true } : {}), ...(checked ? { check: checked } : {}) });
       if (step.kind === 'type' && step.value) typedSoFar.push(step.value);
-      // A hover, a scroll or a step group's expand moves nothing: after a proven step, or one its own exact control
-      // proved, the screen is still the proven one.
-      const carried = (['hover', 'scroll'].includes(step.kind) || Number.isInteger(step.groupIndex)) && (!doubt || byControl);
       const why = strength === 'strong' || carried ? null : pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
       if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
       else doubt = null;

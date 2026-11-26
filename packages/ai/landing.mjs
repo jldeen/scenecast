@@ -390,7 +390,8 @@ export function writeGate(landings, app) {
   const mine = (landings || []).filter(x => x.app === app);
   if (!mine.length) return { ok: false, why: `nothing in ${app} is proven yet` };
   const last = mine[mine.length - 1], since = mine.slice(mine.map(x => !!x.wrote).lastIndexOf(true) + 1);
-  const shaky = (since.length ? since : [last]).find(x => x.strength !== 'strong');
+  // "carried": a wait, hover, scroll or step-group expand right after a proven step, on the screen it proved.
+  const shaky = (since.length ? since : [last]).find(x => x.strength !== 'strong' && x.strength !== 'carried');
   if (!shaky) return { ok: true, why: null };
   const what = shaky.step ? `“${shaky.step}”` : 'a step';
   return { ok: false, why: `${what} ${shaky.strength === 'weak' ? 'only shows the page changed' : "isn't proven"}${shaky === last ? '' : `, since the last write in ${app}`}` };
