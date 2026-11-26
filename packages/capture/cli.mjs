@@ -26,7 +26,8 @@ export async function send(cmd, tmo = 300, port = process.env.REPLICA_RX_PORT ||
   const { id } = await (await fetch(RX + '/cmd', { method: 'POST', body: JSON.stringify(cmd) })).json();
   const t0 = Date.now();
   for (;;) {
-    const r = await (await fetch(RX + '/result?id=' + id)).json();
+    // A poll is safe to repeat: once more on a dropped connection.
+    const r = await fetch(RX + '/result?id=' + id).then(x => x.json()).catch(() => new Promise(ok => setTimeout(ok, 300)).then(() => fetch(RX + '/result?id=' + id)).then(x => x.json()));
     if (!r.pending) return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     if (Date.now() - t0 > +tmo * 1000) return { ok: false, error: 'timeout waiting for ' + id };
     await new Promise(r => setTimeout(r, 300));

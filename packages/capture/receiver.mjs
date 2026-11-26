@@ -220,4 +220,6 @@ createServer(async (req, res) => {
     }
   } catch (e) { log('error ' + e.stack); json(res, 500, { error: String(e) }); }
 }).on('error', e => { console.error(`receiver: ${e.code === 'EADDRINUSE' ? `port ${PORT} is in use (another receiver?)` : e.message}`); process.exit(1); })
-  .listen(PORT, '127.0.0.1', () => log(`receiver on http://127.0.0.1:${PORT} → ${RAW}`));
+  // Idle connections kept 65 s, not Node's 5: a caller busy for a few seconds between two commands (building the
+  // offline walker under load) reused one this end had just closed, and its command failed ("other side closed").
+  .listen(PORT, '127.0.0.1', function () { this.keepAliveTimeout = 65000; this.headersTimeout = 66000; log(`receiver on http://127.0.0.1:${PORT} → ${RAW}`); });
