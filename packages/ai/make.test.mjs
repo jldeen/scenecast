@@ -119,7 +119,8 @@ test('a talk track to a plan on the recorded screens: landings, writes, a differ
   assert.deepEqual(steps.filter(s => s.writes).map(s => s.writes), ['sends prompt 1 (Ask) in Chat app', 'saves "Save note" ("Save: Save note")', 'endorses it: "Certified"']);
   // The script's Approve is the product's Save: flagged once, and the plan uses what the product has.
   assert.match(steps[5].differs, /"Save: Save note".*not "Approve"/);
-  assert.deepEqual(flags.map(f => f.kind), ['differs']);
+  // chat-saved shows only what the app wrote ("Your note is saved as …"): nothing a plan can count on proves the save.
+  assert.deepEqual(flags.map(f => f.kind), ['differs', 'landing']);
   const [l1, l2, l3] = plan.beats[0].lines;
   assert.deepEqual(l1.focus[0], { texts: ['Kestrel moved the ship date by six days.'], on: 'chat-answer' });
   // A screen one click off the path: ⌥F takes the click.
@@ -255,6 +256,22 @@ test('a list framed the way she shows one: its heading and first step; a section
   assert.deepEqual(sectionsOf(page).map(s => [s.label.text, s.cards[0].text]), [['Our process', 'Spend policy'], ['Our people', 'Avery Chen']]);
   // Headings over buttons that do things aren't sections.
   assert.deepEqual(sectionsOf({ items: [h(1, 'Comments', 'h2'), item(2, 'Write a reply', { role: 'button' }), item(3, 'Skip comments', { role: 'button' }), h(4, 'Footer', 'h2'), item(5, 'Manage cookies', { role: 'button' })] }), []);
+});
+
+test('on a screen a write made (a prompt\'s answer, a save\'s card), a plan\'s proof is a control or the product\'s own words, never the app\'s sentences', () => {
+  const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((text, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', text })) });
+  const S = {
+    typed: sc(['New chat', 'Message']),
+    answer: sc(['New chat', 'Message', 'The original date is six days away, so the build runs late.'], [{ role: 'button', name: 'Save: Save skill' }]),
+    saved: sc(['New chat', 'Message', 'The original date is six days away, so the build runs late.', "Completed 'Save skill'", 'Background task ran for'], [{ role: 'button', name: 'Open triage skill' }]),
+  };
+  const walker = { screen: id => S[id], shown: id => S[id], view: () => ({ url: 'https://chat.example.com/' }), states: Object.keys(S), flow: { states: Object.fromEntries(Object.keys(S).map(k => [k, { app: 'chat' }])) } };
+  const plan = { beats: [{ steps: [
+    { kind: 'app', app: 'chat', lands: { screen: 'typed' } },
+    { kind: 'press', key: 'Enter', writes: 'sends the prompt · chat:new-task', line: '1.1', lands: { screen: 'answer' } },
+    { kind: 'click', target: 'Save: Save skill', writes: 'saves the skill · chat:save-skill', line: '1.2', lands: { screen: 'saved' } }] }] };
+  proveLandings(plan, walker);
+  assert.deepEqual(plan.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['answer · control "Save: Save skill"', 'saved · "Background task ran for"']);
 });
 
 test('a landing proves its step: new words, a control\'s state, a control only it has, words gone with the page\'s own still there; numbers last', () => {
@@ -563,7 +580,7 @@ test('a walkthrough makes the same kind of plan: steps, landings, writes, a beat
   const plan = planFromRecording(rec, { walker, flags });
   assert.deepEqual(plan.beats.map(b => b.steps.map(s => s.text)), [['Go to chat', `Type "What's changed on PO-1?"`, 'Press Enter', 'Wait for the answer'], ['Click "Save: Save note"'], ['Go to admin', 'Click "Certified"']]);
   // Its landings prove each step too: what was typed shows in the chat box, and nothing needs her.
-  assert.deepEqual([plan.beats[0].steps[1].lands, flags], [{ screen: 'chat-typed', kind: 'words', text: "What's changed on PO-1?" }, []]);
+  assert.deepEqual([plan.beats[0].steps[1].lands, flags.map(f => f.text)], [{ screen: 'chat-typed', kind: 'words', text: "What's changed on PO-1?" }, [`Click "Save: Save note": nothing on chat-saved tells it from the screen before, so a run can't tell whether it worked`]]);
   // A click recorded by its test id is named from the screen; the prompt is the first one sent.
   assert.deepEqual(plan.beats.flatMap(b => b.steps).filter(s => s.writes).map(s => s.writes.split(' (')[0]), ['sends prompt 1 in Chat app', 'saves "Save note"', 'endorses it: "Certified"']);
 });
