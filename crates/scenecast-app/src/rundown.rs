@@ -194,6 +194,11 @@ static RANGE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+:\d\d)\s*[–—-]\s*(\d+:\d\d)").expect("range"));
 static MSS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[(·|]\s*(\d+:\d\d)\s*\)?\s*$").expect("m:ss"));
+/// Minutes and seconds: "~1m15s", "1 min 15 s".
+static MIN_SEC: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)[(·|]\s*~?\s*(\d+)\s*(?:m|min|mins|minutes)\s*(\d+)\s*(?:s|sec|secs|seconds)\s*\)?\s*$")
+        .expect("minutes and seconds")
+});
 static DUR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)[(·|]\s*~?\s*(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds|m|min|mins|minutes)\s*\)?\s*$",
@@ -227,6 +232,9 @@ fn head(h: &str) -> Head {
         s = s.replacen(&c[0], "", 1);
     } else if let Some(c) = MSS.captures(&s) {
         dur = Some(mss(&c[1]));
+        s.truncate(c.get(0).expect("match").start());
+    } else if let Some(c) = MIN_SEC.captures(&s) {
+        dur = Some(mss(&format!("{}:{}", &c[1], &c[2])));
         s.truncate(c.get(0).expect("match").start());
     } else if let Some(c) = DUR.captures(&s) {
         let n: f64 = c[1].parse().unwrap_or(0.0);
@@ -334,7 +342,7 @@ mod tests {
 
     #[test]
     fn reads_beats_and_times_from_a_talk_track() {
-        let md = "# Innovation\n\n## Backstage\n- open Teams\n\n## The late shipment lands in Teams (0:00–1:15)\n> Kestrel…\n\n## 2. Ask Copilot · 1:15–3:30\n\n## Who can approve (2:15)\n\n## IT turns it on · 90 s\n\n## After the talk\n";
+        let md = "# Innovation\n\n## Backstage\n- open Teams\n\n## The late shipment lands in Teams (0:00–1:15)\n> The supplier…\n\n## 2. Ask Copilot · 1:15–3:30\n\n## Who can approve (2:15)\n\n## IT turns it on · 90 s\n\n## The payoff · ~1m15s\n\n## After the talk\n";
         let b = parse_script(md, "script.md");
         let got: Vec<_> = b
             .iter()
@@ -347,6 +355,7 @@ mod tests {
                 (2, "Ask Copilot", Some(75), Some(210)),
                 (3, "Who can approve", Some(210), Some(345)),
                 (4, "IT turns it on", Some(345), Some(435)),
+                (5, "The payoff", Some(435), Some(510)),
             ]
         );
         let fixture = "## Beat 1 · The question\n> Hi.\n## Beat 2 · Plugins\n";

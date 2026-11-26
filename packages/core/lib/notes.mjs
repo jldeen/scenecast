@@ -16,12 +16,16 @@ const SPECIAL = {
   watch: /^(if something goes wrong|watch[- ]?outs?|troubleshooting|if it goes wrong)\b/i,
   after: /^(after( the talk)?|afterwards|wrap[- ]?up)\b/i,
 };
-// "1:45–2:45", "1:45-2:45", "(0:40)", "~40s", "40 s", "1 min".
+// "1:45–2:45", "1:45-2:45", "(0:40)", "~40s", "40 s", "1 min", "~1m15s".
 const RANGE = /(\d+:\d\d)\s*[–—-]\s*(\d+:\d\d)/;
 const DUR = /~?\s*(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds|m|min|mins|minutes)\b/i;
+const MIN_SEC = /(\d+)\s*(?:m|min|mins|minutes)\s*(\d+)\s*(?:s|sec|secs|seconds)\b/i;
 export const secs = t => { const [m, s] = String(t).split(':').map(Number); return m * 60 + s; };
 export const clock = n => `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, '0')}`;
-const duration = t => { const m = DUR.exec(t || ''); return m ? Math.round(+m[1] * (/^m/i.test(m[2]) ? 60 : 1)) : null; };
+const duration = t => {
+  const ms = MIN_SEC.exec(t || ''); if (ms) return +ms[1] * 60 + +ms[2];
+  const m = DUR.exec(t || ''); return m ? Math.round(+m[1] * (/^m/i.test(m[2]) ? 60 : 1)) : null;
+};
 
 // A heading's beat number, title and time: "3. Sentry has it · 1:45–2:45", "Beat 3: Sentry has it (1:45–2:45)".
 function beatHead(h) {
@@ -30,7 +34,7 @@ function beatHead(h) {
   const mss = !r && /[(·|]\s*(\d+:\d\d)\s*\)?\s*$/.exec(s);
   if (r) { start = secs(r[1]); end = secs(r[2]); s = s.replace(r[0], ''); }
   else if (mss) { dur = secs(mss[1]); s = s.slice(0, mss.index); }
-  else { const d = /[(·|]\s*(~?\s*\d+(?:\.\d+)?\s*(?:s|sec|secs|seconds|m|min|mins|minutes))\s*\)?\s*$/i.exec(s); if (d) { dur = duration(d[1]); s = s.slice(0, d.index); } }
+  else { const d = /[(·|]\s*(~?\s*\d+(?:\.\d+)?\s*(?:s|sec|secs|seconds|m|min|mins|minutes)(?:\s*\d+\s*(?:s|sec|secs|seconds))?)\s*\)?\s*$/i.exec(s); if (d) { dur = duration(d[1]); s = s.slice(0, d.index); } }
   const m = /^(?:(?:beat|scene|step)\s+)?(\d+)\s*[.:·)\-–—]?\s+(.*)$/i.exec(s) || /^(?:beat|scene|step)\s+(\d+)\s*$/i.exec(s);
   if (m) { n = +m[1]; s = m[2] || ''; }
   s = s.replace(/[\s·|(–—-]+$/, '').replace(/^[\s·|:–—-]+/, '').replace(/\(\s*\)$/, '').trim();
