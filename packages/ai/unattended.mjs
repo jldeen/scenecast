@@ -143,7 +143,7 @@ export function menuOutcomes(recorded, sweeps, reach = null) {
   return recorded.map(m => {
     const mine = (sweeps || []).filter(e => e.app === m.app && e.floor && e.floor[m.id]).map(e => ({ state: e.state, r: e.floor[m.id] }));
     const shown = mine.find(e => e.r.shown), found = mine.find(e => e.r.found);
-    const status = shown ? 'captured' : found ? 'missed' : unreached([m.page].filter(Boolean), reach) ? 'not reached' : 'gone';
+    const status = shown ? 'captured' : unreached([m.page].filter(Boolean), reach) ? 'not reached' : found ? 'missed' : 'gone';
     const out = { app: m.app, id: m.id, name: m.name, page: m.page, status, ...(found ? { found: found.r.found } : {}) };
     if (status !== 'missed') return out;
     const pic = mine.find(e => e.r.picture) || found;
@@ -161,7 +161,9 @@ export function hoverOutcomes(recorded, sweeps, reach = null) {
     const mine = (sweeps || []).filter(e => e.app === h.app);
     const captured = h.card ? mine.some(e => (e.cards || []).some(x => (x.cards || []).some(t => cardMatch(h.card, t)))) : mine.some(e => e.floor && e.floor[h.id] && e.floor[h.id].shown);
     const at = mine.filter(e => e.found && e.found[h.id]), found = at.some(e => e.found[h.id] === 'place') ? 'place' : at.length ? 'words' : null;
-    const status = captured ? 'captured' : found ? 'missed' : unreached(h.pages, reach) ? 'not reached' : 'gone';
+    // Recorded only on screens the run never reached: not reached, though a control like it was found elsewhere
+    // (Copilot's task-screen Start dictation shows another card on its home screen).
+    const status = captured ? 'captured' : unreached(h.pages, reach) ? 'not reached' : found ? 'missed' : 'gone';
     const out = { app: h.app, id: h.id, sel: h.anchor.sel, text: h.text, pages: h.pages, status, ...(found ? { found } : {}) };
     if (status !== 'missed') return out;
     const tries = mine.flatMap(e => (e.tries || []).filter(t => (t.ids || []).includes(h.id)).map(t => ({ ...t, state: e.state })));

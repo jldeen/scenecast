@@ -270,7 +270,8 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   (`capHoverFloor`). After the run each recorded hover is captured (a hover captured in its app
   shows its card: the same words, numbers aside, or most of them in another order; `hover-card.mjs`), missed (its anchor was there and its card wasn't
   captured), gone (its anchor's words were on no screen the run swept) or not reached (recorded only on screens the
-  recording has that the run never got to: its plan stopped first, or doesn't go there): a missed one goes under Needs you with a
+  recording has that the run never got to: its plan stopped first, or doesn't go there; so even when a control like
+  it showed another card on another screen): a missed one goes under Needs you with a
   picture of the screen (only a missed one keeps its picture; those the cap cut share one, and so do those whose
   controls showed other cards: a firm answer, not tried again, since a container's every control is the hover's). run.json: `hovers` (the
   list, how each anchor was found, and the counts the summary prints). A live walk and `ai check` don't sweep
