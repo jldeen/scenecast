@@ -121,6 +121,17 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     for (const h of ((p && p.guard) || {}).hosts || []) out.add(h);
     return out;
   };
+  // A write's own calls to a service of its app's (Copilot sends a task to its runtime, not its page's host): its pack
+  // write's opens, each a /^METHOD host/path$/ pattern, opened with the app's hosts for that one write only. The plan
+  // step's own tag names the write; a step with none (a reset's or a Set first's), the pack's write for that step.
+  const opensOf = (id, step, field = null) => {
+    const a = apps.find(x => x.id === id) || {};
+    const p = packs && packs.packFor ? packs.packFor(a.url || a.match) : null;
+    if (!p) return [];
+    const tag = step.writes ? / · ([\w-]+):([\w-]+)$/.exec(step.writes) : null;
+    const w = tag ? (p.writes || []).find(x => x.id === tag[2]) : packs.writeFor ? packs.writeFor(p, step, field) : null;
+    return (w && w.opens) || [];
+  };
   const onHosts = (host, id) => [...hostsOf(id)].some(h => host === h || host.endsWith('.' + h) || h.endsWith('.' + host));
   const controls = id => cmd('observe', { tab: tab(id) }, 30);
   // Every frame's words: the page's own and its frames' (IQ's Power BI report is in one).
@@ -466,12 +477,15 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
     }
     const before = await controls(id).catch(() => ({}));
     let id1 = null;
-    try { const o = await cmd('capOpen', { hosts: hosts || [...hostsOf(id)] }, 30); if (o.refused) return { missing: true, why: `the guard won't open: ${o.refused}` }; id1 = o.id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }
+    try { const o = await cmd('capOpen', { hosts: hosts || [...hostsOf(id)], entries: opensOf(id, step, lastField) }, 30); if (o.refused) return { missing: true, why: `the guard won't open: ${o.refused}` }; id1 = o.id; } catch (e) { return { missing: true, why: 'no guard to open (the capture browser runs writes)' }; }
     let r;
     try { r = await act(id, step, { write: true, el: target }); } finally { await cmd('capClose', { id: id1 }, 30).catch(() => {}); }
     if (r.missing || r.needsYou) return r;
     const after = await controls(id).catch(() => ({}));
-    const ids = (() => { try { return new URL(after.url).pathname.split('/').filter(x => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(x) || /^\d{4,}$/.test(x) || /^[A-Za-z0-9_-]{20,}$/.test(x) && /\d/.test(x)); } catch (e) { return []; } })();
+    // What it made, by the ids in its address: the path's, and a hash route's (Cowork's /cowork/#/task/<id>, its id
+    // URI-encoded; one id can be several GUIDs joined by ':').
+    const idLike = x => /^[0-9a-f]{8}-[0-9a-f-]{27}(?::[0-9a-f]{8}-[0-9a-f-]{27})*$/i.test(x) || /^\d{4,}$/.test(x) || /^[A-Za-z0-9_-]{20,}$/.test(x) && /\d/.test(x);
+    const ids = (() => { try { const u = new URL(after.url), dec = x => { try { return decodeURIComponent(x); } catch (e) { return x; } }; return [...u.pathname.split('/'), ...u.hash.replace(/^#/, '').split('/').map(dec)].filter(idLike); } catch (e) { return []; } })();
     return { ...r, wrote: true, result: { url: after.url || null, title: after.title || null, ids, from: before.url || null, typed: step.kind === 'press' && lastTyped[id] ? lastTyped[id] : null } };
   }
   // Until name-parity shows the reader and a live page name every control alike, a write runs only if the reader,
@@ -589,9 +603,18 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   // (Microsoft IQ's business plugin: a click on its sidebar item). Navigation only, under the guard: a click, a hover,
   // a scroll or a wait; anything else is refused, and so is a step that would write.
   const starts = startUrls(demo);
-  async function home(app) {
+  // fresh: the page loaded again, not only its route changed (an address with a #/ route keeps the document, and with
+  // it a pane or section a side path left open), told by the document's own start time.
+  async function home(app, { fresh = false } = {}) {
     const id = appOf(app) || app;
+    const born = () => cmd('js', { tab: tab(id), code: 'return await page.evaluate(() => performance.timeOrigin)' }, 30).catch(() => null);
+    const t0 = fresh ? await born() : null;
     await cmd('goto', { tab: tab(id), url: starts[id] }, 90).catch(e => log(`${id}: couldn't open its start screen (${e.message})`));
+    if (fresh && t0 != null && (await born()) === t0) {
+      await cmd('js', { tab: tab(id), code: 'await page.evaluate(() => location.reload()).catch(() => {}); return true' }, 60).catch(() => {});
+      await sleep(1500);
+      log(`${id}: loaded its start screen again (the address only changed its route)`);
+    }
     await quiet(id, 800, 20000);
     const did = [];
     for (const text of startSteps(apps.find(a => a.id === id))) {

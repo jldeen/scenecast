@@ -91,6 +91,9 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
 ```
 
 - `on`: the plan step that writes (`kind` as in `packages/ai/plan.mjs`; `target`/`field` are text or `/regex/`).
+- `opens`: the write's own calls to a service of its app's that isn't one of its hosts (Copilot's Cowork runtime:
+  `/^POST <runtime>\/v1\/messages$/`), opened with the app's hosts for that one step only. Read them from the app's
+  own client code; each has a why in `guard.why`.
 - `undo.steps`: plan lines (the same plain steps a plan uses), run in the capture browser. `{name}` placeholders are
   what the run made (the skill, the task). `You: …` is a step for a person. `undo: null` with `irreversible: true` or
   a `note` says there is none. `{ "same": "<write id>" }` reuses another write's undo or check.
@@ -113,7 +116,8 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
 
 An unattended capture pass holds every request that isn't a read (GET, HEAD, OPTIONS), on every host, unless the
 app's pack allows it: what an app sends while it's only looked at (Teams' presence and telemetry, a search that's a
-POST). A planned write opens the app's own hosts for its one step.
+POST). A planned write opens the app's own hosts for its one step, and its pack write's `opens`: its own calls to a
+service of its app's, each one kind of call (`/^METHOD host\/path$/`, with a why in `guard.why`).
 
 ```json
 "guard": { "hosts": ["substrate.office.com"], "allow": ["teams.cloud.microsoft/api/telemetry", "/^POST [^ ]+/search$/"] }

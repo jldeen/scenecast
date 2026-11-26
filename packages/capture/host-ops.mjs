@@ -23,7 +23,8 @@
 //   capApi({ tab, open, host | hostPattern, from?, method, path, body, pick, find?, armed? })
 //                                   find ({ list, name, id, names, where? }, a GET's only): the ids of the answer's list
 //                                   items whose name is exactly one of names (and whose where fields match), never
-//                                   their text: a reset's undo of the script's own leftovers by name
+//                                   their text: a reset's undo of the script's own leftovers by name. With ids
+//                                   instead of names: the items whose id is exactly one of them (a run's own write)
 //                                   a pack's API check (GET, HEAD: the guard as it is; only pick's number and true/false
 //                                   fields come back) or API undo in the app's own signed-in session (from: the
 //                                   frame's host whose calls it takes the session from, and calls from): its page opened (a read), the
@@ -362,12 +363,16 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
     async capOpen(c) {
       if (!guard) return { id: null };
       if (!Array.isArray(c.hosts) || !c.hosts.length) return { id: null, refused: 'a write opens the guard only on named hosts' };
+      // Its own calls to a service of its app's: each a /^METHOD host/path$/ pattern for one kind of write call.
+      const entries = Array.isArray(c.entries) ? c.entries : [];
+      const bad = entries.find(e => typeof e !== 'string' || !/^\/\^(?:\(\?:)?(?:POST|PUT|PATCH|DELETE)(?:\|(?:POST|PUT|PATCH|DELETE))*\)? .+\$\/[a-z]*( when body \/.+\/[a-z]*)?$/.test(e));
+      if (bad !== undefined) return { id: null, refused: `a write's call is a /^METHOD host/path$/ pattern, not ${JSON.stringify(bad)}` };
       const id = `w${++n}`;
       let close;
       const opened = new Promise(r => { close = r; });
       opens.set(id, close);
-      guard.pass(() => opened, { hosts: c.hosts });
-      log(`guard open for one write (${id}): ${c.hosts.join(', ')}`);
+      guard.pass(() => opened, { hosts: c.hosts, entries });
+      log(`guard open for one write (${id}): ${c.hosts.join(', ')}${entries.length ? `; and its calls ${entries.join(', ')}` : ''}`);
       return { id };
     },
     async capClose(c) { const close = opens.get(c.id); if (close) { close(); opens.delete(c.id); } return { closed: !!close }; },
@@ -418,9 +423,11 @@ export function hostOps(cb, { log = () => {}, base = null } = {}) {
             if (find) {
               const j = await res.json().catch(() => null), at = (o, p) => String(p).split('.').reduce((x, k) => x == null ? x : x[k], o);
               const n = t => String(t == null ? '' : t).replace(/\s+/g, ' ').trim().toLowerCase(), want = new Set((find.names || []).map(n));
+              // By ids (exactly, as the run recorded them) or by names (as a person reads them).
+              const ids = Array.isArray(find.ids) ? new Set(find.ids.map(String)) : null;
               const list = at(j, find.list);
               if (!Array.isArray(list)) return { status: res.status, found: null };
-              const ok = it => want.has(n(at(it, find.name))) && Object.entries(find.where || {}).every(([k, v]) => at(it, k) === v);
+              const ok = it => (ids ? ids.has(String(at(it, find.id))) : want.has(n(at(it, find.name)))) && Object.entries(find.where || {}).every(([k, v]) => at(it, k) === v);
               return { status: res.status, found: list.filter(ok).map(it => String(at(it, find.id))).slice(0, 50) };
             }
             return { status: res.status, picked };

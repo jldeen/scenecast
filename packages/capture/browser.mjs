@@ -117,9 +117,12 @@ const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?$/i;
 const hostIs = (host, h) => { const bare = host.replace(/:\d+$/, ''); return host === h || bare === h || bare.endsWith('.' + h); };
 // What a planned write or an API undo opened, for one request: its hosts, and when given its method and exact address
-// (an API undo opens that one call, not its host). Never every host.
-export function openFor(open, u, method) {
-  return (open || []).some(o => Array.isArray(o.hosts) && o.hosts.some(h => hostIs(u.host, h)) && (!o.method || o.method === String(method).toUpperCase()) && (!o.url || o.url === u.href));
+// (an API undo opens that one call, not its host); or one of a write's own calls to a service of its app's (entries,
+// as allow's: a /pattern/ over "METHOD host/path"). Never every host.
+export function openFor(open, u, method, body = null) {
+  const M = String(method).toUpperCase();
+  return (open || []).some(o => (Array.isArray(o.hosts) && o.hosts.some(h => hostIs(u.host, h)) && (!o.method || o.method === M) && (!o.url || o.url === u.href))
+    || (Array.isArray(o.entries) && o.entries.some(e => entryMatches(e, M, u.host + u.pathname, body))));
 }
 // The origin of the page or frame that sent a request: its Origin, else its Referer's (a same-origin GET has no Origin).
 const hostOfOrigin = o => { try { return new URL(o).host; } catch (e) { return null; } };
@@ -156,6 +159,24 @@ export function graphqlOperation(body) {
   if (typeof body !== 'string' || !/"query"\s*:|"operationName"\s*:/.test(body)) return null;
   const n = /"operationName"\s*:\s*"([\w.-]{1,120})"/.exec(body) || /"query"\s*:\s*"\s*(?:query|mutation|subscription)\s+([A-Za-z_]\w{0,119})/.exec(body);
   return n ? n[1] : /"query"\s*:\s*"\s*(query|mutation|subscription)?/.test(body) ? '(anonymous)' : null;
+}
+// What a write's call asked for, by name, for the record: a GraphQL operation, a server function's action (Copilot's
+// _serverFn: the value its "action" key carries), or a JSON body's own action, Verb or operationName. Never the rest of
+// the body. → a name, or null.
+export function postAction(body) {
+  if (typeof body !== 'string' || body.length > 500000) return null;
+  const op = graphqlOperation(body);
+  if (op) return op;
+  let j; try { j = JSON.parse(body); } catch (e) { return null; }
+  let found = null;
+  const walk = (o, d = 0) => {
+    if (found || !o || typeof o !== 'object' || d > 16) return;
+    if (o.p && Array.isArray(o.p.k) && Array.isArray(o.p.v)) { const i = o.p.k.indexOf('action'); if (i >= 0 && o.p.v[i] && typeof o.p.v[i].s === 'string') { found = o.p.v[i].s; return; } }
+    for (const k of ['action', 'Verb', 'verb', 'operationName']) if (typeof o[k] === 'string' && /^[\w.:-]{1,80}$/.test(o[k])) { found = o[k]; return; }
+    for (const v of Array.isArray(o) ? o : Object.values(o)) walk(v, d + 1);
+  };
+  walk(j);
+  return found;
 }
 // The allow entry that let a request through (for the record: passed non-reads by entry), or null.
 export function allowedBy({ method, url, body = null }, allow = []) {
@@ -597,7 +618,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     const prev = guarding;
     const st = { open: [], counts: {}, held: [], passed: [], bodies: [], authFor: null, authFrom: null, auth: null };
     // What's open: a planned write's hosts, or one call (its method and exact address). Never every host.
-    const passing = (u, method) => openFor(st.open, u, method);
+    const passing = (u, method, body) => openFor(st.open, u, method, body);
     const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData, headers }, url, from = {}) => {
       let u = null; try { u = new URL(url); } catch (x) {}
       // Who sent it: the tab (its page's host) and the frame (the document's origin, from its Origin or Referer; else
@@ -613,7 +634,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       let v = guardVerdict({ method, url, body: postData }, { hosts, allow, local }), by = v === 'pass' ? 'allowed' : null;
       // Open for a planned write, unless it's one of the app's own background calls a pack keeps held (stay).
       let stay = false;
-      if (v === 'hold' && u && passing(u, method)) { if (staysHeld({ method, url, body: postData }, stayHeld)) stay = true; else { v = 'pass'; by = 'a planned write'; } }
+      if (v === 'hold' && u && passing(u, method, postData)) { if (staysHeld({ method, url, body: postData }, stayHeld)) stay = true; else { v = 'pass'; by = 'a planned write'; } }
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
       st.counts[k] = (st.counts[k] || 0) + 1;
       if (v === 'hold') {
@@ -622,15 +643,18 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
       }
       // Every non-read that went out, and why: the allow-list (or a read, a local or an unguarded host), or a planned
       // write's opening.
-      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by, ...sender, ...(by === 'allowed' && /graphql/i.test(u.pathname) && graphqlOperation(postData) ? { operation: graphqlOperation(postData) } : {}), ...(by === 'allowed' ? { entry: allowedBy({ method, url, body: postData }, allow) } : {}) });
+      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by, ...sender, ...(by === 'allowed' && /graphql/i.test(u.pathname) && graphqlOperation(postData) ? { operation: graphqlOperation(postData) } : {}), ...(by === 'allowed' ? { entry: allowedBy({ method, url, body: postData }, allow) } : {}), ...(by === 'a planned write' && postAction(postData) ? { action: postAction(postData) } : {}) });
+      // What a planned write let through, its body kept for a person's review (local only, as held ones are).
+      if (v === 'pass' && by === 'a planned write' && u && !READS.has(String(method).toUpperCase())) st.bodies.push({ method, host: u.host, path: u.pathname, at: new Date().toISOString(), passed: by, body: postData == null ? null : String(postData).slice(0, 4000) });
       if (v === 'hold' && gm === 'hold') return { fail: true };
       return null;
     } });
     guarding = {
-      // Open for fn's while: those hosts (a planned write), or with method and url, that one call only. No hosts: refused.
-      async pass(fn, { hosts = null, method = null, url = null } = {}) {
+      // Open for fn's while: those hosts (a planned write) and its own calls (entries), or with method and url, that one
+      // call only. No hosts: refused.
+      async pass(fn, { hosts = null, method = null, url = null, entries = null } = {}) {
         if (!Array.isArray(hosts) || !hosts.length) throw new Error('the guard opens only for named hosts');
-        const o = { hosts, method: method ? String(method).toUpperCase() : null, url };
+        const o = { hosts, method: method ? String(method).toUpperCase() : null, url, ...(Array.isArray(entries) && entries.length ? { entries } : {}) };
         st.open.push(o);
         try { return await fn(); } finally { st.open.splice(st.open.indexOf(o), 1); }
       },

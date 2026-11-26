@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, graphqlOperation, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld, allowedBy } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, graphqlOperation, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld, allowedBy, postAction } from './browser.mjs';
 import { at } from '@stuntdouble/core/lib/at.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
@@ -171,6 +171,26 @@ test("what a write or an API undo opened: its hosts, or its one call (method and
   assert.equal(openFor(call, u('https://api.example.com/v1/a?x=1'), 'PUT'), false);
   assert.equal(openFor([{ hosts: ['example.com'] }], u('https://api.example.com/v1/b'), 'POST'), true);
   assert.equal(openFor([{ hosts: [] }, { method: 'POST' }], u('https://api.example.com/v1/b'), 'POST'), false);
+});
+
+test("a write's own calls to its app's service: that method, host and path only, while the write is open", () => {
+  const u = x => new URL(x);
+  const open = [{ hosts: ['app.example.com'], entries: ['/^POST runtime-[a-z0-9]+\\.gateway\\.example\\.net\\/v1\\/messages$/'] }];
+  assert.equal(openFor(open, u('https://runtime-eus.gateway.example.net/v1/messages'), 'post'), true);
+  assert.equal(openFor(open, u('https://runtime-eus.gateway.example.net/v1/settings'), 'POST'), false);
+  assert.equal(openFor(open, u('https://runtime-eus.gateway.example.net/v1/messages'), 'PATCH'), false);
+  assert.equal(openFor(open, u('https://other-eus.gateway.example.net/v1/messages'), 'POST'), false);
+  assert.equal(openFor(open, u('https://app.example.com/send'), 'POST'), true);
+  assert.equal(openFor([], u('https://runtime-eus.gateway.example.net/v1/messages'), 'POST'), false);
+});
+
+test("what a write's call asked for: a server function's action, a GraphQL operation, a body's Verb; never the rest", () => {
+  const fn = action => JSON.stringify({ t: { t: 10, i: 0, p: { k: ['data'], v: [{ t: 10, i: 1, p: { k: ['enableCache', 'action'], v: [{ t: 2, s: 1 }, { t: 1, s: action }] } }] } } });
+  assert.equal(postAction(fn('SetUserStorageState')), 'SetUserStorageState');
+  assert.equal(postAction('{"query":"mutation SaveSkill { x }"}'), 'SaveSkill');
+  assert.equal(postAction('{"ConversationId":"c","clientData":{"Verb":"list_plugins","Data":{}}}'), 'list_plugins');
+  assert.equal(postAction('{"message":"Eren asked me about PO-1"}'), null);
+  assert.equal(postAction('not json'), null);
 });
 
 test("which page or frame sent a request: its Origin, else its Referer's", () => {

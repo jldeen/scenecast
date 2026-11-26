@@ -123,6 +123,13 @@ test('a plan step maps to the write it makes, and checks only look', () => {
   const bad = { ...cop, writes: [{ id: 'w', what: 'x', on: { kind: 'click', target: 'X' }, undo: null, check: { steps: ['Click "Delete"'] } }], apis: { a: { open: 'https://x', host: 'h' } }, notes: ['Bear', 'er ', 'x'.repeat(24)].join('') };
   const problems = checkPack(bad);
   assert.ok(problems.some(p => /could change something/.test(p)) && problems.some(p => /credential or token/.test(p)));
+  // A write's own calls: one kind each (/^METHOD host\/path$/), with a why; never every path or a read.
+  const op = e => checkPack({ ...cop, writes: [{ ...cop.writes[0], opens: [e] }], guard: { ...cop.guard, why: { ...cop.guard.why, [e]: 'x' } } }).filter(p => /opens/.test(p));
+  assert.deepEqual(op('/^POST rt-[a-z]+\\.example\\.com\\/v1\\/messages$/'), []);
+  assert.equal(op('/^POST rt\\.example\\.com\\/.*$/').length, 1);
+  assert.equal(op('/^GET rt\\.example\\.com\\/v1\\/x$/').length, 1);
+  assert.equal(op('rt.example.com/v1/messages').length, 1);
+  assert.equal(checkPack({ ...cop, writes: [{ ...cop.writes[0], opens: ['/^POST rt\\.example\\.com\\/v1\\/x$/'] }] }).filter(p => /opens/.test(p)).length, 1);
 });
 
 test('safe steps only open a picker or a menu: never a write, never a sign-in', () => {

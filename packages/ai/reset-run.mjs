@@ -129,8 +129,8 @@ const allowedIn = approval => (part, t) => ((approval && approval.reset) || []).
 function writeStepper({ walker, approval, results = {}, did, apiUndo = null }) {
   const allowed = allowedIn(approval);
   const fill = t => String(t).replace(/\{(\w+)\}/g, (m, k) => results[k] || m);
-  const step = async (part, app, s, approvedText, { note = null, names = [] } = {}) => {
-    if (apiUndo && s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) return apiUndo(part, app, s, approvedText, note, names);
+  const step = async (part, app, s, approvedText, { note = null, names = [], undoes = [] } = {}) => {
+    if (apiUndo && s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) return apiUndo(part, app, s, approvedText, note, names, undoes);
     const filled = parseStep(fill(formatStep(s)));
     if (/\{\w+\}/.test(formatStep(filled))) return { ok: false, why: `${formatStep(s)}: the run didn't record what to fill in` };
     if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
@@ -233,15 +233,25 @@ export async function setBefore({ demo, cmd, packs = null, approval, block, walk
 // there (the app's start, the pack's address or steps, or the plan's navigation steps), proven, then read as the reader
 // reads it. recorded: the recording's walker (walker.mjs), for the routes and the start screen's rows. shot(app, name):
 // a picture of each screen read. → [{ text, from, status: 'pass' | 'wrong' | 'cant', ok, why, picture? }]
-export async function checkLines({ demo, cmd, walker, lines, plan, packs = null, recorded = null, shot = null }) {
+// reland: each app loaded again at its start (a real page load) and proven there before its first check (after a run,
+// a side path can leave a pane or a route behind that a goto to the same document keeps).
+export async function checkLines({ demo, cmd, walker, lines, plan, packs = null, recorded = null, shot = null, reland = false }) {
   const appIds = (demo.cfg.apps || []).map(a => a.id), appOf = x => (walker.appOf && walker.appOf(x)) || x;
   const index = packIndex(packs, demo.cfg);
   const ctx = { plan, index, walker: recorded, values: checkValues({ plan, walker: recorded, cfg: demo.cfg, appOf }), appIds, appOf };
   const out = [];
   let at = null, seen = null, n = 0;
+  const landed = new Set();
   const visit = async (app, route) => {
+    let fresh = false;
+    if (reland && !landed.has(app)) {
+      landed.add(app); fresh = true;
+      await walker.home(app, { fresh: true });
+      const st = walker.startCheck ? await walker.startCheck(app, plan).catch(e => ({ ok: false, why: e.message })) : { ok: true };
+      if (!st.ok) return { why: `loaded again at its start, it isn't there: ${st.why}` };
+    }
     if (route.open) await cmd('goto', { tab: appTab(demo, app), url: route.open }, 90).catch(() => {});
-    else await walker.home(app);
+    else if (!fresh) await walker.home(app);
     await walker.quiet(app, 800, 20000);
     for (const [i, s] of (route.steps || []).entries()) {
       const r = await walker.step({ app }, s).catch(e => ({ landed: false, why: e.message }));
@@ -308,7 +318,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
   // with what the run made; if it can't, the steps its Note gives, each approved and run as a write. Nothing a run
   // recorded (the reset before): the script's own leftovers found by name (the group's Names, as approved, through the
   // pack's find), each undone by its id. Never a name the recording's start screen shows (one the demo may keep).
-  const apiUndo = async (part, app, s, approvedText, note, names = []) => {
+  const apiUndo = async (part, app, s, approvedText, note, names = [], undoes = []) => {
     if (!allowed(part, approvedText)) return { ok: false, why: `"${approvedText}" isn't in the approved reset` };
     const m = /^undo with the app pack:\s*([\w-]+):([\w-]+)\s*$/i.exec(s.text);
     const fall = async why => {
@@ -330,9 +340,53 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
       if (r.ok) did.push(`${app}: ${s.text}${label} (${api.method}, ${r.status})`);
       return r;
     };
+    const find = pw.undo.find, fat = find && pack.apis && pack.apis[find.use];
+    // The pack's find (a GET of its list), by ids (the one a write recorded, or a ':' part of it) or by names. → the
+    // ids it found, or { why } when it didn't answer with a list: a failed find is never "nothing to undo".
+    const findIn = async by => {
+      const fl = fillApi({ path: find.path }, {}, appCfg.values);
+      if (fl.left.length) return { why: `its find needs ${fl.left.join(', ')}` };
+      const r = await cmd('capApi', { tab: appTab(demo, app), open: fat.open, host: fat.host, hostPattern: fat.hostPattern, from: fat.from || null, method: 'GET', path: fl.path, find: { list: find.list, name: find.name, id: find.id, ...by, where: find.where || null } }, 150).catch(e => ({ ok: false, why: e.message }));
+      if (!r.ok || !(r.status >= 200 && r.status < 300) || !Array.isArray(r.found)) return { why: r.why || (r.status ? `the API answered ${r.status}` : 'no list in its answer') };
+      return { found: r.found };
+    };
+    // After a run: each write this group undoes, with what that write made. Its recorded id first; if the API won't
+    // take it, or the run recorded none (the write's request held, or no id in its address), the find: by that id,
+    // else by the group's names (exactly, never a name the recording's start screen shows). Nothing found in a list the
+    // API answered is nothing to undo; anything else falls to the Note's steps.
+    const writes = phase === 'after' ? (undoes || []).map(u => /^beat (\d+), (.+)$/.exec(u)).filter(Boolean).map(m => ran.find(w => w.beat === +m[1] && norm(w.text) === norm(m[2]))).filter(Boolean) : [];
+    if (writes.length) {
+      for (const w of writes) {
+        const vals = { ...results, ...(w.values || {}) }, label = ` (beat ${w.beat})`;
+        const r = await call(vals, label);
+        if (r.ok) continue;
+        if (!find || !fat) return fall(r.left ? `the run didn't record ${r.left.join(', ')}` : r.why || `the API answered ${r.status}`);
+        const id = r.left ? null : vals[find.as];
+        // By name: the group's names, exactly, never one the recording's start screen shows.
+        const nameFind = () => {
+          if (!names.length) return { why: 'the group names nothing to find' };
+          const findText = `Find by name: ${names.map(x => `"${x}"`).join(', ')}`;
+          if (!allowed(part, findText)) return { refused: `"${findText}" isn't in the approved reset` };
+          const start = recorded && recorded.start(app), sc0 = start ? recorded.screen(start) || recorded.shown(start) : null;
+          const { mine, kept } = byName(names, sc0);
+          if (kept.length) did.push(`${app}: not found by name, the start screen shows it too: ${kept.map(x => `"${x}"`).join(', ')}`);
+          return mine.length ? { by: { names: mine } } : { why: 'each name is one the start screen shows' };
+        };
+        let f = null, by = null;
+        if (id) { by = { ids: [...new Set([String(id), ...String(id).split(':')])].filter(Boolean) }; f = await findIn(by); if (f.why) return fall(`finding beat ${w.beat}'s ${find.as}: ${f.why}`); }
+        if (!f || !f.found.length) {
+          const n = nameFind();
+          if (n.refused) return { ok: false, why: n.refused };
+          if (n.by) { const fn = await findIn(n.by); if (fn.why) return fall(`finding beat ${w.beat}'s names: ${fn.why}`); if (fn.found.length || !f) { f = fn; by = n.by; } else by = { ...by, names: n.by.names }; }
+          else if (!f) return fall(`the run didn't record ${(r.left || [find.as]).join(', ')}, and ${n.why}`);
+        }
+        if (!f.found.length) { did.push(`${app}: ${s.text}${label}: nothing to undo (its list answered, with ${id ? `no ${find.as} ${id}` : ''}${id && by.names ? ' and ' : ''}${by.names ? `nothing called ${by.names.map(x => `"${x}"`).join(', ')}` : ''})`); continue; }
+        for (const fid of f.found) { const u = await call({ ...vals, [find.as]: fid }, `${label}, found by ${by.names ? 'name' : 'id'}`); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
+      }
+      return { ok: true };
+    }
     const first = await call(results, '');
     if (first.ok) return { ok: true };
-    const find = pw.undo.find, fat = find && pack.apis && pack.apis[find.use];
     if (first.left && find && fat && names.length && phase === 'before') {
       const findText = `Find by name: ${names.map(x => `"${x}"`).join(', ')}`;
       if (!allowed(part, findText)) return { ok: false, why: `"${findText}" isn't in the approved reset` };
@@ -356,7 +410,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     for (const g of list) {
       await home(g.app);
       for (const [i, s] of g.steps.entries()) {
-        const r = await step('undo', g.app, s, formatStep(s), { note: g.note, names: g.names || [] });
+        const r = await step('undo', g.app, s, formatStep(s), { note: g.note, names: g.names || [], undoes: g.undoes });
         // Nothing to undo there (its first step's control isn't on the screen): a clean tenant.
         if (!r.ok && r.missing && i === 0) { out.push({ group: g.undoes.join('; '), skipped: r.why }); break; }
         if (!r.ok) { out.push({ group: g.undoes.join('; '), failed: r.why }); return { ok: false, why: r.why, out }; }
@@ -372,7 +426,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     }
     return { ok: true };
   };
-  const checkAll = () => checkLines({ demo, cmd, walker, lines: parsed.checks, plan, packs, recorded, shot });
+  const checkAll = () => checkLines({ demo, cmd, walker, lines: parsed.checks, plan, packs, recorded, shot, reland: phase === 'after' });
   // After the reset did something: a line still wrong is read again once, a few seconds later. An app can still be
   // answering the undo's call when its screen reloads to be read (the page went quiet before its server did).
   const checkAfterDoing = async () => { let cs = await checkAll(); if (did.length && cs.some(c => c.status === 'wrong')) { await sleep(4000); cs = await checkAll(); } return cs; };

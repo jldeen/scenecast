@@ -576,8 +576,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (pc) checked = r.wrote ? await runPackCheck(pc, app) : (await cmd('capAuthWatch', { off: true }, 30).catch(() => {}), null);
         if (r.wrote) {
           const rec = { beat: bi + 1, step: si, text: at.text, writes: step.writes || wr.why, pack: known.pack, write: known.write, undo: step.undo || known.undo || null, result: r.result };
-          run.writes.push(rec); ran.push({ beat: bi + 1, text: at.text });
-          Object.assign(results, namesOf(known.write, r.result));
+          const vals = namesOf(known.write, r.result);
+          run.writes.push(rec); ran.push({ beat: bi + 1, text: at.text, values: vals });
+          Object.assign(results, vals);
           emit({ event: 'wrote', ...rec });
         }
       } else r = await w.act(app, step);
@@ -812,8 +813,9 @@ async function guardOn(demo, cmd, packs) {
   return g;
 }
 // What the guard held, and every host the browser reached that isn't one of the apps' own.
-// The held requests' bodies a demo asked to keep (capture.keepBodies), in .out/ai/held-bodies.json: local only, for a
-// person reviewing an allow entry. None: no file.
+// The held requests' bodies a demo asked to keep (capture.keepBodies), and every body a planned write let through
+// (passed: 'a planned write'), in .out/ai/held-bodies.json: local only, for a person reviewing an allow entry or what a
+// write sent. None: no file.
 // The steps whose app's page may have been broken today, not by the product: the re-ground's suspect rule
 // (reground.mjs), on this walk and its screens. It compares with the recording, so a demo without one says why.
 // → { steps: [{ step: '<beat>-<step>', text, status, held: [kinds], why }] } or { none: why }

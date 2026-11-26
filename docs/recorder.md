@@ -157,7 +157,9 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 - **Approved, all of it.** The plan word for word, and the list of every write by beat and step, with reset.md's
   undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
   app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
-  for that one step. A write that isn't approved stops the run before it, with a picture.
+  for that one step, and the write's own calls to a service of its app's (its pack write's `opens`: Copilot's send is
+  `POST <runtime>/v1/messages`, not its page's host). A write that isn't approved stops the run before it, with a
+  picture.
 - **Services the apps need** (a pack's `services`: IQ's plugin service). First, before the reset before (so a
   failing service costs nothing: no write, nothing to put back), each app with one is opened and the page's own call
   has to answer 2xx (it waits up to 90 s for it); again once the reset is done, at its start screen. Else nothing is
@@ -168,7 +170,10 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   run.json's `services`.
 - **Read-only between writes.** The guard holds the rest, all run long; what it held goes in run.json, each with
   the tab, the frame and the app it came from (by the request's own target and document, never by when it came: a
-  background tab sends during another app's step), and each passed non-read with the allow entry that let it through. A pack's `guard.stayHeld` stays held even during a write's step (the app's own background calls to the host the write opens).
+  background tab sends during another app's step), and each passed non-read with the allow entry that let it through
+  (or, for a write's, what it asked for: a server function's action, a GraphQL operation, a body's Verb; its body
+  kept in `.out/ai/held-bodies.json`, local only). A pack's `guard.stayHeld` stays held even during a write's step
+  (the app's own background calls to the host the write opens).
 - **Writes in frames too** (Microsoft IQ's Power BI frame): exactly one control by that name in the page and its
   frames, the reader agreeing in that frame's markup, the click hit-tested through the frames, and the guard open for
   that step on the app's hosts and its pack's `guard.hosts` (a frame's host goes there; a tenant's in a private pack).
@@ -180,7 +185,13 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   are filled from demo.json's `apps[].values` (the demo's own IDs and names: which business plugin, which section),
   then run.json's results; the demo's values win, and each value is one encoded path segment, so it can't add a
   segment or a query. If it can't, the Note's `if it can't: A › B` steps run instead (approved with the rest: the
-  approval list shows them).
+  approval list shows them). After a run, it undoes each write the group covers with what that write made (its own
+  ids, read from its address too: Cowork's `/cowork/#/task/<id>`). If the API won't take an id, or the run recorded
+  none (the write's call was held, or its address had no id), the pack's `undo.find` lists what's there: by that id
+  (whole or a `:` part), else by the group's Names (exactly, never one the recording's start screen shows). Found, it's
+  undone by the list's id; a list the API answered (2xx) with no match is nothing to undo; a find that failed falls to
+  the Note's steps. The checks after a run load each app again at its start (a real page load, not only a route) and
+  prove it's there before reading its lines.
 - **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
   leaving the app's hosts, a sign-in page (never signed in: Sign in again; the guard holding an app's sign-in says
   so, with the request), what a step lands on not showing, a control that isn't there, a step only a person can do.

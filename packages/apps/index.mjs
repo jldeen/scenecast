@@ -321,6 +321,12 @@ export function checkPack(p) {
       const fd = (w.undo || {}).find;
       if (fd && (!fd.use || !fd.path || !fd.list || !fd.name || !fd.id || !fd.as || !fd.by)) out.push(`${at}: undo find needs use, path, list, name, id, as (the placeholder it fills) and by (what the script made: task, skill)`);
       if (w.undo && w.undo.api && !w.undo.api.use) out.push(`${at}: undo.api.use names an api (apis.<name>) whose host comes from the browser's own requests`);
+      // A write's own calls to a service of its app's: each one kind of call (a method, a host, a path), with a why.
+      for (const e of (what === 'writes' && w.opens) || []) {
+        const [x] = typeof e === 'string' ? e.split(' when body ') : [null];
+        if (typeof x !== 'string' || !/^\/\^(?:\(\?:)?(?:POST|PUT|PATCH|DELETE)(?:\|(?:POST|PUT|PATCH|DELETE))*\)? [a-z0-9\\[\]+.-]+\\\/.+\$\/[a-z]*$/i.test(x) || /\.\*\$\/[a-z]*$|\\\/\.\+\$\/[a-z]*$/.test(x)) out.push(`${at}: opens "${e}": a /^METHOD host\\/path$/ pattern for one kind of call, never every path`);
+        else if (!(((p.guard || {}).why) || {})[e]) out.push(`${at}: opens "${e}": a why in guard.why (what the write sends there)`);
+      }
     }
   }
   for (const s of p.safe || []) {
