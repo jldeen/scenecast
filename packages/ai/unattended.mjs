@@ -619,7 +619,12 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       run.landings.push({ beat: bi + 1, index: si, app, step: at.text, expected: step.lands ? formatLands(step.lands) : null, got: { screen: c.screen || null, url, text: byCheck ? `the pack's check: ${checked.status}${checked.picked ? ` ${JSON.stringify(checked.picked)}` : ''}` : proofWords(lp.lands) }, ok: true, strength, basis: byCheck ? 'pack check' : 'live', ...(strength === 'strong' ? {} : { why: lp.why }), ...(r.wrote ? { wrote: true } : {}), ...(checked ? { check: checked } : {}) });
       if (step.kind === 'type' && step.value) typedSoFar.push(step.value);
       const why = strength === 'strong' || carried ? null : pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
-      if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
+      if (why) {
+        doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why });
+        // A step that ran and isn't a write, but couldn't be proven: the beat is marked for Review, as a doubt that
+        // stopped nothing is.
+        if (!wr) { const mark = { beat: bi + 1, step: si, text: at.text, app, kind: 'unprovable', why, picture: await shot(app, `${bi + 1}-${si + 1}-mark-unprovable`) }; run.marked.push(mark); emit({ event: 'marked', ...mark }); }
+      }
       else doubt = null;
       Object.assign(lastDid, { did: r.did, screen: c.screen });
       // What was set off camera, on the screen the step lands on (its Seen:), as drawn once the page is quiet. A page
@@ -637,8 +642,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       return null;
     };
     const total = stepCount(plan);
+    // Stop (the app's button): the app clears an old one when this job starts, so one pressed while it got ready counts.
     const stopFile = join(aiDir(demo), 'stop');
-    rmSync(stopFile, { force: true });
     let n = 0;
     outer: for (const [bi, beat] of plan.beats.entries()) {
       const tb = Date.now();
@@ -646,7 +651,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       for (const [si, step] of beat.steps.entries()) {
         const at = { beat: bi, step: si, text: formatStep(step) };
         // Stop (the app's button): between two steps, never between a write and its record; the reset after runs.
-        if (existsSync(stopFile)) { run.stopped = { kind: 'asked', why: 'You stopped it', at }; emit({ event: 'stopped', ...run.stopped }); break outer; }
+        if (existsSync(stopFile)) { rmSync(stopFile, { force: true }); run.stopped = { kind: 'asked', why: 'You stopped it', at }; emit({ event: 'stopped', ...run.stopped }); break outer; }
         emit({ event: 'step', beat: bi, step: si, n: ++n, of: total, text: at.text });
         const prev = app;
         if (step.kind === 'app') app = w.appOf(step.app) || app;

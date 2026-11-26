@@ -261,6 +261,10 @@ pub fn set_separate(dir: &Path, profile: Option<&str>) -> Result<(), AppError> {
                 *c = Value::Object(Default::default());
             }
             c["profile"] = Value::from(p);
+            // Its guard holds every write from the moment the apps load.
+            if c.get("guard").is_none() {
+                c["guard"] = Value::from("hold");
+            }
         }
         None => {
             if o.get("recorder").and_then(Value::as_str) == Some("capture") {
@@ -275,12 +279,17 @@ pub fn set_separate(dir: &Path, profile: Option<&str>) -> Result<(), AppError> {
 /// The separate browser on the presenter's screen, once, to sign in to the demo's apps (`capture sign-in`). Returns
 /// what it says when she's done: `{ ok, … }`.
 pub fn capture_sign_in(dir: &Path) -> Result<Value, AppError> {
+    capture(dir, "sign-in")
+}
+
+/// `capture <sub>` on the engine, and what it says (`{ ok, … }`).
+fn capture(dir: &Path, sub: &str) -> Result<Value, AppError> {
     let engine = crate::receiver::engine_for(dir)?;
     let mut out = String::new();
     engine.run_with_progress(
         [
             std::ffi::OsStr::new("capture"),
-            "sign-in".as_ref(),
+            sub.as_ref(),
             "--demo".as_ref(),
             dir.as_os_str(),
         ],
@@ -295,19 +304,23 @@ pub fn capture_sign_in(dir: &Path) -> Result<Value, AppError> {
         .unwrap_or_else(|_| serde_json::json!({ "ok": false, "error": out.trim() })))
 }
 
-/// The separate browser down (`capture stop`), so its profile is free; Record's readiness check starts it again.
-pub fn capture_stop(dir: &Path) -> Result<(), AppError> {
-    let engine = crate::receiver::engine_for(dir)?;
-    engine.run_with_progress(
-        [
-            std::ffi::OsStr::new("capture"),
-            "stop".as_ref(),
-            "--demo".as_ref(),
-            dir.as_os_str(),
-        ],
-        |_| {},
-    )?;
+/// The separate browser up for a job, fresh: one left running (by an earlier job, perhaps without its guard) is
+/// stopped first. Only the guarded start, never Record's readiness fixes.
+pub fn capture_start(dir: &Path) -> Result<(), AppError> {
+    capture_stop(dir)?;
+    let r = capture(dir, "start")?;
+    if r["ok"] != Value::Bool(true) {
+        return Err(AppError::Invalid(format!(
+            "the separate browser didn't start: {}",
+            r["error"].as_str().unwrap_or("it gave no reason")
+        )));
+    }
     Ok(())
+}
+
+/// The separate browser down (`capture stop`), so its profile is free.
+pub fn capture_stop(dir: &Path) -> Result<(), AppError> {
+    capture(dir, "stop").map(|_| ())
 }
 
 /// The steps to load the extension once, for a browser.
@@ -663,6 +676,7 @@ mod tests {
         assert_eq!(c["recorder"], "capture");
         assert_eq!(c["capture"]["profile"], "demo-tenant");
         assert_eq!(c["capture"]["tenant"], "example.com");
+        assert_eq!(c["capture"]["guard"], "hold");
         assert!(set_separate(tmp.path(), Some("../elsewhere")).is_err());
         set_separate(tmp.path(), None).unwrap();
         let c = read();

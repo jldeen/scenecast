@@ -1137,13 +1137,10 @@ async fn capture_sign_in(state: State<'_, Shared>, app: AppHandle, id: String) -
     .await
 }
 
-/// The separate browser up for a job (Record's readiness check starts it), and down after it.
-fn with_capture<T>(dir: &Path, app: &AppHandle, id: &str, f: impl FnOnce() -> Res<T>) -> Res<T> {
-    let report = scenecast_app::record::preflight(dir, true, |u| emit(app, id, "preflight", u))?;
-    if !report.ready {
-        return Err(AppError::Invalid(scenecast_app::record::not_ready(&report)));
-    }
-    let out = f();
+/// The separate browser up for a job, with its guard on and nothing of Record's readiness fixes, and down after it,
+/// whatever happened.
+fn with_capture<T>(dir: &Path, f: impl FnOnce() -> Res<T>) -> Res<T> {
+    let out = scenecast_app::record::capture_start(dir).and_then(|()| f());
     let _ = scenecast_app::record::capture_stop(dir);
     out
 }
@@ -1152,9 +1149,8 @@ fn with_capture<T>(dir: &Path, app: &AppHandle, id: &str, f: impl FnOnce() -> Re
 #[tauri::command]
 async fn ai_check_script(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
     let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
-    let (to, who) = (app.clone(), id.clone());
     job(state, app, id, "ai-check", move |dir, busy| {
-        with_capture(dir, &to, &who, || {
+        with_capture(dir, || {
             scenecast_app::ai::run(Some(dir), &["check-script"], |u| busy.emit(u))
         })
     })
@@ -1166,13 +1162,14 @@ async fn ai_check_script(state: State<'_, Shared>, app: AppHandle, id: String) -
 #[tauri::command]
 async fn ai_record_unattended(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
     let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
-    let (to, who) = (app.clone(), id.clone());
     job(state, app, id, "ai-record", move |dir, busy| {
+        // A Stop from before this job isn't for it; one pressed from here on is (the run reads it between steps).
+        let _ = std::fs::remove_file(dir.join(".out/ai/stop"));
         if !dir.join("reset.md").is_file() {
             scenecast_app::ai::run(Some(dir), &["reset"], |u| busy.emit(u))?;
         }
         scenecast_app::ai::run(Some(dir), &["approve"], |u| busy.emit(u))?;
-        with_capture(dir, &to, &who, || {
+        with_capture(dir, || {
             scenecast_app::ai::run(Some(dir), &["record", "--unattended", "--checked"], |u| {
                 busy.emit(u)
             })
