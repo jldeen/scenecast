@@ -195,9 +195,10 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   undone by the list's id; a list the API answered (2xx) with no match is nothing to undo; a find that failed falls to
   the Note's steps. What a write makes under a name it picks itself (Copilot's skill) is named from the screen just
   before the write (its pack's `names`), recorded, and found by that name; a write whose screen doesn't give the name
-  doesn't run. A find with a `where` (her own skills, never a plugin's) deletes only what it shows there, and then
-  lists everything the `where` picks: one the start screen doesn't show is a leftover from an earlier run, and the
-  reset fails there. The checks after a run look for what the run named, too. The checks after a run load each app again at its start (a real page load, not only a route) and
+  doesn't run. A find with a `where` (her own skills, never a plugin's) deletes only what it shows there. The reset's
+  checks, before a run and after it, list everything that `where` picks: one the start screen doesn't show is a
+  leftover, undone by its group's Names or, under a name no run recorded, the reset fails there (add it to the
+  Names). The checks after a run look for what the run named, too. The checks after a run load each app again at its start (a real page load, not only a route) and
   prove it's there before reading its lines.
 - **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
   leaving the app's hosts, a sign-in page (never signed in: Sign in again; the guard holding an app's sign-in says

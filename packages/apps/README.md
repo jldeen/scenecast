@@ -259,8 +259,9 @@ and the run's results. An API undo's `find` (`{ use, path, list, name, id, as, b
 before undo the script's own leftovers with nothing a run recorded: the items of the answer's `list` whose `name`
 is one of the reset's `Names:` (what the writes made, `by`: `task`, `skill`), and whose `where` fields match,
 each undone with its `id` as `{<as>}`. With a `where`, an undo only ever deletes what the find shows there (a run's
-recorded name goes through the find too), and after it the reset lists everything the `where` picks: one the
-recording's start screen doesn't show is a leftover under a name no run recorded, and the reset fails there. Only their
+recorded name goes through the find too), and the reset's checks list everything the `where` picks, before a run and
+after it: one the recording's start screen doesn't show is a leftover (a name no run recorded goes in the undo's
+`Names:`), and the reset undoes it by its Names or fails there. Only their
 ids leave the page. Packs never hold credentials or tokens (`checkPack` refuses them).
 
 ## Private packs
