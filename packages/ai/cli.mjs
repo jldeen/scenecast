@@ -81,6 +81,8 @@ async function main() {
     case 'finish': { const { finish } = await import('./finish.mjs'); return finish({ demo: demo(), emit }); }
     case 'record': {
       const d = demo();
+      // Unattended is the capture browser's only: refused before the check, whose fixes would reach her own browser.
+      if (args.includes('--unattended') && d.cfg.recorder !== 'capture') throw new Error('an unattended run needs the capture browser: "recorder": "capture" in demo.json, then preflight');
       // The same readiness check as Record's (--checked: the app ran it just now).
       if (!args.includes('--checked')) {
         const pf = await import('@stuntdouble/core/lib/preflight.mjs');
