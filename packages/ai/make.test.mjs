@@ -23,8 +23,8 @@ import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
-import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
-import { checkFocusJson } from '@stuntdouble/core/lib/overrides.mjs';
+import { parseScript as guideParse, buildNotes } from '@stuntdouble/core/lib/notes.mjs';
+import { checkFocusJson, readEditorOverrides, applyEditorOverrides } from '@stuntdouble/core/lib/overrides.mjs';
 
 const BOX = { sel: 'div[role=textbox][contenteditable=true]' };
 function demoDir() {
@@ -586,6 +586,33 @@ test('the finish: focus points with via that the replica takes, beat keys, and h
   assert.ok(g.beats[0].do.some(d => /^\*\*⌥F\*\*: Kestrel moved/.test(d.text)));
   // The review's timings: each beat's lines at a steady pace, against the time her script gives it.
   assert.deepEqual(beatTimings(plan, ['5s', '~1m15s']).map(r => r[1]), ['about 11 s to say, in 5 s (long)', 'about 1 s to say, in 75 s', 'about 0:12 to say, in 1:20']);
+});
+
+// A take of a plan made on another recording: the take's screens have their own names, not the plan's, and its
+// recorder marked a beat at each app switch and answer, more than the plan has.
+function takeDemo() {
+  const demo = demoDir();
+  const flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8'));
+  const home = { chat: 'chat-home', admin: 'admin-home' };
+  flow.path = [{ app: 'chat', checkpoint: 'chat-home' }, { type: BOX, text: "What's changed on PO-1?", checkpoint: 'chat-typed' }, { enter: BOX, checkpoint: 'chat-answer' },
+    { click: { sel: 'button[aria-label="Save: Save note"]' }, checkpoint: 'chat-saved' }, { app: 'admin', checkpoint: 'admin-home' }, { click: { sel: 'button[aria-label="Certified"]' }, checkpoint: 'admin-certified' }];
+  flow.beats = [{ label: '0 Reset', active: 'chat', states: home }, { label: '1 Chat: start', active: 'chat', states: home },
+    { label: '2 Chat: answer', active: 'chat', states: { ...home, chat: 'chat-answer' } }, { label: '3 Admin: start', active: 'admin', states: { ...home, chat: 'chat-saved' } },
+    { label: '4 Admin: certified', active: 'admin', states: { chat: 'chat-saved', admin: 'admin-certified' } }];
+  writeFileSync(join(demo.dir, 'flow.json'), JSON.stringify(flow));
+  const plan = `# Delay demo\n\n## Beat 1 · The question\n\n- Go to chat\n  Lands on: old-home · "New chat"\n- Type "What's changed on PO-1?" in "Message"\n  Lands on: old-typed · "What's changed"\n- Press Enter\n  Lands on: old-answer · "ship date"\n\n> Our supplier moved the ship date.\n\n## Beat 2 · Save it\n\n- Click "Save: Save note"\n  Lands on: old-saved · "saved"\n\n> I save it.\n\n## Beat 3 · Certify it\n\n- Go to admin\n  Lands on: old-admin · "Plugin admin"\n- Click "Certified"\n  Lands on: old-certified · "Certified by you"\n\n> I certify it.\n`;
+  writeFileSync(join(demo.dir, 'plan.md'), plan);
+  return { demo, flow, plan: parsePlan(plan), home };
+}
+
+test('each beat of a take starts where the take was when it began, and the guide has its picture', () => {
+  const { demo, flow, plan } = takeDemo();
+  const starts = beatStarts(plan, flow);
+  assert.deepEqual(starts.map(b => [b.active, b.states[b.active]]), [['chat', 'chat-home'], ['chat', 'chat-answer'], ['admin', 'admin-home']]);
+  const stage = applyEditorOverrides(structuredClone(flow), { edits: [], beats: Object.fromEntries(starts.map((st, i) => [i + 1, st])) });
+  const notes = buildNotes(demo, stage, '# Delay demo\n\n## 1. The question\n\n## 2. Save it\n\n## 3. Certify it\n', 'script.md');
+  const shots = Object.fromEntries(notes.shots.map(x => [x.name, x.state]));
+  assert.deepEqual(notes.beats.slice(1, -1).map(b => shots[b.shot]), ['chat-home', 'chat-answer', 'admin-home']);
 });
 
 test('proofs on today\'s product: kept, new, today only, behind a write, missed; never a greeting, a passing tip or a page the guard broke', () => {

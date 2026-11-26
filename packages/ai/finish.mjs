@@ -23,16 +23,38 @@ export const MARK = '<!-- Made by Scenecast from your talk track and the plan. E
 // The element around words a Focus names: "the card around …", "the row around …".
 const AROUND = { card: 'section,article,[role=group],[role=article],[role=region],[role=dialog]', row: 'li,tr,[role=row],[role=listitem]', list: 'ul,ol,[role=list]', item: 'li,[role=listitem],[role=option]', button: 'button,[role=button],a', pane: 'aside,[role=complementary],[role=region]', section: 'section,[role=region]' };
 
-// Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins).
+// A plan step and a recorded step, by what they do: the take records each of the plan's app switches, typing, Enter,
+// clicks and keys, in order.
+const stepKind = s => s.kind === 'app' ? 'app' : s.kind === 'type' ? 'type' : s.kind === 'press' ? (s.key === 'Enter' ? 'enter' : 'key') : s.kind === 'click' ? 'click' : null;
+const pathKind = p => p.type ? 'type' : p.enter ? 'enter' : p.click ? 'click' : p.key ? 'key' : p.app ? 'app' : null;
+
+// Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins). A step
+// lands on the screen the plan names when the recording has it, else on the one the take recorded for it (a plan
+// made from another recording names that recording's screens).
 export function beatStarts(plan, flow) {
   const b0 = (flow.beats || [])[0];
   if (!b0) return [];
+  const S = flow.states || {}, path = flow.path || [];
   const cur = { ...b0.states };
-  let active = b0.active;
+  let active = b0.active, at = 0;
+  const recorded = s => {
+    const k = stepKind(s);
+    if (!k) return null;
+    let j = at;
+    while (j < path.length && pathKind(path[j]) !== k) j++;
+    if (j >= path.length) return null;
+    at = j + 1;
+    return path[j].checkpoint;
+  };
   return plan.beats.map(b => {
     const first = b.steps.find(s => s.kind === 'app');
     const start = { active: first && b.steps.indexOf(first) === 0 ? first.app : active, states: { ...cur } };
-    for (const s of b.steps) { if (s.kind === 'app') active = s.app; if (s.lands && s.lands.screen && (flow.states || {})[s.lands.screen]) { cur[flow.states[s.lands.screen].app] = s.lands.screen; active = flow.states[s.lands.screen].app; } }
+    for (const s of b.steps) {
+      if (s.kind === 'app') active = s.app;
+      const took = recorded(s);
+      const screen = s.lands && S[s.lands.screen] ? s.lands.screen : S[took] ? took : null;
+      if (screen) { cur[S[screen].app] = screen; active = S[screen].app; }
+    }
     return start;
   });
 }
