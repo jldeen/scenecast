@@ -731,7 +731,11 @@ try {
   // and a Dud that opens nothing; the recording has those five and a sixth no longer there, and the click cap is 1:
   // all five are clicked, four captured, the Dud missed with a picture, the sixth gone. A seventh, Elsewhere, swaps
   // the screen for another at the same address (as Teams' conversations do): it's missed ("it went to another
-  // screen"), and the audit gets back on Chips one by the control its title names, so the run goes on. A side section outside the
+  // screen"), and the audit gets back on Chips one by the control its title names, so the run goes on. Find here (a
+  // toggle drawn again when pressed, its bar not closed by Escape) is closed by its toggle, with no reload. Fill box
+  // also fills the side's Ask box: put back by clearing it. A status button recorded with a longer name (its account
+  // after the status) is found by its own selector; Format text, recorded on another screen, is no plain button
+  // here: gone. A side section outside the
   // chips screens collapses when Peek is hovered (put back by flipping its own control), and Chips two's Help hover
   // opens a pane Escape doesn't close (put back by a reload). The next saved screens show neither. 'stuck': the pane
   // comes back after the reload, and the run stops before its next save, with a picture, listed for her.
@@ -739,7 +743,9 @@ try {
     const HP = join(DEMO, 'data', 'snaps', 'hovers-tasks.json'), had = existsSync(HP) ? readFileSync(HP, 'utf8') : null;
     mkdirSync(dirname(HP), { recursive: true });
     const menu = (id, name, x) => [id, { id, name, page: 'chips-1', ctl: { sel: 'button', text: name }, ctlRect: { x, y: 80, w: 70, h: 28 }, restore: 'escape' }];
-    writeFileSync(HP, JSON.stringify({ defs: {}, clicks: Object.fromEntries([menu('k1', 'Menu A', 30), menu('k2', 'Menu B', 110), menu('k3', 'Menu C', 190), menu('k4', 'Menu D', 270), menu('k5', 'Dud menu', 350), menu('k6', 'Menu E', 430), menu('k7', 'Elsewhere', 510)]) }));
+    writeFileSync(HP, JSON.stringify({ defs: {}, clicks: Object.fromEntries([['k0', { id: 'k0', name: 'Find here', page: 'chips-1', ctl: { sel: 'button[data-testid="find-toggle-button"][aria-label="Find here"][type="button"]' }, ctlRect: { x: 10, y: 80, w: 40, h: 28 }, restore: 'escape' }], menu('k1', 'Menu A', 30), menu('k2', 'Menu B', 110), menu('k3', 'Menu C', 190), menu('k4', 'Menu D', 270), menu('k5', 'Dud menu', 350), menu('k6', 'Menu E', 430), menu('k7', 'Elsewhere', 510), menu('k8', 'Fill box', 590),
+      ['k9', { id: 'k9', name: 'Your status Available for pat@example.com in Org', page: 'chips-1', ctl: { sel: 'button[data-tid="me-btn"][aria-label="Your status Available for pat@example.com in Org"][type="button"]', text: 'Org PD' }, ctlRect: { x: 670, y: 80, w: 60, h: 28 }, restore: 'escape' }],
+      ['k10', { id: 'k10', name: 'Format text', page: 'chips-1', ctl: { sel: 'button[aria-label="Format text"][type="button"]' }, ctlRect: { x: 300, y: 80, w: 32, h: 32 }, restore: 'escape' }]]) }));
     const c = JSON.parse(cfg0); Object.assign(c.record.auto, { clickMax: 1 }); writeFileSync(cfgF, JSON.stringify(c, null, 2));
     writeFileSync(join(DEMO, 'plan.md'), CHIPS_PLAN + '- Click "Next"\n  Lands on: "Chips three"\n'); writeFileSync(join(DEMO, 'reset.md'), CHIPS_RESET);
     tasks.chips(true); tasks.extras(mode); tasks.seed({});
@@ -755,7 +761,11 @@ try {
     const ml = (pj.menus && pj.menus.list) || [], mBy = n => ml.find(x => x.name === n) || {};
     const why = { code: pr.code, stopped: pj.stopped, menus: pj.menus && { ...pj.menus, list: ml.map(x => [x.name, x.status, x.found, !!x.picture]) }, putBack: pb.map(x => [x.state, x.after, x.how, x.found, x.left]), snaps: snaps.map(([f, t]) => [f.slice(pRaw.length), /Chips (one|two|three)/.exec(t)?.[0], t.includes('Help pane text'), folded(t)]), needsYou: pj.needsYou, notes: ((pRec && pRec.notes) || []).slice(-6), err: String(pr.err || '').slice(-400) };
     if (mode === 'fix') {
-      check("the recording's menus are a floor: all clicked past the click cap, four captured, the one that opens nothing missed with a picture, the one no longer there gone", pr.code === 0 && !pj.stopped && JSON.stringify(pj.menus && { recorded: pj.menus.recorded, captured: pj.menus.captured, gone: pj.menus.gone, missed: pj.menus.missed }) === '{"recorded":7,"captured":4,"gone":1,"missed":2}' && mBy('Dud menu').status === 'missed' && !!mBy('Dud menu').picture && existsSync(mBy('Dud menu').picture) && (pj.needsYou || []).some(n => n.text === 'Open "Dud menu" (tasks)' && n.picture === mBy('Dud menu').picture) && mBy('Menu E').status === 'gone', JSON.stringify(why));
+      check("the recording's menus are a floor: all clicked past the click cap, four captured, the one that opens nothing missed with a picture, the one no longer there gone", pr.code === 0 && !pj.stopped && ['Menu A', 'Menu B', 'Menu C', 'Menu D', 'Find here', 'Fill box'].every(n => mBy(n).status === 'captured') && mBy('Dud menu').status === 'missed' && !!mBy('Dud menu').picture && existsSync(mBy('Dud menu').picture) && (pj.needsYou || []).some(n => n.text === 'Open "Dud menu" (tasks)' && n.picture === mBy('Dud menu').picture) && mBy('Menu E').status === 'gone', JSON.stringify(why));
+      const side1 = (((pRec && pRec.sides) || {}).clicks || []).find(x => (x.results || []).some(r => r.name === 'Find here')) || {}, rOf = n => (side1.results || []).find(r => r.name === n) || {};
+      check("a toggle whose bar Escape doesn't close, drawn again when pressed, is closed by pressing it again: no reload, and the menus after it aren't stuck", rOf('Find here').restore === 'toggle' && ['Menu A', 'Menu B', 'Menu C', 'Menu D'].every(n => rOf(n).restore === 'escape') && !(side1.results || []).some(r => r.restore === 'stuck'), JSON.stringify({ side1, why }));
+      check('a recorded status button whose name has grown or lost a tail is found by its own selector; a recorded "Format text" is no plain button here: gone', mBy('Your status Available for pat@example.com in Org').status === 'captured' && mBy('Format text').status === 'gone', JSON.stringify(why));
+      check('text a side path left in an empty box is cleared before the next save', pb.some(x => /text in: Ask/.test(x.found || '') && x.how === 'closed') && [...of('Chips two'), ...of('Chips three')].every(([, t]) => !t.includes('Prompt text')), JSON.stringify(why));
       check('a menu that goes to another screen at the same address: missed, and the run gets back on its screen by the control its title names', mBy('Elsewhere').status === 'missed' && /another screen/.test(mBy('Elsewhere').why || '') && of('Chips two').length > 0 && !of('Elsewhere').some(([, t]) => /<h1[^>]*>Elsewhere/.test(t)), JSON.stringify(why));
       check('a section a hover collapsed is put back by its own control, and a pane Escape leaves open by a reload', pb.some(x => x.after === 'hovers' && x.how === 'closed' && /Projects/.test(x.found)) && pb.some(x => x.after === 'hovers' && x.how === 'reloaded' && /Help pane/.test(x.found)) && !pb.some(x => x.how === 'stopped'), JSON.stringify(why));
       check('and the screens saved after them show neither', of('Chips two').length > 0 && of('Chips three').length > 0 && [...of('Chips two'), ...of('Chips three')].every(([, t]) => !t.includes('Help pane text') && !folded(t)), JSON.stringify(why));

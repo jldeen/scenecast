@@ -98,6 +98,8 @@ async function backToRest() {
   await install(); await relearn();
 }
 
+// Menus, dialogs and listboxes showing (a click that opened one and read as nothing: see the retry below).
+const overlays = () => ev(() => [...document.querySelectorAll('[role=menu],[role=dialog],[role=alertdialog],[role=listbox],[aria-modal=true]')].filter(e => { const b = e.getBoundingClientRect(); return b.width > 2 && b.height > 2 && getComputedStyle(e).visibility !== 'hidden'; }).length).catch(() => 0);
 const floorShot = async name => ARGS.floorShot ? ARGS.floorShot(`click-${ARGS.page}-${name}`).catch(() => null) : null;
 let floorAt = null;
 for (const c of controls) {
@@ -125,7 +127,7 @@ for (const c of controls) {
       await sleep(100); await ev(() => window.__d1h.takeRest());
       Object.assign(ctl, again); r.refound = true; out.refound = (out.refound || 0) + 1;
     } else if (now.x !== ctl.x || now.y !== ctl.y) { Object.assign(ctl, now); r.moved = true; out.moved = (out.moved || 0) + 1; }
-    const urlBefore = p.url(), titleBefore = titleKey(await titleNow());
+    const urlBefore = p.url(), titleBefore = titleKey(await titleNow()), ov0 = await overlays();
     await move(ctl.x, ctl.y, 3); await sleep(120);
     await p.mouse.down(); await sleep(60); await p.mouse.up();
     const tc = Date.now();
@@ -135,7 +137,19 @@ for (const c of controls) {
     // Another screen at the same address (an app's own route: its title says where): back where the audit was.
     { const tn = await titleNow(); if (ARGS.reland && titleKey(tn) !== titleBefore) { r.navigated = 'title: ' + String(tn).slice(0, 120); if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'it went to another screen', picture: await floorShot(`${c.floor.id}-elsewhere`) }; if (!(await reland())) await backToRest(); else { f = await pickFrame(); off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox(); await install(); await relearn(); } out.results.push(r); continue; } }
     r.visible = await vis();
-    const res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
+    let res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
+    // A recorded menu that opened (a menu or dialog more is showing) and read as nothing: its parts' kind was learned
+    // as the page's own churn (after a reload, as Teams' "Settings and more" was). Closed, the learned churn
+    // forgotten, and pressed once more.
+    if ((!res || !r.visible) && c.floor && (await overlays()) > ov0) {
+      r.again = true;
+      await p.keyboard.press('Escape'); await sleep(150); await settle(1500);
+      await ev(() => { window.__d1h.noiseSigs.clear(); window.__d1h.takeRest(); });
+      const q = await ev(() => window.__d1h.ctlPos()).catch(() => null); if (q) { ctl.x = q.x; ctl.y = q.y; if (q.rect) ctl.rect = q.rect; }
+      await move(ctl.x, ctl.y, 3); await sleep(120); await p.mouse.down(); await sleep(60); await p.mouse.up();
+      await sleep(150); await move(...NEUTRAL); await settle(c.settleMs || 3000);
+      r.visible = await vis(); res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
+    }
     if (!res || !r.visible) { r.effect = 'none'; if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'nothing opened', picture: await floorShot(c.floor.id) }; await ev(() => window.__d1h.unmark()); out.results.push(r); continue; }
     const ser = await f.evaluate(H.SERX({ parts: '[data-d1-hpart]' }));
     await ev(() => window.__d1h.unmark());
@@ -154,18 +168,29 @@ for (const c of controls) {
     // Putting it back, the way the page does.
     let restore = null, reopen = null, revertMs = null;
     if (c.auto) { const s = Date.now(); while (Date.now() - s < c.auto) { await sleep(150); if (!(await vis())) { restore = 'auto'; revertMs = Date.now() - tc; break; } } }
+    // In order, before any reload: its recorded way (Escape, or for a toggle the control again), the control again (the
+    // same element, or one drawn in its place that says it's on: aria-pressed or aria-expanded true, or "toggle" in its
+    // test id, as Teams' Find in channel), the close button of what it opened, then a control that says it opens or
+    // closes something.
     if (!restore && !c.noEscape) { await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await vis())) restore = 'escape'; }
     if (!restore) {
-      const again = await ev(() => { const e = window.__d1h.ctl; if (!e || !e.isConnected) return null; const b = e.getBoundingClientRect(); return b.width > 2 ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null; });
+      let again = await ev(() => { const e = window.__d1h.ctl; if (!e || !e.isConnected) return null; const b = e.getBoundingClientRect(); return b.width > 2 ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null; });
+      if (!again) {
+        const m1 = await mOf(), g = m1 ? await ev(m => window.__d1h.markCtl(m), m1).catch(() => null) : null, at = (g && g.attrs) || {};
+        if (g && (at['aria-pressed'] === 'true' || at['aria-expanded'] === 'true' || /toggle/i.test(`${at['data-testid'] || ''} ${at['data-tid'] || ''}`))) again = g;
+      }
       if (again) { await move(again.x, again.y, 3); await sleep(100); await p.mouse.click(off.x + again.x, off.y + again.y); await sleep(200); await move(...NEUTRAL); await settle(2000); if (!(await vis())) restore = 'toggle'; }
     }
-    // Only a control that says it opens, closes, expands or shows something: never a menu or list item.
-    const cand = newCtls.find(x => /^(open|close|expand|show|collapse|hide|back)\b/i.test(x.label || ''));
+    // Only a control that says it opens, closes, expands or shows something: never a menu or list item. What it opened
+    // has its own close button first (Close, Dismiss, Cancel alone, or an ×).
+    const closer = newCtls.find(x => /^(close|dismiss)\b|^cancel$|^[×✕✖xX]$/i.test(String(x.label || '').trim()));
+    const cand = closer || newCtls.find(x => /^(open|close|expand|show|collapse|hide|back)\b/i.test(x.label || ''));
     if (!restore && cand) {
       await move(cand.x, cand.y, 3); await sleep(100); await p.mouse.click(off.x + cand.x, off.y + cand.y); await sleep(200); await move(...NEUTRAL); await settle(2500);
       if (!(await vis())) { restore = 'reopen'; reopen = cand.spec; }
     }
-    if (!restore) { restore = 'stuck'; r.stuckOps = await vis(); await backToRest(); }
+    // Stuck: what stayed (for the record), then a reload as the last resort.
+    if (!restore) { restore = 'stuck'; r.stuckOps = await vis(); r.stayed = await ev(() => window.__d1h.visibleOpsList().slice(0, 6).map(x => x.slice(0, 160))).catch(() => null); await backToRest(); }
     await H.post('/hover', { page: 'click-' + ARGS.page, n: out.n, kind: 'click', cand: { text: c.name }, ctl, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, restore, reopen, revertMs, clickMs: r.ms, auto: c.auto || null, shot, css, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
     Object.assign(r, { n: out.n, restore, reopen: reopen && reopen.sel, ops: (res.ops || []).length, portals: (res.portals || []).length });
     if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: true, restore };

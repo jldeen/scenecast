@@ -332,7 +332,9 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         Escape doesn't close ('stuck': it's kept in the tab's session, so a reload draws it again). Each chips
 //         screen has its own title ("Chips one | Fixture Tasks"), the side section a "Chips one" button that goes
 //         back there, and Chips one an "Elsewhere" menu that swaps the screen for another at the same address (as
-//         Teams' conversations do).
+//         Teams' conversations do), a "Find here" toggle drawn again when pressed whose bar Escape doesn't close (as
+//         Teams' Find in channel), a "Fill box" menu that also fills the side section's Ask box (as a suggestion fills
+//         Copilot's composer), and a status button ("Your status Away") with a menu.
 //         Chips three always has an avatar ("Profile picture of Pat Doe.") whose people card shows after 0.3 s.
 //         notice('close' | 'stuck'): 0.3 s after Chips is clicked, Teams' "Loading latest updates…" notice comes on top
 //         of the page and stays, with its own Close button ('close') or none ('stuck').
@@ -342,7 +344,7 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
 //         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
 //         API undo that has to go from that frame.
 // The chips screens (main's markup), drawn in place by the tasks page, as an app's in-page routes are.
-const chipsPart = (n, moving = false, extras = null) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && extras ? `<p class="menus">${['A', 'B', 'C', 'D'].map(x => `<button class="mb" aria-haspopup="menu" aria-expanded="false">Menu ${x}</button>`).join('')}<button aria-haspopup="menu">Dud menu</button><button aria-haspopup="menu" id="away">Elsewhere</button></p>` : ''}${n === 2 && extras ? '<p><button id="helpb">Help</button></p>' : ''}${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
+const chipsPart = (n, moving = false, extras = null) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && extras ? `<p class="menus"><button type="button" data-testid="find-toggle-button" aria-pressed="false" aria-label="Find here">Find</button>${['A', 'B', 'C', 'D'].map(x => `<button type="button" class="mb" aria-haspopup="menu" aria-expanded="false">Menu ${x}</button>`).join('')}<button type="button" aria-haspopup="menu">Dud menu</button><button type="button" aria-haspopup="menu" id="away">Elsewhere</button><button type="button" class="mb" aria-haspopup="menu" aria-expanded="false" data-fill="Prompt text">Fill box</button><button type="button" class="mb" data-tid="me-btn" aria-label="Your status Away" aria-haspopup="menu">PD</button></p>` : ''}${n === 2 && extras ? '<p><button id="helpb">Help</button></p>' : ''}${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
 ${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button><button id="pat" aria-label="Profile picture of Pat Doe.">PD</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
 </p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
 const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null, extras = null) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
@@ -382,7 +384,8 @@ if ($('chipsbtn')) {
     if (EXTRAS) {
       // The side section, outside the chips screens (it stays as they change), and what each extra does.
       if (!$('xside')) {
-        document.body.insertAdjacentHTML('afterbegin', '<aside aria-label="Side" id="xside"><button id="peek">Peek</button> <button id="fold" aria-expanded="true">Projects</button><ul id="xlist"><li>Alpha</li><li>Beta</li></ul><button id="goone">Chips one</button></aside>');
+        document.body.insertAdjacentHTML('afterbegin', '<aside aria-label="Side" id="xside"><button id="peek">Peek</button> <button id="fold" aria-expanded="true">Projects</button><ul id="xlist"><li>Alpha</li><li>Beta</li></ul><button id="goone">Chips one</button><textarea aria-label="Ask" id="ask"></textarea></aside>');
+        document.addEventListener('click', e => { const t = e.target.closest('[data-testid=find-toggle-button]'); if (!t) return; const on = t.getAttribute('aria-pressed') !== 'true', n = t.cloneNode(true); n.setAttribute('aria-pressed', String(on)); t.replaceWith(n); const fb = $('findbar'); if (on && !fb) n.insertAdjacentHTML('afterend', '<span role="search" id="findbar">Find bar <input aria-label="Find text"></span>'); if (!on && fb) fb.remove(); });
         $('goone').addEventListener('click', () => show(1));
         $('peek').addEventListener('mouseenter', () => { $('fold').setAttribute('aria-expanded', 'false'); $('xlist').hidden = true; });
         $('fold').addEventListener('click', () => { const open = $('fold').getAttribute('aria-expanded') !== 'true'; $('fold').setAttribute('aria-expanded', String(open)); $('xlist').hidden = !open; });
@@ -395,6 +398,7 @@ if ($('chipsbtn')) {
         const open = b.getAttribute('aria-expanded') === 'true';
         document.querySelectorAll('.fxm').forEach(m => m.remove()); document.querySelectorAll('.mb').forEach(x => x.setAttribute('aria-expanded', 'false'));
         if (open) return;
+        if (b.dataset.fill) $('ask').value = b.dataset.fill;
         const r = b.getBoundingClientRect(), m = document.createElement('div');
         m.className = 'fxm card'; m.setAttribute('role', 'menu'); m.setAttribute('aria-label', b.textContent + ' items');
         m.innerHTML = '<div role="menuitem">' + b.textContent + ' one</div><div role="menuitem">' + b.textContent + ' two</div>';

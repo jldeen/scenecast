@@ -139,15 +139,17 @@ const OPEN_STATE = () => {
   const overlays = uniq([...document.querySelectorAll('[role=menu],[role=dialog],[role=alertdialog],[role=listbox],[aria-modal=true],[popover]')].filter(vis).map(e => (e.getAttribute('role') || 'popover') + ': ' + nm(e).slice(0, 40)));
   const panes = uniq([...document.querySelectorAll('aside,[role=complementary],[role=region][aria-label],section[aria-label]')].filter(vis).map(e => (e.getAttribute('role') || e.localName) + ': ' + (e.getAttribute('aria-label') || '').replace(/\d+/g, '#')));
   const expanded = uniq([...document.querySelectorAll('[aria-expanded]')].filter(vis).map(e => nm(e) + '=' + e.getAttribute('aria-expanded')));
+  // Text boxes and what's in them (a side path that typed or filled one: Copilot's composer).
+  const seen = {}, boxes = [...document.querySelectorAll('textarea,input:not([type]),input[type=text],input[type=search],[contenteditable=true]')].filter(e => vis(e) && !(e.parentElement && e.parentElement.closest('[contenteditable=true]'))).map(e => { const k = (e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.localName).slice(0, 40); return [k + '#' + (seen[k] = (seen[k] || 0) + 1), (e.isContentEditable ? e.innerText : e.value || '').replace(/\s+/g, ' ').trim().slice(0, 200)]; });
   const h = document.querySelector('h1,[role=heading][aria-level="1"]');
-  return { overlays, panes, expanded, title: document.title, heading: h ? (h.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80) : null, path: location.origin + location.pathname, href: location.href };
+  return { overlays, panes, expanded, boxes, title: document.title, heading: h ? (h.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80) : null, path: location.origin + location.pathname, href: location.href };
 };
-// A screen's title as a key: an unread count in front and numbers aside ("(3) Chat | Procurement | Supply alerts").
+// A screen's title as a key: an unread count in front and numbers aside ("(3) Chat | Design | Launch plans").
 const titleKey = t => String(t || '').replace(/^\(\d+\)\s*/, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 // Back on a saved screen (want: OPEN_STATE's path, href and title) after a side path left it, or a reload landed
 // elsewhere (Teams opens its last conversation; its address never changes): its address again when that's what
-// differs, then the control its title names, most specific part first ("Supply alerts" for "Chat | Procurement |
-// Supply alerts | Microsoft Teams"), clicked as a person would. The recorder steps aside. → true once it's there.
+// differs, then the control its title names, most specific part first ("Launch plans" for "Chat | Design |
+// Launch plans | Microsoft Teams"), clicked as a person would. The recorder steps aside. → true once it's there.
 H.reland = async (p, want) => {
   if (!want || !want.title) return true;
   const here = () => p.mainFrame().evaluate(() => ({ path: location.origin + location.pathname, title: document.title })).catch(() => null);
@@ -186,10 +188,11 @@ function recOpenDiff(want, now) {
   const opened = now.overlays.filter(x => !want.overlays.includes(x));
   const panesIn = now.panes.filter(x => !want.panes.includes(x)), panesOut = want.panes.filter(x => !now.panes.includes(x));
   const was = new Map(want.expanded.map(x => [x.replace(/=(true|false)$/, ''), x])), flipped = now.expanded.filter(x => { const k = x.replace(/=(true|false)$/, ''); return was.has(k) && was.get(k) !== x; });
+  const had = new Map(want.boxes || []), typed = (now.boxes || []).filter(([k, v]) => had.has(k) && had.get(k) !== v).map(([k, v]) => ({ key: k, was: had.get(k), now: v }));
   const moved = (want.path && now.path && want.path !== now.path) || (want.title !== undefined && titleKey(want.title) !== titleKey(now.title)) ? [`${want.title} → ${now.title}`] : [];
-  return moved.length || opened.length || panesIn.length || panesOut.length || flipped.length ? { moved, opened, panesIn, panesOut, flipped } : null;
+  return moved.length || opened.length || panesIn.length || panesOut.length || flipped.length || typed.length ? { moved, opened, panesIn, panesOut, flipped, typed } : null;
 }
-const recOpenSay = d => [(d.moved || []).length ? `another screen: ${d.moved.join('; ')}` : '', d.opened.length ? `open: ${d.opened.join('; ')}` : '', d.panesIn.length ? `pane opened: ${d.panesIn.join('; ')}` : '', d.panesOut.length ? `pane closed: ${d.panesOut.join('; ')}` : '', d.flipped.length ? `changed: ${d.flipped.join('; ')}` : ''].filter(Boolean).join(' | ');
+const recOpenSay = d => [(d.moved || []).length ? `another screen: ${d.moved.join('; ')}` : '', d.opened.length ? `open: ${d.opened.join('; ')}` : '', d.panesIn.length ? `pane opened: ${d.panesIn.join('; ')}` : '', d.panesOut.length ? `pane closed: ${d.panesOut.join('; ')}` : '', d.flipped.length ? `changed: ${d.flipped.join('; ')}` : '', (d.typed || []).length ? `text in: ${d.typed.map(t => `${t.key.replace(/#1$/, '')} ("${t.now.slice(0, 40)}")`).join('; ')}` : ''].filter(Boolean).join(' | ');
 // After a side path, and at the end of a screen's sweep: the screen must be as it was saved. Closed (Escape, then each
 // control whose expanded state flipped, flipped back), else the tab reloaded and the screen landed again (its title and
 // first heading), else nothing more is saved: the next save stops (REC.unrestored, with a picture).
@@ -212,6 +215,27 @@ async function recPutBackOff(A, state, after, want, d, first, fix, now, pic) {
   // Another screen: back on it first (its address, else the control its title names).
   if (d && d.moved.length) { await H.reland(p, want); d = recOpenDiff(want, await now()); }
   for (let i = 0; i < 2 && d && (d.opened.length || d.panesIn.length); i++) { await p.keyboard.press('Escape').catch(() => {}); await sleep(500); d = recOpenDiff(want, await now()); }
+  // Text a side path left in a box that was empty: cleared as a person would (click in, select all, Delete; never
+  // Enter, never Send).
+  if (d && d.typed.some(t => t.was === '')) {
+    for (const t of d.typed.filter(x => x.was === '')) {
+      const at = await p.mainFrame().evaluate(key => {
+        const vis = e => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && getComputedStyle(e).visibility !== 'hidden'; };
+        const seen = {};
+        for (const e of document.querySelectorAll('textarea,input:not([type]),input[type=text],input[type=search],[contenteditable=true]')) {
+          if (!vis(e) || (e.parentElement && e.parentElement.closest('[contenteditable=true]'))) continue;
+          const k = (e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.localName).slice(0, 40), id = k + '#' + (seen[k] = (seen[k] || 0) + 1);
+          if (id === key) { const r = e.getBoundingClientRect(); return { x: r.x + Math.min(r.width / 2, 80), y: r.y + Math.min(r.height / 2, 20) }; }
+        }
+        return null;
+      }, t.key).catch(() => null);
+      if (!at) continue;
+      await p.mouse.click(at.x, at.y); await sleep(200);
+      await p.keyboard.press((globalThis.process && globalThis.process.platform) === 'darwin' ? 'Meta+A' : 'Control+A'); await p.keyboard.press('Delete'); await sleep(400);
+    }
+    await p.mainFrame().evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }).catch(() => {});
+    await sleep(300); d = recOpenDiff(want, await now());
+  }
   if (d && d.flipped.length) {
     await p.mainFrame().evaluate(keys => { const nm = e => (e.getAttribute('aria-label') || e.getAttribute('title') || (e.innerText || '').replace(/\s+/g, ' ').trim()).replace(/\d+/g, '#').slice(0, 60); for (const e of document.querySelectorAll('[aria-expanded]')) if (keys.includes(nm(e) + '=' + e.getAttribute('aria-expanded'))) e.click(); }, d.flipped).catch(() => {});
     await sleep(800); d = recOpenDiff(want, await now());
@@ -902,7 +926,7 @@ async function recSide(A, c) {
       const out = await SIDE_CLICKS({ ...c, p, page, snapId: 'hov-click-' + page, skip: c.skip || REC.opts.groups.button });
       let frame = null;
       if (out.frameUrl) { const f = p.frames().find(x => x.url().split('?')[0] === out.frameUrl); if (f) frame = await recFrameKey(p, f); }
-      const results = out.results.map(r => ({ name: r.name, n: r.n, restore: r.restore, ops: r.ops, portals: r.portals, lazyCss: r.lazyCss, skip: r.skip, effect: r.effect, navigated: r.navigated, error: r.error }));
+      const results = out.results.map(r => ({ name: r.name, n: r.n, restore: r.restore, ops: r.ops, portals: r.portals, lazyCss: r.lazyCss, skip: r.skip, effect: r.effect, navigated: r.navigated, ...(r.stayed ? { stayed: r.stayed } : {}), ...(r.again ? { again: true } : {}), error: r.error }));
       // Every control tried is known now (another screen of the app won't try it again); a page only if one opened.
       const seen = recSeen('clicks', A.id + (out.frameUrl || '')); for (const r of out.results) if (!r.floor) seen.add(r.name);
       const F = recFloor();

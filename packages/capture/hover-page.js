@@ -346,8 +346,9 @@
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), rect: rect(e), spec: specOf(e), attrs: Object.fromEntries([...e.attributes].filter(a => !/^(class|style|data-d1-.*|id)$/.test(a.name)).map(a => [a.name, a.value.slice(0, 200)])) };
     },
     // A recorded menu's control here (the click audit's floor): e { id, name, ctl: { sel, text?, in? }, ctlRect }. By its
-    // selector, then the same without its name attributes (an avatar whose label says a status), then by its words (a
-    // control named as recorded, numbers aside, or one name starting with the other); the nearest the recorded spot.
+    // selector, then the same without its name attributes when that still finds just one (an avatar whose label says a
+    // status), then by its words (a control named as recorded, numbers aside, or the one sharing its first three words
+    // or more); the nearest the recorded spot.
     // → { found: 'place' | 'words', m } (m: markCtl's matcher for that one element), or null.
     floorClick(e) {
       const rc = e.ctlRect, cx = rc ? rc.x + rc.w / 2 : null, cy = rc ? rc.y + rc.h / 2 : null;
@@ -356,16 +357,27 @@
       const c = e.ctl || {}, inOk = x => !c.in || !!x.closest(c.in), textOk = x => c.text === undefined || norm(x.innerText) === c.text;
       const matcher = (el, m) => { const all = [...document.querySelectorAll(m.sel)].filter(x => visible(x) && (m.text === undefined || norm(x.innerText) === m.text) && (m.label === undefined || x.getAttribute('aria-label') === m.label) && (!m.in || x.closest(m.in))); return { ...m, nth: Math.max(0, all.indexOf(el)) }; };
       let el = c.sel ? near(q(c.sel).filter(x => visible(x) && inOk(x) && textOk(x))) : null, found = el ? 'place' : null, sel = c.sel;
+      // Its selector without the name its label holds (Teams' profile button: "Your profile, status Available for …"
+      // then, "… status Away" now): only when what's left still says which control (an id, a data- attribute) and
+      // finds exactly one on the screen; its recorded text aside (the button's own words changed with it). A bare
+      // button[type="button"] is any button: never that (it clicked a suggestion card for Copilot's "Format text").
       if (!el && c.sel) {
         const relaxed = c.sel.replace(/\[(aria-label|title|aria-description)="(?:[^"\\]|\\.)*"\]/g, '');
-        if (relaxed && relaxed !== c.sel) { el = near(q(relaxed).filter(x => visible(x) && inOk(x) && textOk(x))); if (el) { found = 'place'; sel = relaxed; } }
+        const telling = /\[(data-[\w-]+|id|name)=/.test(relaxed) || /#[\w-]/.test(relaxed);
+        if (relaxed && relaxed !== c.sel && telling) { const all = q(relaxed).filter(x => visible(x) && inOk(x)); if (all.length === 1) { el = all[0]; found = 'place'; sel = relaxed; } }
+        if (el) return { found, m: matcher(el, { sel, ...(c.in ? { in: c.in } : {}) }) };
       }
       if (el) return { found, m: matcher(el, { sel, ...(c.text !== undefined ? { text: c.text } : {}), ...(c.in ? { in: c.in } : {}) }) };
+      // By its name: the same name (numbers aside), else the one control on the screen whose name starts with the
+      // same three words or more, most of its own ("Your profile, status Away" for "Your profile, status Available
+      // for …"; never "More actions for one" for "More actions for another").
       const n = x => norm(x).toLowerCase().replace(/\d+/g, '#'), want = n(e.name);
       if (!want) return null;
       const name = x => x.getAttribute('aria-label') || norm(x.innerText);
       const ctls = [...document.querySelectorAll('button,[role=button],[aria-expanded],[aria-haspopup],[role=tab],[role=treeitem]')].filter(visible);
-      el = near(ctls.filter(x => n(name(x)) === want)) || near(ctls.filter(x => { const v = n(name(x)); return v.length >= 4 && want.length >= 4 && (v.startsWith(want) || want.startsWith(v)); }));
+      const lead = (a, b) => { const x = a.split(' '), y = b.split(' '); let k = 0; while (k < x.length && k < y.length && x[k] === y[k]) k++; return k; };
+      el = near(ctls.filter(x => n(name(x)) === want));
+      if (!el) { const pre = ctls.filter(x => { const v = n(name(x)), k = lead(v, want); return k >= 3 && k >= 0.75 * v.split(' ').length; }); if (pre.length === 1) el = pre[0]; }
       if (!el) return null;
       const label = el.getAttribute('aria-label');
       return { found: 'words', m: matcher(el, { sel: el.localName, ...(label ? { label } : { text: norm(el.innerText) }) }) };

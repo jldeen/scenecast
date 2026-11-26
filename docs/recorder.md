@@ -276,8 +276,12 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   list, how each anchor was found, and the counts the summary prints). A live walk and `ai check` don't sweep
   hovers.
 - **The recording's menus are a floor** too (`hovers-<app>.json` `clicks`: what the recording's click audit opened).
-  Each is found as a hover is (its selector, then without the name its label holds, as Teams' profile button's status
-  changes, then by its name, nearest the recorded spot; its point read again just before the click), clicked whatever
+  Each is found by its selector; else by the same without the name its label holds, when what's left still says which
+  control (an id or data- attribute) and finds exactly one (Teams' profile button, whose name carries the status and
+  the account); else by its name, numbers aside, or as the one control sharing its first three words or more, most of
+  its own ("Your profile, status Away" for "Your profile, status Available for …"); nearest the recorded spot, its
+  point read again just before the click. A bare `button[type="button"]` is never enough (it once clicked one of
+  Copilot's suggestion cards for "Format text", filling the composer). Clicked whatever
   `auto.clickMax` or the time, captured, and put back its recorded way. The heuristic picks that aren't recorded keep
   the cap and what's left of the budget, and leave out the clicks the demo's build dropped (its flow's `clickPages`
   `drop`: Teams' " Bot Available" opens a chat). After the run each is captured, missed (it was there and nothing
@@ -287,14 +291,20 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   was saved: the same screen (its address, and its title, an unread count and numbers aside: Teams' address never
   changes, its title names the conversation), no menu, dialog, listbox or popover opened, no pane (an aside, a
   complementary or named region or section) opened or closed, no expander flipped (Copilot's "Collapse sidebar",
-  admin's Cloud Shell pane). Not a raw signature: admin's grid order changes on every load. Another screen is left
-  first: its address again, else the control its title names, most specific part first ("Supply alerts" for "Chat |
-  Procurement | Supply alerts | Microsoft Teams"). What else differs is closed (Escape, then each flipped control
-  flipped back, the recorder stepping aside so neither is a step of hers), else the tab is reloaded and gets back on
+  admin's Cloud Shell pane), no text left in a box (Copilot's composer). Not a raw signature: admin's grid order changes on every load. Another screen is left
+  first: its address again, else the control its title names, most specific part first ("Launch plans" for "Chat |
+  Design | Launch plans | Microsoft Teams"). What else differs is closed (Escape; text in a box that was empty
+  cleared by clicking in, selecting all and Delete, never Enter; then each flipped control flipped back, the recorder
+  stepping aside so none is a step of hers), else the tab is reloaded and gets back on
   the screen the same way, else nothing more is saved: the run stops before its next save, with pictures before and
   after, and lists it for her. The click audit does the same after each reload and after a click that changes the
-  title at the same address, and learns the page's own churn again after a reload (else every click after it reads
-  as stuck). The recording: `putBack` (each screen, after what, what it found, and how it was put
+  title at the same address. Before it reloads at all, it closes what a click opened in order: the recorded way
+  (Escape, or the control again), the control again (the same element, or one drawn in its place that says it's on:
+  `aria-pressed`/`aria-expanded` true, or "toggle" in its test id, as Teams' Find in channel), the close button of what
+  it opened (Close, Dismiss, Cancel alone, an ×), then a control that says it opens or closes something. After a
+  reload it waits for the app to go quiet (15 s at most) before learning its own churn again, else every click after
+  it reads as stuck. A recorded menu that visibly opened and read as nothing is pressed once more with the learned
+  churn forgotten. What stayed when a click was stuck is in the recording (`sides.clicks[].results[].stayed`). The recording: `putBack` (each screen, after what, what it found, and how it was put
   back); run.json: `stopped.kind: 'put-back'`.
 - **A page that moves while it's swept** (a banner on top, a list that loads): every hover and every click reads its
   control's point again just before the pointer goes there, and uses where it is now; one that has gone from there is
