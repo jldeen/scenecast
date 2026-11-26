@@ -155,6 +155,8 @@ The tenant and the account live in the demo's own `demo.json`, never in this rep
 nobody there, while the recorder records. It's what the capture browser is for: no screen, no clicks, no waiting.
 The app runs it from Record › Copilot records **in a separate browser** (demo.json `recorder: "capture"` and its
 `capture.profile`): it makes reset.md from the plan when there's none, approves, and stops the capture browser after.
+The profile's own settings, `~/.stuntdouble/capture/<profile>.json` (its tenant, account, the guard's extra `allow`),
+fill in what the demo's `capture` leaves out, so a demo made in the app records like one set up by hand.
 
 - **Check my script first** (`ai check-script`, `packages/ai/check-script.mjs`): `ai walk --live`, then the run's own
   rules over what it saw. A write after a step it couldn't prove (unproven, words drifted, a miss) stops; a write needs

@@ -49,10 +49,24 @@ export function recordedViewport(raw) {
   return null;
 }
 
+export const PROFILE_HOME = () => process.env.STUNTDOUBLE_CAPTURE_HOME || join(homedir(), '.stuntdouble', 'capture');
+export function profileSettings(capture) {
+  const p = capture.profile || 'default';
+  if (!/^[\w.-]+$/.test(p)) return capture;
+  const f = join(PROFILE_HOME(), `${p}.json`);
+  if (!existsSync(f)) return capture;
+  const own = JSON.parse(readFileSync(f, 'utf8'));
+  return { ...own, ...capture, allow: [...new Set([...(own.allow || []), ...(capture.allow || [])])] };
+}
+
 export function loadDemo(dirOrArgs) {
   const dir = typeof dirOrArgs === 'string' ? resolve(dirOrArgs) : findDemoDir(dirOrArgs);
   const cfg = JSON.parse(readFileSync(join(dir, 'demo.json'), 'utf8'));
   const c = { ...DEFAULTS, ...cfg, viewport: { ...DEFAULTS.viewport, ...(cfg.viewport || {}) }, chrome: { ...DEFAULTS.chrome, ...(cfg.chrome || {}) }, record: { ...DEFAULTS.record, ...(cfg.record || {}) } };
+  // Recording in the capture browser: its profile's own settings (~/.stuntdouble/capture/<profile>.json: the tenant
+  // it's signed in to, its account, the guard's extra allow entries) fill in what demo.json's capture leaves out, so a
+  // demo made in the app records as one set up by hand. They name a tenant: they live with the profile, never here.
+  if (c.recorder === 'capture') c.capture = profileSettings(c.capture || {});
   // Raw captures hold real URLs (some with sign-in tokens): they live outside the demo folder by default.
   const raw = home(process.env.REPLICA_RAW || c.raw || `~/.scenecast/${c.name}/raw`);
   fencePath(dir, 'demo'); fencePath(isAbsolute(raw) ? raw : join(dir, raw), 'raw folder');

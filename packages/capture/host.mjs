@@ -10,7 +10,8 @@
 //   "tenant": the demo tenant (its domain or id): nothing is captured signed in to any other,
 //   "account": the demo account (pinned at Entra's sign-in, so no account picker), "domainHint",
 //   "macSso": false to turn the Mac's own single sign-on off in the profile (it's what signs a managed Mac in) }
-// These name a tenant: they go in a demo's own demo.json, never in this repository.
+// These name a tenant: they go in a demo's own demo.json, or in its profile's ~/.stuntdouble/capture/<profile>.json (what
+// a demo leaves out, loadDemo fills in from there), never in this repository.
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
