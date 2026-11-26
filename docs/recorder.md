@@ -156,7 +156,8 @@ nobody there, while the recorder records. It's what the capture browser is for: 
 
 - **Approved, all of it.** The plan word for word, and the list of every write by beat and step, with reset.md's
   undo and set-first steps (`ai approve`; its hash covers the list). A write runs only when it's on that list, its
-  app's pack knows it, and exactly one control on the fresh screen has its name; the guard opens the app's own hosts
+  app's pack knows it, and exactly one control on the fresh screen has its name (an Enter, the box the plan typed in,
+  by that exact name); the guard opens the app's own hosts
   for that one step, and the write's own calls to a service of its app's (its pack write's `opens`: Copilot's send is
   `POST <runtime>/v1/messages`, not its page's host). A write that isn't approved stops the run before it, with a
   picture. Once its control is used, it's a write even if the step then fails (the reset after undoes what it made).

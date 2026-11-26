@@ -431,6 +431,26 @@ test('recording, a write waits for the recorder before the guard opens, not whil
   assert.deepEqual(opened, [{ busyLeft: 0 }]);
 });
 
+test("a write's Enter goes only from the box the plan typed in, by its exact name, never one a near name found", async () => {
+  const { liveWalker } = await import('./live.mjs');
+  const { READ_DOCS_SRC } = await import('@stuntdouble/capture/page-read.mjs');
+  const opened = [], box = { role: 'textbox', name: 'New task list', editable: 'plain', focused: true, x: 400, y: 200 };
+  const cmd = async (op, a) => {
+    if (op === 'observe') return { url: 'https://tasks.example.test/', vw: 1600, vh: 900, items: [box] };
+    // No "New task" anywhere in the page or its frames; the reader names the box as the page does.
+    if (op === 'js') return a.code === READ_DOCS_SRC ? [{ key: 'main', html: '<!doctype html><html><body><input aria-label="New task list"></body></html>' }] : /const out = \[\], frames = page\.frames\(\)/.test(a.code) ? [] : true;
+    if (op === 'capOpen') { opened.push(a); return { id: 'w1' }; }
+    if (op === 'capLog') return { passed: [{ by: 'a planned write', at: new Date().toISOString() }] };
+    return {};
+  };
+  const w = liveWalker({ demo: { cfg: { apps: [{ id: 'tasks', url: 'https://tasks.example.test/' }] } }, cmd });
+  // Typing is read-only: a near name will do.
+  assert.equal((await w.act('tasks', parseStep('Type "Plan the offsite" in "New task"'))).in, 'New task list');
+  const r = await w.write('tasks', { ...parseStep('Press Enter'), writes: 'adds a task · tasks-app:new-task' });
+  assert.equal(r.missing, true);
+  assert.deepEqual(opened, []);
+});
+
 test("a step group folded under the answer's timeline: the header opened first; never a near name", async () => {
   const { liveWalker } = await import('./live.mjs');
   const make = ({ folded, inside = true }) => {

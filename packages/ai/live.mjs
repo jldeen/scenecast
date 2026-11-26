@@ -401,7 +401,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const before = await actions();
         await send(id, 'type', { text: step.value, delay: 18 }, 180, hit);
         await seen(before, 15);
-        lastField = field; lastTyped[id] = step.value; typedIn[id] = field.name;
+        lastField = field; lastTyped[id] = step.value; typedIn[id] = field.name; typedAs[id] = step.target || null;
         await settle(id, 30);
         return { did: 'typed', in: field.name, on: field.name, hit };
       }
@@ -416,7 +416,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         await send(id, 'press', { key: step.key }, 30, { for: formatStep(step), on: field ? field.name : null });
         if (/^(Enter|Escape)$/.test(step.key)) await seen(before);
         if (sent) sent();
-        if (step.key === 'Enter') { lastField = null; delete typedIn[id]; }
+        if (step.key === 'Enter') { lastField = null; delete typedIn[id]; delete typedAs[id]; }
         await settle(id, 600);
         return { did: 'pressed', key: step.key, wrote: !!w };
       }
@@ -545,6 +545,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       const o = await controls(id);
       const field = focusedField(o) || lastField;
       if (!field) return { missing: true, why: 'no box with the focus for Enter to send' };
+      // The box the plan typed in, by its exact name, as a write's click is: never one a near name found.
+      if (typedAs[id] && norm(field.name) !== norm(typedAs[id])) return { missing: true, why: `Enter would send from "${field.name}", not "${typedAs[id]}": a write goes only from the box by its exact name` };
       const ra = await readerAgrees(id, field.name, field.role);
       if (!ra.ok) return { missing: true, why: `${ra.why}: a write runs only where the reader and the page name its control alike` };
     }
@@ -601,6 +603,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   const lastTyped = {};
   // What it typed and hasn't sent, by app: a beat that stops before its Enter clears it, so no run leaves a draft.
   const typedIn = {};
+  // The box each app's typing went to, by the plan's name for it (none for the composer): a write's Enter checks it.
+  const typedAs = {};
   async function clearTyped(app) {
     const id = appOf(app) || app;
     const name = typedIn[id];
