@@ -345,8 +345,9 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
     const api = pw && pw.undo && pw.undo.api, at = api && pack.apis && pack.apis[api.use];
     if (!api || !at) return fall(`the ${m[1]} pack has no API undo for ${m[2]}`);
     const appCfg = (demo.cfg.apps || []).find(a => a.id === app) || {};
-    const call = async (vals, label) => {
-      const fl = fillApi(api, vals, appCfg.values);
+    // found: the id its find picked, over the demo's values too (a value of the same name never stands in for it).
+    const call = async (vals, label, found = {}) => {
+      const fl = fillApi(api, vals, { ...(appCfg.values || {}), ...found });
       if (fl.left.length) return { ok: false, left: fl.left };
       const r = await cmd('capApi', { tab: appTab(demo, app), open: at.open, host: at.host, hostPattern: at.hostPattern, from: at.from || null, method: api.method, path: fl.path, body: fl.body }, 150).catch(e => ({ ok: false, why: e.message }));
       if (r.ok) did.push(`${app}: ${s.text}${label} (${api.method}, ${r.status})`);
@@ -396,7 +397,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
           else if (!f) return fall(`the run didn't record ${(r.left || [find.as]).join(', ')}, and ${n.why}`);
         }
         if (!f.found.length) { did.push(`${app}: ${s.text}${label}: nothing to undo (its list answered, with ${id ? `no ${find.as} ${id}` : ''}${id && by.names ? ' and ' : ''}${by.names ? `nothing called ${by.names.map(x => `"${x}"`).join(', ')}` : ''})`); continue; }
-        for (const fid of f.found) { const u = await call({ ...vals, [find.as]: fid }, `${label}, found by ${by.names ? 'name' : 'id'}`); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
+        for (const fid of f.found) { const u = await call(vals, `${label}, found by ${by.names ? 'name' : 'id'}`, { [find.as]: fid }); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
       }
       return { ok: true };
     }
@@ -414,7 +415,7 @@ export async function runReset({ demo, cmd, walker, phase, approval, ran = [], r
       if (fl.left.length) return fall(`its find needs ${fl.left.join(', ')}`);
       const r = await cmd('capApi', { tab: appTab(demo, app), open: fat.open, host: fat.host, hostPattern: fat.hostPattern, from: fat.from || null, method: 'GET', path: fl.path, find: { list: find.list, name: find.name, id: find.id, names: mine, where: find.where || null } }, 150).catch(e => ({ ok: false, why: e.message }));
       if (!r.ok || !Array.isArray(r.found)) return fall(`finding ${mine.join(', ')} by name: ${r.why || (r.status ? `the API answered ${r.status}` : 'no list in its answer')}`);
-      for (const id of r.found) { const u = await call({ ...results, [find.as]: id }, ' (found by name)'); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
+      for (const id of r.found) { const u = await call(results, ' (found by name)', { [find.as]: id }); if (!u.ok) return fall(u.why || `the API answered ${u.status}`); }
       if (!r.found.length) did.push(`${app}: ${s.text}: nothing by those names`);
       return { ok: true };
     }

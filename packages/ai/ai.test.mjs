@@ -262,6 +262,14 @@ test("an API undo whose find has a where, for a group no write of the run is und
   assert.equal(r.ok, true, r.why);
 });
 
+test("an API undo calls with the id its find picked, even when the demo's values name another under the same name", async () => {
+  // The demo names a skill its Check lines read; the run's write saved "Weekly digest", and the find saw it there.
+  const ran = [{ beat: 2, text: 'Click "Save"', app: 'skills', values: { skill: 'Weekly digest' } }];
+  const { r, deletes } = await undoAfter({ ran, results: { skill: 'Weekly digest' }, values: { skill: 'Team notes' } });
+  assert.deepEqual(deletes, ['DELETE /v1/skills/Weekly%20digest']);
+  assert.equal(r.ok, true, r.why);
+});
+
 test("a Check line reads the same from either parser: a string, or { app, screen, text } with the claim alone", () => {
   assert.equal(checkLine('tasks: no "Call Kestrel"'), 'tasks: no "Call Kestrel"');
   assert.equal(checkLine({ app: 'tasks', screen: 'tasks-home', text: 'no "Call Kestrel"' }), 'tasks: no "Call Kestrel"');
