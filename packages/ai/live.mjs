@@ -292,6 +292,11 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   }
   const refuse = (step, w) => { throw Object.assign(new Error(`a walker doesn't write: ${formatStep(step)}: ${w.why}`), { code: 'WRITE', write: w }); };
 
+  // While the recorder captures a screen, it holds a click's or a key's press back from the page: a click then reaches
+  // it bare, with no pointerdown (Microsoft 365 admin's grid row didn't open, run 13: something else's capture was
+  // still running). So it's settled right before each one, and counts what it held back (blocked).
+  const ready = async () => { if (recording) await settled(cmd, { maxS: 600 }); };
+  const blockedNow = async () => recording ? ((await cmd('recordStatus', {}, 30).catch(() => null)) || {}).blocked || 0 : 0;
   let lastField = null;
   async function act(id, step, { write = false, el: given = null, sent = null, dispatched = null } = {}) {
     switch (step.kind) {
@@ -306,6 +311,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
       case 'manual': return { needsYou: true, why: `"${formatStep(step)}" is the presenter's to do` };
       case 'free': return { needsYou: true, why: `"${step.text}" isn't a step it can do on its own` };
       case 'click': case 'hover': {
+        if (step.kind === 'click') await ready();
         let { el, o } = given ? { el: given, o: await controls(id) } : await locate(id, step.target);
         // A step group by its place among the screen's groups (groupIndex: the plan's), when its label changed.
         let group = null;
@@ -319,10 +325,21 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const again = given ? async () => (await exactInView(id, given.name, { role: given.role, frame: given.fh || 'page' })).el || null : null;
         const u = await uncovered(id, el, step.target, undefined, again);
         if (!u.ok) return { missing: true, why: u.why, hit: { ...hit, covered: u.hit } };
-        const before = await actions();
+        const before = await actions(), held0 = await blockedNow();
         if (dispatched) dispatched();
         await send(id, 'click', { x: u.el.x, y: u.el.y }, 60, { ...hit, landed: u.hit });
         await seen(before);
+        // Held back all the same (a capture began in between): a click that isn't a write goes once more, settled and
+        // measured again. A write never does (the app may have taken it): its landing tells.
+        if (!w && await blockedNow() > held0) {
+          log(`${id}: the recorder held "${step.target}" back while it captured; clicked it again`);
+          await ready();
+          const u2 = await uncovered(id, u.el, step.target, undefined, again);
+          if (!u2.ok) return { missing: true, why: u2.why, hit: { ...hit, covered: u2.hit } };
+          const before2 = await actions();
+          await send(id, 'click', { x: u2.el.x, y: u2.el.y }, 60, { ...hit, landed: u2.hit, again: true });
+          await seen(before2);
+        }
         if (sent) sent();
         if (group && norm(group) !== norm(step.target)) log(`${id}: "${step.target}" is the screen's group #${step.groupIndex + 1}, "${group}" today`);
         // A new screen's sweep (its hovers, menus, zoom) or an answer streaming in can take minutes.
@@ -339,6 +356,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         }
         const hit = hitOf(field, step);
         if (!field.focused) {
+          await ready();
           const u = await uncovered(id, field, step.target, 'field');
           if (!u.ok) return { missing: true, why: u.why, hit: { ...hit, covered: u.hit } };
           await send(id, 'click', { x: u.el.x, y: u.el.y }, 30, { ...hit, landed: u.hit }); await sleep(250);
@@ -356,6 +374,7 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
         const field = focusedField(o) || (step.key === 'Enter' ? lastField : null);
         const w = writeOf(step, null, field, o.url);
         if (w && !write) refuse(step, w);
+        await ready();
         const before = await actions();
         if (dispatched) dispatched();
         await send(id, 'press', { key: step.key }, 30, { for: formatStep(step), on: field ? field.name : null });

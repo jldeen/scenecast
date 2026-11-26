@@ -200,6 +200,10 @@ nobody there, while the recorder records. It's what the capture browser is for: 
   leftover, undone by its group's Names or, under a name no run recorded, the reset fails there (add it to the
   Names). The checks after a run look for what the run named, too. The checks after a run load each app again at its start (a real page load, not only a route) and
   prove it's there before reading its lines.
+- **Waits for the recorder before each click and key.** While it captures a screen, the recorder holds a click's or a
+  key's press back from the page, so a click lands bare (Microsoft 365 admin's grid row didn't open). An unattended
+  pass waits until the recorder is settled right before each one; a click it held back all the same goes once more,
+  unless it's a write.
 - **Stops for anything the plan didn't ask for**, with a picture in `.out/ai/stops/`: a window or a native dialog,
   leaving the app's hosts, a sign-in page (never signed in: Sign in again; the guard holding an app's sign-in says
   so, with the request), what a step lands on not showing, a control that isn't there, a step only a person can do.

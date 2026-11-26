@@ -338,3 +338,26 @@ test("the recording's hovers: each control once per app with its screens; after 
   assert.equal(out[1].why, 'it was on the screen and showed another card');
   assert.match(hoverOutcomes(rec, [{ app: 'chat', state: 's1', found: { [share]: 'place' }, floor: {}, tries: [{ ids: [share], result: 'nothing', retried: true, picture: '/x.png' }], cards: [] }])[0].why, /showed nothing, hovered twice/);
 });
+
+test('recording, a click waits for the recorder; one it held back goes once more, never a write', async () => {
+  const { liveWalker } = await import('./live.mjs');
+  const make = ({ blockFirst }) => {
+    const st = { busy: 2, actions: 0, blocked: 0 }, clicks = [];
+    const cmd = async (op, a) => {
+      if (op === 'recordStatus') { const busy = st.busy > 0; if (busy) st.busy--; return { recording: true, busy, typing: [], actions: st.actions, blocked: st.blocked }; }
+      if (op === 'observe') return { url: 'https://admin.example.test/tools', vw: 1920, vh: 1080, items: [{ role: 'gridcell', name: 'Supply chain disruption', x: 508, y: 465 }] };
+      if (op === 'js') return /elementFromPoint/.test(a.code) ? { role: 'gridcell', name: 'Supply chain disruption', chain: [{ role: 'gridcell', name: 'Supply chain disruption' }], frame: 'page' } : true;
+      if (op === 'click') { clicks.push({ busyLeft: st.busy }); st.actions++; if (blockFirst && clicks.length === 1) st.blocked++; return {}; }
+      return {};
+    };
+    const demo = { cfg: { apps: [{ id: 'admin', url: 'https://admin.example.test/' }] } };
+    return { w: liveWalker({ demo, cmd, recording: true }), clicks };
+  };
+  const nav = make({ blockFirst: true });
+  await nav.w.act('admin', parseStep('Click "Supply chain disruption"'));
+  assert.equal(nav.clicks.length, 2);
+  assert.equal(nav.clicks[0].busyLeft, 0, 'not while the recorder was busy');
+  const wr = make({ blockFirst: true });
+  await wr.w.act('admin', { ...parseStep('Click "Supply chain disruption"'), writes: 'opens it · fixture:open' }, { write: true });
+  assert.equal(wr.clicks.length, 1);
+});
