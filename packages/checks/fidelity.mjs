@@ -24,6 +24,8 @@ import { loadDemo, bundleFlow, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { scratchDir } from '@stuntdouble/core/lib/test-fence.mjs';
 import { scan } from './secrets.mjs';
 import { comparePngs, luminance } from './compare.mjs';
+import { textOverlaps } from './overlap.mjs';
+import { focusLands } from './lands.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -39,6 +41,8 @@ const skip = new Set((arg(args, '--skip', '') || '').split(',').filter(Boolean))
 const only = new Set((arg(args, '--only', '') || '').split(',').filter(Boolean));
 const want = id => !skip.has(id) && (!only.size || only.has(id));
 const VP = demo.cfg.viewport;
+// The recorded size and a presenter's narrower stage windows (62.5% and half): a narrower window plays other captures.
+const SIZES = [[VP.width, VP.height], [Math.round(VP.width * 0.625), Math.round(VP.height * 0.8)], [Math.round(VP.width * 0.5), Math.round(VP.height * 0.75)]];
 const items = [];
 const add = (id, title, status, detail = '') => { items.push({ id, title, status, detail: String(detail).slice(0, 4000), secs: taskSecs(id) }); console.log(`${status.toUpperCase().padEnd(6)} ${id}: ${String(detail).split('\n')[0].slice(0, 160)}`); };
 const started = {};
@@ -311,6 +315,39 @@ try {
     }
   } });
 
+  tasks.push({ id: 'overlap', deps: [], run: async () => {
+    // ---- overlap: no text drawn over other text, on any screen, at the recorded width and at narrower windows (a
+    // presenter's stage window: 62.5% and half of it), scrolled through its main list. A row placed where the recording
+    // measured it, under one whose text got longer or wraps more, shows up here.
+    if (!want('overlap')) return;
+    const list = Object.keys(S).filter(inScope);
+    if (!list.length) return add('overlap', 'No text over text', 'skip', 'no screen changed');
+    const sizes = SIZES;
+    const bad = new Map();
+    await Promise.all(shards(list, JOBS).map(async part => {
+      const page = await open();
+      try {
+        for (const [w, h] of sizes) {
+          await page.setViewportSize({ width: w, height: h });
+          for (const id of part) {
+            await go(page, id); await page.evaluate(a => window.d1.activate(a), S[id].app); await sleep(250);
+            // The app's main scrolling list, read from the top to the end, a screen at a time (at most 8).
+            const n = await page.evaluate(a => { const d = document.querySelector(`iframe[data-app="${a}"]`).contentDocument; const sc = [...d.querySelectorAll('*')].filter(e => e.scrollHeight > e.clientHeight + 40 && /(auto|scroll)/.test(getComputedStyle(e).overflowY)).sort((x, y) => y.clientHeight * y.clientWidth - x.clientHeight * x.clientWidth)[0]; if (!sc) return 1; sc.setAttribute('data-d1-overlap-scroll', ''); return Math.min(8, Math.ceil((sc.scrollHeight - sc.clientHeight) / (sc.clientHeight * 0.8)) + 1); }, S[id].app);
+            for (let k = 0; k < n; k++) {
+              if (n > 1) { await page.evaluate(([a, k, n]) => { const sc = document.querySelector(`iframe[data-app="${a}"]`).contentDocument.querySelector('[data-d1-overlap-scroll]'); if (sc) sc.scrollTop = (sc.scrollHeight - sc.clientHeight) * k / (n - 1); }, [S[id].app, k, n]); await sleep(120); }
+              for (const o of await page.evaluate(textOverlaps, S[id].app)) {
+                const msg = `${id} at ${w} px: "${o.a}" over "${o.b}" (${o.x}, ${o.y})`, key = `${id}|${o.a}|${o.b}`;
+                if (!bad.has(key)) bad.set(key, msg);
+              }
+            }
+          }
+        }
+      } finally { await page.context().close(); }
+    }));
+    const all = [...bad.values()], hard = all.filter(m => !known(m));
+    add('overlap', 'No text over text', hard.length ? 'fail' : all.length ? 'warn' : 'pass', hard.length ? hard.join('\n') : all.length ? all.map(m => m + ' (known: demo.json checks.known)').join('\n') : `${list.length} screens at ${sizes.map(([w]) => w).join(' and ')} px, scrolled through`);
+  } });
+
   tasks.push({ id: 'render', deps: [], run: async () => {
     // ---- render: every screen (in --quick, each one that changed) loads with no error, console message or request
     // off the machine, and reads in the theme it was recorded in. Pictures: .out/render/<state>.png, to look at.
@@ -408,13 +445,20 @@ try {
           if (!(await page.evaluate(([m, a]) => window.d1.focused(m, a), [st.focus, st.app]))) bad.push(`${id}: the cursor isn't in ${JSON.stringify(st.focus)} (the real page put it there)`);
         }
         if (st.fill && st.fill.length && (st.on || []).some(t => t.type && t.to)) {
-          await go(page, id); await page.evaluate(a => window.d1.activate(a), st.app);
-          await focusIn(page, st.fill[0], st.app);
-          await page.keyboard.press(MOD + 'KeyP'); await sleep(200);
-          await page.waitForFunction(() => !window.d1.filling, null, { timeout: 120000 }); await idle(page); n++;
-          const typedTo = (st.on.find(t => t.type && t.to) || {}).to;
-          const now = await stateOf(page, st.app);
-          if (now !== typedTo) bad.push(`${id}: ⌥P typed, but the replica is on ${now}, not ${typedTo}`);
+          const want = st.fill[0].value.replace(/\s+/g, ' ').trim();
+          for (const [w, h] of SIZES) {
+            await page.setViewportSize({ width: w, height: h });
+            await go(page, id); await page.evaluate(a => window.d1.activate(a), st.app);
+            await focusIn(page, st.fill[0], st.app);
+            await page.keyboard.press(MOD + 'KeyP'); await sleep(200);
+            await page.waitForFunction(() => !window.d1.filling, null, { timeout: 120000 }); await idle(page); n++;
+            const typedTo = (st.on.find(t => t.type && t.to) || {}).to;
+            const now = await stateOf(page, st.app);
+            if (now !== typedTo) bad.push(`${id} at ${w} px: ⌥P typed, but the replica is on ${now}, not ${typedTo}`);
+            const got = await page.evaluate(([m, a]) => window.d1.text(m, a), [st.fill[0], st.app]);
+            if (got !== want) bad.push(`${id} at ${w} px: ⌥P left ${JSON.stringify(got)} in the box, not the script's ${JSON.stringify(want)}`);
+          }
+          await page.setViewportSize({ width: VP.width, height: VP.height });
         }
         for (const t of st.on || []) {
           if (!(t.click && t.typedFrom) || !st.typedOf && !Object.values(S).some(x => (x.on || []).some(y => y.type && y.to === id))) continue;
@@ -537,6 +581,30 @@ try {
     };
     const [r1, r2] = await Promise.all([pass(), pass()]);
     for (const p of pts) if (r1[p.id] && r2[p.id] && JSON.stringify(r1[p.id]) !== JSON.stringify(r2[p.id])) bad.push(`${p.id}: lands differently on a second run`);
+    // Each mark is over its target as drawn, at every size, from the screen as loaded and with the target just past the
+    // bottom of its list (where a chat can leave it after an answer streams in: in the window, but clipped by the list,
+    // with the composer below): ⌥F, then Esc, and the target is drawn where the mark was. A box over empty space, or
+    // over something drawn where the target is (the composer, another row, a card), fails.
+    const over = new Map();
+    await Promise.all(shards(pts, Math.min(3, JOBS)).map(async list => {
+      const page = await open();
+      for (const [w, h] of SIZES) {
+        await page.setViewportSize({ width: w, height: h });
+        for (const p of list) for (const low of [false, true]) {
+          await page.evaluate(([a, s]) => window.d1.go(a, s), [p.app, p.states[0]]); await idle(page);
+          await page.mouse.move(w - 1, h - 1);
+          await settle(page, p.id);
+          if (low) { const moved = await page.evaluate(id => { const el = window.d1.focus.target(id); let sc = el && el.parentElement; while (sc && !(sc.scrollHeight > sc.clientHeight + 40 && /(auto|scroll)/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement; if (!sc) return false; const before = sc.scrollTop; const er = el.getBoundingClientRect(), sr = sc.getBoundingClientRect(); if (sr.bottom + 4 + er.height > el.ownerDocument.defaultView.innerHeight) return false; sc.scrollTop += er.top - (sr.bottom + 4); return sc.scrollTop !== before; }, p.id); if (!moved) continue; await settle(page, p.id); }
+          await page.evaluate(id => window.d1.focus.at(id), p.id);
+          await page.keyboard.press(MOD + 'KeyF'); await sleep(50); await quiet(page);
+          await page.keyboard.press('Escape'); await quiet(page);
+          const on = await page.evaluate(focusLands, p.id);
+          if (on && !on.hits && !over.has(p.id)) over.set(p.id, `${p.id} at ${w} px${low ? ', just past the bottom of its list' : ''}: the mark is over ${on.top ? JSON.stringify(on.top) : 'nothing'}, not ${JSON.stringify(p.find || p.label)} (covered or clipped)`);
+        }
+      }
+      await page.context().close();
+    }));
+    bad.push(...over.values());
     if (!QUICK || focusChanged || beatsChanged) {
       const page = await open();
       const b = Math.max(1, Math.min(...all.map(p => p.beat)));

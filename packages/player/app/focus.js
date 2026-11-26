@@ -265,6 +265,13 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
   }
   const r2 = a => a.map(v => Math.round(v * 100) / 100);
 
+  // Something is drawn over all of it (a composer floating over the chat's end, a sticky header), or it's clipped:
+  // none of the points across it shows the element itself.
+  function covered(el) {
+    const d = el.ownerDocument, r = el.getBoundingClientRect();
+    for (const fy of [0.3, 0.7]) for (const fx of [0.1, 0.3, 0.5, 0.7, 0.9]) { const e = d.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy); if (e && (e === el || el.contains(e))) return false; }
+    return true;
+  }
   async function show(i, my) {
     const p = points[i];
     if (!ready(p) && reachable(p)) {
@@ -275,9 +282,10 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
     if (p.open) { let opened = false; for (const l of p.open) opened = openGroup(cur.app, l) || opened; if (opened) { await sleep(T(420)); if (!live(my)) return; } }
     let t = locate(p); if (!t) return;
     const before = r2(t.box);
-    // Off screen, or too near the top or bottom for the margin: scroll it to the middle first.
+    // Off screen, under something drawn over it, or too near the top or bottom for the margin: scroll it to the middle
+    // first.
     const off = t.box[1] < 0 || t.box[3] > H() || t.box[0] < 0 || t.box[2] > W();
-    if (off || !inside(frameAt(p, t.box, fitZ(p, t.box)), MARGIN)) {
+    if (off || covered(t.el) || !inside(frameAt(p, t.box, fitZ(p, t.box)), MARGIN)) {
       t.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       let prev = '', same = 0;
       // Until the smooth scroll has started and finished: at least 300 ms, then 6 still frames.

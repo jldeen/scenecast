@@ -1034,6 +1034,35 @@ function partOf(doc, part) { let e = doc.querySelector(part.sel); for (let i = 0
 function docFor(app, frame) { const doc = app.iframe.contentDocument; return frame ? docsOf(doc).find(d => frameKeyOf(d) === frame) || null : doc; }
 function firstMatch(d, m) { for (const e of d.querySelectorAll(m.sel || '*')) if (matches(e, m)) return e; return null; }
 
+// A virtualized list's rows sit where the recording measured them (absolute, at an inline top: Copilot's chat turns).
+// A row taller here than it was recorded (its text changed, the window is narrower) pushes the rows after it down,
+// and the list grows with them, so no row draws over the next. A row that got shorter keeps its place. The recorded
+// tops stay on the rows (data-d1-top), so this can run again after any change.
+const TOP_PX = /(?:^|;)\s*top:\s*(-?[\d.]+)px/, HEIGHT_PX = /(?:^|;)\s*height:\s*([\d.]+)px/;
+function restackRows(d) {
+  const lists = new Set();
+  for (const r of d.querySelectorAll('[data-index]')) if (r.parentElement && (r.hasAttribute('data-d1-top') || TOP_PX.test(r.getAttribute('style') || ''))) lists.add(r.parentElement);
+  for (const list of lists) {
+    const recorded = (e, attr, re) => { let v = e.getAttribute(attr); if (v === null) { const m = re.exec(e.getAttribute('style') || ''); if (!m) return null; v = m[1]; e.setAttribute(attr, v); } return +v; };
+    const rows = [...list.children].filter(r => r.hasAttribute('data-index')).map(r => ({ r, top: recorded(r, 'data-d1-top', TOP_PX) }))
+      .filter(x => x.top !== null && d.defaultView.getComputedStyle(x.r).position === 'absolute').sort((a, b) => +a.r.dataset.index - +b.r.dataset.index);
+    if (rows.length < 2) continue;
+    let scroller = list.parentElement;
+    while (scroller && scroller !== d.body && !/(auto|scroll)/.test(d.defaultView.getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    const atEnd = scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 2;
+    let end = -Infinity, shift = 0;
+    for (const x of rows) {
+      const top = Math.max(x.top + shift, end);
+      shift = top - x.top;
+      if (x.r.style.top !== `${top}px`) x.r.style.top = `${top}px`;
+      end = top + x.r.offsetHeight;
+    }
+    const h = recorded(list, 'data-d1-height', HEIGHT_PX);
+    if (h !== null) { const want = Math.max(h + shift, end); if (list.style.height !== `${want}px`) list.style.height = `${want}px`; }
+    if (atEnd) scroller.scrollTop = scroller.scrollHeight;
+  }
+}
+
 function applyLayout(app) {
   for (const h of hvState(app).on) hvPlace(h);
   for (const r of clkState(app).open) hvPlace(r.place);
@@ -1057,7 +1086,10 @@ function applyLayout(app) {
     const twin = src && partOf(src, r.part);
     if (!twin) continue;
     hvClear(app); clkClear(app);
+    // The field she's typing in stays hers here too: a band's capture (or the screen's own) holds the typed text.
+    const kept = app.keep ? detachKeep(doc, app.keep) : [];
     morphNode(live, twin);
+    restoreKeep(doc, kept);
     live.__d1band = want; live.__d1gen = app.morphGen;
   }
   for (const r of L.set || []) {
@@ -1157,6 +1189,8 @@ function applyLayout(app) {
     el.style.transform = `translate3d(${x}px, ${ab.bottom + (r.gap || 0)}px, 0px)`;
     if (r.arrow) { const ar = el.querySelector(r.arrow); if (ar) ar.style.left = (ab.left + ab.width / 2 - x - r.arrowHalf) + 'px'; }
   }
+  // Last: what the passes above changed can change a row's height.
+  for (const d of docsOf(doc)) restackRows(d);
 }
 const layoutQueued = new Set();
 function queueLayout(app) {
@@ -1258,6 +1292,7 @@ function morphFrames(liveDoc, targetSnap, scroll, targets, later) {
 
 async function go(app, stateId, { scroll = 'target', keep } = {}) {
   if (!S[stateId]) throw new Error('no state ' + stateId);
+  app.keep = keep || null;
   if (S[stateId].fallback || S[app.state]?.fallback) {
     hvClear(app); clkClear(app);
     app.state = stateId;
@@ -1423,7 +1458,7 @@ async function loadApp(app, stateId) {
   hvClear(app); clkClear(app);
   // A fresh start (⌥0, a beat jump): panes, sections, flags and sizes as captured.
   clkState(app).sticky.clear(); grpState(app).open.clear(); app.flags = {}; app.sizes = {}; app.playing = null;
-  app.state = stateId; app.hover = null; app.subst = []; app.morphGen = (app.morphGen || 0) + 1;
+  app.state = stateId; app.hover = null; app.subst = []; app.keep = null; app.morphGen = (app.morphGen || 0) + 1;
   const snap = S[stateId].snap;
   const state = S[stateId];
   app.customElements = state.fallback ? [] : ((await getJson(snapRelated(snap, '.json')).catch(() => ({}))).customElements) || [];
@@ -1541,6 +1576,7 @@ window.d1 = {
   // Morphs to a state the way a transition does (panes, sections and sizes she set stay), unlike go.
   morph: async (id, st) => { busy++; try { await go(apps[id], st, { scroll: 'target' }); } finally { busy--; } },
   doc: id => apps[id || active].iframe.contentDocument,
+  text(m, id) { const el = findEl(apps[id || active].iframe.contentDocument, m); return el ? textOf(el) : null; },
   reveal(m, id) { const el = findEl(apps[id || active].iframe.contentDocument, m); if (el) el.scrollIntoView({ block: 'center', inline: 'nearest' }); return !!el; },
   locate(m, id) {
     const app = apps[id || active]; const el = findEl(app.iframe.contentDocument, m);
