@@ -8,7 +8,7 @@
 //   page: the address of the tab the request came from (its page target); target: the target that sent it
 //   onResponse: a request paused at its response (a pattern's requestStage 'Response'): body() → its text; { body }
 //     gives the page that body instead (headers as they came, less the encoding and length), else it goes on as is
-//   await tf.set(patterns | null)     intercept these (Fetch.enable on every target), or nothing
+//   await tf.set(patterns | null)     intercept these (Fetch.enable on every target; rejects if one fails), or nothing
 //   tf.targets()                      how many targets it has
 //   await tf.close()
 const KINDS = new Set(['page', 'iframe', 'worker', 'shared_worker', 'service_worker']);
@@ -31,11 +31,18 @@ export async function fetchEveryTarget(port, { onPaused = async () => null, onRe
     ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
   const fetchOn = sessionId => patterns ? send('Fetch.enable', { patterns }, sessionId) : send('Fetch.disable', {}, sessionId);
-  // A new target: Fetch first, then its own children attached the same way, then it goes on.
+  // A new target: Fetch first, then its own children attached the same way, then it goes on. One whose Fetch didn't
+  // start (and that's still there) stays paused at its start: let go, its requests would leave unguarded.
   async function attached({ sessionId, targetInfo, waitingForDebugger }, parent) {
     const kind = targetInfo.type;
     info.set(sessionId, { targetId: targetInfo.targetId, type: kind, url: targetInfo.url, parent: parent || null });
-    if (KINDS.has(kind)) { sessions.set(sessionId, kind); if (patterns) await fetchOn(sessionId).catch(() => {}); }
+    if (KINDS.has(kind)) {
+      sessions.set(sessionId, kind);
+      if (patterns) {
+        const err = await fetchOn(sessionId).then(() => null, e => e);
+        if (err && sessions.has(sessionId)) { log(`interception didn't start on a ${kind} (${err.message}); it stays paused`); return; }
+      }
+    }
     if (kind !== 'browser') await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId).catch(() => {});
     if (waitingForDebugger) await send('Runtime.runIfWaitingForDebugger', {}, sessionId).catch(() => {});
   }
@@ -70,9 +77,10 @@ export async function fetchEveryTarget(port, { onPaused = async () => null, onRe
   // Where each target is now (a tab that navigates).
   await send('Target.setDiscoverTargets', { discover: true }).catch(() => {});
   return {
+    // Rejects when interception didn't start on a target that's still there: the caller stops rather than go on unguarded.
     async set(p) {
       patterns = p && p.length ? p : null;
-      await Promise.all([...sessions.keys()].map(s => fetchOn(s).catch(() => {})));
+      await Promise.all([...sessions.keys()].map(s => fetchOn(s).catch(e => { if (patterns && sessions.has(s)) throw e; })));
     },
     targets: () => sessions.size,
     async close() { if (closed) return; patterns = null; closed = true; try { ws.close(); } catch (e) {} },
