@@ -25,7 +25,7 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
   const c = walk.check;
   if (c && c.error) stops.push(row(-1, -1, null, `the demo's start couldn't be checked: ${c.error}`));
   else if (c && (c.wrong || c.cant)) for (const l of (c.lines || []).filter(l => l.status !== 'pass')) stops.push(row(-1, -1, { text: l.text }, `reset.md's Check: ${l.status}${l.why ? `: ${l.why}` : ''}`, 'Put the demo back as it starts (Reset), or fix the line in reset.md'));
-  for (const o of walk.ownStatus || []) if (o.error || o.status) stops.push(row(-1, -1, null, o.error || `${o.label || o.app} showed her as ${o.status}`));
+  for (const o of walk.ownStatus || []) if (!o.ok) stops.push(row(-1, -1, null, o.error || `${o.app} showed her as ${o.status}, not ${(o.expect || []).join(' or ')}`, 'Start again while you\'re at your computer, with that app open'));
   // The doubt a run carries in each app, since its last proven screen there.
   const doubt = {};
   let app = null;

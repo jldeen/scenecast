@@ -86,6 +86,12 @@ test('reset.md\'s Check failing stops the run before it starts', () => {
   assert.equal(r.stops[0].beat, 0);
 });
 
+test('her own status stops the run only when it isn\'t what the recording has', () => {
+  const ok = walk(['reached', 'reached', 'reached', 'write']);
+  assert.deepEqual(predictStops(PLAN, { ...ok, ownStatus: [{ app: 'teams', status: 'Available', expect: ['Available'], ok: true }] }, { writeKnown: known }).stops, []);
+  assert.match(predictStops(PLAN, { ...ok, ownStatus: [{ app: 'teams', status: 'Away', expect: ['Available'], ok: false }] }, { writeKnown: known }).stops[0].why, /Away, not Available/);
+});
+
 test('answer words and the product\'s own phrases', () => {
   assert.equal(answerLike('Background task ran for'), false);
   assert.equal(answerLike('Roles & Industry'), false);

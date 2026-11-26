@@ -636,12 +636,16 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       return null;
     };
     const total = stepCount(plan);
+    const stopFile = join(aiDir(demo), 'stop');
+    rmSync(stopFile, { force: true });
     let n = 0;
     outer: for (const [bi, beat] of plan.beats.entries()) {
       const tb = Date.now();
       emit({ event: 'beat', beat: bi, title: beat.title });
       for (const [si, step] of beat.steps.entries()) {
         const at = { beat: bi, step: si, text: formatStep(step) };
+        // Stop (the app's button): between two steps, never between a write and its record; the reset after runs.
+        if (existsSync(stopFile)) { run.stopped = { kind: 'asked', why: 'You stopped it', at }; emit({ event: 'stopped', ...run.stopped }); break outer; }
         emit({ event: 'step', beat: bi, step: si, n: ++n, of: total, text: at.text });
         const prev = app;
         if (step.kind === 'app') app = w.appOf(step.app) || app;
@@ -765,7 +769,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   return finish();
   function finish() {
     save();
-    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}), ...(run.hovers && run.hovers.list ? { hovers: { recorded: run.hovers.recorded, captured: run.hovers.captured, gone: run.hovers.gone, missed: run.hovers.missed, ...(run.hovers.notReached ? { notReached: run.hovers.notReached } : {}) } } : {}), ...(run.menus && run.menus.list ? { menus: { recorded: run.menus.recorded, captured: run.menus.captured, gone: run.menus.gone, missed: run.menus.missed, ...(run.menus.notReached ? { notReached: run.menus.notReached } : {}) } } : {}) };
+    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, ...(run.marked.length ? { marked: run.marked.map(m => ({ beat: m.beat, text: m.text, why: m.why, picture: m.picture })) } : {}), held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}), ...(run.hovers && run.hovers.list ? { hovers: { recorded: run.hovers.recorded, captured: run.hovers.captured, gone: run.hovers.gone, missed: run.hovers.missed, ...(run.hovers.notReached ? { notReached: run.hovers.notReached } : {}) } } : {}), ...(run.menus && run.menus.list ? { menus: { recorded: run.menus.recorded, captured: run.menus.captured, gone: run.menus.gone, missed: run.menus.missed, ...(run.menus.notReached ? { notReached: run.menus.notReached } : {}) } } : {}) };
   }
 }
 
