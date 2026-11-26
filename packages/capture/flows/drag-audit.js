@@ -49,6 +49,16 @@ for (const h of handles) {
   try {
     const ok = await ev(spec => { document.querySelectorAll('[data-d1-drag]').forEach(e => e.removeAttribute('data-d1-drag')); const r = spec.rect; const e = [...document.querySelectorAll('*')].find(x => { const b = x.getBoundingClientRect(); return Math.abs(b.x - r.x) < 1 && Math.abs(b.y - r.y) < 1 && Math.abs(b.width - r.w) < 1 && Math.abs(b.height - r.h) < 1 && (x.getAttribute('aria-label') || null) === (spec.label || null) && (x.getAttribute('data-testid') || null) === (spec.testid || null); }); if (!e) return false; e.setAttribute('data-d1-drag', ''); return true; }, h);
     if (!ok) { rec.error = 'handle not found'; out.handles.push(rec); continue; }
+    // Only a handle a person could press: what's on top at its middle is the handle (or in it). A grid's column
+    // separator under a modal drawer isn't one: pressing there hits the backdrop, and that closes the drawer
+    // (Microsoft 365 admin's plugin details, run 14).
+    const cover = await ev(() => {
+      const e = document.querySelector('[data-d1-drag]'), b = e.getBoundingClientRect();
+      const t = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      if (t && t !== document.body && t !== document.documentElement && (e.contains(t) || t.contains(e))) return null;
+      return t ? (t.getAttribute('role') || t.localName) + (t.getAttribute('aria-label') ? ` "${t.getAttribute('aria-label').slice(0, 40)}"` : '') : 'nothing (off the screen)';
+    });
+    if (cover) { rec.error = `covered by ${cover}: a person can't drag it`; out.handles.push(rec); continue; }
     rec.watch = await setup();
     rec.panes = await panes();
     const vertical = (ARGS.axis || (h.rect.w <= h.rect.h ? 'x' : 'y')) === 'x';

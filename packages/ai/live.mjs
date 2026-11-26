@@ -292,9 +292,8 @@ export function liveWalker({ demo, cmd, packs = null, recording = false, tabs = 
   }
   const refuse = (step, w) => { throw Object.assign(new Error(`a walker doesn't write: ${formatStep(step)}: ${w.why}`), { code: 'WRITE', write: w }); };
 
-  // While the recorder captures a screen, it holds a click's or a key's press back from the page: a click then reaches
-  // it bare, with no pointerdown (Microsoft 365 admin's grid row didn't open, run 13: something else's capture was
-  // still running). So it's settled right before each one, and counts what it held back (blocked).
+  // While the recorder captures a screen, it holds a click's or a key's press back from the page (a click then reaches
+  // it bare, with no pointerdown). So it's settled right before each one, and counts what it held back (blocked).
   const ready = async () => { if (recording) await settled(cmd, { maxS: 600 }); };
   const blockedNow = async () => recording ? ((await cmd('recordStatus', {}, 30).catch(() => null)) || {}).blocked || 0 : 0;
   let lastField = null;

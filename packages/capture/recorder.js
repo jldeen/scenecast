@@ -204,7 +204,12 @@ async function recPutBack(A, state, after) {
   const p = A.page, want = (REC.openFp || {})[state];
   if (!want || REC.unrestored) return !REC.unrestored;
   const now = () => p.mainFrame().evaluate(OPEN_STATE).catch(() => null);
-  let d = recOpenDiff(want, await now());
+  const n0 = await now();
+  // A dialog the screen was saved with, gone (a side path closed it: Escape can't open it again). Said, so a later
+  // step that doesn't land on it is explained.
+  const dialogs = o => ((o && o.overlays) || []).filter(x => /^(dialog|alertdialog):/.test(x)).length;
+  if (n0 && dialogs(want) > dialogs(n0)) REC.notes.push(`${state}: after ${after}, a dialog it was saved with is gone (${want.overlays.filter(x => /^(dialog|alertdialog):/.test(x) && !n0.overlays.includes(x)).join('; ') || 'one of them'})`);
+  let d = recOpenDiff(want, n0);
   if (!d) return true;
   const first = recOpenSay(d), F = recFloor();
   const pic = async name => (F && F.pic ? F.pic(p, `putback-${state}-${name}`) : null);

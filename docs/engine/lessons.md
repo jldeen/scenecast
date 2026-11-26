@@ -79,6 +79,10 @@ What the Ignite '26 Demo 1 replica taught, the hard way. The kit handles most of
 - **An audit can leave the page not quite as it was.** Dragging a pane back to its size left it pinned at that
   width, so later zoom and "+N" captures didn't narrow. The drag audit now puts back the attributes it changed,
   and the automatic pass runs drags last on a screen.
+- **An audit can close what the screen was saved with.** Microsoft 365 admin's plugin details is a modal drawer over
+  the Tools grid; the drag audit pressed a column separator under it, hit the backdrop, and closed the drawer. The
+  next step's proof wasn't there. The drag audit now presses only a handle that's on top, and the put-back says when a
+  dialog the screen was saved with is gone.
 - **Headless only: clearing a window override shrinks the viewport**, and the next screenshot snaps it back
   mid-capture (a virtualized list redraws and drops the rows it placed). The recorder sets the viewport back
   exactly. Her real Chrome has no such override.

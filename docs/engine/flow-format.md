@@ -236,7 +236,8 @@ recorder (the click audit leaves those buttons out).
 ### Drags (`drags`)
 
 `record side drags` runs the drag audit: it holds each resize handle (a separator, a slider named for resizing,
-anything with a resize cursor), moves it both ways, lets go, and puts it back. From what the page wrote, the recorder
+anything with a resize cursor), moves it both ways, lets go, and puts it back. Only a handle a person could press: one
+with something else on top at its middle (a grid's column separator under a modal drawer) is skipped, as "covered". From what the page wrote, the recorder
 writes the rule:
 
 ```js
