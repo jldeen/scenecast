@@ -26,6 +26,8 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
   if (c && c.error) stops.push(row(-1, -1, null, `the demo's start couldn't be checked: ${c.error}`));
   else if (c && (c.wrong || c.cant)) for (const l of (c.lines || []).filter(l => l.status !== 'pass')) stops.push(row(-1, -1, { text: l.text }, `reset.md's Check: ${l.status}${l.why ? `: ${l.why}` : ''}`, 'Put the demo back as it starts (Reset), or fix the line in reset.md'));
   for (const o of walk.ownStatus || []) if (!o.ok) stops.push(row(-1, -1, null, o.error || `${o.app} showed her as ${o.status}, not ${(o.expect || []).join(' or ')}`, 'Start again while you\'re at your computer, with that app open'));
+  // Each app's start screen, as the run checks it before its first step.
+  for (const st of walk.starts || []) if (st.ok === false) stops.push(row(-1, -1, null, `${st.app}'s start screen: ${st.why || 'not as the plan has it'}`, 'Open it where the demo starts, or fix its start in the plan'));
   // The doubt a run carries in each app, since its last proven screen there.
   const doubt = {};
   let app = null;
@@ -39,7 +41,7 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
     for (const [si, s] of beat.steps.entries()) {
       const r = rows[si] || { status: 'after-write' };
       if (r.status === 'missed' && r.needs) blind = true;
-      if (r.status === 'after-miss' && !blind) continue;
+      if (r.status === 'after-miss' && !blind && !s.writes) continue;
       const text = r.text || formatStep(s);
       if (s.kind === 'app') app = s.app;
       const tag = s.writes && TAG.exec(s.writes);
@@ -49,6 +51,9 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
         if (d) stops.push(row(bi, si, { text }, `a write after a step it couldn't prove (step ${d.step}: ${d.why})`, d.fix));
         const k = tag ? writeKnown(tag[1], tag[2]) : { ok: false, why: 'the plan names no app pack write for it' };
         if (!k.ok) stops.push(row(bi, si, { text }, `no undo for this write: ${k.why}`, 'Add the write to its app pack, with its undo'));
+        // A run checks where a write lands, after it: its proof can't be words the app writes there.
+        const l = s.lands;
+        if (l && l.kind === 'words' && l.text && answerLike(l.text) && !hers(l.text)) stops.push(row(bi, si, { text }, `its proof quotes words the app wrote ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, or a short phrase of the product\'s own'));
         doubt[app] = null;
         if (r.status === 'write') continue;
       }

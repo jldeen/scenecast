@@ -74,9 +74,11 @@ test('a proof that quotes the answer, then a write, stops; a write with no pack 
   Lands on: chat-saved · "Completed 'Save skill'"
 `);
   const r = predictStops(plan, { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }, { status: 'after-write' }, { status: 'after-write' }] }] }, { writeKnown: (p, w) => w === 'save-skill' ? { ok: false, why: 'chat has no save-skill' } : { ok: true } });
-  assert.deepEqual(r.stops.map(s => s.step), [4, 4]);
+  // Its own proof, "Completed 'Save skill'", is the app's words too (what stopped a real run): a third stop.
+  assert.deepEqual(r.stops.map(s => s.step), [4, 4, 4]);
   assert.match(r.stops[0].why, /couldn't prove \(step 3/);
   assert.match(r.stops[1].why, /no undo/);
+  assert.match(r.stops[2].why, /Completed 'Save skill'/);
   assert.equal(r.marks.length, 2);
 });
 
@@ -90,6 +92,18 @@ test('her own status stops the run only when it isn\'t what the recording has', 
   const ok = walk(['reached', 'reached', 'reached', 'write']);
   assert.deepEqual(predictStops(PLAN, { ...ok, ownStatus: [{ app: 'teams', status: 'Available', expect: ['Available'], ok: true }] }, { writeKnown: known }).stops, []);
   assert.match(predictStops(PLAN, { ...ok, ownStatus: [{ app: 'teams', status: 'Away', expect: ['Available'], ok: false }] }, { writeKnown: known }).stops[0].why, /Away, not Available/);
+});
+
+test('a start screen that isn\'t as the plan has it, a write after a miss, and a write proven by the app\'s words all stop', () => {
+  const ok = walk(['reached', 'reached', 'reached', 'write']);
+  assert.match(predictStops(PLAN, { ...ok, starts: [{ app: 'chat', ok: false, why: 'its start step "Go to chat": not signed in' }] }, { writeKnown: known }).stops[0].why, /chat's start screen: .*not signed in/);
+  // Beat 2 misses its first click; its write still stops the run.
+  const missed = walk([{ status: 'missed', why: 'no "Search"' }, { status: 'after-miss' }, { status: 'after-miss' }, { status: 'after-miss' }].map(x => x.status));
+  missed.beats[1].steps[0].why = 'no "Search"';
+  const r = predictStops(PLAN, missed, { writeKnown: known });
+  assert.deepEqual(r.stops.map(x => [x.beat, x.step]), [[2, 4]]);
+  const quoted = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: chat-saved · "Your skill is saved and ready to use"\n`);
+  assert.match(predictStops(quoted, { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }] }] }, { writeKnown: known }).stops[0].why, /quotes words the app wrote/);
 });
 
 test('answer words and the product\'s own phrases', () => {

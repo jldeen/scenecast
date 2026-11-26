@@ -1231,6 +1231,8 @@ Object.assign(REGIONS, {
   'ai-check'(d) {
     if (!separate(d)) return '';
     const j = J(d.id)['ai-check'] || {};
+    // A result is for the plan and profile it checked: after either changes, check again.
+    if (!running('ai-check', d.id) && j.checked && (j.checked.plan !== planText(d) || j.checked.profile !== J(d.id).capture?.profile)) return '';
     if (running('ai-check', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-checking">Walking your plan in the separate browser, changing nothing. About 7 minutes.</p>`;
     const o = j.outcome;
     if (!o) return errorBox(j.error, 'ai-check');
@@ -1283,7 +1285,7 @@ Object.assign(REGIONS, {
       // In a separate browser: where it stopped (with its picture), the beats it marked, its changes and the reset.
       const o = j.outcome, at = o.stopped?.at;
       html += `<div class="notice ${o.stopped ? 'warn' : 'ok'}" data-test="ai-record-done" data-steps="${o.steps}" data-stopped="${!!o.stopped}" data-marked="${(o.marked || []).length}"><div><strong>${o.stopped ? 'Copilot stopped' : 'Recorded for you'}:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}.${o.stopped ? ` ${at ? `Beat ${at.beat + 1}, ${esc(at.text)}: ` : ''}${esc(o.stopped.why)}${o.stopped.picture ? ` <button class="link" data-reveal="${esc(o.stopped.picture)}">See its picture</button>` : ''}` : ''}
-        ${o.writes ? `${plural(o.writes, 'change')} made, then undone${o.resetAfter === false ? ', <strong>but the reset after didn\u2019t finish</strong>' : ''}.` : ''}
+        ${o.writes ? (o.resetAfter === true ? `${plural(o.writes, 'change')} made, then undone.` : `${plural(o.writes, 'change')} made, and <strong>the reset after didn\u2019t finish</strong>: some may still be in the demo.`) : ''}
         ${(o.marked || []).length ? `<ul data-test="ai-record-marked">${o.marked.map(m => `<li>Beat ${m.beat}, ${esc(m.text)}: ${esc(m.why)}${m.picture ? ` <button class="link" data-reveal="${esc(m.picture)}">See it</button>` : ''}</li>`).join('')}</ul>` : ''}</div></div>`;
     } else if (j.outcome) {
       const o = j.outcome;
@@ -2004,7 +2006,9 @@ const ACTIONS = {
     const plan = $('#ai-plan')?.value || '';
     if (!plan.trim()) return toast('Draft the plan first', true);
     try { await saveAiFields(id); await call('ai_save', { id, plan }); } catch { return; }
-    await step('ai-check', 'ai_check_script', {});
+    const profile = J(id).capture?.profile;
+    const o = await step('ai-check', 'ai_check_script', {});
+    if (o) { await loadAi(id); J(id)['ai-check'].checked = { plan: planText({ id }), profile }; renderRegions(); }
   },
   'coach-start': async () => {
     const id = S.id;
