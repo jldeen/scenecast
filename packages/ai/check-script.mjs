@@ -1,0 +1,92 @@
+// Check my script: before a recording, where a run of this plan would likely stop, and where it would only mark a
+// beat, from a read-only live walk (walk.mjs statuses) and the run's own rules:
+//   - a write never follows a step it couldn't prove (unproven, words drifted, a miss), since the app's last proven
+//     screen; a wait, hover or scroll with no proof of its own carries the screen before it;
+//   - a write needs its app pack's write, with an undo, for the reset after;
+//   - the demo starts as it should (reset.md's Check), and the apps showed her as she should be.
+// Steps after a write in its beat can't be walked read-only (their screens need the write). They're checked by rule:
+// a proof there that quotes the words the app wrote (an answer's sentences, a quoted name) won't be there on another
+// day, so it's a doubt; a control, or a short phrase of the product's own, is fine.
+// → { stops: [{ beat, step, text, why, fix }], marks: [same], unchecked: n, ok }
+
+import { formatStep } from './plan.mjs';
+
+const TAG = / · ([\w-]+):([\w-]+)$/;
+// A wait, hover or scroll, and a step group opened by its place, carry the proven screen before them (a run's rule).
+const GROUP = /^\d+ (?:items?|background tasks?) complete\b/i;
+const carries = s => /^(wait|hover|scroll)$/.test(s.kind) || (s.kind === 'click' && GROUP.test(s.target || ''));
+// Words an app wrote, not its own interface: a sentence (6 words or more), or a quoted name in it.
+export const answerLike = text => /['"‘’“”]/.test(text) || String(text).trim().split(/\s+/).length >= 6;
+
+export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } = {}) {
+  const stops = [], marks = [];
+  let unchecked = 0;
+  const row = (bi, si, s, why, fix) => ({ beat: bi + 1, step: si + 1, text: s ? s.text || null : null, why, ...(fix ? { fix } : {}) });
+  const c = walk.check;
+  if (c && c.error) stops.push(row(-1, -1, null, `the demo's start couldn't be checked: ${c.error}`));
+  else if (c && (c.wrong || c.cant)) for (const l of (c.lines || []).filter(l => l.status !== 'pass')) stops.push(row(-1, -1, { text: l.text }, `reset.md's Check: ${l.status}${l.why ? `: ${l.why}` : ''}`, 'Put the demo back as it starts (Reset), or fix the line in reset.md'));
+  for (const o of walk.ownStatus || []) if (o.error || o.status) stops.push(row(-1, -1, null, o.error || `${o.label || o.app} showed her as ${o.status}`));
+  // The doubt a run carries in each app, since its last proven screen there.
+  const doubt = {};
+  let app = null;
+  // What she typed: a proof that quotes it is her words in a box, not the app's.
+  const typed = plan.beats.flatMap(b => b.steps).filter(s => s.kind === 'type' && s.value).map(s => s.value);
+  const hers = text => typed.some(v => v.includes(text));
+  for (const [bi, beat] of plan.beats.entries()) {
+    const rows = ((walk.beats || [])[bi] || { steps: [] }).steps;
+    // Blind: the rest of the beat needs a write the walk didn't run (after it, or after a miss it caused).
+    let blind = false;
+    for (const [si, s] of beat.steps.entries()) {
+      const r = rows[si] || { status: 'after-write' };
+      if (r.status === 'missed' && r.needs) blind = true;
+      if (r.status === 'after-miss' && !blind) continue;
+      const text = r.text || formatStep(s);
+      if (s.kind === 'app') app = s.app;
+      const tag = s.writes && TAG.exec(s.writes);
+      const isWrite = r.status === 'write' || !!s.writes;
+      if (isWrite) {
+        const d = doubt[app];
+        if (d) stops.push(row(bi, si, { text }, `a write after a step it couldn't prove (step ${d.step}: ${d.why})`, d.fix));
+        const k = tag ? writeKnown(tag[1], tag[2]) : { ok: false, why: 'the plan names no app pack write for it' };
+        if (!k.ok) stops.push(row(bi, si, { text }, `no undo for this write: ${k.why}`, 'Add the write to its app pack, with its undo'));
+        doubt[app] = null;
+        if (r.status === 'write') continue;
+      }
+      const set = (why, fix) => { if (!doubt[app]) doubt[app] = { step: si + 1, why, fix }; marks.push(row(bi, si, { text }, why, fix)); };
+      const ruled = r.status === 'after-write' || blind || (r.status === 'drifted' && r.needs);
+      if (!ruled && r.status === 'reached') doubt[app] = null;
+      else if (!ruled && r.status === 'unproven' && carries(s)) continue;
+      else if (!ruled && r.status === 'unproven') set(`nothing proves where it lands${r.why ? ` (${r.why})` : ''}`, 'Give it a Lands on: a control or words that only show once it has run');
+      else if (!ruled && r.status === 'drifted') set(`the words it lands on aren't on the screen today${r.why ? ` (${r.why})` : ''}`, r.seen && r.seen.headings && r.seen.headings.length ? `Today the screen says: ${r.seen.headings.slice(0, 3).map(h => `"${h}"`).join(', ')}` : 'Land on what the screen says today');
+      else if (!ruled && r.status === 'missed') set(`it can't be done today: ${r.why || 'not there'}`, r.needs ? `It may need ${r.needs}` : null);
+      else if (ruled) {
+        unchecked++;
+        const l = s.lands;
+        if (l && l.kind === 'words' && l.text && answerLike(l.text) && !hers(l.text)) set(`its proof quotes words the app wrote ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, or a short phrase of the product\'s own');
+        else if (l && l.kind) doubt[app] = null;
+        else if (!carries(s)) set('nothing proves where it lands, and it can only be seen once the write before it runs', 'Give it a Lands on: a control on that screen')
+      }
+    }
+  }
+  return { stops, marks, unchecked, ok: !stops.length };
+}
+
+// The live check: a read-only walk of the demo's plan in the capture browser (walkLive), then the stops it predicts.
+// Saved as .out/ai/check-script.json for the app. → predictStops' result, with the walk's time.
+export async function checkScript({ demo, emit = () => {}, cmd }) {
+  const [{ walkLive }, { walkerPacks }, { packIndex }, { readPlan }, { aiDir }, fs, path] = await Promise.all([import('./unattended.mjs'), import('./live.mjs'), import('./check-lines.mjs'), import('./draft.mjs'), import('./run.mjs'), import('node:fs'), import('node:path')]);
+  const packs = await walkerPacks();
+  const plan = readPlan(demo);
+  const walk = await walkLive({ demo, emit, cmd, packs });
+  const idx = packIndex(packs, demo.cfg);
+  const writeKnown = (packId, writeId) => {
+    const p = idx.byId(packId), w = p && (p.writes || []).find(x => x.id === writeId);
+    if (!p) return { ok: false, why: `no app pack called ${packId} is loaded` };
+    if (!w) return { ok: false, why: `the ${packId} pack doesn't list ${writeId}` };
+    return w.undo ? { ok: true } : { ok: false, why: `the ${packId} pack's ${writeId} has no undo` };
+  };
+  const r = { ...predictStops(plan, walk, { writeKnown }), secs: walk.secs };
+  fs.mkdirSync(aiDir(demo), { recursive: true });
+  fs.writeFileSync(path.join(aiDir(demo), 'check-script.json'), JSON.stringify(r, null, 1) + '\n');
+  return r;
+}
