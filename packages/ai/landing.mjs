@@ -159,7 +159,9 @@ export const packChecked = packs => s => {
 // says so.
 // answer: the screen is what a write in this beat made (a prompt's answer, a save's card). A plan's proof there is never
 // the words the app wrote (a sentence, a quoted name: they change from run to run), so a run on another day finds it.
-export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [], answer = !!(s && s.writes) } = {}) {
+// sent: a send in this beat made the screen (the new chat's name is its title).
+export const SENDS = /^sends\b/i;
+export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [], answer = !!(s && s.writes), sent = SENDS.test((s && s.writes) || '') } = {}) {
   const rec = walker.screen(to);
   const recBefore = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
   const reads = live ? (live.afters || []).filter(Boolean) : [], readsBefore = live ? (live.befores || []).filter(Boolean) : [];
@@ -178,7 +180,7 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   // (A capture with no title of its own is named by its screen's id: that isn't one.)
   // Today's and the recording's: a live read can come before the app names the chat.
   const titlesNow = [...new Set([after.title, ...afters.map(a => a && a.title), rec && rec.title].filter(x => x && x !== to).map(pnorm))];
-  const madeTitles = answer ? titlesNow.filter(t => t && !before.some(b => b && pnorm(b.title || '') === t)) : [];
+  const madeTitles = sent ? titlesNow.filter(t => t && !before.some(b => b && pnorm(b.title || '') === t)) : [];
   const titled = t => { const n = pnorm(t); return !!n && madeTitles.some(m => n === m || n.includes(m) || m.includes(n)); };
   const stable = t => !!t && /[a-z]/i.test(t) && !GREETING.test(String(t).trim()) && !titled(t) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
   const proves = l => afters.every(sc => holds(sc, l) === true) && before.every(b => holds(b, l) === false);
@@ -341,15 +343,16 @@ export function proveLandings(plan, walker, flags = [], { checked = null } = {})
   if (!walker) return flags;
   const steps = plan.beats.flatMap((b, bi) => b.steps.map(s => [s, bi]));
   const typedAll = [...(walker.typedTexts ? walker.typedTexts() : []), ...steps.map(([s]) => s.kind === 'type' ? s.value : null).filter(Boolean)];
-  let cur = null, wrote = -1;
+  let cur = null, wrote = -1, sent = -1;
   for (const [k, [s, bi]] of steps.entries()) {
     if (s.writes) wrote = bi;
+    if (SENDS.test(s.writes || '')) sent = bi;
     const to = s.lands && s.lands.screen, from = cur;
     if (!to) continue;
     cur = to;
     if (!walker.screen(to)) continue;
     const next = (steps.slice(k + 1).find(([x]) => !/^(wait|scroll)$/.test(x.kind)) || [])[0] || null;
-    const r = chooseProof(s, from, to, walker, { typed: typedAll.filter(v => !(s.kind === 'type' && v === s.value)), next, answer: wrote === bi });
+    const r = chooseProof(s, from, to, walker, { typed: typedAll.filter(v => !(s.kind === 'type' && v === s.value)), next, answer: wrote === bi, sent: sent === bi });
     s.lands = { screen: to, ...r.lands, text: r.lands.kind === 'words' ? r.lands.text : null };
     if (r.differs && !s.differs) s.differs = r.differs;
     const flag = !r.lands.kind ? { kind: 'landing', text: `${formatStep(s)}: ${r.why}, so a run can't tell whether it worked` }

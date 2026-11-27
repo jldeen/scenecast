@@ -139,6 +139,9 @@ test('a start screen that isn\'t as the plan has it, a write after a miss, and a
   assert.equal(predictStops(curly, sent, { writeKnown: known, titleOf: id => id === 'chat-answer' ? 'Kestrel’s Risk' : 'New chat' }).stops.length, 1);
   const fixed = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to notes\n  Lands on: notes-home · "Saved notes"\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: notes-saved · "Saved notes"\n`);
   assert.deepEqual(predictStops(fixed, sent, { writeKnown: known, titleOf: () => 'Saved notes' }).stops, []);
+  // A save that goes to a page with its own fixed title isn't flagged: only a send names a chat.
+  const moved = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to notes\n  Lands on: notes-new · "New note"\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: notes-saved · "Saved notes"\n`);
+  assert.deepEqual(predictStops(moved, sent, { writeKnown: known, titleOf: id => id === 'notes-saved' ? 'Saved notes' : 'New note' }).stops, []);
   const hello = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Good morning"\n`);
   assert.match(predictStops(hello, sent, { writeKnown: known }).stops[0].why, /words the app makes up \("Good morning"\)/);
 });

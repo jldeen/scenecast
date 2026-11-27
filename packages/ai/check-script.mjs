@@ -11,7 +11,7 @@
 
 import { formatStep } from './plan.mjs';
 // The run's own normalizing (landing.mjs), so Check my script and a run agree on a title.
-import { pnorm as pn } from './landing.mjs';
+import { pnorm as pn, SENDS } from './landing.mjs';
 
 const TAG = / · ([\w-]+):([\w-]+)$/;
 // A wait, hover or scroll, and a step group opened by its place, carry the proven screen before them (a run's rule).
@@ -74,9 +74,9 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
         // A run checks where a write lands, after it: its proof can't be words the app writes there.
         const l = s.lands;
         // What the app makes up: an answer's words, a greeting, or the name it gave the new chat.
-        // A title the write gave its screen: not the one the screen before it had.
+        // A title a send gave its screen: not the one the screen before it had.
         const title = l && l.screen ? pn(titleOf(l.screen)) : '';
-        const titled = !!title && title !== pn(titleOf(startsOn.get(s)));
+        const titled = SENDS.test(s.writes || '') && !!title && title !== pn(titleOf(startsOn.get(s)));
         // The title can be a control's name too (the new chat's link in Recent).
         const said = l && (l.kind === 'words' ? l.text : l.kind === 'control' ? l.control : null);
         const made = !!said && ((l.kind === 'words' && ((!hers(said) && answerLike(said)) || GREETING.test(said.trim()))) || (titled && (pn(said) === title || title.includes(pn(said)) || pn(said).includes(title))));

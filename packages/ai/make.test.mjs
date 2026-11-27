@@ -1197,11 +1197,17 @@ test('a send is never proven by the name the app gives the new chat: it changes 
   const today = 'Kestrel PO-450101 Ship-Date Risk', early = { ...screens.typed, headings: [today], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: today }] };
   const soon = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'control', control: 'Message Copilot' } }, { before: [screens.typed], afters: [early, early], walker: { ...walker, screen: id => id === 'answer' ? { ...screens.answer, title: t } : screens[id] || null } });
   assert.notEqual(formatLands(soon.lands), `answer · "${today}"`);
-  // A live read has its page's title: a save that shows "Saved notes" on a page already titled that is proven by them.
-  const notes = more => readScreen([{ key: 'main', title: 'Saved notes', html: `<main><button>Save</button>${more}</main>` }]);
-  const notesWalker = { flow: { states: { saved: { app: 'notes' } } }, states: ['saved'], screen: id => id === 'saved' ? { ...notes('<h1>Saved notes</h1>'), title: 'Saved notes' } : null, shown: () => null, control: () => null, typedTexts: () => [] };
-  const saved = liveProof({ kind: 'click', target: 'Save', writes: 'saves it', lands: { screen: 'saved', kind: 'words', text: 'Saved notes' } }, { before: [notes('')], afters: [notes('<h1>Saved notes</h1>'), notes('<h1>Saved notes</h1>')], walker: notesWalker });
+  // A save that goes to a page with its own fixed title ("New note" to "Saved notes") is proven by it: only a send
+  // names a chat.
+  const notes = (title, more) => readScreen([{ key: 'main', title, html: `<main><button>Save</button>${more}</main>` }]);
+  const notesWalker = { flow: { states: { saved: { app: 'notes' } } }, states: ['saved'], screen: id => id === 'saved' ? { ...notes('Saved notes', '<h1>Saved notes</h1>'), title: 'Saved notes' } : null, shown: () => null, control: () => null, typedTexts: () => [] };
+  const saved = liveProof({ kind: 'click', target: 'Save', writes: 'saves it', lands: { screen: 'saved', kind: 'words', text: 'Saved notes' } }, { before: [notes('New note', '')], afters: [notes('Saved notes', '<h1>Saved notes</h1>'), notes('Saved notes', '<h1>Saved notes</h1>')], walker: notesWalker });
   assert.deepEqual([formatLands(saved.lands), saved.strength], ['saved · "Saved notes"', 'strong']);
+  // A live read has its page's title: today's name for the chat, nothing like the recording's, isn't a proof either.
+  const chat = (title, more) => readScreen([{ key: 'main', title, html: `<main><textarea aria-label="Message Copilot"></textarea>${more}</main>` }]);
+  const named = chat('Supplier delay analysis', '<h1>Supplier delay analysis</h1>');
+  const renamed = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'words', text: t } }, { before: [chat('New chat', '')], afters: [named, named], walker });
+  assert.notEqual(formatLands(renamed.lands), 'answer · "Supplier delay analysis"');
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
