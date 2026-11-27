@@ -698,10 +698,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   } } finally {
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
+      // The take the replica was made from, until this one is known to have run to the end.
+      const recFile = join(demo.raw, 'recording.json'), lastTake = existsSync(recFile) ? readFileSync(recFile) : null;
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
-      // Never in the way of the reset after: a focus.json she broke by hand stays as it is.
-      // Only a take that ran to the end replaces the last one's: one that stopped part way leaves its replica as it was.
-      if (run.summary && run.summary.states > 0 && !run.stopped) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
       // A save it refused after the last step: the take ends there, and she sees why.
       const os = await ownStopped();
       if (os && !run.stopped) ownStopRun(os);
@@ -711,6 +710,13 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (u && !run.stopped) restoreStopRun(u);
       const l = await leaveNow().catch(() => null);
       if (l && l.leak && !run.stopped) leakStop(l.leak);
+      // Only a take that ran to the end replaces the last one (its recording, beat keys and focus points): one that
+      // stopped part way leaves them, and the replica made from them, as they were. A focus.json she broke by hand
+      // stays as it is.
+      if (run.summary && run.summary.states > 0) {
+        if (!run.stopped) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
+        else try { if (lastTake) writeFileSync(recFile, lastTake); else rmSync(recFile, { force: true }); } catch (e) { log(`the last take's recording wasn't put back: ${e.message}`); }
+      }
     }
     // Each recorded hover and menu: captured, missed, not reached or gone; a missed one is listed for her, with its
     // picture.
