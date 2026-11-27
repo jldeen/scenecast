@@ -14,6 +14,7 @@ import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { cleanTarget } from './from-script.mjs';
 import { readFocusJson, readEditorOverrides, writeJsonAtomic, checkFocusJson, FOCUS_JSON, EDITOR_JSON } from '@stuntdouble/core/lib/overrides.mjs';
 import { proofWords } from './landing.mjs';
+import { GROUP_LABEL } from './find.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');
@@ -37,15 +38,18 @@ const sameStep = (s, p, nameOf = q => specName(q.click)) => {
   if (k === 'type') return !s.value || bare(p.text) === bare(s.value);
   if (k === 'key') return p.key === s.key;
   // A recorded click with no name (a test id only) isn't the one a plan step names.
-  if (k === 'click') { const a = bare(nameOf(p)), b = bare(s.target); return !!a && (!b || a.includes(b) || b.includes(a)); }
+  // A step group by its label, its count aside ("3 items complete" recorded as "4 items complete").
+  const count = t => GROUP_LABEL.test(s.target || '') ? t.replace(/\d+/g, '#') : t;
+  if (k === 'click') { const a = count(bare(nameOf(p))), b = count(bare(s.target)); return !!a && (!b || a.includes(b) || b.includes(a)); }
   return true;
 };
 
 // Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins). A step
 // lands on the screen the plan names when the recording has it, else on the one the take recorded for it (a plan
 // made from another recording names that recording's screens). nameOf(screen, matcher): the walker's, to name a
-// click the recorder kept by its test id only, from the control it picks on the screen it was on.
-export function beatStarts(plan, flow, { nameOf = null } = {}) {
+// click the recorder kept by its test id only, from the control it picks on the screen it was on. screens: filled with
+// each plan screen the take has under another name → the take's.
+export function beatStarts(plan, flow, { nameOf = null, screens = null } = {}) {
   const b0 = (flow.beats || [])[0];
   if (!b0) return [];
   const S = flow.states || {}, path = flow.path || [];
@@ -67,6 +71,7 @@ export function beatStarts(plan, flow, { nameOf = null } = {}) {
     for (const s of b.steps) {
       if (s.kind === 'app') active = s.app;
       const took = recorded(s);
+      if (screens && s.lands && s.lands.screen && !S[s.lands.screen] && S[took]) screens[s.lands.screen] = took;
       const screen = s.lands && S[s.lands.screen] ? s.lands.screen : S[took] ? took : null;
       if (screen) { cur[S[screen].app] = screen; active = S[screen].app; }
     }
@@ -140,7 +145,7 @@ export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
     const screen = tb.screen || '';
     if (screen || keys[i]) md.push(`*Screen:* ${screen || 'where the beat starts'}${keys[i] ? ` (**${keys[i]}**)` : ''}`, '');
     const steps = b.steps.map(s => presenterStep(s, flow, apps));
-    const focus = (b.lines || []).flatMap(l => (l.focus || []).filter(f => f.on).map(f => `**⌥F**: ${f.texts.join(', ')}`));
+    const focus = (b.lines || []).flatMap(l => (l.focus || []).filter(f => f.on && (flow.states || {})[f.on]).map(f => `**⌥F**: ${f.texts.join(', ')}`));
     if (steps.length || focus.length) { md.push('**Do**', ''); for (const s of [...steps, ...focus]) md.push(`- ${s}`); md.push(''); }
     if (tb.stage.length) { md.push('**Watch**', ''); for (const s of tb.stage) md.push(`- ${s}`); md.push(''); }
     md.push('**Say**', '');
@@ -261,6 +266,10 @@ export async function finish({ demo, packs, emit = () => {} }) {
   const result = { script: null, beats: 0, points: 0 };
   let slots = [];
   // Her script for the guide: from her talk track (source.md, kept when the plan was made), unless she wrote her own.
+  // Where each beat starts in the take; a Focus on a plan screen the take has under another name goes on the take's.
+  const screens = {};
+  const starts = beatStarts(plan, flow, { nameOf: walker.nameOf, screens });
+  for (const b of plan.beats) for (const l of b.lines || []) for (const f of l.focus || []) if (f.on && screens[f.on]) f.on = screens[f.on];
   // Only a talk track the plan was made from (its "From:" line): notes she gave with a goal aren't her script.
   const src = join(demo.dir, 'source.md');
   if (existsSync(src) && /^<!-- From: /.test(readFileSync(src, 'utf8'))) {
@@ -268,7 +277,6 @@ export async function finish({ demo, packs, emit = () => {} }) {
     const track = parseTalkTrack(text.replace(/^<!-- From: .+? -->\s*/, ''), name.replace(/\.docx$/i, '.md'));
     const tbs = trackBeats(track, plan);
     slots = tbs.map(tb => (tb || {}).time);
-    const starts = beatStarts(plan, flow, { nameOf: walker.nameOf });
     // The beat keys: ⌥n starts her beat n where it starts, named as her guide names it (flow.editor.json; edits kept).
     // They're the show's beats: none after the plan's last (the recording's own beats, or a longer plan's from before).
     const ed = readEditorOverrides(demo.dir);

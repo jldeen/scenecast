@@ -662,6 +662,24 @@ test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 
   assert.deepEqual(applyEditorOverrides(structuredClone(flow), ed).beats.map(b => b.label), ['0 Reset', '1 The question', '2 Save it', '3 Certify it']);
 });
 
+test('a step group recorded with another count still moves the next beat\'s start', () => {
+  const { demo, flow } = takeDemo();
+  const plan = parsePlan(readFileSync(join(demo.dir, 'plan.md'), 'utf8').replace('Click "Save: Save note"', 'Click "3 items complete, using Search"'));
+  flow.path.find(p => p.click && /Save note/.test(p.click.sel)).click = { sel: 'button', text: '4 items complete, using Search' };
+  assert.equal(beatStarts(plan, flow)[2].states.chat, 'chat-saved');
+});
+
+test('a Focus on a screen the take has under another name goes on the take\'s, in focus.json and the guide', async () => {
+  const { demo } = takeDemo();
+  const file = join(demo.dir, 'plan.md');
+  writeFileSync(file, readFileSync(file, 'utf8').replace('> Our supplier moved the ship date.\n', '> Our supplier moved the ship date.\n  Focus: "ship date" · on old-answer\n'));
+  writeFileSync(join(demo.dir, 'source.md'), '<!-- From: talk.md -->\n\n# Delay demo\n\n## 1. The question\n\n> Our supplier moved the ship date.\n\n## 2. Save it\n\n> I save it.\n\n## 3. Certify it\n\n> I certify it.\n');
+  await finish({ demo, packs: null });
+  const points = JSON.parse(readFileSync(join(demo.dir, 'focus.json'), 'utf8')).points.filter(p => p.source === 'plan');
+  assert.deepEqual(points.map(p => p.states), [['chat-answer']]);
+  assert.match(readFileSync(join(demo.dir, 'script.md'), 'utf8'), /\*\*⌥F\*\*: ship date/);
+});
+
 test('notes she gave with a goal aren\'t her script: the finish writes no guide script from them', async () => {
   const { demo } = takeDemo();
   writeFileSync(join(demo.dir, 'source.md'), 'Contoso wants to see how fast a PO gets approved. Their CFO cares about audit trails.\n');
