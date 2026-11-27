@@ -405,6 +405,9 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         if (own) { alt = true; step.target = own.name; r = { ...r, control: own }; }
       } else if (r.control && r.control.name && norm(r.control.name) !== norm(step.target) && step.kind !== 'type') step.target = r.control.name;
       if (step.kind === 'type') { S.typed[S.app] = step.value; if (r.control) step.target = S.field[S.app] = r.control.name; }
+      // A click into the box it then types in only focuses it: nothing shows it landed, so a run would hold the send
+      // after it, and typing focuses the box itself.
+      if (step.kind === 'type') { const prev = beat.steps[beat.steps.length - 1]; if (prev && prev.kind === 'click' && !prev.writes && !prev.lands && norm(prev.target) === norm(step.target)) beat.steps.pop(); }
       // The product's own approve button ("Save: Save skill") where the recording clicked the replica's ("Approve"):
       // it goes where that went.
       if (step.kind === 'click' && r.control && (!r.to || r.to === id) && APPROVE.test(step.target)) {

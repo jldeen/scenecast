@@ -114,11 +114,12 @@ test('a talk track to a plan on the recorded screens: landings, writes, a differ
   const walker = walkerFromDemo(demo);
   const { plan, flags } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker });
   const steps = plan.beats.flatMap(b => b.steps);
-  assert.deepEqual(steps.map(s => s.text), ['Go to chat', 'Click "Message"', `Type "What's changed on PO-1?" in "Message"`, 'Press Enter', 'Wait for the answer', 'Click "Save: Save note"', 'Go to admin', 'Click "Certified"']);
+  // "Click the message box" before typing in it only focuses it: the typing does that, and nothing would prove the click.
+  assert.deepEqual(steps.map(s => s.text), ['Go to chat', `Type "What's changed on PO-1?" in "Message"`, 'Press Enter', 'Wait for the answer', 'Click "Save: Save note"', 'Go to admin', 'Click "Certified"']);
   assert.deepEqual(steps.filter(s => s.lands).map(s => s.lands.screen), ['chat-home', 'chat-typed', 'chat-answer', 'chat-saved', 'admin-home', 'admin-certified']);
   assert.deepEqual(steps.filter(s => s.writes).map(s => s.writes), ['sends prompt 1 (Ask) in Chat app', 'saves "Save note" ("Save: Save note")', 'endorses it: "Certified"']);
   // The script's Approve is the product's Save: flagged once, and the plan uses what the product has.
-  assert.match(steps[5].differs, /"Save: Save note".*not "Approve"/);
+  assert.match(steps[4].differs, /"Save: Save note".*not "Approve"/);
   // chat-saved shows only what the app wrote ("Your note is saved as …"): nothing a plan can count on proves the save.
   assert.deepEqual(flags.map(f => f.kind), ['differs', 'landing']);
   const [l1, l2, l3] = plan.beats[0].lines;
@@ -546,7 +547,7 @@ test('the reset: each write undone in reverse, a pack\'s undo with what the run 
   const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && (w.on.key ? w.on.key === step.key : w.on.target.toLowerCase() === String(step.target).toLowerCase())) || null;
   const packs = { forApp: { chat: pack }, writeFor };
   const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs });
-  assert.match(plan.beats[0].steps[5].writes, / · notes:save-note$/);
+  assert.match(plan.beats[0].steps[4].writes, / · notes:save-note$/);
   // A pack's safe step: it only looks like a change, so it isn't asked about or undone.
   const quiet = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs: { forApp: { admin: { id: 'admin', safe: [{ id: 'cert', on: { kind: 'click', target: 'Certified' }, what: 'Only shows the endorsement menu.' }] } }, writeFor } }).plan;
   const cert = quiet.beats[1].steps.find(st => st.target === 'Certified');
@@ -637,7 +638,7 @@ test('a read-only walk: a write isn\'t run, the rest of its beat waits on it, th
   const demo = demoDir(), walker = walkerFromDemo(demo);
   const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker });
   const w = await walkPlan(plan, walker);
-  assert.deepEqual(w.beats.map(b => b.steps.map(s => s.status)), [['reached', 'reached', 'reached', 'write', 'after-write', 'after-write'], ['reached', 'write']]);
+  assert.deepEqual(w.beats.map(b => b.steps.map(s => s.status)), [['reached', 'reached', 'write', 'after-write', 'after-write'], ['reached', 'write']]);
   assert.deepEqual(w.writes.map(x => [x.beat, x.text]), [[1, 'Press Enter'], [2, 'Click "Certified"']]);
   // A step that doesn't land where the plan says is a miss; behind a write that didn't run, it says which one.
   plan.beats[1].steps = [{ kind: 'app', app: 'chat' }, { kind: 'click', target: 'Save: Save note', lands: { screen: 'chat-saved' } }];
