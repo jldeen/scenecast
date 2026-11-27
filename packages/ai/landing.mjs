@@ -173,7 +173,7 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   // Another step's words: what it types, a stretch of it (four words or more), or words holding the start of a
   // sentence it types (a search term inside other words is only a word on the page).
   const typedIn = t => { const n = pnorm(t); return n.length > 1 && typed.some(v => { const m = pnorm(v); return !!m && (n === m || (m.includes(n) && (count(n) >= 4 || n.length >= 25)) || (count(m) >= 4 && n.includes(m.slice(0, 24)))); }); };
-  const stable = t => !!t && /[a-z]/i.test(t) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
+  const stable = t => !!t && /[a-z]/i.test(t) && !GREETING.test(String(t).trim()) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
   const proves = l => afters.every(sc => holds(sc, l) === true) && before.every(b => holds(b, l) === false);
 
   if (s.kind === 'type' && s.value) {
@@ -349,6 +349,10 @@ export function proveLandings(plan, walker, flags = [], { checked = null } = {})
 
 // With no recording behind a step: nothing recorded to compare with (no frame, no other captures), and a control found
 // by its exact name.
+// A greeting ("Hi, try asking me to recap a meeting", "Good morning, Jessica", "Welcome back, Jessica"): an app picks
+// another on each visit, so a run can't count on it, even where the recording caught only one. A product's own fixed
+// heading ("Welcome to Contoso Admin") isn't one.
+const GREETING = /^(hi|hello|hey|good (morning|afternoon|evening)|welcome back)\b/i;
 const NONE = { screen: () => null, shown: () => null, flow: { states: {} }, states: [],
   control: (sc, name) => { const el = ((sc && sc.controls) || []).find(c => !unseen(c) && pnorm(c.name) === pnorm(name)); return el ? { el, score: 100 } : null; } };
 const sameProof = (a, b) => !!a && !!b && a.kind === b.kind && (a.state || null) === (b.state || null) && textsOf(a).map(pnorm).join('\n') === textsOf(b).map(pnorm).join('\n');

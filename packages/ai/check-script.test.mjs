@@ -82,10 +82,24 @@ test('a proof that quotes the answer, then a write, stops; a write with no pack 
   assert.equal(r.marks.length, 2);
 });
 
-test('reset.md\'s Check failing stops the run before it starts', () => {
-  const r = predictStops(PLAN, { ...walk(['reached', 'reached', 'reached', 'write']), check: { wrong: 1, cant: 0, lines: [{ text: 'Added doesn\'t list the skill', status: 'wrong' }] } }, { writeKnown: known });
-  assert.equal(r.stops.length, 1);
-  assert.equal(r.stops[0].beat, 0);
+test('a start check failing stops the run before it starts, said in plain words', () => {
+  const lines = [{ text: 'chat: Added doesn\'t list the skill', status: 'wrong' }, { text: 'chat on cop-home: Recent is empty', status: 'cant', why: 'the plan never lands on cop-home', plan: true },
+    { text: 'chat: Added lists the skill', status: 'cant', why: 'on the way there, Click "Plugins": it didn\'t land' },
+    { text: 'chat: No skill the run saved', status: 'cant', why: 'nothing gives {skill}: the recording or the demo', setup: true }];
+  const r = predictStops(PLAN, { ...walk(['reached', 'reached', 'reached', 'write']), check: { wrong: 1, cant: 3, lines } }, { writeKnown: known, names: { chat: 'Chat app' } });
+  assert.deepEqual(r.stops.map(s => [s.beat, s.why, s.fix]), [
+    [0, 'Before it starts, the demo isn\'t as it should be (Chat app: Added doesn\'t list the skill)', 'Put the demo back as it starts, then check again'],
+    [0, 'Before it starts, it can\'t check this with the plan as it is (Chat app: Recent is empty)', 'Make the plan again: its start checks are made with it'],
+    // Not the plan's doing: it says why, and making the plan again isn't the fix.
+    [0, 'Before it starts, it couldn\'t check this (Chat app: Added lists the skill): on the way there, Click "Plugins": it didn\'t land', 'Open the demo where it starts, then check again'],
+    // The check's own (a value, its pack): neither the plan nor the demo's start is the fix.
+    [0, 'Before it starts, it can\'t check this (Chat app: No skill the run saved): the demo\'s reset or its app\'s pack doesn\'t say how', 'Fix that check in the demo\'s reset or the app\'s pack (what\'s missing is under Details), then check again']]);
+  for (const s of r.stops) assert.doesNotMatch(`${s.why} ${s.fix}`, /reset\.md|\bcant\b|\bwrong\b|cop-home|lands on|\{skill\}/);
+  assert.equal(r.stops[1].detail, 'the plan never lands on cop-home');
+  assert.equal(r.stops[3].detail, 'nothing gives {skill}: the recording or the demo');
+  // Checks that stopped with an error: what happened, a next step, and the error under Details.
+  const err = predictStops(PLAN, { ...walk(['reached', 'reached', 'reached', 'write']), check: { error: 'Target page, context or browser has been closed' } }, { writeKnown: known });
+  assert.deepEqual([err.stops[0].why, err.stops[0].fix, err.stops[0].detail], ['Before it starts, its checks stopped with an error', 'Check again. If it stops the same way, what went wrong is under Details', 'Target page, context or browser has been closed']);
 });
 
 test('her own status stops the run only when it isn\'t what the recording has', () => {
@@ -96,7 +110,8 @@ test('her own status stops the run only when it isn\'t what the recording has', 
 
 test('a start screen that isn\'t as the plan has it, a write after a miss, and a write proven by the app\'s words all stop', () => {
   const ok = walk(['reached', 'reached', 'reached', 'write']);
-  assert.match(predictStops(PLAN, { ...ok, starts: [{ app: 'chat', ok: false, why: 'its start step "Go to chat": not signed in' }] }, { writeKnown: known }).stops[0].why, /chat's start screen: .*not signed in/);
+  assert.equal(predictStops(PLAN, { ...ok, starts: [{ app: 'chat', ok: false, why: 'its start step "Go to chat": not signed in' }] }, { writeKnown: known, names: { chat: 'Chat app' } }).stops[0].why, 'Chat app isn\'t where the demo starts: its start step "Go to chat": not signed in');
+  assert.equal(predictStops(PLAN, { ...ok, starts: [{ app: 'chat', ok: false, why: 'chat isn\'t on its recorded start screen' }] }, { writeKnown: known, names: { chat: 'Chat app' } }).stops[0].why, 'Chat app isn\'t where the demo starts: Chat app isn\'t on its recorded start screen');
   // Beat 2 misses its first click; its write still stops the run.
   const missed = walk([{ status: 'missed', why: 'no "Search"' }, { status: 'after-miss' }, { status: 'after-miss' }, { status: 'after-miss' }].map(x => x.status));
   missed.beats[1].steps[0].why = 'no "Search"';

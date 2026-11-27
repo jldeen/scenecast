@@ -14,7 +14,7 @@ import { planFromTrack, intentsOf, promptFor, namedRows, stepsFrom, firstOfKind,
 import { holds, liveProof, writeGate, leftOut } from './landing.mjs';
 import { planFromRecording } from './walkthrough.mjs';
 import { resetFor, formatReset, parseReset } from './reset.mjs';
-import { approve, approval, writeReset } from './make.mjs';
+import { approve, approval, writeReset, planFromScript } from './make.mjs';
 import { walkPlan } from './walk.mjs';
 import { undoGroups, checkClaim } from './reset-run.mjs';
 import { startUrls } from './live.mjs';
@@ -1042,6 +1042,21 @@ test('a list that shows only the rows in view: rows the recording scrolled to, o
   assert.match(md, /### A number changed\n\n\| Recorded \| Today \| Screen \(steps\) \|\n\|---\|---\|---\|\n\| The rows the list starting “Name”, “Contoso Ledger” says it has: “9” \| “12” \| ledgers \(1-2\) \|/);
 });
 
+test('a plan never proves a step by a greeting: an app picks another on each visit', () => {
+  const sc = items => ({ headings: [], controls: [], items: items.map((text, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', text })) });
+  const screens = { start: sc(['Recent chats']), home: sc(['Recent chats', 'Hi, try asking me to recap a meeting', 'Message Copilot']) };
+  const walker = { flow: { states: { start: { app: 'copilot' }, home: { app: 'copilot' } } }, states: ['start', 'home'], screen: id => screens[id] || null, shown: () => null,
+    control: () => null, typedTexts: () => [] };
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'start' } }, { kind: 'click', target: 'New', lands: { screen: 'home' } }] }] };
+  proveLandings(plan, walker);
+  assert.equal(formatLands(plan.beats[0].steps[1].lands), 'home · "Message Copilot"');
+  // A product's own fixed heading still proves a step.
+  screens.home = sc(['Recent chats', 'Welcome to Contoso Admin']);
+  const plan2 = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'start' } }, { kind: 'click', target: 'New', lands: { screen: 'home' } }] }] };
+  proveLandings(plan2, walker);
+  assert.equal(formatLands(plan2.beats[0].steps[1].lands), 'home · "Welcome to Contoso Admin"');
+});
+
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
   const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
   const tabs = (agents, plugins) => [{ role: 'tab', name: 'Agents', selected: agents }, { role: 'tab', name: 'Plugins', selected: plugins }];
@@ -1220,6 +1235,17 @@ test('what a Leave out line names: each list row that has its words, and all tha
   // A copy: the screen as read keeps none of it, and one with nothing to leave out is the same screen.
   assert.deepEqual([sc.items.some(i => i.left), leftOut(sc, ['Northwind Traders']) === sc], [false, true]);
   assert.deepEqual([holds(sc, { kind: 'words', text: 'Weekly digest' }), holds(m, { kind: 'words', text: 'Weekly digest' }), holds(m, { kind: 'words', text: 'Order 1001 shipped' })], [true, false, true]);
+});
+
+test('making the plan again makes reset.md again: no start check or undo from the last plan is left', async () => {
+  const demo = demoDir();
+  writeFileSync(join(demo.dir, 'reset.md'), '# Reset: old\n\n## Check\n\n- chat on old-home: "from the last plan"\n  From: beat 1\n');
+  const file = join(demo.dir, 'talk.md');
+  writeFileSync(file, SCRIPT);
+  await planFromScript({ demo, file, packs: null });
+  const text = readFileSync(join(demo.dir, 'reset.md'), 'utf8');
+  assert.doesNotMatch(text, /from the last plan|old-home/);
+  assert.match(text, /^# Reset/);
 });
 
 test('her Leave out: reset.md keeps it word for word; what it names never proves a step; the review lists it', async () => {

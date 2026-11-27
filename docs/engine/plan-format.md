@@ -336,8 +336,8 @@ each `{ app, strength, wrote, step }`).
 
 ## The reset (`reset.md`)
 
-Made from the plan's writes, in reverse, and from the state the demo's first screens show (`scenecast ai reset`). The
-capture pass runs it before and after a run: Undo, then Set first, then Check. During the run, it makes each
+Made from the plan's writes, in reverse, and from the state the demo's first screens show (`scenecast ai reset`), and
+made again whenever the plan is (Leave out stays as she wrote it). The capture pass runs it before and after a run: Undo, then Set first, then Check. During the run, it makes each
 `Set before` just before its step, and its browser leaves out what `Leave out` names all through.
 
 ```markdown

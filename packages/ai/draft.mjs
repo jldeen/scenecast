@@ -28,6 +28,7 @@ export async function draftPlan({ demo, model, settings = {}, emit = () => {} })
   if (!plan.beats.length) throw new Error('the plan came back empty: say a bit more about what the demo should show');
   const text = formatPlan(plan);
   writeFileSync(join(demo.dir, PLAN), text);
+  await (await import('./make.mjs')).resetFollows(demo);
   emit({ event: 'plan', beats: plan.beats.length, steps: stepCount(plan), askFirst: (text.match(/ — ask first/g) || []).length });
   return { text, plan };
 }

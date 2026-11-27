@@ -98,6 +98,10 @@ test('one rule for what can be checked: a claim in a known form on a screen a ch
   assert.equal(checkable(line('tasks', 'shows "No tasks yet"'), ctx()).ok, true);
   assert.match(checkable(line('tasks', 'everything is fine'), ctx()).why, /can't check "everything is fine" on its own/);
   assert.match(checkable(line('tasks', 'shows "Task stats"', null, 'tasks-stats'), ctx()).why, /which writes/);
+  // Only a way there or a proof is the plan's doing; a check's own words, values or pack aren't.
+  assert.equal(checkable(line('tasks', 'shows "Task stats"', null, 'tasks-stats'), ctx()).plan, true);
+  assert.equal(checkable(line('tasks', 'everything is fine'), ctx()).plan, undefined);
+  assert.equal(checkable(line('tasks', 'No task the run added', 'beat 1'), ctx({ values: {} })).plan, undefined);
   assert.match(checkable(line('nope', 'shows "x"'), ctx()).why, /which app/);
   // A pack check: its look, the values from the plan (what was typed) and the demo.
   const p = checkable(line('tasks', 'No task the run added', 'beat 1'), ctx());
