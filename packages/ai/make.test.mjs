@@ -1090,6 +1090,16 @@ test('a plan never proves a step by a greeting: an app picks another on each vis
   assert.equal(formatLands(plan2.beats[0].steps[1].lands), 'home · "Welcome to Contoso Admin"');
 });
 
+test('where an app starts is proven by its own box, not by words that may be a drop zone\'s', () => {
+  const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((text, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', text })) });
+  const screens = { teams: sc(['Supply alerts']), start: sc(['Drop your files here', 'Recent chats'], [{ role: 'link', name: 'Plugins', nav: true }, { role: 'textbox', name: 'Message Copilot', editable: true }]) };
+  const walker = { flow: { states: { teams: { app: 'teams' }, start: { app: 'copilot' } } }, states: ['teams', 'start'], screen: id => screens[id] || null, shown: () => null,
+    control: () => null, typedTexts: () => [] };
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'teams', lands: { screen: 'teams' } }, { kind: 'app', app: 'copilot', lands: { screen: 'start' } }] }] };
+  proveLandings(plan, walker);
+  assert.equal(formatLands(plan.beats[0].steps[1].lands), 'start · control "Message Copilot"');
+});
+
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
   const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
   const tabs = (agents, plugins) => [{ role: 'tab', name: 'Agents', selected: agents }, { role: 'tab', name: 'Plugins', selected: plugins }];
@@ -1151,7 +1161,7 @@ test('words only inside a message prove a step last, and say so, unless it\'s a 
     { kind: 'press', key: 'Enter', line: '1.3', writes, lands: { screen: 'sent' } }] }] });
   const p = plan('sends a prompt · chat-app:send'), flags = proveLandings(p, walker, [], { checked });
   // Words outside a message first, the plan's own included; a message's only when nothing else tells the screens apart.
-  assert.deepEqual(p.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['pr · "Status and details"', 'files · "Changes recommended"', 'chat · "New chat"', 'sent · "You said:"']);
+  assert.deepEqual(p.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['pr · "Status and details"', 'files · "Changes recommended"', 'chat · control "Message"', 'sent · "You said:"']);
   assert.deepEqual(flags.map(f => [f.kind, f.at]), [['message', '1.2']]);
   assert.match(flags[0].text, /^Click "Files changed": a run checks it by “Changes recommended”, words inside a message/);
   // The same send, which no pack checks: it says so too.

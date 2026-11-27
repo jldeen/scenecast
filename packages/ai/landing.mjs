@@ -236,6 +236,9 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
       // What the caller expects first (liveProof: the step's own control in a new state, the next step's control).
       for (const f of first) if (pick(f)) return found(f);
       if (nextCtl && !late) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
+      // Where an app starts: the page's own box (its message or search box) before any words, which may be a banner's
+      // or a drop zone's ("Drop your files here") and not there on another day.
+      if (s.kind === 'app') for (const c of controls) if (isBox(c) && !c.nav && pick({ kind: 'control', control: c.name, state: null })) return found({ kind: 'control', control: c.name, state: null });
       for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
       for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
       for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });

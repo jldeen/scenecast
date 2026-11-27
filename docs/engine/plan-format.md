@@ -132,9 +132,11 @@ plans, Copilot's (after its answer is grounded) and walkthroughs all get the sam
    step clicks, when it's in a live region (an approval card: the next step needs exactly it); new words (headings,
    then lines, then labels; the page's own before its frame); a control's state; what a box says; a control only this
    screen has; and words gone with the page's own words still there.
-3. **A Go to step** lands on one page of its site. When other recorded pages of the site show its proof too
-   ("Status and details" is on every pull request's page), the words its page names itself by (in its title: the pull
-   request's) that none of those pages show come first. An app that's one page with panels over it (one address) has
+3. **A Go to step** is proven by the page's own message or search box first, when it has one: words where an app starts
+   may be a banner's or a drop zone's ("Drop your files here") and not there on another day. It lands on one page of
+   its site. When other recorded pages of the site show its proof too ("Status and details" is on every pull request's
+   page), the words its page names itself by (in its title: the pull request's) that none of those pages show come
+   first. An app that's one page with panels over it (one address) has
    nothing to tell apart.
 4. **Numbers last.** Words without a number first. A number that only identifies (`#2`, `PO-1001`) or is part of
    what nearly every screen of the site shows (`Microsoft 365 admin center`) doesn't count. Words with a number only
