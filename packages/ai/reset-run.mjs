@@ -282,7 +282,8 @@ export async function checkLines({ demo, cmd, walker, lines, plan, packs = null,
   for (const line of lines) {
     const text = checkLine(line), from = (line && line.from) || null;
     const c = checkable(line, ctx);
-    if (!c.ok) { out.push({ text, from, status: 'cant', ok: false, why: c.why }); continue; }
+    // plan: it can't be checked with this plan (no way there, no proof of its page); the others couldn't be read now.
+    if (!c.ok) { out.push({ text, from, status: 'cant', ok: false, why: c.why, plan: true }); continue; }
     const key = routeKey(c.app, c.route);
     if (key !== at) { at = key; seen = await visit(c.app, c.route); }
     if (seen.why) { out.push({ text, from, status: 'cant', ok: false, why: seen.why }); continue; }
