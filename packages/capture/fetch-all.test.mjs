@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchEveryTarget } from './fetch-all.mjs';
 
-// A DevTools connection that answers every call, except Fetch.enable on the sessions in `failOn`.
-function fakeDevTools(failOn) {
+// A DevTools connection that answers every call, except Fetch.enable on the sessions in `failOn` (and with "wasn't
+// found", as Chrome says for a target kind with no Fetch, on those in `noFetch`).
+function fakeDevTools(failOn, noFetch = new Set()) {
   const sent = [];
   let socket = null;
   globalThis.fetch = async () => ({ json: async () => ({ webSocketDebuggerUrl: 'ws://fake' }) });
@@ -12,7 +13,8 @@ function fakeDevTools(failOn) {
     send(text) {
       const m = JSON.parse(text);
       sent.push(m);
-      const error = m.method === 'Fetch.enable' && failOn.has(m.sessionId) ? { message: 'Fetch.enable failed' } : undefined;
+      const error = m.method !== 'Fetch.enable' ? undefined : failOn.has(m.sessionId) ? { message: 'Fetch.enable failed' }
+        : noFetch.has(m.sessionId) ? { message: "'Fetch.enable' wasn't found" } : undefined;
       setTimeout(() => this.onmessage({ data: JSON.stringify({ id: m.id, ...(error ? { error } : { result: {} }) }) }));
     }
     close() {}
@@ -37,6 +39,22 @@ test('a target whose interception fails stays paused, and set() says so', async 
     await assert.rejects(tf.set([{ urlPattern: '*', requestStage: 'Request' }]), /Fetch\.enable failed/);
     // Gone before its Fetch started: nothing left to guard.
     emit('Target.detachedFromTarget', { sessionId: 'bad' });
+    await tf.set([{ urlPattern: '*', requestStage: 'Request' }]);
+    await tf.close();
+  } finally {
+    globalThis.fetch = realFetch; globalThis.WebSocket = realWS;
+  }
+});
+
+test("a target kind with no Fetch (a page's own worker) goes on as before, and set() doesn't fail for it", async () => {
+  const realFetch = globalThis.fetch, realWS = globalThis.WebSocket;
+  try {
+    const { sent, emit } = fakeDevTools(new Set(), new Set(['worker']));
+    const tf = await fetchEveryTarget(1);
+    await tf.set([{ urlPattern: '*', requestStage: 'Request' }]);
+    emit('Target.attachedToTarget', { sessionId: 'worker', targetInfo: { targetId: 'worker', type: 'worker', url: 'blob:x' }, waitingForDebugger: true });
+    await settle();
+    assert.deepEqual(sent.filter(m => m.method === 'Runtime.runIfWaitingForDebugger').map(m => m.sessionId), ['worker']);
     await tf.set([{ urlPattern: '*', requestStage: 'Request' }]);
     await tf.close();
   } finally {
