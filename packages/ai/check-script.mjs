@@ -78,7 +78,7 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
         const titled = !!title && title !== pn(titleOf(startsOn.get(s)));
         // The title can be a control's name too (the new chat's link in Recent).
         const said = l && (l.kind === 'words' ? l.text : l.kind === 'control' ? l.control : null);
-        const made = !!said && !hers(said) && ((l.kind === 'words' && (answerLike(said) || GREETING.test(said.trim()))) || (titled && (pn(said) === title || title.includes(pn(said)) || pn(said).includes(title))));
+        const made = !!said && ((l.kind === 'words' && ((!hers(said) && answerLike(said)) || GREETING.test(said.trim()))) || (titled && (pn(said) === title || title.includes(pn(said)) || pn(said).includes(title))));
         if (made) stops.push(row(bi, si, { text }, `its proof is words the app makes up ("${said.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, such as its message box'));
         doubt[app] = null;
         if (r.status === 'write') continue;

@@ -117,6 +117,9 @@ test('a talk track to a plan on the recorded screens: landings, writes, a differ
   const steps = plan.beats.flatMap(b => b.steps);
   // "Click the message box" before typing in it only focuses it: the typing does that, and nothing would prove the click.
   assert.deepEqual(steps.map(s => s.text), ['Go to chat', `Type "What's changed on PO-1?" in "Message"`, 'Press Enter', 'Wait for the answer', 'Click "Save: Save note"', 'Go to admin', 'Click "Certified"']);
+  // With no recording yet too, when the script names the box for both.
+  const bare = planFromTrack(parseTalkTrack('# T\n\n## 1. A\n\n**Do:** Click "Message", type "What changed?" in "Message", Enter.\n', 'x.md'), { walker: null }).plan;
+  assert.deepEqual(bare.beats.flatMap(b => b.steps).map(s => s.kind), ['type', 'press']);
   assert.deepEqual(steps.filter(s => s.lands).map(s => s.lands.screen), ['chat-home', 'chat-typed', 'chat-answer', 'chat-saved', 'admin-home', 'admin-certified']);
   assert.deepEqual(steps.filter(s => s.writes).map(s => s.writes), ['sends prompt 1 (Ask) in Chat app', 'saves "Save note" ("Save: Save note")', 'endorses it: "Certified"']);
   // The script's Approve is the product's Save: flagged once, and the plan uses what the product has.

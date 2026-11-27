@@ -39,4 +39,12 @@ test('a take that stops part way puts the last one back whole; one that finishes
   take(first, 1);
   endTake(first, null, { restore: true });
   assert.equal(readFileSync(join(first, 'recording.json'), 'utf8'), 'take 1');
+  // A raw path ending in a slash: the copy goes beside the folder, not in it, and still comes back.
+  const slash = join(mkdtempSync(join(tmpdir(), 'sc-take-')), 'raw');
+  take(slash, 1);
+  const kept3 = keepLastTake(`${slash}/`);
+  assert.equal(kept3, `${slash}.last-take`);
+  take(slash, 2);
+  endTake(`${slash}/`, kept3, { restore: true });
+  assert.equal(readFileSync(join(slash, 'recording.json'), 'utf8'), 'take 1');
 });

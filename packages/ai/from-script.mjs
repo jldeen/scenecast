@@ -324,6 +324,9 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
     // One step, on the screen it's on: the product's control, what the recording did around it, where it lands, what
     // it writes, and what differs from the script.
     const promptOf = value => promptFor(track.prompts, value);
+    // A click into the box it then types in only focuses it: nothing shows it landed, so a run would hold the send
+    // after it, and typing focuses the box itself.
+    const focusOnly = step => { const prev = beat.steps[beat.steps.length - 1]; if (prev && prev.kind === 'click' && !prev.writes && !prev.lands && norm(prev.target) === norm(step.target)) beat.steps.pop(); };
     const push = (s, from, line, opts = {}) => {
       const step = { ...s }, nf = flags.length;
       // A step left out: what was said about where it is goes with it.
@@ -344,7 +347,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           return drop();
         }
       }
-      if (!walker || step.kind === 'manual' || step.kind === 'wait' || step.kind === 'scroll') return append(step, from);
+      if (!walker || step.kind === 'manual' || step.kind === 'wait' || step.kind === 'scroll') { if (step.kind === 'type') focusOnly(step); return append(step, from); }
       let id = at(), sc = scr(id);
       if ((step.kind === 'click' || step.kind === 'hover') && COMPOSER_WORDS.test(step.target)) { const b = composer(sc.controls); if (b) step.target = b.name; }
       if ((step.kind === 'click' || step.kind === 'hover') && TITLE_WORDS.test(step.target) && sc.headings[0]) { step.target = sc.headings[0]; step.title = true; }
@@ -405,9 +408,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         if (own) { alt = true; step.target = own.name; r = { ...r, control: own }; }
       } else if (r.control && r.control.name && norm(r.control.name) !== norm(step.target) && step.kind !== 'type') step.target = r.control.name;
       if (step.kind === 'type') { S.typed[S.app] = step.value; if (r.control) step.target = S.field[S.app] = r.control.name; }
-      // A click into the box it then types in only focuses it: nothing shows it landed, so a run would hold the send
-      // after it, and typing focuses the box itself.
-      if (step.kind === 'type') { const prev = beat.steps[beat.steps.length - 1]; if (prev && prev.kind === 'click' && !prev.writes && !prev.lands && norm(prev.target) === norm(step.target)) beat.steps.pop(); }
+      if (step.kind === 'type') focusOnly(step);
       // The product's own approve button ("Save: Save skill") where the recording clicked the replica's ("Approve"):
       // it goes where that went.
       if (step.kind === 'click' && r.control && (!r.to || r.to === id) && APPROVE.test(step.target)) {

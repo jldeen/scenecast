@@ -1,6 +1,7 @@
 // The last take's raw recording, kept while a new one records: a take that stops part way puts it back whole (its
 // recording, and the snapshots, shots, streams and hovers it names, which the new take's reuse by screen name).
 import { existsSync, readdirSync, rmSync, cpSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // Not part of a take: content-addressed blobs and the index of them by address (a take only adds to both, and the
 // running receiver keeps that index in memory), and the receiver's own log.
@@ -10,7 +11,8 @@ const takeFiles = dir => existsSync(dir) ? readdirSync(dir).filter(n => !SHARED.
 // → the copy's folder, or null when there's no last take (no recording.json).
 export function keepLastTake(raw) {
   if (!raw || !existsSync(`${raw}/recording.json`)) return null;
-  const to = `${raw}.last-take`;
+  // Beside the raw folder, never in it (a raw path can end in a slash).
+  const to = `${resolve(raw)}.last-take`;
   rmSync(to, { recursive: true, force: true });
   for (const n of takeFiles(raw)) cpSync(`${raw}/${n}`, `${to}/${n}`, { recursive: true });
   return to;
