@@ -339,6 +339,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         const pack = ((packs || {}).forApp || {})[S.app];
         const pw = pack && packs.writeFor ? packWrite(packs.writeFor, pack, step, null, null) : null;
         if (pw && !undoable(pack, pw)) {
+          S.refused = true;
           flag('needs-ok', `${cap(formatStep(step))} in ${appTitle(S.app)}: it ${pw.what.split(/[;:(]/)[0].trim()}, and Scenecast can't put that back afterwards. Left out of the plan: add it back if you want it.`, { ...where(line), target: step.target });
           return drop();
         }
@@ -364,7 +365,8 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         if (other) { push({ kind: 'app', app: other.id }, from, line); id = at(); sc = scr(id); r = go(step); }
         else if (b) {
           flag('added', `Before "${step.target}", ${b.steps.length === 1 ? 'a step' : `${b.steps.length} steps`} your script leaves out, as recorded: ${b.steps.map(formatStep).join(' → ')}`, where(line));
-          for (const bs of b.steps) push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, '(not in your script: as recorded)', line);
+          S.refused = false;
+          for (const bs of b.steps) { push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, '(not in your script: as recorded)', line, { recorded: true }); if (S.refused) break; }
           id = at(); sc = scr(id); r = go(step);
         }
         if (!r.control && !r.recorded) {
@@ -421,7 +423,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           const then = m && (walker.recorded || walker.step)(m.to, { ...step, strict: true, role: opts.role });
           if (!m || !then || then.to !== r.to) continue;
           const text = `Before "${step.target}", a step your script leaves out, as recorded: ${formatStep(m.steps[0])} (the screen after it shows what that found)`;
-          const typed = push({ kind: 'type', target: m.steps[0].target, value: m.steps[0].value }, '(not in your script: as recorded)', line);
+          const typed = push({ kind: 'type', target: m.steps[0].target, value: m.steps[0].value }, '(not in your script: as recorded)', line, { recorded: true });
           // Her own recording's, and not a write: for information (the review's "Added from your recording").
           flag(typed && typed.writes ? 'added' : 'restored', text, where(line));
           id = at(); sc = scr(id); r = go({ ...step, strict: true, role: opts.role });
@@ -448,9 +450,13 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       const hers = line && Array.isArray(line.intents) ? [line.say || '', ...(line.do || []), line.screen || ''].join(' ') : null;
       const theirs = hers !== null && step.kind === 'click' && !(line.drafted || []).some(t => norm(t) === norm(step.target)) && !hasWords(hers, step.target) && !(alt && SAYS_APPROVE.test(hers));
       const other = step.kind === 'click' && ((!alt && said && !hasWords(step.target, said)) || theirs);
-      if ((w || pw) && ((pack && packs.writeFor && !undoable(pack, pw)) || other)) {
+      if ((w || pw) && ((pack && packs.writeFor && !undoable(pack, pw)) || other || opts.recorded)) {
         const what = (w || pw).what.split(/[;:(]/)[0].trim();
-        flag('needs-ok', theirs
+        // The way there it was part of stops here: past it, the recording's screens aren't where the run would be.
+        S.refused = true;
+        flag('needs-ok', opts.recorded
+          ? `The recording does "${formatStep(step)}" on the way, and it ${what}. Your script doesn't say to. Left out of the plan: add it back if that's what you meant.`
+          : theirs
           ? `Copilot's plan clicks "${step.target}" for "${clean(hers).slice(0, 80)}", and clicking it ${what}. Your script doesn't name it. Left out of the plan: add it back if that's what you meant.`
           : other
           ? `Your script says "${said}", but that isn't on the screen. The closest is "${step.target}", and clicking it ${what}. Left out of the plan: add it back if that's what you meant.`
@@ -495,7 +501,8 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
             const b = walker.bridge(S.cur[app2], (s2, id2) => id2 === to, 8, again);
             if (b && b.steps.length) {
               flag('added', `Beat key ⌥${it.beat} starts on "${to}": ${b.steps.length === 1 ? 'a step' : `${b.steps.length} steps`} your script leaves out, as recorded: ${b.steps.map(formatStep).join(' → ')}`, where(line));
-              for (const bs of b.steps) { push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, '(not in your script: as recorded)', line); mark(); }
+              S.refused = false;
+              for (const bs of b.steps) { push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, '(not in your script: as recorded)', line, { recorded: true }); mark(); if (S.refused) break; }
             }
             if (S.cur[app2] !== to) { S.cur[app2] = to; const last = beat.steps[beat.steps.length - 1]; if (last && last.kind === 'app' && last.app === app2) last.lands = { screen: to, text: landText(null, scr(to)) }; mark(); }
           }
@@ -563,7 +570,8 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           const b = walker.bridge(at(), (s2, id2, m, path) => m && m.steps.some(x => x.kind === 'click' && /^add\b/i.test(x.target) && !(walker.flow.states[id2] || {}).esc) && path.steps.some(names), 12);
           if (b) {
             flag('added', `"Add ${it.add}" is ${b.steps.length} steps, as recorded: ${b.steps.map(formatStep).join(' → ')}`, where(line));
-            for (const bs of b.steps) { if (bs.kind === 'click' && /^add\b/i.test(bs.target) && b.steps.indexOf(bs) === b.steps.length - 1) S.picked = it.add; S.wrote = null; const done = push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, it.from, line); mark(); if (done && S.wrote && S.wrote.kind === 'add') hints.push({ texts: [it.add], around: 'row' }); }
+            S.refused = false;
+            for (const bs of b.steps) { if (bs.kind === 'click' && /^add\b/i.test(bs.target) && b.steps.indexOf(bs) === b.steps.length - 1) S.picked = it.add; S.wrote = null; const hers = bs.kind === 'click' && /^add\b/i.test(bs.target) && b.steps.indexOf(bs) === b.steps.length - 1; const done = push({ kind: bs.kind, target: bs.target, value: bs.value, key: bs.key }, it.from, line, { recorded: !hers }); mark(); if (S.refused) break; if (done && S.wrote && S.wrote.kind === 'add') hints.push({ texts: [it.add], around: 'row' }); }
           }
           else hints.push({ texts: [it.add], loose: true });
           continue;

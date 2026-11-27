@@ -118,9 +118,11 @@ export function trackFromAnswer(track, answer, draft = null) {
       ...b,
       lines: b.lines.map((l, li) => {
         const id = lineId(bi, li), a = byId.get(id);
-        if (!a) { if (appEnd.has(id)) on = appEnd.get(id); return l; }
-        let steps = Array.isArray(a.steps) ? a.steps : [];
         const mine = steps0.filter(s => s.line === id);
+        // A line the answer leaves out is read by the rules again, in the app it's in then: when the answer has gone
+        // elsewhere, it gets the rules' steps with the switch back.
+        if (!a && !(mine.length && appAt.get(id) && on && on !== appAt.get(id))) { if (appEnd.has(id)) on = appEnd.get(id); return l; }
+        let steps = a && Array.isArray(a.steps) ? a.steps : [];
         if (!steps.length) steps = mine.map(formatStep);
         let intents = steps.map(s => intentOf(s, l, prompts)).filter(Boolean);
         // An answer that doesn't switch to the app her line is in would do the line in the app before (her prompt typed
@@ -130,7 +132,7 @@ export function trackFromAnswer(track, answer, draft = null) {
         for (const it of intents) if (it.app) on = it.app;
         // The controls the rules read her line's changes as: a change Copilot proposes on another must be named by her.
         const drafted = mine.filter(s => s.writes && s.target).map(s => s.target);
-        return { ...l, intents, drafted, points: (Array.isArray(a.point) ? a.point : []).filter(p => p && (p.text || (Array.isArray(p.texts) && p.texts.length))).slice(0, 3) };
+        return { ...l, intents, drafted, points: (a && Array.isArray(a.point) ? a.point : []).filter(p => p && (p.text || (Array.isArray(p.texts) && p.texts.length))).slice(0, 3) };
       }),
     })),
   };
