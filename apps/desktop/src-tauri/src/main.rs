@@ -1160,6 +1160,8 @@ async fn ai_finish(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<
 async fn ai_check_script(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
     let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
     job(state, app, id, "ai-check", move |dir, busy| {
+        // The receiver stays on this demo until the walk is done: another demo opened meanwhile waits for it.
+        let _held = scenecast_app::receiver::host().hold(dir)?;
         with_capture(dir, || {
             scenecast_app::ai::run(Some(dir), &["check-script"], |u| busy.emit(u))
         })
@@ -1173,6 +1175,8 @@ async fn ai_check_script(state: State<'_, Shared>, app: AppHandle, id: String) -
 async fn ai_record_unattended(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
     let _ = scenecast_app::receiver::host().ensure(&state.library.dir(&id)?);
     job(state, app, id, "ai-record", move |dir, busy| {
+        // The receiver stays on this demo through the run and its reset after: switched, it would lose their commands.
+        let _held = scenecast_app::receiver::host().hold(dir)?;
         // A Stop from before this job isn't for it; one pressed from here on is (the run reads it between steps).
         let _ = std::fs::remove_file(dir.join(".out/ai/stop"));
         if !dir.join("reset.md").is_file() {
