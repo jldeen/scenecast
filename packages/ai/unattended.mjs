@@ -700,7 +700,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
       // Never in the way of the reset after: a focus.json she broke by hand stays as it is.
-      if (run.summary && run.summary.states > 0) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
+      // Only a take that ran to the end replaces the last one's: one that stopped part way leaves its replica as it was.
+      if (run.summary && run.summary.states > 0 && !run.stopped) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
       // A save it refused after the last step: the take ends there, and she sees why.
       const os = await ownStopped();
       if (os && !run.stopped) ownStopRun(os);

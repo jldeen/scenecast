@@ -230,8 +230,14 @@ try {
   // Without the frame's host in the pack, the write's POST to it is held: it never reaches the notes server.
   writePack({ frameHost: false });
   tasks.log.length = 0;
+  // The last take's focus points: a run that stops part way leaves them (and its replica) as they were.
+  const focusBefore = existsSync(join(DEMO, 'focus.json')) ? readFileSync(join(DEMO, 'focus.json'), 'utf8') : null;
+  writeFileSync(join(DEMO, 'focus.json'), JSON.stringify({ points: [{ source: 'plan', beat: 1, texts: ['Kept from the last take'] }] }));
   res = await aiProc(['record', '--demo', DEMO, '--unattended', '--checked'], DEMO, E);
   rj = readRun(DEMO);
+  const keptPoints = JSON.parse(readFileSync(join(DEMO, 'focus.json'), 'utf8')).points || [];
+  check('a run that stops part way keeps the last take\'s focus points', rj.stopped && rj.summary && rj.summary.states > 0 && keptPoints.some(p => (p.texts || [])[0] === 'Kept from the last take'), JSON.stringify({ stopped: !!rj.stopped, states: rj.summary && rj.summary.states, keptPoints }));
+  if (focusBefore === null) rmSync(join(DEMO, 'focus.json'), { force: true }); else writeFileSync(join(DEMO, 'focus.json'), focusBefore);
   const pinHeld = (rj.guard.held || []).find(h => h.host === NOTES_HOST && h.path === '/api/pin');
   check('a held request names the tab, the frame and the app it came from', pinHeld && pinHeld.tab === HOST && pinHeld.frame === NOTES_HOST && pinHeld.app === 'tasks', JSON.stringify(pinHeld));
   check('a frame\'s host the pack doesn\'t name stays held: the write never reaches it, and the run stops', rj.stopped && count(tasks.log, 'POST notes/api/pin') === 0 && tasks.state().pinned === false && (rj.guard.held || []).some(h => h.host === NOTES_HOST && h.path === '/api/pin'), JSON.stringify({ stopped: rj.stopped, held: (rj.guard.held || []).filter(h => h.host === NOTES_HOST), log: tasks.log.filter(l => !l.startsWith('GET')) }));
