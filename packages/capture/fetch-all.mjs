@@ -16,6 +16,8 @@ const KINDS = new Set(['page', 'iframe', 'worker', 'shared_worker', 'service_wor
 const DROP_HEADERS = /^(content-encoding|content-length|transfer-encoding)$/i;
 // A target kind with no Fetch at all (a page's own worker: its requests go through the page, which has it).
 const NO_FETCH = /wasn't found/;
+// A target that closed while a call to it was on its way (its detach not here yet): nothing left to guard.
+const GONE = /Session with given id not found|No target with given id/;
 
 export async function fetchEveryTarget(port, { onPaused = async () => null, onResponse = async () => null, log = () => {} } = {}) {
   const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
@@ -82,7 +84,7 @@ export async function fetchEveryTarget(port, { onPaused = async () => null, onRe
     // Rejects when interception didn't start on a target that's still there: the caller stops rather than go on unguarded.
     async set(p) {
       patterns = p && p.length ? p : null;
-      await Promise.all([...sessions.keys()].map(s => fetchOn(s).catch(e => { if (patterns && sessions.has(s) && !NO_FETCH.test(e.message)) throw e; })));
+      await Promise.all([...sessions.keys()].map(s => fetchOn(s).catch(e => { if (patterns && sessions.has(s) && !NO_FETCH.test(e.message) && !GONE.test(e.message)) throw e; })));
     },
     targets: () => sessions.size,
     async close() { if (closed) return; patterns = null; closed = true; try { ws.close(); } catch (e) {} },

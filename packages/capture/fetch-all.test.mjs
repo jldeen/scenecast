@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { fetchEveryTarget } from './fetch-all.mjs';
 
 // A DevTools connection that answers every call, except Fetch.enable on the sessions in `failOn` (and with "wasn't
-// found", as Chrome says for a target kind with no Fetch, on those in `noFetch`).
-function fakeDevTools(failOn, noFetch = new Set()) {
+// found", as Chrome says for a target kind with no Fetch, on those in `noFetch`; and "not found" for every call on
+// those in `gone`: closed, before its detach arrives).
+function fakeDevTools(failOn, noFetch = new Set(), gone = new Set()) {
   const sent = [];
   let socket = null;
   globalThis.fetch = async () => ({ json: async () => ({ webSocketDebuggerUrl: 'ws://fake' }) });
@@ -13,7 +14,7 @@ function fakeDevTools(failOn, noFetch = new Set()) {
     send(text) {
       const m = JSON.parse(text);
       sent.push(m);
-      const error = m.method !== 'Fetch.enable' ? undefined : failOn.has(m.sessionId) ? { message: 'Fetch.enable failed' }
+      const error = gone.has(m.sessionId) ? { message: 'Session with given id not found.' } : m.method !== 'Fetch.enable' ? undefined : failOn.has(m.sessionId) ? { message: 'Fetch.enable failed' }
         : noFetch.has(m.sessionId) ? { message: "'Fetch.enable' wasn't found" } : undefined;
       setTimeout(() => this.onmessage({ data: JSON.stringify({ id: m.id, ...(error ? { error } : { result: {} }) }) }));
     }
@@ -55,6 +56,22 @@ test("a target kind with no Fetch (a page's own worker) goes on as before, and s
     emit('Target.attachedToTarget', { sessionId: 'worker', targetInfo: { targetId: 'worker', type: 'worker', url: 'blob:x' }, waitingForDebugger: true });
     await settle();
     assert.deepEqual(sent.filter(m => m.method === 'Runtime.runIfWaitingForDebugger').map(m => m.sessionId), ['worker']);
+    await tf.set([{ urlPattern: '*', requestStage: 'Request' }]);
+    await tf.close();
+  } finally {
+    globalThis.fetch = realFetch; globalThis.WebSocket = realWS;
+  }
+});
+
+test('a target that closes while set() turns interception on (its detach not here yet) is gone, not a failure', async () => {
+  const realFetch = globalThis.fetch, realWS = globalThis.WebSocket;
+  try {
+    const gone = new Set();
+    const { emit } = fakeDevTools(new Set(), new Set(), gone);
+    const tf = await fetchEveryTarget(1);
+    emit('Target.attachedToTarget', { sessionId: 'popup', targetInfo: { targetId: 'popup', type: 'page', url: 'about:blank' }, waitingForDebugger: true });
+    await settle();
+    gone.add('popup');
     await tf.set([{ urlPattern: '*', requestStage: 'Request' }]);
     await tf.close();
   } finally {
