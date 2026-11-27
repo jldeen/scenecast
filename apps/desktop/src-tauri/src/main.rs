@@ -1145,6 +1145,16 @@ fn with_capture<T>(dir: &Path, f: impl FnOnce() -> Res<T>) -> Res<T> {
     out
 }
 
+/// After a Copilot take is built: her script as the guide's, the beat keys for the plan's beats and the plan's focus
+/// points (`ai finish`).
+#[tauri::command]
+async fn ai_finish(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
+    job(state, app, id, "ai-finish", move |dir, busy| {
+        scenecast_app::ai::run(Some(dir), &["finish"], |u| busy.emit(u))
+    })
+    .await
+}
+
 /// Check my script: a read-only walk of the plan in the separate browser, and where a run would likely stop.
 #[tauri::command]
 async fn ai_check_script(state: State<'_, Shared>, app: AppHandle, id: String) -> Res<Value> {
@@ -2117,6 +2127,7 @@ fn main() {
             ai_record,
             ai_record_unattended,
             ai_check_script,
+            ai_finish,
             capture_profiles,
             set_separate,
             capture_sign_in,
