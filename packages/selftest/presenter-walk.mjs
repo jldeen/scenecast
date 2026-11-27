@@ -13,7 +13,7 @@ import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { freePort } from '@stuntdouble/core/lib/server.mjs';
-import { selftestGuard } from './guard.mjs';
+import { selftestGuard, edgeHere } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = join(KIT, '..');
@@ -137,7 +137,7 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
   const ids = ['script', 'focus-beats', 'stage', 'pictures', 'window-opens', 'window-content', 'window-follows', 'window-browses', 'window-clicker', 'window-goes', 'timer', 'steps', 'errors'];
   check('presenter walk: ⌥G opens the guide; it follows, browses, a clicker\'s Page Down moves the stage, goes, steps, times; script, guide and replica agree', r.code === 0 && rep.pass && ids.every(id => (rep.items.find(i => i.id === id) || {}).status === 'pass') && /over \d+ beats?/.test((rep.items.find(i => i.id === 'steps') || {}).detail), r.out);
   // In Edge too, where it's installed (the macOS and Windows runners): on Windows, its real Ctrl+Alt keys.
-  if (process.platform === 'win32' || process.platform === 'darwin') {
+  if (await edgeHere(check)) {
     r = await run('notes', '--check', { REPLICA_CHROME_CHANNEL: 'msedge' });
     rep = JSON.parse(readFileSync(join(DEMO, '.out', 'notes-check.json'), 'utf8'));
     check(`presenter walk in Edge (${process.platform === 'win32' ? 'Windows, Ctrl+Alt' : 'Mac, ⌥'})`, r.code === 0 && rep.pass && ids.every(id => (rep.items.find(i => i.id === id) || {}).status === 'pass') && (process.platform !== 'win32' || /Ctrl\+Alt\+G/.test(rep.items.find(i => i.id === 'window-opens').detail)), r.out);

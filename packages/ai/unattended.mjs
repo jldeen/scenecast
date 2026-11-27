@@ -26,6 +26,7 @@ import { liveWalker, walkerPacks } from './live.mjs';
 import { runReset, fillApi, setBefore, setBeforeProblem, claimScreen, checkClaim, checkLines } from './reset-run.mjs';
 import { leaveOutOf, leaveOn, leaveLog, leftFor, leaveApps, leaveFailure } from './leave-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
+import { forgetLastTake } from './finish.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { GROUP_LABEL, groupOpenAfter } from './find.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
@@ -299,7 +300,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   const out = aiDir(demo), stops = join(out, 'stops');
   mkdirSync(out, { recursive: true });
   const log = text => emit({ event: 'note', text });
-  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [], ...(lo.rules.length || lo.skipped.length ? { leaveOut: { lines: lo.lines.map(l => ({ app: l.app, what: l.what, from: l.from, shows: l.shows })), ...(lo.skipped.length ? { skipped: lo.skipped } : {}) } } : {}), apps: [...inPlan] };
+  const run = { at: new Date().toISOString(), unattended: true, title: plan.title, goal: readGoal(demo).goal || '', approved: { at: ap.at, list256: ap.list256 }, beats: [], steps: [], landings: [], writes: [], unprovable: [], marked: [], needsYou: [], starts: [], stopped: null, reset: {}, guard: {}, events: [], setBefore: [], ...(lo.rules.length || lo.skipped.length ? { leaveOut: { lines: lo.lines.map(l => ({ app: l.app, what: l.what, from: l.from, shows: l.shows })), ...(lo.skipped.length ? { skipped: lo.skipped } : {}) } } : {}), apps: [...inPlan] };
   const save = () => writeFileSync(join(out, 'run.json'), JSON.stringify(run, null, 1));
   // Leave out's record (per rule: the requests it filtered and what it took out; the checks before each save; a leak).
   const leakWhy = leak => `left out of the replica, and ${leak.why}: nothing after it was saved`;
@@ -570,7 +571,9 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (doubt) {
         const before = `the step before it (${doubt.text}) couldn't be proven (${doubt.why})`;
         if (wr) return { kind: 'unprovable', why: `${before}, and a write never follows a step it couldn't prove`, beforeWrite: true };
-        if (step.kind !== 'app') { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; byControl = true; }
+        // A step with a control goes on by that control only (exactly one, by its exact name); a scroll or a wait has
+        // none, and can't write, so it goes on.
+        if (step.kind !== 'app' && step.target) { const u = await w.uniqueControl(app, step); if (!u.ok) return { kind: 'unprovable', why: `${before}, and ${u.why}` }; byControl = true; }
       }
       let r, checked = null;
       if (wr) {
@@ -602,11 +605,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         // Its control was used and then the step failed: recorded above (the reset after undoes it), then the run stops.
         if (r.error) return { kind: 'error', why: `${at.text}: ${r.error}` };
       } else r = await w.act(app, step);
-      if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why };
+      if (r.missing || r.needsYou) return { kind: r.missing ? 'missing' : 'needs-you', why: r.why, ...(wr ? { write: true } : {}) };
       const c = await w.check(app, step);
       const afters = await w.reads(app).catch(() => []);
       lastReads[app] = afters;
-      if (!c.ok) return { kind: c.kind, why: c.why };
+      if (!c.ok) return { kind: c.kind, why: c.why, ...(wr ? { write: true } : {}) };
       const lp = liveProof(step, { before: screensOf(before, step.kind === 'app' ? prev : app), afters: screensOf(afters, app), next: nextActing(bi, si), typed: typedSoFar.filter(t => t !== step.value), walker: recWalker });
       const byCheck = !!(checked && checked.ok);
       // A wait, a hover, a scroll or a step group's expand moves nothing: after a proven step, or one its own exact
@@ -617,7 +620,12 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       run.landings.push({ beat: bi + 1, index: si, app, step: at.text, expected: step.lands ? formatLands(step.lands) : null, got: { screen: c.screen || null, url, text: byCheck ? `the pack's check: ${checked.status}${checked.picked ? ` ${JSON.stringify(checked.picked)}` : ''}` : proofWords(lp.lands) }, ok: true, strength, basis: byCheck ? 'pack check' : 'live', ...(strength === 'strong' ? {} : { why: lp.why }), ...(r.wrote ? { wrote: true } : {}), ...(checked ? { check: checked } : {}) });
       if (step.kind === 'type' && step.value) typedSoFar.push(step.value);
       const why = strength === 'strong' || carried ? null : pre || (w.proofOf(step) ? null : 'the plan gives it no proof of where it lands');
-      if (why) { doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why }); }
+      if (why) {
+        doubt = { text: at.text, why }; run.unprovable.push({ beat: bi + 1, step: si, text: at.text, why, strength }); emit({ event: 'unprovable', beat: bi, step: si, why });
+        // A step that ran and isn't a write, but couldn't be proven: the beat is marked for Review, as a doubt that
+        // stopped nothing is.
+        if (!wr) { const mark = { beat: bi + 1, step: si, text: at.text, app, kind: 'unprovable', why, picture: await shot(app, `${bi + 1}-${si + 1}-mark-unprovable`) }; run.marked.push(mark); emit({ event: 'marked', ...mark }); }
+      }
       else doubt = null;
       Object.assign(lastDid, { did: r.did, screen: c.screen });
       // What was set off camera, on the screen the step lands on (its Seen:), as drawn once the page is quiet. A page
@@ -635,12 +643,16 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       return null;
     };
     const total = stepCount(plan);
+    // Stop (the app's button): the app clears an old one when this job starts, so one pressed while it got ready counts.
+    const stopFile = join(aiDir(demo), 'stop');
     let n = 0;
     outer: for (const [bi, beat] of plan.beats.entries()) {
       const tb = Date.now();
       emit({ event: 'beat', beat: bi, title: beat.title });
       for (const [si, step] of beat.steps.entries()) {
         const at = { beat: bi, step: si, text: formatStep(step) };
+        // Stop (the app's button): between two steps, never between a write and its record; the reset after runs.
+        if (existsSync(stopFile)) { rmSync(stopFile, { force: true }); run.stopped = { kind: 'asked', why: 'You stopped it', at }; emit({ event: 'stopped', ...run.stopped }); break outer; }
         emit({ event: 'step', beat: bi, step: si, n: ++n, of: total, text: at.text });
         const prev = app;
         if (step.kind === 'app') app = w.appOf(step.app) || app;
@@ -653,6 +665,18 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
         if (stop && stop.notice) { noticeStopRun(stop.notice, at); break outer; }
         if (stop && !stop.own && !stop.leak && !stop.notice && !stop.unrestored) { const u = await unrestored(); if (u) stop = { kind: 'put-back', unrestored: u }; }
         if (stop && stop.unrestored) { restoreStopRun(stop.unrestored, at); break outer; }
+        // A doubt no write follows (a step it couldn't prove, words that aren't there, a control that isn't), on a
+        // step that isn't a write itself: the run keeps the screen as it is, marks the beat for Review, and goes on. A
+        // write never follows it (the doubt stops that write), and anything else still stops the run.
+        if (stop && /^(unprovable|elsewhere|missing)$/.test(stop.kind) && !stop.beforeWrite && !stop.write) {
+          const mark = { beat: bi + 1, step: si, text: at.text, app, kind: stop.kind, why: stop.why, picture: await shot(app, `${bi + 1}-${si + 1}-mark-${stop.kind}`) };
+          run.marked.push(mark);
+          emit({ event: 'marked', ...mark });
+          doubt = { text: at.text, why: stop.why };
+          run.steps.push({ ...at, app, did: 'marked', secs: +((Date.now() - ts) / 1000).toFixed(1), screen: null });
+          emit({ event: 'step-done', beat: bi, step: si, did: 'marked' });
+          continue;
+        }
         if (stop) {
           await stopWith(app, at, stop.kind, `${at.text}: ${stop.why}`);
           // Leave out's own picture, taken as it refused the save, and where on the screen it was.
@@ -675,6 +699,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
+      // Never in the way of the reset after: a focus.json she broke by hand stays as it is.
+      if (run.summary && run.summary.states > 0) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
       // A save it refused after the last step: the take ends there, and she sees why.
       const os = await ownStopped();
       if (os && !run.stopped) ownStopRun(os);
@@ -752,7 +778,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
   return finish();
   function finish() {
     save();
-    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}), ...(run.hovers && run.hovers.list ? { hovers: { recorded: run.hovers.recorded, captured: run.hovers.captured, gone: run.hovers.gone, missed: run.hovers.missed, ...(run.hovers.notReached ? { notReached: run.hovers.notReached } : {}) } } : {}), ...(run.menus && run.menus.list ? { menus: { recorded: run.menus.recorded, captured: run.menus.captured, gone: run.menus.gone, missed: run.menus.missed, ...(run.menus.notReached ? { notReached: run.menus.notReached } : {}) } } : {}) };
+    return { stopped: run.stopped, steps: run.steps.length, writes: run.writes.length, ...(run.marked.length ? { marked: run.marked.map(m => ({ beat: m.beat, text: m.text, why: m.why, picture: m.picture })) } : {}), held: (run.guard.held || []).filter(h => h.held).length, resetBefore: run.reset.before && run.reset.before.ok, resetAfter: run.reset.after ? run.reset.after.ok : null, summary: run.summary, ...(run.ownStatus ? { ownStatus: { start: run.ownStatus.start, ...(run.ownStatus.beat1 ? { beat1: run.ownStatus.beat1 } : {}) } } : {}), ...(run.hovers && run.hovers.list ? { hovers: { recorded: run.hovers.recorded, captured: run.hovers.captured, gone: run.hovers.gone, missed: run.hovers.missed, ...(run.hovers.notReached ? { notReached: run.hovers.notReached } : {}) } } : {}), ...(run.menus && run.menus.list ? { menus: { recorded: run.menus.recorded, captured: run.menus.captured, gone: run.menus.gone, missed: run.menus.missed, ...(run.menus.notReached ? { notReached: run.menus.notReached } : {}) } } : {}) };
   }
 }
 

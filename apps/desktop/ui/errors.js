@@ -11,6 +11,18 @@ export const CATALOG = [
   // A newer run of the same step took over: nothing went wrong, nothing to show.
   { id: 'superseded', test: /replaced by a newer check|a newer run took its place/i, quiet: true },
 
+  // Another demo's recording in the separate browser holds the receiver until it's done.
+  { id: 'receiver-held', test: /recording another demo in the separate browser/i,
+    title: () => 'Copilot is recording another demo',
+    body: () => 'It\u2019s using the separate browser until it\u2019s done. Open this demo again then.',
+    action: () => null },
+
+  // The separate browser's profile has no demo tenant yet (0.5.7: a "Use this tenant" button after signing in).
+  { id: 'no-demo-tenant', test: /doesn.t say which tenant to record in/i,
+    title: () => 'This demo doesn\u2019t know its tenant yet',
+    body: () => 'Scenecast only records signed in to your demo tenant. Add its domain to the separate browser\u2019s settings (Details says where), then sign in again.',
+    action: () => null },
+
   // An app that opened a sign-in page: the presenter signs in, in that tab.
   { id: 'app-signed-out', test: /opened a sign-in page/i,
     title: c => `Sign in to ${c.app || 'the app'} first`,

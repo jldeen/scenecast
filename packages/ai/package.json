@@ -1,14 +1,14 @@
 {
   "name": "@scenecast/ai",
-  "version": "0.5.5",
+  "version": "0.5.6-rc.1",
   "private": true,
   "type": "module",
   "description": "AI-assisted recording: Record for me (a plan, then the browser driven through the recorder), I'll click you script it, and Coach me. GitHub Copilot through the presenter's own GitHub sign-in, or a deterministic stand-in for tests.",
   "dependencies": {
     "@github/copilot-sdk": "1.0.31",
-    "@scenecast/script": "0.5.5",
-    "@stuntdouble/apps": "0.5.5",
-    "@stuntdouble/core": "0.5.5",
-    "@stuntdouble/player": "0.5.5"
+    "@scenecast/script": "0.5.6-rc.1",
+    "@stuntdouble/apps": "0.5.6-rc.1",
+    "@stuntdouble/core": "0.5.6-rc.1",
+    "@stuntdouble/player": "0.5.6-rc.1"
   }
 }

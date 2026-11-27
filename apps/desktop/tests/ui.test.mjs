@@ -592,6 +592,19 @@ try {
   const planText = await b.execute(() => document.querySelector('[data-test="ai-plan-text"]').value);
   check('the plan fills the run of show, with the steps that ask first', await exists('plan-beat-1') && /asks you first/.test(await b.execute(() => document.querySelector('[data-test="run-of-show"]').innerText)));
   check('Record for me: a plan in plain words, sends asking first', /Click "Plugins"/.test(planText) && /Press Enter — ask first/.test(planText) && /Click "Send" — ask first/.test(planText), planText);
+  // In a separate browser: the choice is kept with the demo (its recorder), with Check my script beside Approve; then
+  // back in her browser for the rest of this test.
+  await click('separate-on');
+  check('Copilot can record in a separate browser: kept with the demo, Check my script beside Approve', await waitFor('the separate browser', async () => JSON.parse(readFileSync(join(FM, 'demo.json'), 'utf8')).recorder === 'capture' && (await exists('ai-check')), 20000).catch(() => false));
+  await click('separate-off');
+  check('and back in her browser', await waitFor('her browser', async () => JSON.parse(readFileSync(join(FM, 'demo.json'), 'utf8')).recorder !== 'capture' && !(await exists('ai-check')), 20000).catch(() => false));
+  // Clicking through yourself after choosing the separate browser: her own browser records again.
+  await click('separate-on');
+  await waitFor('the separate browser', async () => JSON.parse(readFileSync(join(FM, 'demo.json'), 'utf8')).recorder === 'capture', 20000).catch(() => false);
+  await click('mode-manual');
+  check('clicking through yourself records in her browser, not the separate one', await waitFor('her browser', async () => JSON.parse(readFileSync(join(FM, 'demo.json'), 'utf8')).recorder !== 'capture', 20000).catch(() => false));
+  await click('mode-record');
+  await waitFor('the run of show', () => exists('ai-record'), 20000).catch(() => false);
   await shot('16-plan');
   await chat.bringToFront();
   // As on a Mac with the browser in front: the covered app window gets no animation frames (found on Jessica's Mac,
@@ -619,6 +632,8 @@ try {
   // Ready to present first, then compared and checked in the background: wait for both.
   await waitFor('the demo to be ready, compared and checked', async () => ((await exists('ai-after-done')) && (await attr('ai-after-done', 'data-compared')) === 'true' && (await attr('ai-after-done', 'data-checks')) !== '') || (await b.execute(() => /notice bad/.test(document.querySelector('[data-region="ai-after"]')?.innerHTML || ''))), 900000);
   check('Record for me: built, the talk track on its screens, the guide, the checks pass, compared', await exists('ai-after-done') && (await attr('ai-after-done', 'data-checks')) === 'true' && (await attr('ai-after-done', 'data-compared')) === 'true', await b.execute(() => document.querySelector('[data-region="ai-after"]')?.innerText));
+  // In her browser the run writes its own talk track, beat for beat: the finish is only for a separate-browser take.
+  check('Record for me in her browser: its own talk track, no finish after it', (await attr('ai-after-done', 'data-finished')) === 'false');
   check('Record for me: what was sent to Copilot, listed', await exists('ai-sent-list'));
   await shot('18-record-for-me-done');
   check('Record for me: script.md and focus points', /Kestrel moved the ship date/.test(readFileSync(join(FM, 'script.md'), 'utf8')) && JSON.parse(readFileSync(join(FM, 'focus.json'), 'utf8')).points.length > 0);

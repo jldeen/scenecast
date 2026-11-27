@@ -46,7 +46,23 @@ struct Inner {
     /// Pings in a row it didn't answer.
     misses: u32,
     error: Option<String>,
+    /// Jobs talking to it right now (a separate-browser recording or check): it stays on its demo until they're done.
+    held: u32,
 }
+
+/// While it lives, the receiver stays on its demo (`ReceiverHost::hold`).
+pub struct Held(&'static ReceiverHost);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if let Ok(mut g) = self.0.inner.lock() {
+            g.held = g.held.saturating_sub(1);
+        }
+    }
+}
+
+/// What opening another demo says while one is held.
+pub const HELD: &str = "Copilot is recording another demo in the separate browser: this one opens fully once it's done";
 
 /// Checks in a row (2 s apart, 1.5 s each) a running receiver may miss before it's restarted. A receiver taking in a
 /// big snapshot can be slow to answer: restarting it then (one missed ping did, on a presenter's real tabs) dropped
@@ -256,6 +272,14 @@ fn child_alive(child: &mut Option<Child>) -> bool {
 impl ReceiverHost {
     /// The receiver for this demo, started (or kept) running. Returns its state.
     pub fn ensure(&'static self, dir: &Path) -> Result<ReceiverState, AppError> {
+        self.ensure_with(dir, false)
+    }
+
+    /// `hold`: held for this demo in the same lock that puts the receiver on it, so no other demo slips in between.
+    fn ensure_with(&'static self, dir: &Path, hold: bool) -> Result<ReceiverState, AppError> {
+        if self.held_elsewhere(dir) {
+            return Err(AppError::Invalid(HELD.into()));
+        }
         self.supervisor.call_once(|| {
             std::thread::Builder::new()
                 .name("receiver".into())
@@ -274,19 +298,41 @@ impl ReceiverHost {
         {
             let mut g = self.inner.lock().expect("receiver lock");
             let same = g.dir.as_deref().is_some_and(|d| same_dir(d, dir));
+            if !same && g.held > 0 {
+                return Err(AppError::Invalid(HELD.into()));
+            }
             if !same {
                 stop_child(&mut g);
                 g.dir = Some(dir.to_path_buf());
                 g.port = None;
                 g.restarts = 0;
             }
+            if hold {
+                g.held += 1;
+            }
             if let Err(e) = self.start_locked(&mut g) {
                 g.error = Some(e.to_string());
+                if hold {
+                    g.held -= 1;
+                }
                 return Err(e);
             }
             g.error = None;
         }
         Ok(self.state())
+    }
+
+    /// Held for another demo: a recording in the separate browser talks to it until its reset after is done.
+    fn held_elsewhere(&self, dir: &Path) -> bool {
+        let g = self.inner.lock().expect("receiver lock");
+        g.held > 0 && !g.dir.as_deref().is_some_and(|d| same_dir(d, dir))
+    }
+
+    /// The receiver for this demo, kept on it until the returned guard is dropped: another demo's `ensure` is refused
+    /// meanwhile (a separate-browser recording loses its commands, its reset after included, if it's switched).
+    pub fn hold(&'static self, dir: &Path) -> Result<Held, AppError> {
+        self.ensure_with(dir, true)?;
+        Ok(Held(self))
     }
 
     /// Whether the receiver for this demo is the app's, and on which port.
@@ -499,8 +545,12 @@ fn spawn(dir: &Path, port: u16) -> Result<Child, AppError> {
         .map_err(|e| AppError::Invalid(format!("can't run {}: {e}", engine.node.display())))
 }
 
-/// The engine, pointed at the app's receiver for this demo when there is one.
+/// The engine, pointed at the app's receiver for this demo when there is one. While another demo's recording holds the
+/// receiver, none: its commands would reach that recording's browser.
 pub fn engine_for(dir: &Path) -> Result<scenecast_build::Engine, AppError> {
+    if host().held_elsewhere(dir) {
+        return Err(AppError::Invalid(HELD.into()));
+    }
     let mut engine = crate::engine()?;
     if let Some(port) = host().port_for(dir) {
         engine
@@ -545,6 +595,26 @@ mod tests {
         let g = host.inner.lock().unwrap();
         assert_eq!((g.restarts, g.misses, g.port), (0, 2, Some(port)));
         drop(l);
+    }
+
+    #[test]
+    fn a_held_receiver_stays_on_its_demo() {
+        let host: &'static ReceiverHost = Box::leak(Box::default());
+        let (a, b) = (
+            std::env::temp_dir().join("held-a"),
+            std::env::temp_dir().join("held-b"),
+        );
+        {
+            let mut g = host.inner.lock().unwrap();
+            g.dir = Some(a.clone());
+            g.held = 1;
+        }
+        let held = Held(host);
+        let err = host.ensure(&b).unwrap_err().to_string();
+        assert_eq!(err, HELD);
+        assert_eq!(host.inner.lock().unwrap().dir.as_deref(), Some(a.as_path()));
+        drop(held);
+        assert_eq!(host.inner.lock().unwrap().held, 0);
     }
 
     #[test]

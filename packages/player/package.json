@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/player",
-  "version": "0.5.5",
+  "version": "0.5.6-rc.1",
   "description": "StuntDouble's player: zero-dependency server, morph engine, stream replay, presenter keys (Alt, or Ctrl+Alt), focus points, app-window launcher for macOS and Windows.",
   "type": "module",
   "license": "MIT",
@@ -12,7 +12,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@stuntdouble/core": "0.5.5",
-    "@stuntdouble/apps": "0.5.5"
+    "@stuntdouble/core": "0.5.6-rc.1",
+    "@stuntdouble/apps": "0.5.6-rc.1"
   }
 }

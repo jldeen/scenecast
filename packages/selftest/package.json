@@ -1,14 +1,14 @@
 {
   "name": "@scenecast/selftest",
-  "version": "0.5.5",
+  "version": "0.5.6-rc.1",
   "private": true,
   "type": "module",
   "description": "End-to-end tests: the fixture app recorded, built, served and checked through the scenecast binary.",
   "dependencies": {
-    "@scenecast/script": "0.5.5",
-    "@stuntdouble/capture": "0.5.5",
-    "@stuntdouble/checks": "0.5.5",
-    "@stuntdouble/core": "0.5.5",
-    "@stuntdouble/player": "0.5.5"
+    "@scenecast/script": "0.5.6-rc.1",
+    "@stuntdouble/capture": "0.5.6-rc.1",
+    "@stuntdouble/checks": "0.5.6-rc.1",
+    "@stuntdouble/core": "0.5.6-rc.1",
+    "@stuntdouble/player": "0.5.6-rc.1"
   }
 }

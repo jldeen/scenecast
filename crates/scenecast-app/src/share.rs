@@ -15,7 +15,13 @@ use crate::library::{Demo, Library};
 
 pub const EXT: &str = "scenecast";
 const FORMAT: &str = "scenecast-demo";
-const KEPT_FROM_OUT: [&str; 2] = [".out/fidelity/report.json", ".out/fidelity.json"];
+/// What Review and the library read the checks from: real vs replica (`fidelity/report.json`), and the checklist, whole
+/// (`fidelity.json`) or quick (`quick.json`, the one there is when it was shared without the whole one).
+const KEPT_FROM_OUT: [&str; 3] = [
+    ".out/fidelity/report.json",
+    ".out/fidelity.json",
+    ".out/quick.json",
+];
 
 /// What goes in: the demo folder, less the presenter's own things.
 fn shared(rel: &str) -> bool {
@@ -56,6 +62,18 @@ fn files(root: &Path) -> std::io::Result<Vec<(String, PathBuf)>> {
                 out.push((rel, path));
             }
         }
+    }
+    // The library shows the newer of the two checklists; the file doesn't keep when each ran, so it carries only that one.
+    let modified = |f: &str| fs::metadata(root.join(f)).and_then(|m| m.modified()).ok();
+    if let (Some(whole), Some(quick)) =
+        (modified(".out/fidelity.json"), modified(".out/quick.json"))
+    {
+        let older = if quick > whole {
+            ".out/fidelity.json"
+        } else {
+            ".out/quick.json"
+        };
+        out.retain(|(rel, _)| rel != older);
     }
     out.sort();
     Ok(out)
@@ -203,6 +221,24 @@ mod tests {
             b"real screenshot",
         )
         .unwrap();
+        fs::write(
+            d.dir.join(".out/quick.json"),
+            r#"{"pass":false,"items":[{"id":"links","status":"fail"}]}"#,
+        )
+        .unwrap();
+        // The whole checklist ran after the quick one (before sharing): it's the one that goes.
+        fs::write(
+            d.dir.join(".out/fidelity.json"),
+            r#"{"pass":true,"items":[{"id":"links","status":"pass"},{"id":"notes","status":"pass"}]}"#,
+        )
+        .unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        fs::File::options()
+            .write(true)
+            .open(d.dir.join(".out/fidelity.json"))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
         fs::write(d.dir.join("ai.json"), r#"{"goal":"private"}"#).unwrap();
         fs::create_dir_all(d.dir.join("presenter")).unwrap();
         fs::write(d.dir.join("presenter/notes.json"), "{}").unwrap();
@@ -218,6 +254,8 @@ mod tests {
         assert!(names.contains(&"scenecast.json".to_owned()));
         assert!(names.contains(&"demo/presenter/notes.json".to_owned()));
         assert!(names.contains(&"demo/.out/fidelity/report.json".to_owned()));
+        assert!(names.contains(&"demo/.out/fidelity.json".to_owned()));
+        assert!(!names.contains(&"demo/.out/quick.json".to_owned()));
         assert!(
             !names
                 .iter()
@@ -241,6 +279,14 @@ mod tests {
             serde_json::from_slice(&fs::read(a.dir.join("demo.json")).unwrap()).unwrap();
         assert_eq!(cfg["raw"], "~/.scenecast/supplier-delay/raw");
         assert!(a.dir.join("presenter/notes.json").is_file());
+        // Compared with the real product and checked, as it was when it was shared.
+        assert!(a.status.fidelity.as_ref().is_some_and(|f| f.pass));
+        assert!(
+            a.status
+                .checks
+                .as_ref()
+                .is_some_and(|c| c.pass && c.passed == 2 && !c.quick)
+        );
         assert!(!theirs.root.read_dir().unwrap().any(|e| {
             e.unwrap()
                 .file_name()

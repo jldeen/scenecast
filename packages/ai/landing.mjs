@@ -2,6 +2,7 @@
 // chosen from the recording and checked against it the way a run checks the live page. Rules-only plans, Copilot's
 // (after its answer is grounded) and walkthroughs all go through proveLandings(); the offline walker checks with holds().
 import { formatStep } from './plan.mjs';
+import { answerLike } from './check-script.mjs';
 
 // Compared the way a run compares: lowercased, quotes and invisible characters out, spaces as one.
 export const pnorm = s => String(s == null ? '' : s).toLowerCase().replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, '').replace(/["“”'‘’]/g, '').replace(/\s+/g, ' ').trim();
@@ -156,7 +157,9 @@ export const packChecked = packs => s => {
 // the product changed since the recording. live.unstable: words today's reads can't count on.
 // → { lands: { kind, … }, number, message, differs, why }: lands.kind is null when nothing proves the step, and `why`
 // says so.
-export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [] } = {}) {
+// answer: the screen is what a write in this beat made (a prompt's answer, a save's card). A plan's proof there is never
+// the words the app wrote (a sentence, a quoted name: they change from run to run), so a run on another day finds it.
+export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [], answer = false } = {}) {
   const rec = walker.screen(to);
   const recBefore = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
   const reads = live ? (live.afters || []).filter(Boolean) : [], readsBefore = live ? (live.befores || []).filter(Boolean) : [];
@@ -226,7 +229,7 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
     for (const late of [false, true]) for (const digits of [false, true]) {
       // A number in what nearly all the site's screens show (its name: "Microsoft 365") doesn't change from screen to screen.
       const fine = t => stable(t) && (digits || !numbered(t) || frame.always.has(pnorm(t)));
-      const pick = l => msgOf(l) === late && textsOf(l).every(fine) && fromSound(l) && proves(l);
+      const pick = l => msgOf(l) === late && textsOf(l).every(fine) && fromSound(l) && proves(l) && !(answer && l.kind === 'words' && answerLike(l.text));
       const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))), message: late });
       // The plan's own proof, while it still proves the step.
       if (own && pick(own)) return found(own);
@@ -325,14 +328,15 @@ export function proveLandings(plan, walker, flags = [], { checked = null } = {})
   if (!walker) return flags;
   const steps = plan.beats.flatMap((b, bi) => b.steps.map(s => [s, bi]));
   const typedAll = [...(walker.typedTexts ? walker.typedTexts() : []), ...steps.map(([s]) => s.kind === 'type' ? s.value : null).filter(Boolean)];
-  let cur = null;
+  let cur = null, wrote = -1;
   for (const [k, [s, bi]] of steps.entries()) {
+    if (s.writes) wrote = bi;
     const to = s.lands && s.lands.screen, from = cur;
     if (!to) continue;
     cur = to;
     if (!walker.screen(to)) continue;
     const next = (steps.slice(k + 1).find(([x]) => !/^(wait|scroll)$/.test(x.kind)) || [])[0] || null;
-    const r = chooseProof(s, from, to, walker, { typed: typedAll.filter(v => !(s.kind === 'type' && v === s.value)), next });
+    const r = chooseProof(s, from, to, walker, { typed: typedAll.filter(v => !(s.kind === 'type' && v === s.value)), next, answer: wrote === bi });
     s.lands = { screen: to, ...r.lands, text: r.lands.kind === 'words' ? r.lands.text : null };
     if (r.differs && !s.differs) s.differs = r.differs;
     const flag = !r.lands.kind ? { kind: 'landing', text: `${formatStep(s)}: ${r.why}, so a run can't tell whether it worked` }

@@ -14,6 +14,7 @@ import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { cleanTarget } from './from-script.mjs';
 import { readFocusJson, readEditorOverrides, writeJsonAtomic, checkFocusJson, FOCUS_JSON, EDITOR_JSON } from '@stuntdouble/core/lib/overrides.mjs';
 import { proofWords } from './landing.mjs';
+import { GROUP_LABEL } from './find.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');
@@ -23,19 +24,67 @@ export const MARK = '<!-- Made by Scenecast from your talk track and the plan. E
 // The element around words a Focus names: "the card around …", "the row around …".
 const AROUND = { card: 'section,article,[role=group],[role=article],[role=region],[role=dialog]', row: 'li,tr,[role=row],[role=listitem]', list: 'ul,ol,[role=list]', item: 'li,[role=listitem],[role=option]', button: 'button,[role=button],a', pane: 'aside,[role=complementary],[role=region]', section: 'section,[role=region]' };
 
-// Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins).
-export function beatStarts(plan, flow) {
+// A plan step and a recorded step, by what they do: the take records the plan's app switches, typing, Enter, clicks
+// and keys, in order, but not every one (a click into a box to type in, a switch to the app it's on, a click that
+// changes nothing). A step is the take's next recorded one when that does the same: the same app, the same words
+// typed, a click on the control it names, the same key.
+const stepKind = s => s.kind === 'app' ? 'app' : s.kind === 'type' ? 'type' : s.kind === 'press' ? (s.key === 'Enter' ? 'enter' : 'key') : s.kind === 'click' ? 'click' : null;
+const pathKind = p => p.type ? 'type' : p.enter ? 'enter' : p.click ? 'click' : p.key ? 'key' : p.app ? 'app' : null;
+const bare = t => norm(String(t || '').replace(/[\u200B-\u200D\u2060\uFEFF]/g, ''));
+const sameStep = (s, p, nameOf = q => specName(q.click)) => {
+  const k = stepKind(s);
+  if (!k || k !== pathKind(p)) return false;
+  if (k === 'app') return p.app === s.app;
+  if (k === 'type') return !s.value || bare(p.text) === bare(s.value);
+  if (k === 'key') return p.key === s.key;
+  // A recorded click with no name (a test id only) isn't the one a plan step names.
+  // A step group by its label, its count aside ("3 items complete" recorded as "4 items complete").
+  const count = t => GROUP_LABEL.test(s.target || '') ? t.replace(/\d+/g, '#') : t;
+  if (k === 'click') { const a = count(bare(nameOf(p))), b = count(bare(s.target)); return !!a && (!b || a.includes(b) || b.includes(a)); }
+  return true;
+};
+
+// Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins). A step
+// lands on the screen the plan names when the recording has it, else on the one the take recorded for it (a plan
+// made from another recording names that recording's screens). nameOf(screen, matcher): the walker's, to name a
+// click the recorder kept by its test id only, from the control it picks on the screen it was on. screens: filled with
+// each plan screen the take has under another name → the take's.
+export function beatStarts(plan, flow, { nameOf = null, screens = null } = {}) {
   const b0 = (flow.beats || [])[0];
   if (!b0) return [];
+  const S = flow.states || {}, path = flow.path || [];
   const cur = { ...b0.states };
-  let active = b0.active;
+  let active = b0.active, at = 0;
+  const nameAt = p => specName(p.click) || (nameOf && S[p.checkpoint] && cur[S[p.checkpoint].app] ? nameOf(cur[S[p.checkpoint].app], p.click) || '' : '');
+  const recorded = s => {
+    // Every take starts with its first app's checkpoint; a plan that starts by typing or clicking (in its first app)
+    // has no step for it.
+    if (at === 0 && s.kind !== 'app' && path[0] && path[0].app) { const c = path[at++].checkpoint; if (S[c]) cur[S[c].app] = c; }
+    // A box emptied: no plan step does it, but its app is on its screen after it.
+    while (at < path.length && path[at].clear) { const c = path[at++].checkpoint; if (S[c]) cur[S[c].app] = c; }
+    // A recorded click with no name (a test id only) that no plan step can be matched to is passed over when the
+    // take's next step is this one.
+    if (at + 1 < path.length && pathKind(path[at]) === 'click' && !bare(nameAt(path[at])) && sameStep(s, path[at + 1], nameAt)) at++;
+    if (at >= path.length || !sameStep(s, path[at], nameAt)) return null;
+    return path[at++].checkpoint;
+  };
   return plan.beats.map(b => {
     const first = b.steps.find(s => s.kind === 'app');
     const start = { active: first && b.steps.indexOf(first) === 0 ? first.app : active, states: { ...cur } };
-    for (const s of b.steps) { if (s.kind === 'app') active = s.app; if (s.lands && s.lands.screen && (flow.states || {})[s.lands.screen]) { cur[flow.states[s.lands.screen].app] = s.lands.screen; active = flow.states[s.lands.screen].app; } }
+    for (const s of b.steps) {
+      if (s.kind === 'app') active = s.app;
+      const took = recorded(s);
+      if (screens && s.lands && s.lands.screen && !S[s.lands.screen] && S[took]) screens[s.lands.screen] = took;
+      const screen = s.lands && S[s.lands.screen] ? s.lands.screen : S[took] ? took : null;
+      if (screen) { cur[S[screen].app] = screen; active = S[screen].app; }
+    }
     return start;
   });
 }
+
+// Her talk track's beat for each beat of the plan: by its title, else in order. The plan is what the take ran: a beat
+// she left out of it (or that the take couldn't do) isn't in it.
+export const trackBeats = (track, plan) => plan.beats.map((b, i) => track.beats.find(tb => norm(tb.title) === norm(b.title)) || track.beats[i] || null);
 
 // The plan's Focus lines as focus points (packages/player/app/focus.js): the words, the element around them, an arrow,
 // a step group to open first, or `via` for a screen one step on.
@@ -92,13 +141,14 @@ function presenterStep(s, flow, apps = []) {
 // Her script in the guide's format: beats with times, Do (presenter keys, ⌥F points), Say (her words).
 export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
   const md = [`# ${track.title || plan.title || 'Demo'}`, '', MARK, ''];
-  track.beats.forEach((tb, i) => {
-    const b = plan.beats[i] || { steps: [], lines: [] };
+  const tbs = trackBeats(track, plan);
+  plan.beats.forEach((b, i) => {
+    const tb = tbs[i] || { title: b.title, time: '', screen: '', stage: [], lines: (b.lines || []).map(l => ({ say: l.text })) };
     md.push(`## ${i + 1}. ${tb.title}${tb.time ? ` · ${tb.time}` : ''}`, '');
     const screen = tb.screen || '';
     if (screen || keys[i]) md.push(`*Screen:* ${screen || 'where the beat starts'}${keys[i] ? ` (**${keys[i]}**)` : ''}`, '');
     const steps = b.steps.map(s => presenterStep(s, flow, apps));
-    const focus = (b.lines || []).flatMap(l => (l.focus || []).filter(f => f.on).map(f => `**⌥F**: ${f.texts.join(', ')}`));
+    const focus = (b.lines || []).flatMap(l => (l.focus || []).filter(f => f.on && (flow.states || {})[f.on]).map(f => `**⌥F**: ${f.texts.join(', ')}`));
     if (steps.length || focus.length) { md.push('**Do**', ''); for (const s of [...steps, ...focus]) md.push(`- ${s}`); md.push(''); }
     if (tb.stage.length) { md.push('**Watch**', ''); for (const s of tb.stage) md.push(`- ${s}`); md.push(''); }
     md.push('**Say**', '');
@@ -208,6 +258,17 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], l
   return { file: join(out, 'index.html'), needs, added, offCamera, leftOut };
 }
 
+// Once a new take is saved, before it's built: what the finish and Script made for the last take names its screens, which
+// this take may not have (the build refuses a beat key or focus point on a screen it doesn't have). The beat keys and
+// the plan's and Script's focus points go; the finish and Script make them again for this take. Her own dots and
+// edits stay.
+export function forgetLastTake(dir) {
+  const ed = readEditorOverrides(dir);
+  if (Object.keys(ed.beats).length) writeJsonAtomic(join(dir, EDITOR_JSON), { ...ed, beats: {} });
+  const fj = readFocusJson(dir), kept = fj.points.filter(p => p.source !== 'plan' && p.source !== 'script');
+  if (kept.length !== fj.points.length) writeJsonAtomic(join(dir, FOCUS_JSON), { ...fj, points: kept });
+}
+
 export async function finish({ demo, packs, emit = () => {} }) {
   const planFile = join(demo.dir, 'plan.md');
   if (!existsSync(planFile)) throw new Error('make the plan first');
@@ -219,15 +280,22 @@ export async function finish({ demo, packs, emit = () => {} }) {
   const result = { script: null, beats: 0, points: 0 };
   let slots = [];
   // Her script for the guide: from her talk track (source.md, kept when the plan was made), unless she wrote her own.
+  // Where each beat starts in the take; a Focus on a plan screen the take has under another name goes on the take's.
+  const screens = {};
+  const starts = beatStarts(plan, flow, { nameOf: walker.nameOf, screens });
+  for (const b of plan.beats) for (const l of b.lines || []) for (const f of l.focus || []) if (f.on && screens[f.on]) f.on = screens[f.on];
+  // Only a talk track the plan was made from (its "From:" line): notes she gave with a goal aren't her script.
   const src = join(demo.dir, 'source.md');
-  if (existsSync(src)) {
+  if (existsSync(src) && /^<!-- From: /.test(readFileSync(src, 'utf8'))) {
     const text = readFileSync(src, 'utf8'), name = (/^<!-- From: (.+?) -->/.exec(text) || [, 'source.md'])[1];
     const track = parseTalkTrack(text.replace(/^<!-- From: .+? -->\s*/, ''), name.replace(/\.docx$/i, '.md'));
-    slots = plan.beats.map((b, i) => (track.beats.find(tb => norm(tb.title) === norm(b.title)) || track.beats[i] || {}).time);
-    const starts = beatStarts(plan, flow);
-    // The beat keys: ⌥n starts her beat n where it starts (flow.editor.json; edits and other beats kept).
+    const tbs = trackBeats(track, plan);
+    slots = tbs.map(tb => (tb || {}).time);
+    // The beat keys: ⌥n starts her beat n where it starts, named as her guide names it (flow.editor.json; edits kept).
+    // They're the show's beats: none after the plan's last (the recording's own beats, or a longer plan's from before).
     const ed = readEditorOverrides(demo.dir);
-    starts.slice(0, 9).forEach((st, i) => { ed.beats[String(i + 1)] = { active: st.active, states: st.states }; });
+    for (const n of Object.keys(ed.beats)) if (+n > starts.length) delete ed.beats[n];
+    starts.slice(0, 9).forEach((st, i) => { ed.beats[String(i + 1)] = { active: st.active, states: st.states, label: (tbs[i] || plan.beats[i]).title }; });
     writeJsonAtomic(join(demo.dir, EDITOR_JSON), { version: 1, ...ed });
     result.beats = Math.min(9, starts.length);
     const keys = starts.map((st, i) => i < 9 ? `⌥${i + 1}` : null);

@@ -58,6 +58,8 @@ not the next time is a bug.
    `Cargo.toml` (the workspace), `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/tauri.conf.json`; then
    refresh the lockfiles (`package-lock.json`, `apps/desktop/package-lock.json`, `Cargo.lock`,
    `apps/desktop/src-tauri/Cargo.lock`).
+   A release candidate (`0.5.6-rc.1`) also needs `bundle.windows.wix.version` in `tauri.conf.json`, all numbers
+   (`0.5.6.1`): Windows' MSI installer can't take `rc.1`. The release itself drops it again.
 2. **The notes:** `docs/releases/vX.Y.Z.md`, for presenters: one line on what's new, how to update ("click **Update to
    vX.Y.Z** at the bottom left"), then what's fixed and what's new in plain words.
 3. **The guide**, if it changed: `node scripts/guide-pdf.mjs` makes `docs/guide.pdf` from `docs/guide.md`.

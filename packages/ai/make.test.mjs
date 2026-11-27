@@ -3,7 +3,7 @@
 // walkthrough to the same plan, and the finish (focus points with via, her script for the guide).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,11 +20,11 @@ import { undoGroups, checkClaim } from './reset-run.mjs';
 import { startUrls } from './live.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
-import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish } from './finish.mjs';
+import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish, forgetLastTake } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
-import { parseScript as guideParse } from '@stuntdouble/core/lib/notes.mjs';
-import { checkFocusJson } from '@stuntdouble/core/lib/overrides.mjs';
+import { parseScript as guideParse, buildNotes } from '@stuntdouble/core/lib/notes.mjs';
+import { checkFocusJson, readEditorOverrides, applyEditorOverrides } from '@stuntdouble/core/lib/overrides.mjs';
 
 const BOX = { sel: 'div[role=textbox][contenteditable=true]' };
 function demoDir() {
@@ -119,7 +119,8 @@ test('a talk track to a plan on the recorded screens: landings, writes, a differ
   assert.deepEqual(steps.filter(s => s.writes).map(s => s.writes), ['sends prompt 1 (Ask) in Chat app', 'saves "Save note" ("Save: Save note")', 'endorses it: "Certified"']);
   // The script's Approve is the product's Save: flagged once, and the plan uses what the product has.
   assert.match(steps[5].differs, /"Save: Save note".*not "Approve"/);
-  assert.deepEqual(flags.map(f => f.kind), ['differs']);
+  // chat-saved shows only what the app wrote ("Your note is saved as …"): nothing a plan can count on proves the save.
+  assert.deepEqual(flags.map(f => f.kind), ['differs', 'landing']);
   const [l1, l2, l3] = plan.beats[0].lines;
   assert.deepEqual(l1.focus[0], { texts: ['Kestrel moved the ship date by six days.'], on: 'chat-answer' });
   // A screen one click off the path: ⌥F takes the click.
@@ -255,6 +256,22 @@ test('a list framed the way she shows one: its heading and first step; a section
   assert.deepEqual(sectionsOf(page).map(s => [s.label.text, s.cards[0].text]), [['Our process', 'Spend policy'], ['Our people', 'Avery Chen']]);
   // Headings over buttons that do things aren't sections.
   assert.deepEqual(sectionsOf({ items: [h(1, 'Comments', 'h2'), item(2, 'Write a reply', { role: 'button' }), item(3, 'Skip comments', { role: 'button' }), h(4, 'Footer', 'h2'), item(5, 'Manage cookies', { role: 'button' })] }), []);
+});
+
+test('on a screen a write made (a prompt\'s answer, a save\'s card), a plan\'s proof is a control or the product\'s own words, never the app\'s sentences', () => {
+  const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((text, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', text })) });
+  const S = {
+    typed: sc(['New chat', 'Message']),
+    answer: sc(['New chat', 'Message', 'The original date is six days away, so the build runs late.'], [{ role: 'button', name: 'Save: Save skill' }]),
+    saved: sc(['New chat', 'Message', 'The original date is six days away, so the build runs late.', "Completed 'Save skill'", 'Background task ran for'], [{ role: 'button', name: 'Open triage skill' }]),
+  };
+  const walker = { screen: id => S[id], shown: id => S[id], view: () => ({ url: 'https://chat.example.com/' }), states: Object.keys(S), flow: { states: Object.fromEntries(Object.keys(S).map(k => [k, { app: 'chat' }])) } };
+  const plan = { beats: [{ steps: [
+    { kind: 'app', app: 'chat', lands: { screen: 'typed' } },
+    { kind: 'press', key: 'Enter', writes: 'sends the prompt · chat:new-task', line: '1.1', lands: { screen: 'answer' } },
+    { kind: 'click', target: 'Save: Save skill', writes: 'saves the skill · chat:save-skill', line: '1.2', lands: { screen: 'saved' } }] }] };
+  proveLandings(plan, walker);
+  assert.deepEqual(plan.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['answer · control "Save: Save skill"', 'saved · "Background task ran for"']);
 });
 
 test('a landing proves its step: new words, a control\'s state, a control only it has, words gone with the page\'s own still there; numbers last', () => {
@@ -563,7 +580,7 @@ test('a walkthrough makes the same kind of plan: steps, landings, writes, a beat
   const plan = planFromRecording(rec, { walker, flags });
   assert.deepEqual(plan.beats.map(b => b.steps.map(s => s.text)), [['Go to chat', `Type "What's changed on PO-1?"`, 'Press Enter', 'Wait for the answer'], ['Click "Save: Save note"'], ['Go to admin', 'Click "Certified"']]);
   // Its landings prove each step too: what was typed shows in the chat box, and nothing needs her.
-  assert.deepEqual([plan.beats[0].steps[1].lands, flags], [{ screen: 'chat-typed', kind: 'words', text: "What's changed on PO-1?" }, []]);
+  assert.deepEqual([plan.beats[0].steps[1].lands, flags.map(f => f.text)], [{ screen: 'chat-typed', kind: 'words', text: "What's changed on PO-1?" }, [`Click "Save: Save note": nothing on chat-saved tells it from the screen before, so a run can't tell whether it worked`]]);
   // A click recorded by its test id is named from the screen; the prompt is the first one sent.
   assert.deepEqual(plan.beats.flatMap(b => b.steps).filter(s => s.writes).map(s => s.writes.split(' (')[0]), ['sends prompt 1 in Chat app', 'saves "Save note"', 'endorses it: "Certified"']);
 });
@@ -586,6 +603,106 @@ test('the finish: focus points with via that the replica takes, beat keys, and h
   assert.ok(g.beats[0].do.some(d => /^\*\*⌥F\*\*: Kestrel moved/.test(d.text)));
   // The review's timings: each beat's lines at a steady pace, against the time her script gives it.
   assert.deepEqual(beatTimings(plan, ['5s', '~1m15s']).map(r => r[1]), ['about 11 s to say, in 5 s (long)', 'about 1 s to say, in 75 s', 'about 0:12 to say, in 1:20']);
+});
+
+// A take of a plan made on another recording: the take's screens have their own names, not the plan's, and its
+// recorder marked a beat at each app switch and answer, more than the plan has.
+function takeDemo() {
+  const demo = demoDir();
+  const flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8'));
+  const home = { chat: 'chat-home', admin: 'admin-home' };
+  flow.path = [{ app: 'chat', checkpoint: 'chat-home' }, { type: BOX, text: "What's changed on PO-1?", checkpoint: 'chat-typed' }, { enter: BOX, checkpoint: 'chat-answer' },
+    { click: { sel: 'button[aria-label="Save: Save note"]' }, checkpoint: 'chat-saved' }, { app: 'admin', checkpoint: 'admin-home' }, { click: { sel: 'button[aria-label="Certified"]' }, checkpoint: 'admin-certified' }];
+  flow.beats = [{ label: '0 Reset', active: 'chat', states: home }, { label: '1 Chat: start', active: 'chat', states: home },
+    { label: '2 Chat: answer', active: 'chat', states: { ...home, chat: 'chat-answer' } }, { label: '3 Admin: start', active: 'admin', states: { ...home, chat: 'chat-saved' } },
+    { label: '4 Admin: certified', active: 'admin', states: { chat: 'chat-saved', admin: 'admin-certified' } }];
+  writeFileSync(join(demo.dir, 'flow.json'), JSON.stringify(flow));
+  const plan = `# Delay demo\n\n## Beat 1 · The question\n\n- Go to chat\n  Lands on: old-home · "New chat"\n- Click "Message"\n- Type "What's changed on PO-1?" in "Message"\n  Lands on: old-typed · "What's changed"\n- Press Enter\n  Lands on: old-answer · "ship date"\n\n> Our supplier moved the ship date.\n\n## Beat 2 · Save it\n\n- Click "Save: Save note"\n  Lands on: old-saved · "saved"\n\n> I save it.\n\n## Beat 3 · Certify it\n\n- Go to admin\n  Lands on: old-admin · "Plugin admin"\n- Click "Certified"\n  Lands on: old-certified · "Certified by you"\n\n> I certify it.\n`;
+  writeFileSync(join(demo.dir, 'plan.md'), plan);
+  return { demo, flow, plan: parsePlan(plan), home };
+}
+
+test('each beat of a take starts where the take was when it began, and the guide has its picture', () => {
+  const { demo, flow, plan } = takeDemo();
+  const starts = beatStarts(plan, flow);
+  assert.deepEqual(starts.map(b => [b.active, b.states[b.active]]), [['chat', 'chat-home'], ['chat', 'chat-answer'], ['admin', 'admin-home']]);
+  const stage = applyEditorOverrides(structuredClone(flow), { edits: [], beats: Object.fromEntries(starts.map((st, i) => [i + 1, st])) });
+  const notes = buildNotes(demo, stage, '# Delay demo\n\n## 1. The question\n\n## 2. Save it\n\n## 3. Certify it\n', 'script.md');
+  const shots = Object.fromEntries(notes.shots.map(x => [x.name, x.state]));
+  assert.deepEqual(notes.beats.slice(1, -1).map(b => shots[b.shot]), ['chat-home', 'chat-answer', 'admin-home']);
+});
+
+test('a recorded click with no name, at the end of a beat, isn\'t the next beat\'s click', () => {
+  const { flow, plan } = takeDemo();
+  // A click on a test id only, between the answer and the save: the save's step mustn't take it.
+  const i = flow.path.findIndex(p => p.click);
+  flow.path.splice(i, 0, { click: { sel: '[data-testid="noop"]' }, checkpoint: 'chat-answer' });
+  assert.equal(beatStarts(plan, flow)[2].states.chat, 'chat-saved');
+});
+
+test('a take\'s Save kept by its test id only, and a box it emptied, still start the next beats where they were', () => {
+  const { flow, plan } = takeDemo();
+  const save = flow.path.find(p => p.click && /Save note/.test(p.click.sel));
+  save.click = { sel: 'button[data-testid="save"]' };
+  flow.path.splice(flow.path.indexOf(save), 0, { clear: BOX, checkpoint: 'chat-answer' });
+  const nameOf = (sig, m) => sig === 'chat-answer' && m.sel === save.click.sel ? 'Save: Save note' : null;
+  assert.deepEqual(beatStarts(plan, flow, { nameOf }).map(b => [b.active, b.states.chat]), [['chat', 'chat-home'], ['chat', 'chat-answer'], ['admin', 'chat-saved']]);
+});
+
+test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 start them, none of the recording\'s after them', async () => {
+  const { demo, flow, home } = takeDemo();
+  // Her talk track has a beat this take left out; the beat keys from a longer plan before are still there.
+  writeFileSync(join(demo.dir, 'source.md'), '<!-- From: talk.md -->\n\n# Delay demo\n\n## 1. The question · ~10s\n\n> Our supplier moved the ship date.\n\n## 2. Save it · ~20s\n\n> I save it.\n\n## 3. A part this take left out · ~30s\n\n> Not in this take.\n\n## 4. Certify it · ~1m15s\n\n> I certify it.\n');
+  writeFileSync(join(demo.dir, 'flow.editor.json'), JSON.stringify({ version: 1, edits: [], beats: { 4: { active: 'admin', states: home } } }));
+  await finish({ demo, packs: null });
+  const script = readFileSync(join(demo.dir, 'script.md'), 'utf8');
+  assert.deepEqual(guideParse(script, 'script.md').beats.map(b => [b.title, b.start, b.end]), [['The question', 0, 10], ['Save it', 10, 30], ['Certify it', 30, 105]]);
+  const ed = readEditorOverrides(demo.dir);
+  assert.deepEqual(Object.entries(ed.beats).map(([n, b]) => [n, b.label]), [['1', 'The question'], ['2', 'Save it'], ['3', 'Certify it']]);
+  assert.deepEqual(applyEditorOverrides(structuredClone(flow), ed).beats.map(b => b.label), ['0 Reset', '1 The question', '2 Save it', '3 Certify it']);
+});
+
+test('a plan that starts by typing still lines up with the take, past its first checkpoint', () => {
+  const { demo, flow } = takeDemo();
+  const plan = parsePlan(readFileSync(join(demo.dir, 'plan.md'), 'utf8').replace('- Go to chat\n  Lands on: old-home · "New chat"\n', ''));
+  assert.deepEqual(beatStarts(plan, flow).map(b => b.states.chat), ['chat-home', 'chat-answer', 'chat-saved']);
+});
+
+test('before a new take is built, what was made for the last one goes; her own dots and edits stay', () => {
+  const { demo, home } = takeDemo();
+  writeFileSync(join(demo.dir, 'flow.editor.json'), JSON.stringify({ version: 1, edits: [{ find: 'Friday', replace: 'Monday' }], beats: { 1: { active: 'chat', states: home } } }));
+  const pt = (id, source) => ({ id, beat: 1, app: 'chat', states: ['old-answer'], find: 'x', source });
+  writeFileSync(join(demo.dir, 'focus.json'), JSON.stringify({ version: 1, points: [pt('a', 'plan'), pt('b', 'script'), pt('c', 'dot')] }));
+  forgetLastTake(demo.dir);
+  const ed = readEditorOverrides(demo.dir);
+  assert.deepEqual([ed.beats, ed.edits.length], [{}, 1]);
+  assert.deepEqual(JSON.parse(readFileSync(join(demo.dir, 'focus.json'), 'utf8')).points.map(p => p.id), ['c']);
+});
+
+test('a step group recorded with another count still moves the next beat\'s start', () => {
+  const { demo, flow } = takeDemo();
+  const plan = parsePlan(readFileSync(join(demo.dir, 'plan.md'), 'utf8').replace('Click "Save: Save note"', 'Click "3 items complete, using Search"'));
+  flow.path.find(p => p.click && /Save note/.test(p.click.sel)).click = { sel: 'button', text: '4 items complete, using Search' };
+  assert.equal(beatStarts(plan, flow)[2].states.chat, 'chat-saved');
+});
+
+test('a Focus on a screen the take has under another name goes on the take\'s, in focus.json and the guide', async () => {
+  const { demo } = takeDemo();
+  const file = join(demo.dir, 'plan.md');
+  writeFileSync(file, readFileSync(file, 'utf8').replace('> Our supplier moved the ship date.\n', '> Our supplier moved the ship date.\n  Focus: "ship date" · on old-answer\n'));
+  writeFileSync(join(demo.dir, 'source.md'), '<!-- From: talk.md -->\n\n# Delay demo\n\n## 1. The question\n\n> Our supplier moved the ship date.\n\n## 2. Save it\n\n> I save it.\n\n## 3. Certify it\n\n> I certify it.\n');
+  await finish({ demo, packs: null });
+  const points = JSON.parse(readFileSync(join(demo.dir, 'focus.json'), 'utf8')).points.filter(p => p.source === 'plan');
+  assert.deepEqual(points.map(p => p.states), [['chat-answer']]);
+  assert.match(readFileSync(join(demo.dir, 'script.md'), 'utf8'), /\*\*⌥F\*\*: ship date/);
+});
+
+test('notes she gave with a goal aren\'t her script: the finish writes no guide script from them', async () => {
+  const { demo } = takeDemo();
+  writeFileSync(join(demo.dir, 'source.md'), 'Contoso wants to see how fast a PO gets approved. Their CFO cares about audit trails.\n');
+  const r = await finish({ demo, packs: null });
+  assert.equal(r.script, null);
+  assert.equal(existsSync(join(demo.dir, 'script.md')), false);
 });
 
 test('proofs on today\'s product: kept, new, today only, behind a write, missed; never a greeting, a passing tip or a page the guard broke', () => {

@@ -44,10 +44,10 @@
     { id: 'iq', url: 'https://preview.iq.example.com/', key: 'i' },
     { id: 'admin', url: 'https://admin.cloud.microsoft/', key: 'a' },
   ];
-  const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', recording: 'new', paused: 'new', recorded: 'recorded', review: 'built', 'review-ok': 'built', making: 'new', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
+  const stage = { empty: 'new', library: 'checked', record: 'new', 'record-pick': 'new', copilot: 'new', 'copilot-plan': 'new', 'copilot-separate': 'new', recording: 'new', paused: 'new', recorded: 'recorded', review: 'built', 'review-ok': 'built', making: 'new', present: 'checked', presenting: 'checked', share: 'checked' }[SC] || 'new';
   const after = s => ['recorded', 'built', 'checked'].indexOf(stage) >= ['recorded', 'built', 'checked'].indexOf(s);
   const status = {
-    recorded: after('recorded'), recordedAt: after('recorded') ? now - 3600e3 : null, screens: after('recorded') ? 22 : 0,
+    recorded: after('recorded'), raw: after('recorded'), recordedAt: after('recorded') ? now - 3600e3 : null, screens: after('recorded') ? 22 : 0,
     built: after('built'), builtAt: after('built') ? now - 1800e3 : null, liveScenes: after('built') ? 22 : 0, fallbackScenes: 0,
     fidelity: after('built') ? { pass: stage === 'checked', within: stage === 'checked' ? 22 : 21, total: 22, score: stage === 'checked' ? 100 : 95.5, fontsOk: true, at: now - 900e3 } : null,
     checks: after('built') ? { pass: true, passed: 41, failed: 0, quick: true, at: now - 900e3 } : null,
@@ -61,6 +61,8 @@
   const others = [
     { ...demo, id: 'supplier-delay', title: 'Supplier delay walkthrough', status: { ...status, stage: 'checked', recorded: true, built: true, screens: 14, liveScenes: 14 } },
     { ...demo, id: 'admin-tour', title: 'Admin center tour', status: { ...status, stage: 'checked', recorded: true, built: true, screens: 9, liveScenes: 9 } },
+    // Opened from a shared file: the build's copy of the take and the checks it was shared with, no raw recording.
+    { ...demo, id: 'shared-demo', title: 'Shared demo from a colleague', status: { ...status, stage: 'checked', recorded: true, raw: false, recordedAt: now - 26 * 3600e3, built: true, screens: 44, liveScenes: 44, fidelity: { pass: false, within: 35, total: 43, viewsDiffer: 0, score: 81.4, fontsOk: false, at: now - 26 * 3600e3 } } },
   ];
   const demos = SC === 'empty' ? [] : SC === 'library' ? [demo, ...others] : [demo, ...others];
   const signedIn = q.get('signed') !== '0' && SC !== 'empty';
@@ -128,8 +130,10 @@
     browser_profiles: ({ browser }) => ({ browser: browser || demo.browser, picked: 'Profile 10', running: true, profiles: [
       { dir: 'Profile 10', name: 'Jessica', email: 'jessica@contoso.com', open: true, color: '#6b4fbb', ...(SC === 'empty' ? {} : { extension: { id: 'kfmgcj', enabled: true, devMode: true } }) },
       { dir: 'Default', name: 'Personal', color: '#0f6cbd' } ] }),
-    ai_get: () => ({ plan: SC === 'copilot-plan' ? PLAN : '', goal: 'A buyer finds out PO-450101 is late, asks Copilot what it holds up, finds who can approve the expedite in Microsoft IQ, and IT rolls the agent out.', source: '', sent: [], run: null,
-      review: SC === 'copilot-plan' ? { from: 'Act 1 talk track.docx', beats: 4, steps: 14, checked: 22, writes: [], flags: [{ kind: 'differs', beat: 2, line: '2.1', text: 'The product shows "Save: Save skill" here, not "Approve"' }] } : null }),
+    // Copilot records in a separate browser, already signed in (copilot-separate).
+    capture_profiles: () => ({ profiles: ['default', 'demo-tenant'], separate: SC === 'copilot-separate', profile: SC === 'copilot-separate' ? 'demo-tenant' : 'default' }),
+    ai_get: () => ({ plan: /^copilot-(plan|separate)$/.test(SC) ? PLAN : '', goal: 'A buyer finds out PO-450101 is late, asks Copilot what it holds up, finds who can approve the expedite in Microsoft IQ, and IT rolls the agent out.', source: '', sent: [], run: null,
+      review: /^copilot-(plan|separate)$/.test(SC) ? { from: 'Act 1 talk track.docx', beats: 4, steps: 14, checked: 22, writes: [], flags: [{ kind: 'differs', beat: 2, line: '2.1', text: 'The product shows "Save: Save skill" here, not "Approve"' }] } : null }),
     pick_script_file: () => ({ name: 'Act 1 talk track.docx', path: '/x/Act 1 talk track.docx' }),
     ai_approve: () => ({ approved: true }),
     ai_save: a => a, ai_settings: ({ set }) => ({ model: 'auto', pageText: true, ...set }),

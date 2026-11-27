@@ -715,7 +715,7 @@ function tabDone(t, s) {
   return { record: s.recorded, review: s.built && !!s.fidelity?.pass, build: s.built, fidelity: !!s.fidelity?.pass, script: s.focusPoints > 0 }[t];
 }
 function tabJobs(t) {
-  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-script', 'coach'], review: ['build', 'checks', 'fidelity', 'script', 'ai-script'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
+  return { record: ['preflight', 'record', 'record-stop', 'extension', 'install', 'ai-plan', 'ai-record', 'ai-check', 'capture-sign-in', 'ai-script', 'coach'], review: ['build', 'checks', 'fidelity', 'script', 'ai-script'], build: ['build', 'checks'], fidelity: ['fidelity'], script: ['script'], export: ['export'] }[t] || [];
 }
 const gateDone = (g, s) => ({ record: s.recorded || s.built, review: s.built && !!s.fidelity?.pass, present: !!s.rehearsedAt, share: !!s.exportedAt })[g];
 const gateJobs = g => g === 'review' ? [...new Set(REVIEW.flatMap(([t]) => tabJobs(t)))] : tabJobs(gateTab(g));
@@ -972,6 +972,8 @@ Object.assign(REGIONS, REGIONS_LATE);
 
 // How it's recorded: by hand (I'll click through, optionally coached) or by Copilot. Every demo can switch.
 const copilotMode = d => d.mode === 'record';
+// Copilot records in a separate browser (demo.json recorder "capture"), not hers.
+const separate = d => copilotMode(d) && !!J(d.id).capture?.separate;
 const coachMode = d => d.mode === 'coach';
 const recState = d => {
   const j = J(d.id).record || {}, stop = J(d.id)['record-stop'] || {}, st = j.status;
@@ -987,7 +989,7 @@ function recHead(d) {
   // Copilot has stopped clicking once it's writing the talk track: the browser is the presenter's again.
   const writing = aiOn && (J(d.id)['ai-record']?.stages || []).some(s => s.name === 'script');
   if (writing) return head('Writing your talk track', 'Copilot has finished clicking. It\u2019s writing what to say from what it did.', `<button class="btn primary big" disabled>Writing\u2026</button>`);
-  if (aiOn) return head('Copilot is recording', 'Keep your hands off the browser until it asks.', `<button class="btn primary big" data-action="ai-stop" data-test="ai-stop">${STOP} Stop</button>`);
+  if (aiOn) return head('Copilot is recording', separate(d) ? 'In a separate browser, off your screen. You can keep working.' : 'Keep your hands off the browser until it asks.', `<button class="btn primary big" data-action="ai-stop" data-test="ai-stop">${STOP} Stop</button>`);
   if (starting) return head('Getting ready', `<span data-test="record-starting">Checking your browser and the app tabs, then capturing each start screen. Wait for <strong>Recording</strong> before you click.</span>`,
     `<button class="btn primary big" disabled>Starting…</button>`);
   if (recording && st?.held) {
@@ -1019,6 +1021,9 @@ function recHead(d) {
     const other = `<button class="alink" data-action="set-mode" data-mode-to="manual" data-test="mode-manual">${HAND} or click through yourself</button>`;
     if (!plan.length) return head('Run of show', `Say what to show above. Copilot drafts the steps; you read them before it starts.${again}`,
       `${other}<button class="btn primary big" data-action="ai-plan" data-test="ai-plan" ${running('ai-plan', d.id) ? 'disabled' : ''}>Draft the plan ${I.arrow}</button>`);
+    if (separate(d)) return head('Run of show', `Copilot clicks in a separate browser, off your screen. It stops before any change it can\u2019t prove, and puts the demo back after.${again}`,
+      `${other}<button class="btn" data-action="ai-check" data-test="ai-check" ${running('ai-check', d.id) || running('ai-plan', d.id) ? 'disabled' : ''}>Check my script</button>
+       <button class="btn primary big" data-action="ai-record" data-test="ai-record" ${running('ai-plan', d.id) || running('ai-check', d.id) ? 'disabled' : ''}>Approve and start ${I.arrow}</button>`);
     return head('Run of show', `Copilot clicks; ${asks ? `${plural(asks, 'step')} ${asks === 1 ? 'asks' : 'ask'} you first` : 'nothing needs your go-ahead'}.${again}`,
       `${other}<button class="btn primary big" data-action="ai-record" data-test="ai-record" ${running('ai-plan', d.id) ? 'disabled' : ''}>Approve and start ${I.arrow}</button>`);
   }
@@ -1155,6 +1160,7 @@ PANELS.record = (panel, d) => {
         ${planBeats(AIS[d.id]?.plan).length ? `<button class="btn" data-action="ai-plan" data-test="ai-plan-again" ${running('ai-plan', d.id) ? 'disabled' : ''}>${I.spark} Draft it again</button>` : ''}</div>
       <div class="row" style="margin-top:8px"><button class="btn" data-action="ai-plan-script" data-test="ai-plan-script" ${running('ai-plan', d.id) ? 'disabled' : ''}>Make it from my script\u2026</button>
         <span class="hint small">Your talk track, in Word, Markdown, RunLines or text. Copilot puts each Do line on the real screens.</span></div>
+      <div data-region="separate"></div>
       <details style="margin-top:6px"><summary>Add notes, a doc or an email to work from</summary>
         <label for="ai-source" class="visually-hidden">Material to work from</label><textarea id="ai-source" rows="3" data-test="ai-source" data-save="source" style="margin-top:8px"></textarea>
         <div class="row" style="margin-top:6px"><button class="btn small" data-action="pick-source-demo">Open a file…</button></div></details>
@@ -1167,6 +1173,7 @@ PANELS.record = (panel, d) => {
     <section class="card rundown" aria-label="Run of show" data-test="run-of-show">
       <div data-region="rec-head"></div>
       <div data-region="ai-run" class="ai-run"></div>
+      <div data-region="ai-check"></div>
       <div class="rd-cols" aria-hidden="true"><span></span><span>Item</span><span>App</span><span>Time</span><span>State</span></div>
       ${live ? '<div data-region="preshow" hidden></div>' : `<div class="sec">Pre-show</div>
       <div data-region="preshow"></div>
@@ -1180,6 +1187,7 @@ PANELS.record = (panel, d) => {
     <div data-region="ai-after"></div>
     ${sent ? `<details class="card sent"><summary>What was sent to Copilot</summary><div data-region="ai-sent"></div></details>` : ''}`;
   if (aiMode(d.mode)) loadAi(d.id);
+  if (copilotMode(d)) invoke('capture_profiles', { id: d.id }).then(c => { J(d.id).capture = c; renderRegions(); }).catch(() => {});
   // The rundown (talk track beats), the profiles (who, and whether to ask which), and a quiet check (no fixes):
   // Start checks again, with its fixes.
   invoke('rundown', { id: d.id }).then(r => { J(d.id).rundown = r; renderRegions(); }).catch(() => {});
@@ -1207,7 +1215,37 @@ function pendingQuestion(events) {
   const answered = new Set(events.filter(e => e.event === 'answered').map(e => e.data.id));
   return [...events].reverse().find(e => questionKinds.has(e.event) && !answered.has(e.data.id));
 }
+// What Check my script found: where a run would stop (before a change it can't prove), and the steps it couldn't
+// prove that no change follows (the run goes on past those and marks the beat).
+const checkItem = (k, x) => `<li data-test="ai-check-${k}">${x.beat > 0 ? `Beat ${x.beat}${x.text ? `, ${esc(x.text)}` : ''}: ` : ''}${esc(x.why)}${x.fix ? `<br><small>${esc(x.fix)}</small>` : ''}</li>`;
+const signInFailed = d => {
+  const j = J(d.id)['capture-sign-in'], e = j && (j.error || (j.outcome && !j.outcome.ok && j.outcome.error));
+  return e && !running('capture-sign-in', d.id) ? errorBox(e, 'capture-sign-in') : '';
+};
 Object.assign(REGIONS, {
+  separate(d) {
+    const c = J(d.id).capture;
+    if (!c || running('ai-record', d.id)) return '';
+    const names = [...new Set([...(c.profiles || []), c.profile])];
+    return `<div class="row" style="margin-top:8px" data-test="separate" data-on="${!!c.separate}"><span class="small">Copilot records</span>
+      <span class="seg" role="group" aria-label="Where Copilot records"><button type="button" class="btn small ${c.separate ? 'subtle' : ''}" aria-pressed="${!c.separate}" data-action="separate" data-to="" data-test="separate-off">in your browser</button><button type="button" class="btn small ${c.separate ? '' : 'subtle'}" aria-pressed="${!!c.separate}" data-action="separate" data-to="${esc(c.profile)}" data-test="separate-on">in a separate browser</button></span>
+      ${c.separate ? `<button class="alink small" data-action="capture-sign-in" data-test="capture-sign-in" ${running('capture-sign-in', d.id) ? 'disabled' : ''}>${running('capture-sign-in', d.id) ? 'Signing in\u2026' : 'Sign in to it'}</button>
+        <details class="small"><summary>Details</summary><label>Its profile <select id="separate-profile" data-test="separate-profile">${names.map(n => `<option ${n === c.profile ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label></details>` : ''}</div>
+      ${c.separate ? signInFailed(d) : ''}`;
+  },
+  'ai-check'(d) {
+    if (!separate(d)) return '';
+    const j = J(d.id)['ai-check'] || {};
+    // A result is for the plan and profile it checked: after either changes, check again.
+    if (!running('ai-check', d.id) && j.checked && (j.checked.plan !== planText(d) || j.checked.profile !== J(d.id).capture?.profile)) return '';
+    if (running('ai-check', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-checking">Walking your plan in the separate browser, changing nothing. About 7 minutes.</p>`;
+    const o = j.outcome;
+    if (!o) return errorBox(j.error, 'ai-check');
+    const later = o.unchecked ? ` ${plural(o.unchecked, 'step')} after a change can only be seen when it records.` : '';
+    if (!o.stops.length && !o.marks.length) return `<div class="notice ok" data-test="ai-check-done" data-stops="0" data-marks="0"><div><strong>Nothing in the way.</strong> Every step it could walk landed where your plan says.${later}</div></div>`;
+    return `<div class="notice ${o.stops.length ? 'warn' : 'info'}" data-test="ai-check-done" data-stops="${o.stops.length}" data-marks="${o.marks.length}"><div><strong>${o.stops.length ? `It would stop ${plural(o.stops.length, 'time')}` : 'It would record to the end'}</strong>${o.marks.length ? `, and mark ${plural(o.marks.length, 'step')} it couldn\u2019t prove` : ''}. Fix these in the plan, then check again.${later}
+      <ul>${o.stops.map(x => checkItem('stop', x)).join('')}${o.marks.map(x => checkItem('mark', x)).join('')}</ul></div></div>`;
+  },
   'ai-plan-progress'(d) {
     const j = J(d.id)['ai-plan'] || {};
     if (running('ai-plan', d.id)) return `${progressBar(true)}<p class="small" data-test="ai-planning">${J(d.id).planFrom ? `Copilot is reading ${esc(J(d.id).planFrom)} and putting each step on the screens your demo shows\u2026` : 'Copilot is reading your words and the start screens, and drafting the plan\u2026'}</p>`;
@@ -1248,7 +1286,13 @@ Object.assign(REGIONS, {
         ${q.event === 'question' ? `<div class="row" style="margin-top:8px"><input type="text" id="ai-instead" placeholder='Or tell it what to do: Click "Plugins"' style="flex:1"><button class="btn" data-answer="do" data-qid="${esc(x.id)}" data-with-text="1">Do this instead</button></div>` : ''}</div></div>`;
     }
     if (notes.length && on) html += `<ul class="small muted">${notes.map(e => `<li>${esc(e.event === 'adapted' ? `Did "${e.data.to}" instead of "${e.data.from}"` : e.event === 'skipped' ? `Skipped "${e.data.step}": ${e.data.why}` : e.data.text)}</li>`).join('')}</ul>`;
-    if (j.outcome) {
+    if (j.outcome && j.outcome.resetBefore !== undefined) {
+      // In a separate browser: where it stopped (with its picture), the beats it marked, its changes and the reset.
+      const o = j.outcome, at = o.stopped?.at;
+      html += `<div class="notice ${o.stopped ? 'warn' : 'ok'}" data-test="ai-record-done" data-steps="${o.steps}" data-stopped="${!!o.stopped}" data-marked="${(o.marked || []).length}"><div><strong>${o.stopped ? 'Copilot stopped' : 'Recorded for you'}:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}.${o.stopped ? ` ${at ? `Beat ${at.beat + 1}, ${esc(at.text)}: ` : ''}${esc(o.stopped.why)}${o.stopped.picture ? ` <button class="link" data-reveal="${esc(o.stopped.picture)}">See its picture</button>` : ''}` : ''}
+        ${o.writes ? (o.resetAfter === true ? `${plural(o.writes, 'change')} made, then undone.` : `${plural(o.writes, 'change')} made, and <strong>the reset after didn\u2019t finish</strong>: some may still be in the demo.`) : ''}
+        ${(o.marked || []).length ? `<ul data-test="ai-record-marked">${o.marked.map(m => `<li>Beat ${m.beat}, ${esc(m.text)}: ${esc(m.why)}${m.picture ? ` <button class="link" data-reveal="${esc(m.picture)}">See it</button>` : ''}</li>`).join('')}</ul>` : ''}</div></div>`;
+    } else if (j.outcome) {
       const o = j.outcome;
       html += `<div class="notice ok" data-test="ai-record-done" data-steps="${o.steps}" data-confirmed="${o.confirmed}"><div><strong>Recorded for you:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}${o.confirmed ? `, ${o.confirmed} after you said yes` : ''}${o.stopped ? ' (stopped early)' : ''}. ${o.script ? `The talk track: ${plural(o.script.beats, 'beat')}, ${plural(o.script.lines, 'line')}.` : ''}</div></div>`;
     }
@@ -1260,7 +1304,7 @@ Object.assign(REGIONS, {
     if (c.stage === 'error') return errorBox(c.error);
     if (c.stage !== 'done') return `${progressBar(true)}<p class="small" data-test="ai-after" data-stage="${c.stage}">Making your replica: <button class="link" data-goto="review">see it in Review</button>.</p>`;
     if (c.checking) return `<div class="notice ok" data-test="ai-after-ready" data-checking="${esc(c.checking)}"><div><strong>Your replica is ready to present.</strong> Each screen is being compared with the real product: <button class="link" data-goto="review">see it in Review</button>.</div></div>`;
-    return `<div class="notice ok" data-test="ai-after-done" data-checks="${J(d.id).checks?.outcome?.pass ?? ''}" data-compared="${!!J(d.id).review?.compared}"><div><strong>Your replica is made.</strong> <button class="link" data-goto="review">Review it</button>: every screen next to the real product, with your talk track on its screens.</div></div>`;
+    return `<div class="notice ok" data-test="ai-after-done" data-finished="${!!J(d.id)['ai-finish']?.outcome}" data-checks="${J(d.id).checks?.outcome?.pass ?? ''}" data-compared="${!!J(d.id).review?.compared}"><div><strong>Your replica is made.</strong> <button class="link" data-goto="review">Review it</button>: every screen next to the real product, with your talk track on its screens.</div></div>`;
   },
   coach(d) {
     const j = J(d.id).coach || {};
@@ -1290,7 +1334,7 @@ Object.assign(REGIONS, {
 // it's Copilot's to write; the talk track goes on its screens when there is one; then it's ready to present. Every screen
 // compared with the real product, and the quick checks, follow in the background (checkInBackground). A step that fails
 // stops the chain and says so in Review.
-async function makeReplica(id, { write = false } = {}) {
+async function makeReplica(id, { write = false, finish = false } = {}) {
   const set = stage => { J(id).aiChain = { ...(J(id).aiChain || {}), stage, write }; renderSidebar(); renderRegions(); if (id === S.id) renderHead(); };
   J(id).aiChain = { stage: 'start', write, recorded: J(id)['record-stop']?.outcome || J(id)['ai-record']?.outcome?.summary || null };
   J(id).review = null;
@@ -1300,7 +1344,14 @@ async function makeReplica(id, { write = false } = {}) {
     const b = await step('build', 'build', { force: false, id });
     if (!b?.ok) throw new Error(b?.stopped || J(id).build?.error || 'the build stopped: see Build');
     J(id).scrub = b.scrub;
-    if (write || S.demos.find(x => x.id === id)?.status.hasScript) {
+    // A Copilot take: the plan's beats, focus points and her script, then the guide from them.
+    let made = null;
+    if (finish) {
+      set('focus');
+      made = await step('ai-finish', 'ai_finish', { id });
+      if (!made) throw new Error(J(id)['ai-finish']?.error || 'the guide wasn\u2019t made from the plan');
+    }
+    if (made?.script || write || S.demos.find(x => x.id === id)?.status.hasScript) {
       set('focus');
       const sc = await step('script', 'script_run', { id });
       if (!sc) throw new Error(J(id).script?.error || 'the talk track wasn\u2019t put on its screens: see Talk track');
@@ -1389,7 +1440,8 @@ Object.assign(REGIONS, {
     const comparing = r.comparing || c?.checking === 'compare';
     const ev = J(d.id).fidelity?.events || [];
     const of = ev.find(e => e.event === 'compare-start')?.data?.items, sofar = ev.filter(e => e.event === 'compared').length;
-    const primary = comparing ? `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`
+    // Comparing and fixing need the recording's own pictures: a shared demo has its results, not the recording.
+    const primary = comparing || !d.status.raw ? `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`
       : r.differ || r.viewsDiffer ? `<button class="btn primary" data-action="review-fix" data-test="review-fix" ${fixing ? 'disabled' : ''}>Fix it for me ${I.arrow}</button>`
       : !r.compared ? `<button class="btn primary" data-action="review-compare" data-test="review-compare" ${fixing ? 'disabled' : ''}>Compare with the real product ${I.arrow}</button>`
       : `<button class="btn primary" data-goto="present" data-test="review-next">Next: rehearse ${I.arrow}</button>`;
@@ -1406,7 +1458,7 @@ Object.assign(REGIONS, {
     // Compared before 0.5.3 (drawn headless): text can read about 1% different though it matches. One button checks it
     // again, drawn in Chrome or Edge as it was recorded.
     const all = [...r.beats.flatMap(b => b.screens), ...r.others];
-    const oldCheck = r.compared && !comparing && all.some(x => x.pass != null) && !all.some(x => x.realChecker)
+    const oldCheck = d.status.raw && r.compared && !comparing && all.some(x => x.pass != null) && !all.some(x => x.realChecker)
       ? `<p class="small muted" data-test="review-old-check">Checked by an older Scenecast, which draws text a little differently. <button class="link" data-action="review-recheck" data-test="review-recheck" ${fixing ? 'disabled' : ''}>Check again in Chrome</button></p>` : '';
     const sub = comparing ? `Comparing each screen with the real product${of ? `: ${sofar} of ${of}` : ''}\u2026 It\u2019s ready to present meanwhile.`
       : !r.compared ? `${plural(r.screens, 'screen')}. Not compared with the real product yet.`
@@ -1517,8 +1569,8 @@ Object.assign(REGIONS, {
 PANELS.build = async (panel, d) => {
   panel.innerHTML = `<div class="card"><h2>Build the replica</h2>
       <p class="muted">Turns the recording into the replica: every screen a real captured page. Secrets and personal data are scrubbed on the way; a password, key or token stops the build.</p>
-      <div class="row"><button class="btn primary" data-action="build" data-test="build" ${d.status.recorded ? '' : 'disabled'}>${d.status.built ? 'Build again' : 'Build'}</button>
-        ${d.status.recorded ? '' : '<span class="muted small">Record the demo first.</span>'}</div>
+      <div class="row"><button class="btn primary" data-action="build" data-test="build" ${d.status.raw ? '' : 'disabled'}>${d.status.built ? 'Build again' : 'Build'}</button>
+        ${d.status.raw ? '' : '<span class="muted small">Record the demo first.</span>'}</div>
       <div data-region="build" style="margin-top:12px"></div></div>
     <div class="card"><h2>Scrub report</h2><p class="muted">What was taken out of the replica before anyone sees it.</p><div data-region="scrub"></div></div>
     <div class="card"><h2>Checks</h2><p class="muted">The replica in a headless browser: each step landing where the recording did, presenter keys, focus points, menus and lists, the presenter guide, no errors and nothing fetched from outside. After a build, an edit or a new script, the checks for what changed run on their own (a few minutes at most). Every check, two identical runs and every zoom included, runs once: when you export.</p>
@@ -1944,12 +1996,38 @@ const ACTIONS = {
     // Approving is the plan as it is now: its writes included. Any edit after this needs approving again.
     try { await saveAiFields(id); await call('ai_save', { id, plan }); await call('ai_approve', { id }); } catch { return; }
     J(id).aiChain = null;
-    const o = await step('ai-record', 'ai_record', {});
+    const away = !!J(id).capture?.separate;
+    const o = await step('ai-record', away ? 'ai_record_unattended' : 'ai_record', {});
     loadAi(id);
-    // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away.
-    if (o) await makeReplica(id);
+    // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away. A run in
+    // the separate browser writes no talk track: the finish makes the guide's from the plan (in her browser, the run
+    // writes its own, beat for beat). One that stopped before it recorded anything leaves the replica as it was.
+    // One that stopped part way: its beats weren't all recorded, so no finish from the whole plan.
+    if (o && (!away || o.summary?.states > 0)) await makeReplica(id, { finish: away && !o.stopped });
   },
   'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
+  separate: async t => {
+    const id = S.id;
+    await call('set_separate', { id, profile: t.dataset.to || null });
+    J(id).capture = await invoke('capture_profiles', { id }).catch(() => J(id).capture);
+    J(id).preflight = null;
+    rerender();
+  },
+  'capture-sign-in': async () => {
+    const r = await step('capture-sign-in', 'capture_sign_in', {});
+    // Why not, in plain words, under the separate browser's choice (signInFailed).
+    if (r) toast(r.ok ? 'Signed in to the separate browser' : r.error ? 'Not signed in: see why below' : 'Not signed in: the window closed first', !r.ok);
+  },
+  'ai-check': async () => {
+    const id = S.id;
+    const plan = $('#ai-plan')?.value || '';
+    if (!plan.trim()) return toast('Draft the plan first', true);
+    try { await saveAiFields(id); await call('ai_save', { id, plan }); } catch { return; }
+    // The result is for the plan as it was sent: an edit while it runs makes it stale.
+    const profile = J(id).capture?.profile, sent = planText({ id });
+    const o = await step('ai-check', 'ai_check_script', {});
+    if (o) { await loadAi(id); J(id)['ai-check'].checked = { plan: sent, profile }; renderRegions(); }
+  },
   'coach-start': async () => {
     const id = S.id;
     await saveAiFields(id);
@@ -1990,6 +2068,11 @@ const ACTIONS = {
   'set-mode': async t => {
     const id = S.id, mode = t.dataset.modeTo;
     if (mode !== 'record') await saveAiFields(id).catch(() => {});
+    // Clicking through yourself, or coached: your own browser records, not the separate one.
+    if (mode !== 'record' && J(id).capture?.separate) {
+      await call('set_separate', { id, profile: null });
+      J(id).capture = await invoke('capture_profiles', { id }).catch(() => J(id).capture);
+    }
     await call('ai_save', { id, mode });
     await refreshDemo(id);
     if (mode !== 'manual' && !AI.status) refreshAi();
@@ -2159,6 +2242,10 @@ document.addEventListener('change', e => {
       toast(`Recording in ${BNAME[t.value]}`);
       rerender();
     }).catch(() => {});
+  }
+  if (t.id === 'separate-profile' && S.view === 'demo') {
+    const id = S.id;
+    return call('set_separate', { id, profile: t.value }).then(async () => { J(id).capture = await invoke('capture_profiles', { id }).catch(() => J(id).capture); rerender(); }).catch(() => {});
   }
   if (t.name === 'profile' && t.closest('#profile-pick')) {
     const id = S.id;
