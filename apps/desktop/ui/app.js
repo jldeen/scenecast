@@ -1220,7 +1220,7 @@ function pendingQuestion(events) {
 }
 // What Check my script found: where a run would stop (before a change it can't prove), and the steps it couldn't
 // prove that no change follows (the run goes on past those and marks the beat).
-const checkItem = (k, x) => `<li data-test="ai-check-${k}">${x.beat > 0 ? `Beat ${x.beat}${x.text ? `, ${esc(x.text)}` : ''}: ` : ''}${esc(x.why)}${x.fix ? `<br><small>${esc(x.fix)}</small>` : ''}</li>`;
+const checkItem = (k, x) => `<li data-test="ai-check-${k}">${x.beat > 0 ? `Beat ${x.beat}${x.text ? `, ${esc(x.text)}` : ''}: ` : ''}${esc(x.why)}${x.fix ? `<br><small>${esc(x.fix)}</small>` : ''}${x.detail ? `<details class="small"><summary>Details</summary>${esc(x.detail)}</details>` : ''}</li>`;
 const signInFailed = d => {
   const j = J(d.id)['capture-sign-in'], e = j && (j.error || (j.outcome && !j.outcome.ok && j.outcome.error));
   return e && !running('capture-sign-in', d.id) ? errorBox(e, 'capture-sign-in') : '';

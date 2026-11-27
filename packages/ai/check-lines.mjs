@@ -18,7 +18,8 @@ import { BOX_MAX } from '@scenecast/script/html.mjs';
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const quoted = s => [...String(s).matchAll(/["“]([^"“”]+)["”]/g)].map(m => m[1]);
 const listOf = s => String(s).split(/\s*,\s*|\s+and\s+/).map(clean).filter(Boolean);
-const no = why => ({ ok: false, why });
+// plan: the plan is why (no way to its screen, no proof of it); the others are the check's own (a pack, a value, its words).
+const no = (why, plan = false) => ({ ok: false, why, ...(plan ? { plan } : {}) });
 export const FORMS = 'shows "…", no "…", "…" is on/off, "…" is picked, "…" lists …, … is version …, or renders light/dark';
 
 // A line's words as a claim, in the forms `ai reset` writes (reset.mjs startText, inverseOf). null: not one of them.
@@ -255,14 +256,14 @@ export function checkable(line, ctx) {
     const steps = (c.steps || []).map(t => parseStep(t));
     const bad = steps.map((s, i) => notNavigation(s, steps[i - 1])).find(Boolean);
     if (bad) return no(`the ${src.pack.id} pack's way to its check ${bad}`);
-    if (!c.open && !steps.length && line.screen) { const r = routeTo(plan, app, line.screen, { walker, appOf }); if (r.why) return no(r.why); return { ok: true, app, claim: lc.claim, route: r.route, source: src }; }
+    if (!c.open && !steps.length && line.screen) { const r = routeTo(plan, app, line.screen, { walker, appOf }); if (r.why) return no(r.why, true); return { ok: true, app, claim: lc.claim, route: r.route, source: src }; }
     if (lc.claim.kind === 'absent' && !c.lands) return no(`the ${src.pack.id} pack's check says nothing that proves its page (lands), so an empty page would pass`);
     return { ok: true, app, claim: lc.claim, route: { ...(c.open ? { open: c.open } : { home: true }), steps, ...(c.lands ? { lands: c.lands } : {}) }, source: src };
   }
   const claim = claimOf(line.text);
   if (!claim) return no(`can't check "${clean(line.text)}" on its own: say it as ${FORMS}`);
   const r = routeTo(plan, app, line.screen, { walker, appOf });
-  if (r.why) return no(r.why);
+  if (r.why) return no(r.why, true);
   return { ok: true, app, claim, route: r.route, source: null };
 }
 // The names a reset may find and undo by name: the script's own, never one the recording's start screen shows (it
