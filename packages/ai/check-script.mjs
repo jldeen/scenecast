@@ -40,6 +40,8 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
     let blind = false;
     for (const [si, s] of beat.steps.entries()) {
       const r = rows[si] || { status: 'after-write' };
+      // Hers to do, or not a step it can do: a run stops there (needs you), whatever comes after.
+      if (s.kind === 'manual' || s.kind === 'free') { stops.push(row(bi, si, { text: r.text || formatStep(s) }, s.kind === 'manual' ? "it's yours to do, and a run on its own stops there" : "it isn't a step a run can do on its own", 'Make it a step Copilot can do, or move it to the reset')); continue; }
       if (r.status === 'missed' && r.needs) blind = true;
       if (r.status === 'after-miss' && !blind && !s.writes) continue;
       const text = r.text || formatStep(s);
@@ -59,7 +61,8 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
       }
       const set = (why, fix) => { if (!doubt[app]) doubt[app] = { step: si + 1, why, fix }; marks.push(row(bi, si, { text }, why, fix)); };
       const ruled = r.status === 'after-write' || blind || (r.status === 'drifted' && r.needs);
-      if (!ruled && r.status === 'reached') doubt[app] = null;
+      // A doubt lasts until the app's next write: before a write, the run looks back to its last one (writeGate).
+      if (!ruled && r.status === 'reached') continue;
       else if (!ruled && r.status === 'unproven' && carries(s)) continue;
       else if (!ruled && r.status === 'unproven') set(`nothing proves where it lands${r.why ? ` (${r.why})` : ''}`, 'Give it a Lands on: a control or words that only show once it has run');
       else if (!ruled && r.status === 'drifted') set(`the words it lands on aren't on the screen today${r.why ? ` (${r.why})` : ''}`, r.seen && r.seen.headings && r.seen.headings.length ? `Today the screen says: ${r.seen.headings.slice(0, 3).map(h => `"${h}"`).join(', ')}` : 'Land on what the screen says today');
@@ -68,8 +71,7 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
         unchecked++;
         const l = s.lands;
         if (l && l.kind === 'words' && l.text && answerLike(l.text) && !hers(l.text)) set(`its proof quotes words the app wrote ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, or a short phrase of the product\'s own');
-        else if (l && l.kind) doubt[app] = null;
-        else if (!carries(s)) set('nothing proves where it lands, and it can only be seen once the write before it runs', 'Give it a Lands on: a control on that screen')
+        else if (!(l && l.kind) && !carries(s)) set('nothing proves where it lands, and it can only be seen once the write before it runs', 'Give it a Lands on: a control on that screen')
       }
     }
   }

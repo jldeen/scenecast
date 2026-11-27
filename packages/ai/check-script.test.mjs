@@ -115,3 +115,36 @@ test('answer words and the product\'s own phrases', () => {
   const typed = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Type "Turn this investigation into a skill I can reuse." in "Message"\n  Lands on: chat-typed · "Turn this investigation into a skill I can reuse."\n- Press Enter — ask first\n  Writes: sends it · chat:new-task\n`);
   assert.deepEqual(predictStops(typed, { beats: [{ steps: [{ status: 'reached' }, { status: 'reached' }, { status: 'write' }] }] }).marks, []);
 });
+
+test('a doubt lasts until the next write: unproven, then reached, then a write still stops at the write', () => {
+  const plan = parsePlan(`# T
+
+## Beat 1 · A
+
+- Go to chat
+  Lands on: chat-home · "New chat"
+- Click "Plugins"
+- Click "Roles"
+  Lands on: chat-roles · "Roles & Industry"
+- Click "Turn on" — ask first
+  Writes: turns the plugin on · chat:plugin-switch
+`);
+  const r = predictStops(plan, { beats: [{ steps: ['reached', 'unproven', 'reached', 'write'].map(status => ({ status })) }] }, { writeKnown: known });
+  assert.equal(r.stops.length, 1);
+  assert.match(r.stops[0].why, /a write after a step it couldn't prove \(step 2/);
+});
+
+test('a step that\'s hers to do, or one a run can\'t do, is a stop even with no write after it', () => {
+  const plan = parsePlan(`# T
+
+## Beat 1 · A
+
+- Go to chat
+  Lands on: chat-home · "New chat"
+- You: point at the chart
+- Wave at the audience
+`);
+  const r = predictStops(plan, { beats: [{ steps: ['reached', 'reached', 'reached'].map(status => ({ status })) }] }, { writeKnown: known });
+  assert.deepEqual(r.stops.map(s => s.step), [2, 3]);
+  assert.equal(r.ok, false);
+});
