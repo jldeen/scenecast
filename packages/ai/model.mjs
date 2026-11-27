@@ -74,7 +74,9 @@ function parseJson(text) {
 }
 
 // cacheDir: answers kept by what was asked (the task, its instructions, the input and the model), so asking the same
-// thing again sends nothing. stats: how many questions went to the model, how many came from the cache, and how long
+// thing again sends nothing. ask(task, input, { keyOf }): kept by keyOf instead of the input (what the answer depends
+// on, when the input also carries hints that change from one version to the next).
+// Copilot's SDK has no temperature: an answer is steady because it's kept, not because the model is. stats: how many questions went to the model, how many came from the cache, and how long
 // the model took.
 // cacheOnly: answer from the cache or not at all (evaluations that mustn't ask again).
 export async function makeModel({ kind, sentDir, settings = {}, on = () => {}, cacheDir = null, timeoutMs, cacheOnly = false } = {}) {
@@ -88,9 +90,9 @@ export async function makeModel({ kind, sentDir, settings = {}, on = () => {}, c
   return {
     kind: custom ? 'custom' : kind,
     stats,
-    async ask(task, input) {
+    async ask(task, input, { keyOf = null } = {}) {
       const sent = JSON.stringify(input, null, 1);
-      const key = cacheDir ? createHash('sha256').update(JSON.stringify([task, SYSTEM[task] || '', sent, kind, settings.model || 'auto'])).digest('hex').slice(0, 32) : null;
+      const key = cacheDir ? createHash('sha256').update(JSON.stringify([task, SYSTEM[task] || '', keyOf ? JSON.stringify(keyOf, null, 1) : sent, kind, settings.model || 'auto'])).digest('hex').slice(0, 32) : null;
       const cached = key && join(cacheDir, `${task}-${key}.json`);
       if (cached && existsSync(cached)) { stats.cached++; on({ event: 'cached', task, file: cached }); return JSON.parse(readFileSync(cached, 'utf8')).answer; }
       if (cacheOnly) throw new Error('not in the cache');

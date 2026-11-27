@@ -130,7 +130,10 @@ export async function planWithModel(track, { walker, model = null, packs = null,
   emit({ event: 'copilot', step: 'reading', screens: input.screens.length, pageText });
   const t0 = Date.now();
   let answer = null, error = null;
-  try { answer = await model.ask('script-plan', input); } catch (e) { error = String((e && e.message) || e).slice(0, 300); }
+  // Kept by her script and the recording's screens, not by the rules' draft: the same script on the same recording gets
+  // the same plan, whatever the rules learned since.
+  const keyOf = scriptPlanInput(track, walker, { pageText, draft: null });
+  try { answer = await model.ask('script-plan', input, { keyOf }); } catch (e) { error = String((e && e.message) || e).slice(0, 300); }
   const info = { model: model.kind, calls: (model.stats || st).calls - before.calls, cached: (model.stats || st).cached - before.cached, secs: +((Date.now() - t0) / 1000).toFixed(1), sentChars: JSON.stringify(input).length, pageText, ...(error ? { error } : {}) };
   const t2 = trackFromAnswer(track, answer, draft);
   if (!t2) { emit({ event: 'copilot', step: 'rules', why: error || 'no plan in the answer' }); return rules({ ...info, fallback: true }); }

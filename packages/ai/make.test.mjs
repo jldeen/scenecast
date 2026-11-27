@@ -220,6 +220,12 @@ test('Copilot gets a screen\'s words only when page text is allowed, redacted; a
   await m.ask('script-plan', { a: 1 });
   await m.ask('script-plan', { a: 2 });
   assert.deepEqual([(await import(pathToFileURL(file).href)).n, m.stats.cached], [2, 1]);
+  // A plan from her script is kept by her script and the screens, not by the rules' draft it also sends: what the
+  // rules learn since doesn't ask Copilot again, so the same script on the same recording gets the same plan.
+  let asked = null;
+  await planWithModel(track, { walker, model: { kind: 'x', ask: async (task, input, opts) => { asked = { input, opts }; return { beats: [] }; } } });
+  assert.deepEqual(asked.opts.keyOf, scriptPlanInput(track, walker, { pageText: false }));
+  assert.doesNotMatch(JSON.stringify(asked.opts.keyOf), /"draft":|"issues":/);
 });
 
 test('one box for what a line names together: rows of one list, a step and the steps it goes on to', () => {
