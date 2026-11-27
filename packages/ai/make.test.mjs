@@ -1167,6 +1167,19 @@ test('where an app starts is proven by its own box, not by words that may be a d
   assert.equal(formatLands(mine.beats[0].steps[1].lands), 'start · "Recent chats"');
 });
 
+test('a send is never proven by the name the app gives the new chat: it changes from run to run', () => {
+  const t = 'Kestrel PO-450101 Ship-Date Risk Summary';
+  const screens = {
+    typed: { title: 'New chat', headings: [], items: [{ i: 0, kind: 'text', role: 'generic', tag: 'span', text: 'Recent' }], controls: [{ role: 'textbox', name: 'Message Copilot', editable: true }] },
+    answer: { title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }, { i: 1, kind: 'text', role: 'generic', tag: 'span', text: 'Recent' }], controls: [{ role: 'link', name: t }, { role: 'textbox', name: 'Message Cowork', editable: true }] },
+  };
+  const walker = { flow: { states: { typed: { app: 'copilot' }, answer: { app: 'copilot' } } }, states: ['typed', 'answer'], screen: id => screens[id] || null, shown: () => null,
+    control: () => null, typedTexts: () => [] };
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'typed' } }, { kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer' } }] }] };
+  proveLandings(plan, walker);
+  assert.equal(formatLands(plan.beats[0].steps[1].lands), 'answer · control "Message Cowork"');
+});
+
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
   const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
   const tabs = (agents, plugins) => [{ role: 'tab', name: 'Agents', selected: agents }, { role: 'tab', name: 'Plugins', selected: plugins }];

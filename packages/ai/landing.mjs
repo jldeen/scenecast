@@ -173,7 +173,13 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   // Another step's words: what it types, a stretch of it (four words or more), or words holding the start of a
   // sentence it types (a search term inside other words is only a word on the page).
   const typedIn = t => { const n = pnorm(t); return n.length > 1 && typed.some(v => { const m = pnorm(v); return !!m && (n === m || (m.includes(n) && (count(n) >= 4 || n.length >= 25)) || (count(m) >= 4 && n.includes(m.slice(0, 24)))); }); };
-  const stable = t => !!t && /[a-z]/i.test(t) && !GREETING.test(String(t).trim()) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
+  // A screen a send made: its title is the name the app gave the new chat ("Kestrel PO-450101 Ship-Date Risk Summary"),
+  // a different one on each run, so neither it nor a part of it proves the step.
+  // (A capture with no title of its own is named by its screen's id: that isn't one.)
+  const titleNow = pnorm([after.title, rec && rec.title].find(x => x && x !== to) || '');
+  const madeTitle = answer && count(titleNow) >= 2 && !before.some(b => b && pnorm(b.title || '') === titleNow) ? titleNow : null;
+  const titled = t => { const n = pnorm(t); return !!madeTitle && !!n && (n === madeTitle || n.includes(madeTitle) || (count(t) >= 2 && madeTitle.includes(n))); };
+  const stable = t => !!t && /[a-z]/i.test(t) && !GREETING.test(String(t).trim()) && !titled(t) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
   const proves = l => afters.every(sc => holds(sc, l) === true) && before.every(b => holds(b, l) === false);
 
   if (s.kind === 'type' && s.value) {

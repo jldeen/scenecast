@@ -118,7 +118,15 @@ test('a start screen that isn\'t as the plan has it, a write after a miss, and a
   const r = predictStops(PLAN, missed, { writeKnown: known });
   assert.deepEqual(r.stops.map(x => [x.beat, x.step]), [[2, 4]]);
   const quoted = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: chat-saved · "Your skill is saved and ready to use"\n`);
-  assert.match(predictStops(quoted, { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }] }] }, { writeKnown: known }).stops[0].why, /quotes words the app wrote/);
+  assert.match(predictStops(quoted, { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }] }] }, { writeKnown: known }).stops[0].why, /words the app makes up/);
+  // A send proven by the name the app gave the new chat (the recorded screen's title), or by a greeting.
+  const titled = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Kestrel PO-450101 Ship-Date Risk Summary"\n`);
+  const sent = { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }] }] };
+  const titleOf = id => id === 'chat-answer' ? 'Kestrel PO-450101 Ship-Date Risk Summary' : null;
+  assert.deepEqual(predictStops(titled, sent, { writeKnown: known, titleOf }).stops.map(x => [x.beat, x.step, x.fix]), [[1, 2, 'Prove it by a control on that screen, such as its message box']]);
+  assert.deepEqual(predictStops(titled, sent, { writeKnown: known }).stops, []);
+  const hello = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Good morning"\n`);
+  assert.match(predictStops(hello, sent, { writeKnown: known }).stops[0].why, /words the app makes up \("Good morning"\)/);
 });
 
 test('answer words and the product\'s own phrases', () => {

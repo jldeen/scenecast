@@ -18,8 +18,12 @@ const carries = s => /^(wait|hover|scroll)$/.test(s.kind) || (s.kind === 'click'
 // Words an app wrote, not its own interface: a sentence (6 words or more), or a quoted name in it.
 export const answerLike = text => /['"‘’“”]/.test(text) || String(text).trim().split(/\s+/).length >= 6;
 
-// names: each app's name as the window shows it ({ id: title }).
-export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), names = {} } = {}) {
+const GREETING = /^(hi|hello|hey|good (morning|afternoon|evening)|welcome back)\b/i;
+const pn = t => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+// names: each app's name as the window shows it ({ id: title }). titleOf: a recorded screen's page title (the name
+// the app gave a new chat, on the screen a send made).
+export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), names = {}, titleOf = () => null } = {}) {
   const stops = [], marks = [];
   let unchecked = 0;
   const row = (bi, si, s, why, fix) => ({ beat: bi + 1, step: si + 1, text: s ? s.text || null : null, why, ...(fix ? { fix } : {}) });
@@ -64,7 +68,11 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
         if (!k.ok) stops.push(row(bi, si, { text }, `no undo for this write: ${k.why}`, 'Add the write to its app pack, with its undo'));
         // A run checks where a write lands, after it: its proof can't be words the app writes there.
         const l = s.lands;
-        if (l && l.kind === 'words' && l.text && answerLike(l.text) && !hers(l.text)) stops.push(row(bi, si, { text }, `its proof quotes words the app wrote ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, or a short phrase of the product\'s own'));
+        // What the app makes up: an answer's words, a greeting, or the name it gave the new chat.
+        const title = l && l.screen ? pn(titleOf(l.screen)) : '';
+        const titled = title.split(' ').length >= 2;
+        const made = l && l.kind === 'words' && l.text && !hers(l.text) && (answerLike(l.text) || GREETING.test(l.text.trim()) || (titled && (pn(l.text) === title || title.includes(pn(l.text)) || pn(l.text).includes(title))));
+        if (made) stops.push(row(bi, si, { text }, `its proof is words the app makes up ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, such as its message box'));
         doubt[app] = null;
         if (r.status === 'write') continue;
       }
@@ -108,7 +116,10 @@ export async function checkScript({ demo, emit = () => {}, cmd }) {
     return w.undo ? { ok: true } : { ok: false, why: `the ${packId} pack's ${writeId} has no undo` };
   };
   const names = Object.fromEntries((demo.cfg.apps || []).map(x => [x.id, x.title || x.id]));
-  const r = { ...predictStops(plan, walk, { writeKnown, names }), secs: walk.secs };
+  const { walkerFromDemo } = await import('./walker.mjs');
+  const rec = walkerFromDemo(demo);
+  const titleOf = id => { const t = ((rec && rec.screen(id)) || {}).title; return t && t !== id ? t : null; };
+  const r = { ...predictStops(plan, walk, { writeKnown, names, titleOf }), secs: walk.secs };
   fs.mkdirSync(aiDir(demo), { recursive: true });
   fs.writeFileSync(path.join(aiDir(demo), 'check-script.json'), JSON.stringify(r, null, 1) + '\n');
   return r;
