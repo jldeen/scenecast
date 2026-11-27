@@ -1,6 +1,6 @@
 {
   "name": "@stuntdouble/apps",
-  "version": "0.5.6-rc.1",
+  "version": "0.5.6-rc.2",
   "description": "StuntDouble app packs: what each real app needs to be recorded, built and shown (busy markers, step groups, CSS repairs, layout rules, theme and platform packs, writes and their undo), once per app, never per demo. Data plus small pure helpers; no dependency on the other packages. Packs outside the repository: STUNTDOUBLE_PACKS or ~/.stuntdouble/packs.",
   "type": "module",
   "main": "index.mjs",
