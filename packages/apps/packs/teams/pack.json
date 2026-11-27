@@ -215,7 +215,7 @@
       "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/oofstatus$/",
       "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/peopleInsights\\/peoplecard$/",
       "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/linkedin\\/profiles$/",
-      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/graphql\\/?$/ when body /^(?![\\s\\S]*(?:^|[^\\w$])(?:mutation|subscription)(?=[\\s({@]))\\s*\\{[\\s\\S]*\"query\"\\s*:\\s*\"\\s*query\\b/",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/graphql\\/?$/ when body /^(?![\\s\\S]*(?:^|[^\\w$]|\\\\(?:[nrtfb]|u[0-9a-fA-F]{4}))(?:mutation|subscription)(?=[\\s({@]))\\s*\\{[\\s\\S]*\"query\"\\s*:\\s*\"\\s*query\\b/",
       "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetch$/",
       "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchfeaturesettings$/"
     ],
@@ -229,7 +229,7 @@
       "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/oofstatus$/": "A people card's out-of-office state. The body is only the call's request headers: a read (setting it is Outlook's, not this). Held, the card can't say whether they're away (Nov 25).",
       "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v1\\/peopleInsights\\/peoplecard$/": "A people card's insights section. The body is only the call's request headers: a read. Held, the card's insights part stays empty (Nov 25).",
       "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/linkedin\\/profiles$/": "A people card's LinkedIn match. The body is only the call's request headers: a read (linking an account is a separate flow). Held, the card has no LinkedIn possible match (Nov 25).",
-      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/graphql\\/?$/ when body /^(?![\\s\\S]*(?:^|[^\\w$])(?:mutation|subscription)(?=[\\s({@]))\\s*\\{[\\s\\S]*\"query\"\\s*:\\s*\"\\s*query\\b/": "A people card's badges, through Loki's GraphQL (BadgesWithData_LPCBadges_DataQuery, Nov 25). Only a body that is a query: the document starts with the query keyword, and the words mutation and subscription are nowhere in the body as an operation; a batch, a persisted query (a hash, no text) or no body seen stays held. Held, the card shows \"Badges: Something went wrong. Try again\" (Nov 25).",
+      "/^POST [a-z]+\\.loki\\.delve\\.office\\.com\\/api\\/v2\\/graphql\\/?$/ when body /^(?![\\s\\S]*(?:^|[^\\w$]|\\\\(?:[nrtfb]|u[0-9a-fA-F]{4}))(?:mutation|subscription)(?=[\\s({@]))\\s*\\{[\\s\\S]*\"query\"\\s*:\\s*\"\\s*query\\b/": "A people card's badges, through Loki's GraphQL (BadgesWithData_LPCBadges_DataQuery, Nov 25). Only a body that is a query: the document starts with the query keyword, and the words mutation and subscription are nowhere in the body as an operation; a batch, a persisted query (a hash, no text) or no body seen stays held. Held, the card shows \"Badges: Something went wrong. Try again\" (Nov 25).",
       "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetch$/": "Reads a people card's person by their user reference (the body is a list of them). Held, the card opens without their details (Nov 25).",
       "/^POST teams\\.cloud\\.microsoft\\/api\\/mt\\/part\\/[a-z]+-\\d+\\/beta\\/users\\/fetchfeaturesettings$/": "Reads which card features apply to a person (the body is a list of user references and their kind). Held, the card leaves those parts out (Nov 25)."
     }

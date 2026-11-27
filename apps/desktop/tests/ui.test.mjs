@@ -54,6 +54,9 @@ const FEED_URL = `http://127.0.0.1:${feed.address().port}/latest.json`;
 
 // ---- The app -----------------------------------------------------------------------------------------------------
 const appLog = [];
+// Windows finds a user's AppData under USERPROFILE: Google Chrome won't start (the checker's, Playwright's) where the
+// home has none.
+for (const d of ['Local', 'Roaming']) mkdirSync(join(tmp, 'home', 'AppData', d), { recursive: true });
 const app = spawn(BIN, [], {
   env: {
     ...process.env,
@@ -686,7 +689,8 @@ try {
   check('the UI test ran to the end', false, e.stack || e);
   if (b && SHOTS) await b.saveScreenshot(join(SHOTS, 'zz-failure.png')).catch(() => {});
   console.log('--- app output ---\n' + appLog.join('').slice(-6000));
-  try { console.log('--- scenecast.log ---\n' + readFileSync(join(tmp, 'ai-home', 'logs', 'scenecast.log'), 'utf8').slice(-3000)); } catch (e) {}
+  // The app's own log (an engine step's error with its last lines), kept with the screenshots CI uploads.
+  try { const log = readFileSync(join(tmp, 'ai-home', 'logs', 'scenecast.log'), 'utf8'); console.log('--- scenecast.log ---\n' + log.slice(-3000)); if (SHOTS) writeFileSync(join(SHOTS, 'scenecast.log'), log); } catch (e) {}
 } finally {
   await ctx?.close().catch(() => {});
   await viewer?.close().catch(() => {});

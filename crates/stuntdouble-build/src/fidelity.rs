@@ -185,8 +185,13 @@ pub enum FidelityError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("the engine's {step} stopped with exit code {code}")]
-    Step { step: &'static str, code: i32 },
+    /// `tail`: its last lines of output on stderr, so whoever reads the error sees why.
+    #[error("the engine's {step} stopped with exit code {code}{tail}")]
+    Step {
+        step: &'static str,
+        code: i32,
+        tail: String,
+    },
     #[error("the build of round {round}'s fixes failed (exit code {code}); see its output")]
     BuildFailed { round: u32, code: i32 },
 }
@@ -235,16 +240,32 @@ pub fn run(
             .map(|c| ("SCENECAST_CHECKER", c))
             .into_iter()
             .collect();
+        let mut last: std::collections::VecDeque<String> = Default::default();
         let code =
             engine.run_with_progress_env(with_demo(name, &args, dir), env, |p| match &p {
                 Progress::Stdout(line) => match parse_event(line) {
                     Some(event) => on(FidelityProgress::Event(event)),
                     None => on(FidelityProgress::Engine(p)),
                 },
-                Progress::Stderr(_) => on(FidelityProgress::Engine(p)),
+                Progress::Stderr(line) => {
+                    if last.len() == 12 {
+                        last.pop_front();
+                    }
+                    last.push_back(line.clone());
+                    on(FidelityProgress::Engine(p))
+                }
             })?;
         if code != 0 {
-            return Err(FidelityError::Step { step: name, code });
+            let tail = if last.is_empty() {
+                String::new()
+            } else {
+                format!(":\n{}", Vec::from(last).join("\n"))
+            };
+            return Err(FidelityError::Step {
+                step: name,
+                code,
+                tail,
+            });
         }
         Ok(())
     };
