@@ -1132,9 +1132,13 @@ function recShowRows(d) {
     if (!plan.length) return `<div class="sec">Show <span>Copilot\u2019s plan shows here.</span></div>
       <div class="rd-row" data-test="show-empty">${mk('todo')}<div class="t"><b>No plan yet</b><small>Say what the demo should show, then draft the plan.</small></div><span></span><span></span><span></span></div>`;
     const rev = AIS[d.id]?.review, differs = plan.flatMap(b => b.steps).filter(s => s.differs);
+    // Changes left out when the plan was drafted (the app's pack can't undo them, or the control isn't the one her
+    // script names), less any she has put back in the plan since.
+    const asks = (rev?.flags || []).filter(f => f.kind === 'needs-ok' && !(f.target && plan.some(b => b.steps.some(s => s.text.includes(`"${f.target}"`)))));
     const from = rev?.from ? `Made from ${esc(rev.from)}, each step on the screens your demo shows.` : 'Copilot\u2019s plan.';
     return `<div class="sec">Show <span>${from} Read it, change anything, then approve.</span></div>
       ${differs.length ? `<div class="rd-row" data-test="plan-differs" data-count="${differs.length}">${mk('hold')}<div class="t"><b>${plural(differs.length, 'step')} ${differs.length === 1 ? 'isn\u2019t' : 'aren\u2019t'} quite what your script says</b><small>Copilot uses what the product shows. They\u2019re marked below.</small></div><span></span><span></span><span></span></div>` : ''}
+      ${asks.length ? `<div class="rd-row" data-test="plan-needs-ok" data-count="${asks.length}">${mk('hold')}<div class="t"><b>${plural(asks.length, 'change')} ${asks.length === 1 ? 'needs' : 'need'} your OK</b><small>Left out when the plan was drafted. Add ${asks.length === 1 ? 'it' : 'one'} back to the plan if it\u2019s what you meant.</small><ul class="steps">${asks.map(f => `<li>${esc(f.text)}</li>`).join('')}</ul></div><span></span><span></span><span></span></div>` : ''}
       ${plan.map((b, k) => `<div class="rd-row" data-test="plan-beat-${k + 1}">${mk('todo')}<div class="t"><b>Beat ${k + 1} \u00b7 ${esc(b.title)}</b>${b.say[0] ? `<small><em>\u201c${esc(b.say[0])}\u201d</em></small>` : ''}
         <ul class="steps">${b.steps.map(s => `<li${s.differs ? ' data-test="plan-step-differs"' : ''}>${esc(s.text)}${s.writes ? ` <span class="tag" data-test="plan-step-writes" title="${esc(s.writes)}">changes something</span>` : s.ask ? ' <span class="tag">asks you first</span>' : ''}${s.writes ? `<small>${esc(s.writes[0].toUpperCase() + s.writes.slice(1))}</small>` : ''}${s.differs ? `<small class="differs">Not as your script says: ${esc(s.differs)}</small>` : ''}</li>`).join('')}</ul></div>
         <span></span><span class="time">${timed(k + 1)}</span>${stateOf()}</div>`).join('')}`;

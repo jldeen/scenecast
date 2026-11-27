@@ -106,6 +106,10 @@ in the plan, and when it gets there it stops and asks: **Do it**, **I'll click i
 fine. When a screen isn't what it expected, it waits for it, then works out what to do instead, then asks you
 (**I did it**, **Skip it**, or tell it what to do in plain words).
 
+A plan made from your script only has changes its app's pack knows how to undo, made on the control your script names.
+Anything else (your script says "Manage all" and the closest thing on the screen is a different switch) is left out
+and listed above the plan as **needs your OK**: add it back to the plan if it's what you meant.
+
 In a separate browser (Record › **Copilot records in a separate browser**), off your screen, there's nobody to ask,
 so you approve every write before it starts: the approval lists each one by beat and step, and the run does only
 those. Anything else that could change something is held, and stops the run with a picture of where it was. The demo

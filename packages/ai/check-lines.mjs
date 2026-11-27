@@ -133,7 +133,11 @@ const steady = sc => (sc.controls || []).filter(c => {
   return shown.size >= said;
 });
 const proven = s => !!(s && s.lands && s.lands.kind);
-const onScreen = (controls, target) => (controls || []).some(c => { const a = norm(c.name), b = norm(target); return a && b && (a === b || a.startsWith(b)); });
+const named = (c, target) => { const a = norm(c.name), b = norm(target); return !!(a && b && (a === b || a.startsWith(b))); };
+const onScreen = (controls, target) => (controls || []).some(c => named(c, target));
+// A row of a data grid: what it lists depends on its filter, order and paging (Demo 1's start was recorded filtered to
+// 2 plugins; today's shows 500 of 541).
+const gridRow = (sc, target) => (sc.controls || []).some(c => c.row !== undefined && /^(grid|table|treegrid)$/.test((((sc.lists || {})[c.list]) || [])[1] || '') && named(c, target));
 
 // A read-only way to a screen of an app: the app's start (walker.home), then the plan's own steps that land there, all
 // navigation, the first of them a control the recorded start screen has, the last proving the screen.
@@ -152,15 +156,21 @@ export function routeTo(plan, app, screen, { walker = null, appOf = x => x } = {
   const rec = id => id && walker ? walker.screen(id) || (walker.shown && walker.shown(id)) : null;
   const startScreen = walker ? rec(start) || rec(walker.start && walker.start(app)) : null;
   const steps = k => mine.slice(k, x + 1).filter(s => s.kind !== 'app');
+  // A grid's row starts a route only when no step before it can: the plan's own way to it (a search by its name).
+  let row = null;
+  const fromRow = () => row !== null ? { route: { home: true, steps: steps(row) } } : null;
   for (let k = x; k >= 0; k--) {
     const s = mine[k];
     // Going back to the app carries on where it was; its first Go to is its start.
     if (s.kind === 'app') { if (s === goTo) return { route: { home: true, steps: steps(k + 1) } }; continue; }
     const bad = notNavigation(s, mine[k - 1]);
-    if (bad) return { why: `the way to ${screen} passes ${formatStep(s)}, which ${bad}` };
-    if (startScreen && s.target && onScreen(steady(startScreen), s.target)) return { route: { home: true, steps: steps(k) } };
+    if (bad) return fromRow() || { why: `the way to ${screen} passes ${formatStep(s)}, which ${bad}` };
+    if (startScreen && s.target && onScreen(steady(startScreen), s.target)) {
+      if (!gridRow(startScreen, s.target)) return { route: { home: true, steps: steps(k) } };
+      if (row === null) row = k;
+    }
   }
-  return { why: `no read-only way from ${app}'s start to ${screen}` };
+  return fromRow() || { why: `no read-only way from ${app}'s start to ${screen}` };
 }
 
 // The app packs by app and by id, from either shape (make.mjs loadPacks' forApp, live.mjs walkerPacks' packsForDemo).

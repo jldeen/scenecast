@@ -231,11 +231,17 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
       const fine = t => stable(t) && (digits || !numbered(t) || frame.always.has(pnorm(t)));
       const pick = l => msgOf(l) === late && textsOf(l).every(fine) && fromSound(l) && proves(l) && !(answer && l.kind === 'words' && answerLike(l.text));
       const found = l => ({ lands: l, number: textsOf(l).some(t => numbered(t) && !frame.always.has(pnorm(t))), message: late });
-      // The plan's own proof, while it still proves the step.
-      if (own && pick(own)) return found(own);
+      // The plan's own proof, while it still proves the step; where an app starts, words the rules only suggested
+      // (no kind) come after its box.
+      const hint = s.kind === 'app' && !l0.kind;
+      if (own && !hint && pick(own)) return found(own);
       // What the caller expects first (liveProof: the step's own control in a new state, the next step's control).
       for (const f of first) if (pick(f)) return found(f);
       if (nextCtl && !late) { const l = { kind: 'control', control: nextCtl.name, state: null }; if (textsOf(l).every(fine) && proves(l)) return found(l); }
+      // Where an app starts: the page's own box (its message or search box) before any words, which may be a banner's
+      // or a drop zone's ("Drop your files here") and not there on another day.
+      if (s.kind === 'app') for (const c of controls) if (isBox(c) && !c.nav && pick({ kind: 'control', control: c.name, state: null })) return found({ kind: 'control', control: c.name, state: null });
+      if (own && hint && pick(own)) return found(own);
       for (const mine of [true, false]) for (const t of ranked) if ((!mine || !framed(t)) && pick({ kind: 'words', text: t })) return found({ kind: 'words', text: t });
       for (const c of controls) { const st = stateOf(c); if (st && pick({ kind: 'control', control: c.name, state: st })) return found({ kind: 'control', control: c.name, state: st }); }
       for (const c of controls) if (isBox(c) && c.value && pick({ kind: 'box', box: c.name, says: lead(c.value, 40) })) return found({ kind: 'box', box: c.name, says: lead(c.value, 40) });

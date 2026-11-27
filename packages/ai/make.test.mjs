@@ -18,7 +18,7 @@ import { approve, approval, writeReset, planFromScript } from './make.mjs';
 import { walkPlan } from './walk.mjs';
 import { undoGroups, checkClaim } from './reset-run.mjs';
 import { startUrls } from './live.mjs';
-import { scriptPlanInput, planWithModel } from './script-plan.mjs';
+import { scriptPlanInput, planWithModel, trackFromAnswer } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish, forgetLastTake } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
@@ -220,6 +220,64 @@ test('Copilot gets a screen\'s words only when page text is allowed, redacted; a
   await m.ask('script-plan', { a: 1 });
   await m.ask('script-plan', { a: 2 });
   assert.deepEqual([(await import(pathToFileURL(file).href)).n, m.stats.cached], [2, 1]);
+  // A plan from her script is kept by her script and the screens, not by the rules' draft it also sends: what the
+  // rules learn since doesn't ask Copilot again, so the same script on the same recording gets the same plan.
+  let asked = null;
+  await planWithModel(track, { walker, model: { kind: 'x', ask: async (task, input, opts) => { asked = { input, opts }; return { beats: [] }; } } });
+  assert.deepEqual(asked.opts.keyOf, scriptPlanInput(track, walker, { pageText: false }));
+  assert.doesNotMatch(JSON.stringify(asked.opts.keyOf), /"draft":|"issues":/);
+});
+
+test('a change the rules left out stays hers to OK when Copilot\'s answer leaves it out too', async () => {
+  const walker = walkerFromDemo(demoDir());
+  const track = parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Manage sync.'), 'x.md');
+  const ask = async () => ({ beats: [{ n: 1, lines: [] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to admin'] }] }] });
+  const r = await planWithModel(track, { walker, model: { kind: 'x', ask } });
+  assert.equal(r.flags.filter(f => f.kind === 'needs-ok' && /^Your script says "Manage sync"/.test(f.text)).length, 1);
+  // A change Copilot puts on a control her line doesn't name, nor the rules read it as: hers to OK.
+  const swap = await planWithModel(parseTalkTrack(SCRIPT, 'x.md'), { walker, model: { kind: 'x', ask: async () => ({ beats: [{ n: 1, lines: [] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to admin', 'Click "Enable Sync"'] }] }] }) } });
+  assert.ok(!swap.plan.beats[1].steps.some(st => st.writes));
+  assert.ok(swap.flags.some(f => f.kind === 'needs-ok' && /^Copilot's plan clicks "Enable Sync" for ".*", and clicking it turns "Enable Sync" on\. Your script doesn't name it\./.test(f.text)));
+  // With no screens to ground it on, a change its pack can't undo still waits.
+  const packs = { forApp: { chat: { id: 'notes', writes: [{ id: 'save-note', on: { kind: 'click', target: 'Save' }, what: 'saves a note', undo: null }] } }, writeFor: (p, st) => (p.writes || []).find(x => x.on.kind === st.kind && x.on.target.toLowerCase() === String(st.target).toLowerCase()) || null };
+  const bare = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Approve on the Save note card.', 'Click Save.'), 'x.md'), { apps: [{ id: 'chat', key: 'C', title: 'Chat app' }, { id: 'admin', key: 'A', title: 'Admin center' }], packs });
+  assert.ok(!bare.plan.beats[0].steps.some(st => st.target === 'Save'));
+  assert.ok(bare.flags.some(f => f.kind === 'needs-ok' && /^Click "Save" in Chat app: it saves a note, and Scenecast can't put that back/.test(f.text)));
+  // The recording's way to her control makes a change her script doesn't: left out, and the way stops there.
+  const demo2 = demoDir(), flow2 = JSON.parse(readFileSync(join(demo2.dir, 'flow.json'), 'utf8'));
+  flow2.states['admin-home'].on.push({ click: { sel: 'div[aria-label="Enable Sync"]' }, to: 'admin-synced' });
+  flow2.states['admin-synced'] = { app: 'admin', snap: 'admin-synced' };
+  writeFileSync(join(demo2.dir, 'flow.json'), JSON.stringify(flow2));
+  writeFileSync(join(demo2.dir, 'data', 'snaps', 'admin-synced.html'), '<!doctype html><html><head><title>t</title></head><body><h1>Plugin admin</h1><p>Sync is on</p><button aria-label="Sync now">Sync now</button></body></html>');
+  const via = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Sync now.'), 'x.md'), { walker: walkerFromDemo(demo2) });
+  assert.ok(!via.plan.beats[1].steps.some(st => st.writes), via.plan.beats[1].steps.map(formatStep).join(' / '));
+  assert.ok(via.flags.some(f => f.kind === 'needs-ok' && /^The recording does "Click "Enable Sync"" on the way, and it turns "Enable Sync" on\. Your script doesn't say to\./.test(f.text)));
+  // Made after all (Copilot's answer has it, and it's her control): not listed.
+  const made = await planWithModel(parseTalkTrack(SCRIPT, 'x.md'), { walker, model: { kind: 'x', ask: async () => ({ beats: [{ n: 1, lines: [] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to admin', 'Click "Certified"'] }] }] }) } });
+  assert.ok(!made.flags.some(f => f.kind === 'needs-ok'));
+});
+
+test('an answer that leaves out the switch to the app her line is in keeps the rules\' switch', () => {
+  const track = parseTalkTrack('# T\n\n## 1. Open · ~5s\n\n> I open Teams.\n\n## 2. Ask · ~10s\n\n> So I ask Copilot.\n', 't.md');
+  const draft = { plan: { beats: [{ steps: [{ kind: 'app', app: 'teams', line: '1.1' }] }, { steps: [{ kind: 'app', app: 'copilot', line: '2.1' }, { kind: 'press', key: 'Enter', line: '2.1' }] }] }, flags: [] };
+  const answer = { beats: [{ n: 1, lines: [{ id: '1.1', steps: ['Go to teams'] }] }, { n: 2, lines: [{ id: '2.1', steps: ['Type "What does this put at risk?" in "Message Copilot"', 'Press Enter'] }] }] };
+  const t = trackFromAnswer(track, answer, draft);
+  assert.deepEqual(t.beats[1].lines[0].intents.map(i => Object.keys(i)[0]), ['app', 'type', 'key']);
+  assert.equal(t.beats[1].lines[0].intents[0].app, 'copilot');
+  // A later line with no switch of its own is in the app the rules read it in, even after the answer went elsewhere.
+  const two = parseTalkTrack('# T\n\n## 1. Open · ~5s\n\n> I open Teams.\n\n## 2. Ask · ~10s\n\n> So I ask Copilot.\n\n> Then I ask again.\n', 't.md');
+  const draft2 = { plan: { beats: [{ steps: [{ kind: 'app', app: 'teams', line: '1.1' }] }, { steps: [{ kind: 'app', app: 'copilot', line: '2.1' }, { kind: 'press', key: 'Enter', line: '2.1' }, { kind: 'press', key: 'Enter', line: '2.2' }] }] }, flags: [] };
+  const drift = trackFromAnswer(two, { beats: [{ n: 1, lines: [{ id: '1.1', steps: ['Go to teams'] }] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to teams', 'Press Enter'] }, { id: '2.2', steps: ['Press Enter'] }] }] }, draft2);
+  assert.deepEqual(drift.beats[1].lines[1].intents.map(i => i.app || Object.keys(i)[0]), ['copilot', 'key']);
+  // A line the answer leaves out, after the answer went elsewhere: the rules' steps, with the switch back.
+  const three = parseTalkTrack('# T\n\n## 1. Open · ~5s\n\n> I open Teams.\n\n> And send it.\n\n## 2. Ask · ~10s\n\n> So I ask Copilot.\n', 't.md');
+  const draft3 = { plan: { beats: [{ steps: [{ kind: 'app', app: 'teams', line: '1.1' }, { kind: 'press', key: 'Enter', line: '1.2' }] }, { steps: [{ kind: 'app', app: 'copilot', line: '2.1' }, { kind: 'press', key: 'Enter', line: '2.1' }] }] }, flags: [] };
+  const left = trackFromAnswer(three, { beats: [{ n: 1, lines: [{ id: '1.1', steps: ['Go to copilot'] }] }, { n: 2, lines: [{ id: '2.1', steps: ['Press Enter'] }] }] }, draft3);
+  assert.deepEqual(left.beats[0].lines[1].intents.map(i => i.app || Object.keys(i)[0]), ['teams', 'key']);
+  assert.deepEqual(left.beats[1].lines[0].intents.map(i => i.app || Object.keys(i)[0]), ['copilot', 'key']);
+  // One that switches itself is left as it is.
+  const own = trackFromAnswer(track, { beats: [answer.beats[0], { n: 2, lines: [{ id: '2.1', steps: ['Go to copilot', 'Press Enter'] }] }] }, draft);
+  assert.deepEqual(own.beats[1].lines[0].intents.map(i => Object.keys(i)[0]), ['app', 'key']);
 });
 
 test('one box for what a line names together: rows of one list, a step and the steps it goes on to', () => {
@@ -444,11 +502,48 @@ test('a walker never writes; offline, the recording says where a write went', ()
   assert.deepEqual([r.screen.sig, r.screen.app, r.landed, r.wrote], ['chat-saved', 'chat', true, false]);
 });
 
+test('a change goes in only as the app\'s pack knows it, on the control her line names: else it waits for her OK', () => {
+  const walker = walkerFromDemo(demoDir());
+  const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && w.on.target.toLowerCase() === String(step.target).toLowerCase()) || null;
+  const packs = { forApp: { chat: { id: 'notes', writes: [{ id: 'save-note', on: { kind: 'click', target: 'Save' }, undo: { steps: ['Click "Delete {skill}"'] } }] } }, writeFor };
+  const { plan, flags } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs });
+  assert.ok(!plan.beats[0].steps.some(st => st.kind === 'press'));
+  assert.ok(flags.some(f => f.kind === 'needs-ok' && f.text === 'Press Enter in Chat app: it sends prompt 1, and Scenecast can\'t put that back afterwards. Left out of the plan: add it back if you want it.'));
+  // Her words aren't on the screen: the closest control is never clicked for a change, pack or not.
+  const near = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Manage sync.'), 'x.md'), { walker });
+  assert.ok(!near.plan.beats[1].steps.some(st => st.target === 'Enable Sync'));
+  assert.ok(near.flags.some(f => f.kind === 'needs-ok' && f.text === 'Your script says "Manage sync", but that isn\'t on the screen. The closest is "Enable Sync", and clicking it turns "Enable Sync" on. Left out of the plan: add it back if that\'s what you meant.'));
+  // However the control was found: one that drops her words is never the change ("Enable Sync now" is not "Enable
+  // Sync"); one that only adds a kind of control to them is ("Certified badge" is "Certified").
+  const strict = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Enable Sync now.'), 'x.md'), { walker });
+  assert.ok(!strict.plan.beats[1].steps.some(st => st.writes));
+  assert.ok(strict.flags.some(f => f.kind === 'needs-ok' && /^Your script says "Enable Sync now", but that isn't on the screen\. The closest is "Enable Sync"/.test(f.text)));
+  assert.ok(planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Certified badge.'), 'x.md'), { walker }).plan.beats[1].steps.some(st => st.target === 'Certified' && st.writes));
+  // A write its pack knows but can't undo (irreversible, or no undo) waits for her OK too.
+  for (const w of [{ undo: null }, { undo: { steps: ['Click "Delete {skill}"'] }, irreversible: true }]) {
+    const once = { forApp: { chat: { id: 'notes', writes: [{ id: 'send', on: { kind: 'press', key: 'Enter' }, undo: { steps: ['x'] } }, { id: 'save-note', on: { kind: 'click', target: 'Save' }, ...w }] } },
+      writeFor: (p, st) => (p.writes || []).find(x => x.on.kind === st.kind && (x.on.key ? x.on.key === st.key : x.on.target.toLowerCase() === String(st.target).toLowerCase())) || null };
+    const r = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs: once });
+    assert.ok(!r.plan.beats[0].steps.some(st => /notes:save-note/.test(st.writes || '')), JSON.stringify(w));
+    assert.ok(r.flags.some(f => f.kind === 'needs-ok' && /Scenecast can't put that back/.test(f.text)));
+  }
+  // Nor does it come back as the way to her next step: a screen only that change reaches isn't bridged to.
+  const demo = demoDir(), flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8'));
+  flow.states['admin-home'].on.push({ click: { sel: 'div[aria-label="Enable Sync"]' }, to: 'admin-synced' });
+  flow.states['admin-synced'] = { app: 'admin', snap: 'admin-synced' };
+  writeFileSync(join(demo.dir, 'flow.json'), JSON.stringify(flow));
+  writeFileSync(join(demo.dir, 'data', 'snaps', 'admin-synced.html'), '<!doctype html><html><head><title>t</title></head><body><h1>Plugin admin</h1><p>Sync is on</p><button aria-label="Sync now">Sync now</button></body></html>');
+  const then = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Manage sync. Click Sync now.'), 'x.md'), { walker: walkerFromDemo(demo) });
+  assert.ok(!then.plan.beats[1].steps.some(st => st.writes), then.plan.beats[1].steps.map(formatStep).join(' / '));
+});
+
 test('the reset: each write undone in reverse, a pack\'s undo with what the run made, read-only checks', () => {
   const demo = demoDir();
   const walker = walkerFromDemo(demo);
-  const pack = { id: 'notes', writes: [{ id: 'save-note', on: { kind: 'click', target: 'Save' }, makes: 'note', undo: { steps: ['Click "Delete {skill}"'] }, check: { look: { absent: '{skill}' } } }] };
-  const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && w.on.target.toLowerCase() === String(step.target).toLowerCase()) || null;
+  const pack = { id: 'notes', writes: [
+    { id: 'save-note', on: { kind: 'click', target: 'Save' }, makes: 'note', undo: { steps: ['Click "Delete {skill}"'] }, check: { look: { absent: '{skill}' } } },
+    { id: 'send', on: { kind: 'press', key: 'Enter' }, makes: 'task', undo: { steps: ['Delete the task it made ("{task}")'] }, check: { expect: 'no task "{task}" from this run in Recent' } }] };
+  const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && (w.on.key ? w.on.key === step.key : w.on.target.toLowerCase() === String(step.target).toLowerCase())) || null;
   const packs = { forApp: { chat: pack }, writeFor };
   const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs });
   assert.match(plan.beats[0].steps[5].writes, / · notes:save-note$/);
@@ -1057,6 +1152,20 @@ test('a plan never proves a step by a greeting: an app picks another on each vis
   assert.equal(formatLands(plan2.beats[0].steps[1].lands), 'home · "Welcome to Contoso Admin"');
 });
 
+test('where an app starts is proven by its own box, not by words that may be a drop zone\'s', () => {
+  const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((text, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', text })) });
+  const screens = { teams: sc(['Supply alerts']), start: sc(['Drop your files here', 'Recent chats'], [{ role: 'link', name: 'Plugins', nav: true }, { role: 'textbox', name: 'Message Copilot', editable: true }]) };
+  const walker = { flow: { states: { teams: { app: 'teams' }, start: { app: 'copilot' } } }, states: ['teams', 'start'], screen: id => screens[id] || null, shown: () => null,
+    control: () => null, typedTexts: () => [] };
+  // The rules' hint (words, no kind) doesn't come first; a proof the plan says it is does.
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'teams', lands: { screen: 'teams' } }, { kind: 'app', app: 'copilot', lands: { screen: 'start', text: 'Drop your files here' } }] }] };
+  proveLandings(plan, walker);
+  assert.equal(formatLands(plan.beats[0].steps[1].lands), 'start · control "Message Copilot"');
+  const mine = { beats: [{ steps: [{ kind: 'app', app: 'teams', lands: { screen: 'teams' } }, { kind: 'app', app: 'copilot', lands: { screen: 'start', kind: 'words', text: 'Recent chats' } }] }] };
+  proveLandings(mine, walker);
+  assert.equal(formatLands(mine.beats[0].steps[1].lands), 'start · "Recent chats"');
+});
+
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {
   const sc = (items, controls = []) => ({ headings: [], controls, items: items.map((it, i) => ({ i, kind: 'text', role: 'generic', tag: 'span', ...(typeof it === 'string' ? { text: it } : it) })) });
   const tabs = (agents, plugins) => [{ role: 'tab', name: 'Agents', selected: agents }, { role: 'tab', name: 'Plugins', selected: plugins }];
@@ -1118,7 +1227,7 @@ test('words only inside a message prove a step last, and say so, unless it\'s a 
     { kind: 'press', key: 'Enter', line: '1.3', writes, lands: { screen: 'sent' } }] }] });
   const p = plan('sends a prompt · chat-app:send'), flags = proveLandings(p, walker, [], { checked });
   // Words outside a message first, the plan's own included; a message's only when nothing else tells the screens apart.
-  assert.deepEqual(p.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['pr · "Status and details"', 'files · "Changes recommended"', 'chat · "New chat"', 'sent · "You said:"']);
+  assert.deepEqual(p.beats[0].steps.slice(1).map(s => formatLands(s.lands)), ['pr · "Status and details"', 'files · "Changes recommended"', 'chat · control "Message"', 'sent · "You said:"']);
   assert.deepEqual(flags.map(f => [f.kind, f.at]), [['message', '1.2']]);
   assert.match(flags[0].text, /^Click "Files changed": a run checks it by “Changes recommended”, words inside a message/);
   // The same send, which no pack checks: it says so too.

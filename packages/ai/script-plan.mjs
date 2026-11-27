@@ -104,16 +104,35 @@ export function trackFromAnswer(track, answer, draft = null) {
   for (const b of answer.beats) for (const l of (b && Array.isArray(b.lines) ? b.lines : [])) if (l && l.id != null) byId.set(String(l.id), l);
   if (!byId.size) return null;
   const prompts = track.prompts || [];
+  // The app each line is in as the rules read it, at its start and its end (a line with no switch of its own is in the
+  // app before it).
+  const steps0 = draft ? draft.plan.beats.flatMap(b => b.steps) : [];
+  const appAt = new Map(), appEnd = new Map();
+  let cur = null;
+  for (const s of steps0) { if (s.kind === 'app') cur = s.app; if (s.line) { if (!appAt.has(s.line)) appAt.set(s.line, cur); appEnd.set(s.line, cur); } }
+  // The app Copilot's steps are in, line to line.
+  let on = null;
   return {
     ...track,
     beats: track.beats.map((b, bi) => ({
       ...b,
       lines: b.lines.map((l, li) => {
-        const a = byId.get(lineId(bi, li));
-        if (!a) return l;
-        let steps = Array.isArray(a.steps) ? a.steps : [];
-        if (!steps.length && draft) steps = draft.plan.beats.flatMap(b => b.steps).filter(s => s.line === lineId(bi, li)).map(formatStep);
-        return { ...l, intents: steps.map(s => intentOf(s, l, prompts)).filter(Boolean), points: (Array.isArray(a.point) ? a.point : []).filter(p => p && (p.text || (Array.isArray(p.texts) && p.texts.length))).slice(0, 3) };
+        const id = lineId(bi, li), a = byId.get(id);
+        const mine = steps0.filter(s => s.line === id);
+        // A line the answer leaves out is read by the rules again, in the app it's in then: when the answer has gone
+        // elsewhere, it gets the rules' steps with the switch back.
+        if (!a && !(mine.length && appAt.get(id) && on && on !== appAt.get(id))) { if (appEnd.has(id)) on = appEnd.get(id); return l; }
+        let steps = a && Array.isArray(a.steps) ? a.steps : [];
+        if (!steps.length) steps = mine.map(formatStep);
+        let intents = steps.map(s => intentOf(s, l, prompts)).filter(Boolean);
+        // An answer that doesn't switch to the app her line is in would do the line in the app before (her prompt typed
+        // and sent in Teams, not Copilot): the rules' app goes first.
+        const want = appAt.get(id);
+        if (want && on !== want && !(intents[0] && intents[0].app)) intents = [{ app: want }, ...intents];
+        for (const it of intents) if (it.app) on = it.app;
+        // The controls the rules read her line's changes as: a change Copilot proposes on another must be named by her.
+        const drafted = mine.filter(s => s.writes && s.target).map(s => s.target);
+        return { ...l, intents, drafted, points: (a && Array.isArray(a.point) ? a.point : []).filter(p => p && (p.text || (Array.isArray(p.texts) && p.texts.length))).slice(0, 3) };
       }),
     })),
   };
@@ -130,10 +149,19 @@ export async function planWithModel(track, { walker, model = null, packs = null,
   emit({ event: 'copilot', step: 'reading', screens: input.screens.length, pageText });
   const t0 = Date.now();
   let answer = null, error = null;
-  try { answer = await model.ask('script-plan', input); } catch (e) { error = String((e && e.message) || e).slice(0, 300); }
+  // Kept by her script and the recording's screens, not by the rules' draft: the same script on the same recording gets
+  // the same plan, whatever the rules learned since.
+  const keyOf = scriptPlanInput(track, walker, { pageText, draft: null });
+  try { answer = await model.ask('script-plan', input, { keyOf }); } catch (e) { error = String((e && e.message) || e).slice(0, 300); }
   const info = { model: model.kind, calls: (model.stats || st).calls - before.calls, cached: (model.stats || st).cached - before.cached, secs: +((Date.now() - t0) / 1000).toFixed(1), sentChars: JSON.stringify(input).length, pageText, ...(error ? { error } : {}) };
   const t2 = trackFromAnswer(track, answer, draft);
   if (!t2) { emit({ event: 'copilot', step: 'rules', why: error || 'no plan in the answer' }); return rules({ ...info, fallback: true }); }
   emit({ event: 'copilot', step: 'grounding', calls: info.calls, cached: info.cached, secs: info.secs });
-  return { ...planFromTrack(t2, { walker, apps, packs }), model: info };
+  const out = planFromTrack(t2, { walker, apps, packs });
+  // A change the rules left out, that Copilot's answer left out too (or took from the rules, already without it): still
+  // hers to OK, unless the plan makes it after all.
+  const made = new Set(out.plan.beats.flatMap(b => b.steps).filter(s => s.writes).map(s => `${s.line}|${s.target}`));
+  const said = new Set(out.flags.map(f => f.text));
+  const lost = draft.flags.filter(f => f.kind === 'needs-ok' && !said.has(f.text) && !made.has(`${f.at}|${f.target}`));
+  return { ...out, flags: [...out.flags, ...lost], model: info };
 }

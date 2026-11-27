@@ -145,14 +145,17 @@ test('a check\'s way there starts from the recording\'s own start screen when th
   assert.match(routeTo(plan, 'tasks', 'tasks-fresh').why, /which writes/);
 });
 
-test('a route never starts at a row of a list that says it has more rows than it shows: it takes the plan\'s search', () => {
+test('a route starts at a grid\'s row only when the plan has no way before it: it takes the plan\'s search', () => {
   const plan = parsePlan('# T\n\n## Beat 1 · Tools\n\n- Go to admin\n  Lands on: admin-home · "Fixture Admin"\n- Type "echo" in "Search tools by name"\n- Press Enter\n  Lands on: admin-echo · "echo-4"\n- Click "echo-4"\n  Lands on: admin-tool · "Close details"\n');
   // The recorded start screen rendered the row; a virtualized grid (301 rows, a few shown) may not today.
   const start = said => ({ controls: [{ name: 'Search tools by name', role: 'searchbox' }, { name: 'alpha-0', role: 'row', list: 7, row: 8 }, { name: 'echo-4', role: 'row', list: 7, row: 9 }],
     items: [{ text: 'alpha-0', list: 7, row: 8 }, { text: 'echo-4', list: 7, row: 9 }], lists: { 7: ['Tools', 'grid', said] } });
   const walker = said => ({ start: () => 'admin-home', screen: id => id === 'admin-home' ? start(said) : null, shown: () => null });
   assert.deepEqual(routeTo(plan, 'admin', 'admin-tool', { walker: walker(301) }).route.steps.map(s => s.kind), ['type', 'press', 'click']);
-  // A list that says nothing of its size (or shows all it says): its row starts a route.
-  assert.deepEqual(routeTo(plan, 'admin', 'admin-tool', { walker: walker(null) }).route.steps.map(s => s.kind), ['click']);
-  assert.deepEqual(routeTo(plan, 'admin', 'admin-tool', { walker: walker(2) }).route.steps.map(s => s.kind), ['click']);
+  // A grid that shows all it says still takes the plan's search: the recording's may have been filtered (Demo 1's start
+  // showed 2 plugins; today's shows 500).
+  assert.deepEqual(routeTo(plan, 'admin', 'admin-tool', { walker: walker(2) }).route.steps.map(s => s.kind), ['type', 'press', 'click']);
+  // With no way before it, the row starts the route.
+  const direct = parsePlan('# T\n\n## Beat 1 · Tools\n\n- Go to admin\n  Lands on: admin-home · "Fixture Admin"\n- Click "echo-4"\n  Lands on: admin-tool · "Close details"\n');
+  assert.deepEqual(routeTo(direct, 'admin', 'admin-tool', { walker: walker(2) }).route.steps.map(s => s.kind), ['click']);
 });
