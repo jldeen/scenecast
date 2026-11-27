@@ -28,10 +28,11 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
   const said = t => { const m = /^([\w-]+)(?: on [\w-]+)?:\s*(.+)$/.exec(t || ''); return m ? `${name(m[1])}: ${m[2]}` : t || ''; };
   const c = walk.check;
   // The engine's words stay in detail (the CLI's answer), never in what the window shows.
-  if (c && c.error) stops.push({ ...row(-1, -1, null, 'Before it starts, its checks couldn\'t run', 'Check again in a minute'), detail: c.error });
+  if (c && c.error) stops.push({ ...row(-1, -1, null, 'Before it starts, its checks stopped with an error', 'Check again. If it stops the same way, what went wrong is under Details'), detail: c.error });
   else if (c && (c.wrong || c.cant)) for (const l of (c.lines || []).filter(l => l.status !== 'pass')) stops.push({ ...(l.status === 'wrong'
     ? row(-1, -1, { text: l.text }, `Before it starts, the demo isn't as it should be (${said(l.text)})`, 'Put the demo back as it starts, then check again')
     : l.plan ? row(-1, -1, { text: l.text }, `Before it starts, it can't check this with the plan as it is (${said(l.text)})`, 'Make the plan again: its start checks are made with it')
+      : l.setup ? row(-1, -1, { text: l.text }, `Before it starts, it can't check this (${said(l.text)}): the demo's reset or its app's pack doesn't say how`, 'Fix that check in the demo\'s reset or the app\'s pack (what\'s missing is under Details), then check again')
       : row(-1, -1, { text: l.text }, `Before it starts, it couldn't check this (${said(l.text)})${l.why ? `: ${l.why}` : ''}`, 'Open the demo where it starts, then check again')), ...(l.why ? { detail: l.why } : {}) });
   for (const o of walk.ownStatus || []) if (!o.ok) stops.push(row(-1, -1, null, o.error || `${name(o.app)} showed you as ${o.status}, not ${(o.expect || []).join(' or ')}`, 'Start again while you\'re at your computer, with that app open'));
   // Each app's start screen, as the run checks it before its first step.
