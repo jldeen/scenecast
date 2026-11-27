@@ -261,8 +261,9 @@ export async function finish({ demo, packs, emit = () => {} }) {
   const result = { script: null, beats: 0, points: 0 };
   let slots = [];
   // Her script for the guide: from her talk track (source.md, kept when the plan was made), unless she wrote her own.
+  // Only a talk track the plan was made from (its "From:" line): notes she gave with a goal aren't her script.
   const src = join(demo.dir, 'source.md');
-  if (existsSync(src)) {
+  if (existsSync(src) && /^<!-- From: /.test(readFileSync(src, 'utf8'))) {
     const text = readFileSync(src, 'utf8'), name = (/^<!-- From: (.+?) -->/.exec(text) || [, 'source.md'])[1];
     const track = parseTalkTrack(text.replace(/^<!-- From: .+? -->\s*/, ''), name.replace(/\.docx$/i, '.md'));
     const tbs = trackBeats(track, plan);

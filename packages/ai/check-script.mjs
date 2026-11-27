@@ -59,19 +59,22 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
         doubt[app] = null;
         if (r.status === 'write') continue;
       }
-      const set = (why, fix) => { if (!doubt[app]) doubt[app] = { step: si + 1, why, fix }; marks.push(row(bi, si, { text }, why, fix)); };
+      // lasts: until the app's next write, as an unproven landing does in a run (writeGate looks back to it); a drifted
+      // or missed step is only marked there, and the next proven step clears it.
+      const set = (why, fix, lasts = true) => { if (!doubt[app] || (lasts && !doubt[app].lasts)) doubt[app] = { step: si + 1, why, fix, lasts }; marks.push(row(bi, si, { text }, why, fix)); };
+      const proven = () => { if (doubt[app] && !doubt[app].lasts) doubt[app] = null; };
       const ruled = r.status === 'after-write' || blind || (r.status === 'drifted' && r.needs);
-      // A doubt lasts until the app's next write: before a write, the run looks back to its last one (writeGate).
-      if (!ruled && r.status === 'reached') continue;
+      if (!ruled && r.status === 'reached') proven();
       else if (!ruled && r.status === 'unproven' && carries(s)) continue;
       else if (!ruled && r.status === 'unproven') set(`nothing proves where it lands${r.why ? ` (${r.why})` : ''}`, 'Give it a Lands on: a control or words that only show once it has run');
-      else if (!ruled && r.status === 'drifted') set(`the words it lands on aren't on the screen today${r.why ? ` (${r.why})` : ''}`, r.seen && r.seen.headings && r.seen.headings.length ? `Today the screen says: ${r.seen.headings.slice(0, 3).map(h => `"${h}"`).join(', ')}` : 'Land on what the screen says today');
-      else if (!ruled && r.status === 'missed') set(`it can't be done today: ${r.why || 'not there'}`, r.needs ? `It may need ${r.needs}` : null);
+      else if (!ruled && r.status === 'drifted') set(`the words it lands on aren't on the screen today${r.why ? ` (${r.why})` : ''}`, r.seen && r.seen.headings && r.seen.headings.length ? `Today the screen says: ${r.seen.headings.slice(0, 3).map(h => `"${h}"`).join(', ')}` : 'Land on what the screen says today', false);
+      else if (!ruled && r.status === 'missed') set(`it can't be done today: ${r.why || 'not there'}`, r.needs ? `It may need ${r.needs}` : null, false);
       else if (ruled) {
         unchecked++;
         const l = s.lands;
         if (l && l.kind === 'words' && l.text && answerLike(l.text) && !hers(l.text)) set(`its proof quotes words the app wrote ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, or a short phrase of the product\'s own');
-        else if (!(l && l.kind) && !carries(s)) set('nothing proves where it lands, and it can only be seen once the write before it runs', 'Give it a Lands on: a control on that screen')
+        else if (l && l.kind) proven();
+        else if (!carries(s)) set('nothing proves where it lands, and it can only be seen once the write before it runs', 'Give it a Lands on: a control on that screen')
       }
     }
   }

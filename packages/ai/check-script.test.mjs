@@ -134,6 +134,27 @@ test('a doubt lasts until the next write: unproven, then reached, then a write s
   assert.match(r.stops[0].why, /a write after a step it couldn't prove \(step 2/);
 });
 
+test('a drifted or missed step is only marked in a run: a proven step after it clears it before the write', () => {
+  const plan = parsePlan(`# T
+
+## Beat 1 · A
+
+- Go to chat
+  Lands on: chat-home · "New chat"
+- Click "Plugins"
+  Lands on: chat-plugins · "Roles & Industry"
+- Click "Roles"
+  Lands on: chat-roles · "Roles & Industry"
+- Click "Turn on" — ask first
+  Writes: turns the plugin on · chat:plugin-switch
+`);
+  for (const miss of ['drifted', 'missed']) {
+    const r = predictStops(plan, { beats: [{ steps: ['reached', miss, 'reached', 'write'].map(status => ({ status })) }] }, { writeKnown: known });
+    assert.deepEqual(r.stops, [], miss);
+    assert.equal(r.marks.length, 1, miss);
+  }
+});
+
 test('a step that\'s hers to do, or one a run can\'t do, is a stop even with no write after it', () => {
   const plan = parsePlan(`# T
 

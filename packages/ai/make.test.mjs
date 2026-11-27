@@ -3,7 +3,7 @@
 // walkthrough to the same plan, and the finish (focus points with via, her script for the guide).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -652,7 +652,7 @@ test('a take\'s Save kept by its test id only, and a box it emptied, still start
 test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 start them, none of the recording\'s after them', async () => {
   const { demo, flow, home } = takeDemo();
   // Her talk track has a beat this take left out; the beat keys from a longer plan before are still there.
-  writeFileSync(join(demo.dir, 'source.md'), '# Delay demo\n\n## 1. The question · ~10s\n\n> Our supplier moved the ship date.\n\n## 2. Save it · ~20s\n\n> I save it.\n\n## 3. A part this take left out · ~30s\n\n> Not in this take.\n\n## 4. Certify it · ~1m15s\n\n> I certify it.\n');
+  writeFileSync(join(demo.dir, 'source.md'), '<!-- From: talk.md -->\n\n# Delay demo\n\n## 1. The question · ~10s\n\n> Our supplier moved the ship date.\n\n## 2. Save it · ~20s\n\n> I save it.\n\n## 3. A part this take left out · ~30s\n\n> Not in this take.\n\n## 4. Certify it · ~1m15s\n\n> I certify it.\n');
   writeFileSync(join(demo.dir, 'flow.editor.json'), JSON.stringify({ version: 1, edits: [], beats: { 4: { active: 'admin', states: home } } }));
   await finish({ demo, packs: null });
   const script = readFileSync(join(demo.dir, 'script.md'), 'utf8');
@@ -660,6 +660,14 @@ test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 
   const ed = readEditorOverrides(demo.dir);
   assert.deepEqual(Object.entries(ed.beats).map(([n, b]) => [n, b.label]), [['1', 'The question'], ['2', 'Save it'], ['3', 'Certify it']]);
   assert.deepEqual(applyEditorOverrides(structuredClone(flow), ed).beats.map(b => b.label), ['0 Reset', '1 The question', '2 Save it', '3 Certify it']);
+});
+
+test('notes she gave with a goal aren\'t her script: the finish writes no guide script from them', async () => {
+  const { demo } = takeDemo();
+  writeFileSync(join(demo.dir, 'source.md'), 'Contoso wants to see how fast a PO gets approved. Their CFO cares about audit trails.\n');
+  const r = await finish({ demo, packs: null });
+  assert.equal(r.script, null);
+  assert.equal(existsSync(join(demo.dir, 'script.md')), false);
 });
 
 test('proofs on today\'s product: kept, new, today only, behind a write, missed; never a greeting, a passing tip or a page the guard broke', () => {

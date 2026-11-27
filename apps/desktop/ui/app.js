@@ -1993,10 +1993,13 @@ const ACTIONS = {
     // Approving is the plan as it is now: its writes included. Any edit after this needs approving again.
     try { await saveAiFields(id); await call('ai_save', { id, plan }); await call('ai_approve', { id }); } catch { return; }
     J(id).aiChain = null;
-    const o = await step('ai-record', J(id).capture?.separate ? 'ai_record_unattended' : 'ai_record', {});
+    const away = !!J(id).capture?.separate;
+    const o = await step('ai-record', away ? 'ai_record_unattended' : 'ai_record', {});
     loadAi(id);
-    // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away.
-    if (o) await makeReplica(id, { finish: true });
+    // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away. A run in
+    // the separate browser writes no talk track: the finish makes the guide's from the plan (in her browser, the run
+    // writes its own, beat for beat).
+    if (o) await makeReplica(id, { finish: away });
   },
   'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
   separate: async t => {
