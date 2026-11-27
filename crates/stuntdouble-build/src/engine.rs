@@ -363,12 +363,12 @@ pub(crate) fn dunce(path: PathBuf) -> PathBuf {
     }
 }
 
-#[cfg(test)]
+// A fake Node is a shell script: Unix only.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     // A Node that prints this version, as `node --version` does.
-    #[cfg(unix)]
     fn node_saying(dir: &Path, version: &str) -> Engine {
         use std::os::unix::fs::PermissionsExt;
         let node = dir.join("node");
@@ -382,7 +382,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn node_20_is_refused_before_anything_runs() {
         let temp = tempfile::tempdir().unwrap();

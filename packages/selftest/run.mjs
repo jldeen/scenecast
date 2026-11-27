@@ -8,7 +8,10 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// CI runs the capture run as a job of its own, beside the rest: SELFTEST_PART=capture-run runs only it, rest the others.
+const part = process.env.SELFTEST_PART || null;
 const step = (name, cmd, args) => {
+  if (part && (part === 'capture-run') !== (name === 'capture run')) return;
   console.log(`\n== ${name}`);
   const r = spawnSync(cmd, args, { cwd: ROOT, stdio: 'inherit' });
   if (r.status !== 0) { console.log(`${name} failed`); process.exit(r.status || 1); }
