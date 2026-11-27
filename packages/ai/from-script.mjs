@@ -247,6 +247,12 @@ export function packWrite(writeFor, pack, step, field, el) {
   return null;
 }
 
+// Every word of hers in the control's name ("Sync" is "Enable Sync"; "Manage all" isn't "All users").
+const KIND_WORDS = new Set(['the', 'a', 'an', 'button', 'badge', 'link', 'tab', 'switch', 'toggle', 'checkbox', 'box', 'icon', 'menu', 'row', 'card', 'option']);
+const hasWords = (name, hers) => { const n = new Set(norm(name).split(/[^a-z0-9]+/)); return norm(hers).split(/[^a-z0-9]+/).filter(x => x && !KIND_WORDS.has(x)).every(x => n.has(x)); };
+// A pack's write the reset can put back: an undo (its own, or the one it's the same as), and not irreversible.
+const undoable = (pack, pw) => { if (!pw || pw.irreversible) return false; const u = pw.undo && pw.undo.same ? ((pack.writes || []).find(x => x.id === pw.undo.same) || {}).undo : pw.undo; return !!u; };
+
 // A recorded move that would change something (send, save, approve, add).
 const writes = m => m.steps.some((s, i) => {
   if (s.kind !== 'press') return !!writeOf(s, m.control || null, {});
@@ -332,8 +338,11 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       if (step.kind === 'type' && !step.target && S.field[S.app] && walker.control(sc, S.field[S.app], 'field')) step.target = S.field[S.app];
       // A step that could write isn't done by a walker: offline, the recording says where it went; live, mapping stops.
       const go = (st2) => { const guess = writeOf(st2, null, {}); if (!guess) return walker.step(id, st2, S.typed[S.app] || ''); if (walker.recorded) return walker.recorded(id, st2, S.typed[S.app] || ''); throw Object.assign(new Error('stops before a write'), { code: 'WRITE' }); };
+      // Her words for the control (after the rules for "the message box" and "the title"), and whether the card's own
+      // approve button stood in for them ("Approve" on her card, "Save: Save skill" on the product's).
+      const said = step.target;
+      let alt = false;
       let r = go({ ...step, strict: true, role: opts.role });
-      let near = null;
       if ((step.kind === 'click' || step.kind === 'hover') && !r.control && !r.recorded && !step.title) {
         const strong = (sc2, name, min = 50) => { const h = walker.control(sc2, name); return h && h.score >= min; };
         // To a screen with the control by its own name before one with a name like it ("Add to business plugin", once
@@ -349,11 +358,12 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         if (!r.control && !r.recorded) {
           if (opts.maybe) return null;
           // "Approve" where the product says "Save" (or the other way round): the card's own button, said differently.
-          const alt = approvalAlt(sc, step.target, opts.card);
-          if (alt) {
-            step.differs = `the product shows "${alt.name}" here, not "${step.target}"${opts.card ? ` (your script: the "${opts.card}" card)` : ''}`;
+          const own = approvalAlt(sc, step.target, opts.card);
+          if (own) {
+            alt = true;
+            step.differs = `the product shows "${own.name}" here, not "${step.target}"${opts.card ? ` (your script: the "${opts.card}" card)` : ''}`;
             flag('differs', cap(step.differs), where(line));
-            step.target = alt.name;
+            step.target = own.name;
             r = go(step);
           }
         }
@@ -362,8 +372,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           if (close && close.score >= 30 && step.kind === 'click') {
             step.differs = `there's no "${step.target}" here; the closest is "${close.el.name}"`;
             flag('differs', `${cap(formatStep(step))}: ${step.differs}`, where(line));
-            near = { said: step.target, is: close.el.name };
-            step.target = near.is;
+            step.target = close.el.name;
             r = go(step);
           }
         }
@@ -375,11 +384,11 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       }
       if ((step.kind === 'click' || step.kind === 'hover') && !r.control && r.recorded) {
         // The recording has it, the product's own screen doesn't (a part composed into the replica).
-        const alt = approvalAlt(sc, step.target, opts.card);
+        const own = approvalAlt(sc, step.target, opts.card);
         const card = opts.card ? ` (your script: the "${opts.card}" card)` : '';
-        step.differs = alt ? `the product shows "${alt.name}" here, not "${step.target}"${card}` : `"${step.target}" isn't on the product's screen (the replica has it)`;
+        step.differs = own ? `the product shows "${own.name}" here, not "${step.target}"${card}` : `"${step.target}" isn't on the product's screen (the replica has it)`;
         flag('differs', `${cap(step.differs)}`, where(line));
-        if (alt) { step.target = alt.name; r = { ...r, control: alt }; }
+        if (own) { alt = true; step.target = own.name; r = { ...r, control: own }; }
       } else if (r.control && r.control.name && norm(r.control.name) !== norm(step.target) && step.kind !== 'type') step.target = r.control.name;
       if (step.kind === 'type') { S.typed[S.app] = step.value; if (r.control) step.target = S.field[S.app] = r.control.name; }
       // The product's own approve button ("Save: Save skill") where the recording clicked the replica's ("Approve"):
@@ -419,13 +428,15 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       // What the pack knows only looks like a change ("Add content to…" opens a picker): no write, no asking.
       const safe = !pw ? packSafe(packs, pack, step, field, r.control) : null;
       if (safe) { step.safe = `${safe.what.replace(/\.$/, '')} · ${pack.id}:${safe.id}`; w = null; }
-      // A change only goes in when the app's pack knows it (so the reset can put it back) and it's the control her line
-      // names: never "Manage all" made into the closest switch. Otherwise it's left out, for her OK.
-      if ((w || pw) && ((pack && packs.writeFor && !pw) || near)) {
+      // A change only goes in when the app's pack can undo it (so the reset can put it back) and it's the control her
+      // line names, however it was found: never "Manage all" made into the closest switch. Otherwise it's left out, for
+      // her OK.
+      const other = step.kind === 'click' && !alt && said && !hasWords(step.target, said);
+      if ((w || pw) && ((pack && packs.writeFor && !undoable(pack, pw)) || other)) {
         const what = (w || pw).what.split(/[;:(]/)[0].trim();
-        flag('needs-ok', near
-          ? `Your script says "${near.said}", but that isn't on the screen. The closest is "${near.is}", and clicking it ${what}. Left out of the plan: add it back if that's what you meant.`
-          : `${cap(formatStep(step))} in ${appTitle(S.app)}: it ${what}, and Scenecast can't put that back afterwards. Left out of the plan: add it back if you want it.`, where(line));
+        flag('needs-ok', other
+          ? `Your script says "${said}", but that isn't on the screen. The closest is "${step.target}", and clicking it ${what}. Left out of the plan: add it back if that's what you meant.`
+          : `${cap(formatStep(step))} in ${appTitle(S.app)}: it ${what}, and Scenecast can't put that back afterwards. Left out of the plan: add it back if you want it.`, { ...where(line), target: step.target });
         // Nor is it the way to a later step: what it reaches, only it reaches.
         if (r.to) wrote.add(r.to);
         return drop();

@@ -142,5 +142,11 @@ export async function planWithModel(track, { walker, model = null, packs = null,
   const t2 = trackFromAnswer(track, answer, draft);
   if (!t2) { emit({ event: 'copilot', step: 'rules', why: error || 'no plan in the answer' }); return rules({ ...info, fallback: true }); }
   emit({ event: 'copilot', step: 'grounding', calls: info.calls, cached: info.cached, secs: info.secs });
-  return { ...planFromTrack(t2, { walker, apps, packs }), model: info };
+  const out = planFromTrack(t2, { walker, apps, packs });
+  // A change the rules left out, that Copilot's answer left out too (or took from the rules, already without it): still
+  // hers to OK, unless the plan makes it after all.
+  const made = new Set(out.plan.beats.flatMap(b => b.steps).filter(s => s.writes).map(s => `${s.line}|${s.target}`));
+  const said = new Set(out.flags.map(f => f.text));
+  const lost = draft.flags.filter(f => f.kind === 'needs-ok' && !said.has(f.text) && !made.has(`${f.at}|${f.target}`));
+  return { ...out, flags: [...out.flags, ...lost], model: info };
 }
