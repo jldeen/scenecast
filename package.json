@@ -1,6 +1,6 @@
 {
   "name": "scenecast-workspace",
-  "version": "0.5.6-rc.3",
+  "version": "0.5.6-rc.4",
   "private": true,
   "type": "module",
   "description": "Scenecast's JavaScript: everything that runs in the browser (recorder, player, checks). The scenecast binary (Rust) runs it.",
@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "test": "node packages/selftest/run.mjs",
-    "test:unit": "node --test packages/capture/fetch-all.test.mjs packages/capture/leave-out.test.mjs packages/capture/presence.test.mjs packages/capture/host.test.mjs packages/capture/cards.test.mjs packages/capture/hover-card.test.mjs packages/ai/leave-run.test.mjs packages/ai/check-script.test.mjs packages/ai/check-lines.test.mjs packages/player/bundle-flow.test.mjs packages/player/launch.test.mjs packages/player/presenter-key.test.mjs packages/player/serve.test.mjs packages/checks/path.test.mjs packages/core/compile/flow.test.mjs packages/core/lib/preflight.test.mjs packages/core/lib/profiles.test.mjs packages/checks/fixer/patches.test.mjs packages/script/script.test.mjs packages/ai/ai.test.mjs packages/ai/make.test.mjs packages/core/lib/exit.test.mjs packages/core/lib/at.test.mjs packages/core/lib/text-rules.test.mjs packages/core/lib/demo.test.mjs packages/core/lib/beats.test.mjs packages/core/lib/control-name.test.mjs apps/desktop/tests/errors.test.mjs packages/apps/apps.test.mjs packages/capture/browser.test.mjs packages/core/lib/test-fence.test.mjs packages/selftest/reap.test.mjs packages/capture/host-ops.test.mjs",
+    "test:unit": "node --test packages/capture/fetch-all.test.mjs packages/capture/leave-out.test.mjs packages/capture/presence.test.mjs packages/capture/host.test.mjs packages/capture/cards.test.mjs packages/capture/hover-card.test.mjs packages/ai/leave-run.test.mjs packages/ai/check-script.test.mjs packages/ai/take.test.mjs packages/ai/check-lines.test.mjs packages/player/bundle-flow.test.mjs packages/player/launch.test.mjs packages/player/presenter-key.test.mjs packages/player/serve.test.mjs packages/checks/path.test.mjs packages/core/compile/flow.test.mjs packages/core/lib/preflight.test.mjs packages/core/lib/profiles.test.mjs packages/checks/fixer/patches.test.mjs packages/script/script.test.mjs packages/ai/ai.test.mjs packages/ai/make.test.mjs packages/core/lib/exit.test.mjs packages/core/lib/at.test.mjs packages/core/lib/text-rules.test.mjs packages/core/lib/demo.test.mjs packages/core/lib/beats.test.mjs packages/core/lib/control-name.test.mjs apps/desktop/tests/errors.test.mjs apps/desktop/tests/run.test.mjs packages/apps/apps.test.mjs packages/capture/browser.test.mjs packages/core/lib/test-fence.test.mjs packages/selftest/reap.test.mjs packages/capture/host-ops.test.mjs",
     "test:browsers": "node packages/selftest/extension-browsers.mjs",
     "test:capture": "node packages/selftest/capture-fixture.mjs",
     "test:capture-browser": "node packages/selftest/capture-browser.mjs",

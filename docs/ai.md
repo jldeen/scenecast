@@ -113,7 +113,7 @@ and listed above the plan as **needs your OK**: add it back to the plan if it's 
 In a separate browser (Record › **Copilot records in a separate browser**), off your screen, there's nobody to ask,
 so you approve every write before it starts: the approval lists each one by beat and step, and the run does only
 those. Anything else that could change something is held, and stops the run with a picture of where it was. The demo
-is put back as it started, before the run and after it.
+is put back as it started, before the run and after it. A run that stops part way leaves your replica as it was.
 
 - **Sign in to it** once: its window opens on your screen, you sign in to the demo's apps, and it hides again.
 - **Check my script** first, about 7 minutes: it walks your plan there, changing nothing, and lists where a run would

@@ -27,6 +27,7 @@ import { runReset, fillApi, setBefore, setBeforeProblem, claimScreen, checkClaim
 import { leaveOutOf, leaveOn, leaveLog, leftFor, leaveApps, leaveFailure } from './leave-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
 import { forgetLastTake } from './finish.mjs';
+import { keepLastTake, endTake } from './take.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { GROUP_LABEL, groupOpenAfter } from './find.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
@@ -377,7 +378,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     }
     return null;
   };
-  let recording = false, wRun = null;
+  let recording = false, wRun = null, lastTake = null, ranAll = false;
   const ran = [], results = {};
   try { main: {
     // Leave out, from the start: the apps that have a line opened again, so what they show comes filtered. Before the
@@ -467,6 +468,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     let app = first && first.kind === 'app' && w.appOf(first.app) || appIds[0];
     // Leave out can refuse a start screen's save (what she leaves out was on it): the take ends before it begins, and so
     // does the run.
+    lastTake = keepLastTake(demo.raw);
     try { await cmd('recordStart', { apps: demo.cfg.apps.map(a => ({ id: a.id, match: a.match })), record: recordOpts(demo.cfg), parallel: true, zooms: demo.cfg.zooms, first: app }, 300); }
     catch (e) {
       const os = await ownStopped();
@@ -695,12 +697,11 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       run.beats.push({ beat: bi + 1, title: beat.title, secs: +((Date.now() - tb) / 1000).toFixed(1) });
       if (bi === 0 && ownApps.length) { await settled(cmd, { maxS: 300 }).catch(() => {}); await ownSummary('beat1'); }
     }
+    ranAll = !run.stopped;
   } } finally {
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
-      // Never in the way of the reset after: a focus.json she broke by hand stays as it is.
-      if (run.summary && run.summary.states > 0) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
       // A save it refused after the last step: the take ends there, and she sees why.
       const os = await ownStopped();
       if (os && !run.stopped) ownStopRun(os);
@@ -711,6 +712,12 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       const l = await leaveNow().catch(() => null);
       if (l && l.leak && !run.stopped) leakStop(l.leak);
     }
+    // Only a take that ran every step and saved replaces the last one (its raw recording, beat keys and focus points):
+    // one that stopped part way, failed or didn't save leaves them, and the replica made from them, as they were. A
+    // first take that stopped is kept (there's nothing to put back). A focus.json she broke by hand stays as it is.
+    const whole = ranAll && !run.stopped && !!run.summary && !run.summary.error;
+    if (recording && whole && run.summary.states > 0) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
+    try { endTake(demo.raw, lastTake, { restore: !whole }); } catch (e) { log(`the last take's recording wasn't put back: ${e.message}`); }
     // Each recorded hover and menu: captured, missed, not reached or gone; a missed one is listed for her, with its
     // picture.
     if (run.hovers || run.menus) {

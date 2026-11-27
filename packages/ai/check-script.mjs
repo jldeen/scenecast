@@ -10,6 +10,8 @@
 // → { stops: [{ beat, step, text, why, fix }], marks: [same], unchecked: n, ok }
 
 import { formatStep } from './plan.mjs';
+// The run's own normalizing (landing.mjs), so Check my script and a run agree on a title.
+import { pnorm as pn, SENDS } from './landing.mjs';
 
 const TAG = / · ([\w-]+):([\w-]+)$/;
 // A wait, hover or scroll, and a step group opened by its place, carry the proven screen before them (a run's rule).
@@ -18,8 +20,11 @@ const carries = s => /^(wait|hover|scroll)$/.test(s.kind) || (s.kind === 'click'
 // Words an app wrote, not its own interface: a sentence (6 words or more), or a quoted name in it.
 export const answerLike = text => /['"‘’“”]/.test(text) || String(text).trim().split(/\s+/).length >= 6;
 
-// names: each app's name as the window shows it ({ id: title }).
-export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), names = {} } = {}) {
+const GREETING = /^(hi|hello|hey|good (morning|afternoon|evening)|welcome back)\b/i;
+
+// names: each app's name as the window shows it ({ id: title }). titleOf: a recorded screen's page title (the name
+// the app gave a new chat, on the screen a send made).
+export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), names = {}, titleOf = () => null } = {}) {
   const stops = [], marks = [];
   let unchecked = 0;
   const row = (bi, si, s, why, fix) => ({ beat: bi + 1, step: si + 1, text: s ? s.text || null : null, why, ...(fix ? { fix } : {}) });
@@ -43,6 +48,10 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
   // What she typed: a proof that quotes it is her words in a box, not the app's.
   const typed = plan.beats.flatMap(b => b.steps).filter(s => s.kind === 'type' && s.value).map(s => s.value);
   const hers = text => typed.some(v => v.includes(text));
+  // The screen each step starts from: the last one the plan landed on before it.
+  const startsOn = new Map();
+  let landed = null;
+  for (const st of plan.beats.flatMap(b => b.steps)) { startsOn.set(st, landed); if (st.lands && st.lands.screen) landed = st.lands.screen; }
   for (const [bi, beat] of plan.beats.entries()) {
     const rows = ((walk.beats || [])[bi] || { steps: [] }).steps;
     // Blind: the rest of the beat needs a write the walk didn't run (after it, or after a miss it caused).
@@ -64,7 +73,14 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
         if (!k.ok) stops.push(row(bi, si, { text }, `no undo for this write: ${k.why}`, 'Add the write to its app pack, with its undo'));
         // A run checks where a write lands, after it: its proof can't be words the app writes there.
         const l = s.lands;
-        if (l && l.kind === 'words' && l.text && answerLike(l.text) && !hers(l.text)) stops.push(row(bi, si, { text }, `its proof quotes words the app wrote ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, or a short phrase of the product\'s own'));
+        // What the app makes up: an answer's words, a greeting, or the name it gave the new chat.
+        // A title a send gave its screen: not the one the screen before it had.
+        const title = l && l.screen ? pn(titleOf(l.screen)) : '';
+        const titled = SENDS.test(s.writes || '') && !!title && title !== pn(titleOf(startsOn.get(s)));
+        // The title can be a control's name too (the new chat's link in Recent).
+        const said = l && (l.kind === 'words' ? l.text : l.kind === 'control' ? l.control : null);
+        const made = !!said && ((l.kind === 'words' && ((!hers(said) && answerLike(said)) || GREETING.test(said.trim()))) || (titled && (pn(said) === title || title.includes(pn(said)) || pn(said).includes(title))));
+        if (made) stops.push(row(bi, si, { text }, `its proof is words the app makes up ("${said.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, such as its message box'));
         doubt[app] = null;
         if (r.status === 'write') continue;
       }
@@ -108,7 +124,10 @@ export async function checkScript({ demo, emit = () => {}, cmd }) {
     return w.undo ? { ok: true } : { ok: false, why: `the ${packId} pack's ${writeId} has no undo` };
   };
   const names = Object.fromEntries((demo.cfg.apps || []).map(x => [x.id, x.title || x.id]));
-  const r = { ...predictStops(plan, walk, { writeKnown, names }), secs: walk.secs };
+  const { walkerFromDemo } = await import('./walker.mjs');
+  const rec = walkerFromDemo(demo);
+  const titleOf = id => { const t = ((rec && rec.screen(id)) || {}).title; return t && t !== id ? t : null; };
+  const r = { ...predictStops(plan, walk, { writeKnown, names, titleOf }), secs: walk.secs };
   fs.mkdirSync(aiDir(demo), { recursive: true });
   fs.writeFileSync(path.join(aiDir(demo), 'check-script.json'), JSON.stringify(r, null, 1) + '\n');
   return r;

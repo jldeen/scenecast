@@ -23,6 +23,7 @@ import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish, forgetLastTake } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
+import { readScreen } from '@scenecast/script/html.mjs';
 import { parseScript as guideParse, buildNotes } from '@stuntdouble/core/lib/notes.mjs';
 import { checkFocusJson, readEditorOverrides, applyEditorOverrides } from '@stuntdouble/core/lib/overrides.mjs';
 
@@ -114,11 +115,15 @@ test('a talk track to a plan on the recorded screens: landings, writes, a differ
   const walker = walkerFromDemo(demo);
   const { plan, flags } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker });
   const steps = plan.beats.flatMap(b => b.steps);
-  assert.deepEqual(steps.map(s => s.text), ['Go to chat', 'Click "Message"', `Type "What's changed on PO-1?" in "Message"`, 'Press Enter', 'Wait for the answer', 'Click "Save: Save note"', 'Go to admin', 'Click "Certified"']);
+  // "Click the message box" before typing in it only focuses it: the typing does that, and nothing would prove the click.
+  assert.deepEqual(steps.map(s => s.text), ['Go to chat', `Type "What's changed on PO-1?" in "Message"`, 'Press Enter', 'Wait for the answer', 'Click "Save: Save note"', 'Go to admin', 'Click "Certified"']);
+  // With no recording yet too, when the script names the box for both.
+  const bare = planFromTrack(parseTalkTrack('# T\n\n## 1. A\n\n**Do:** Click "Message", type "What changed?" in "Message", Enter.\n', 'x.md'), { walker: null }).plan;
+  assert.deepEqual(bare.beats.flatMap(b => b.steps).map(s => s.kind), ['type', 'press']);
   assert.deepEqual(steps.filter(s => s.lands).map(s => s.lands.screen), ['chat-home', 'chat-typed', 'chat-answer', 'chat-saved', 'admin-home', 'admin-certified']);
   assert.deepEqual(steps.filter(s => s.writes).map(s => s.writes), ['sends prompt 1 (Ask) in Chat app', 'saves "Save note" ("Save: Save note")', 'endorses it: "Certified"']);
   // The script's Approve is the product's Save: flagged once, and the plan uses what the product has.
-  assert.match(steps[5].differs, /"Save: Save note".*not "Approve"/);
+  assert.match(steps[4].differs, /"Save: Save note".*not "Approve"/);
   // chat-saved shows only what the app wrote ("Your note is saved as …"): nothing a plan can count on proves the save.
   assert.deepEqual(flags.map(f => f.kind), ['differs', 'landing']);
   const [l1, l2, l3] = plan.beats[0].lines;
@@ -546,7 +551,7 @@ test('the reset: each write undone in reverse, a pack\'s undo with what the run 
   const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && (w.on.key ? w.on.key === step.key : w.on.target.toLowerCase() === String(step.target).toLowerCase())) || null;
   const packs = { forApp: { chat: pack }, writeFor };
   const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs });
-  assert.match(plan.beats[0].steps[5].writes, / · notes:save-note$/);
+  assert.match(plan.beats[0].steps[4].writes, / · notes:save-note$/);
   // A pack's safe step: it only looks like a change, so it isn't asked about or undone.
   const quiet = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs: { forApp: { admin: { id: 'admin', safe: [{ id: 'cert', on: { kind: 'click', target: 'Certified' }, what: 'Only shows the endorsement menu.' }] } }, writeFor } }).plan;
   const cert = quiet.beats[1].steps.find(st => st.target === 'Certified');
@@ -637,7 +642,7 @@ test('a read-only walk: a write isn\'t run, the rest of its beat waits on it, th
   const demo = demoDir(), walker = walkerFromDemo(demo);
   const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker });
   const w = await walkPlan(plan, walker);
-  assert.deepEqual(w.beats.map(b => b.steps.map(s => s.status)), [['reached', 'reached', 'reached', 'write', 'after-write', 'after-write'], ['reached', 'write']]);
+  assert.deepEqual(w.beats.map(b => b.steps.map(s => s.status)), [['reached', 'reached', 'write', 'after-write', 'after-write'], ['reached', 'write']]);
   assert.deepEqual(w.writes.map(x => [x.beat, x.text]), [[1, 'Press Enter'], [2, 'Click "Certified"']]);
   // A step that doesn't land where the plan says is a miss; behind a write that didn't run, it says which one.
   plan.beats[1].steps = [{ kind: 'app', app: 'chat' }, { kind: 'click', target: 'Save: Save note', lands: { screen: 'chat-saved' } }];
@@ -1164,6 +1169,45 @@ test('where an app starts is proven by its own box, not by words that may be a d
   const mine = { beats: [{ steps: [{ kind: 'app', app: 'teams', lands: { screen: 'teams' } }, { kind: 'app', app: 'copilot', lands: { screen: 'start', kind: 'words', text: 'Recent chats' } }] }] };
   proveLandings(mine, walker);
   assert.equal(formatLands(mine.beats[0].steps[1].lands), 'start · "Recent chats"');
+});
+
+test('a send is never proven by the name the app gives the new chat: it changes from run to run', () => {
+  const t = 'Kestrel PO-450101 Ship-Date Risk Summary';
+  const screens = {
+    typed: { title: 'New chat', headings: [], items: [{ i: 0, kind: 'text', role: 'generic', tag: 'span', text: 'Recent' }], controls: [{ role: 'textbox', name: 'Message Copilot', editable: true }] },
+    answer: { title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }, { i: 1, kind: 'text', role: 'generic', tag: 'span', text: 'Recent' }], controls: [{ role: 'link', name: t }, { role: 'textbox', name: 'Message Cowork', editable: true }] },
+  };
+  const walker = { flow: { states: { typed: { app: 'copilot' }, answer: { app: 'copilot' } } }, states: ['typed', 'answer'], screen: id => screens[id] || null, shown: () => null,
+    control: () => null, typedTexts: () => [] };
+  const plan = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'typed' } }, { kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer' } }] }] };
+  proveLandings(plan, walker);
+  assert.equal(formatLands(plan.beats[0].steps[1].lands), 'answer · control "Message Cowork"');
+  // A one-word name, or one word of a longer one, doesn't either.
+  for (const name of ['Kestrel', 'Kestrel Risk']) {
+    screens.answer = { ...screens.answer, title: name, headings: [name], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: 'Kestrel' }, { i: 1, kind: 'text', role: 'generic', tag: 'span', text: 'Recent' }],
+      controls: [{ role: 'link', name }, { role: 'textbox', name: 'Message Cowork', editable: true }] };
+    const p1 = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'typed' } }, { kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer' } }] }] };
+    proveLandings(p1, walker);
+    assert.equal(formatLands(p1.beats[0].steps[1].lands), 'answer · control "Message Cowork"', name);
+  }
+  // On the live page too (a plan's own proof, checked as a run goes): a send's new title isn't a proof.
+  const live = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'words', text: t } }, { before: [screens.typed], afters: [{ ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }, { ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }] });
+  assert.notEqual(formatLands(live.lands), `answer · "${t}"`);
+  // Read before the app names the chat (the page still has the title it had): the recording's name still rules it out.
+  const today = 'Kestrel PO-450101 Ship-Date Risk', early = { ...screens.typed, headings: [today], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: today }] };
+  const soon = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'control', control: 'Message Copilot' } }, { before: [screens.typed], afters: [early, early], walker: { ...walker, screen: id => id === 'answer' ? { ...screens.answer, title: t } : screens[id] || null } });
+  assert.notEqual(formatLands(soon.lands), `answer · "${today}"`);
+  // A save that goes to a page with its own fixed title ("New note" to "Saved notes") is proven by it: only a send
+  // names a chat.
+  const notes = (title, more) => readScreen([{ key: 'main', title, html: `<main><button>Save</button>${more}</main>` }]);
+  const notesWalker = { flow: { states: { saved: { app: 'notes' } } }, states: ['saved'], screen: id => id === 'saved' ? { ...notes('Saved notes', '<h1>Saved notes</h1>'), title: 'Saved notes' } : null, shown: () => null, control: () => null, typedTexts: () => [] };
+  const saved = liveProof({ kind: 'click', target: 'Save', writes: 'saves it', lands: { screen: 'saved', kind: 'words', text: 'Saved notes' } }, { before: [notes('New note', '')], afters: [notes('Saved notes', '<h1>Saved notes</h1>'), notes('Saved notes', '<h1>Saved notes</h1>')], walker: notesWalker });
+  assert.deepEqual([formatLands(saved.lands), saved.strength], ['saved · "Saved notes"', 'strong']);
+  // A live read has its page's title: today's name for the chat, nothing like the recording's, isn't a proof either.
+  const chat = (title, more) => readScreen([{ key: 'main', title, html: `<main><textarea aria-label="Message Copilot"></textarea>${more}</main>` }]);
+  const named = chat('Supplier delay analysis', '<h1>Supplier delay analysis</h1>');
+  const renamed = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'words', text: t } }, { before: [chat('New chat', '')], afters: [named, named], walker });
+  assert.notEqual(formatLands(renamed.lands), 'answer · "Supplier delay analysis"');
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {

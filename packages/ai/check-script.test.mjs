@@ -118,7 +118,32 @@ test('a start screen that isn\'t as the plan has it, a write after a miss, and a
   const r = predictStops(PLAN, missed, { writeKnown: known });
   assert.deepEqual(r.stops.map(x => [x.beat, x.step]), [[2, 4]]);
   const quoted = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: chat-saved · "Your skill is saved and ready to use"\n`);
-  assert.match(predictStops(quoted, { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }] }] }, { writeKnown: known }).stops[0].why, /quotes words the app wrote/);
+  assert.match(predictStops(quoted, { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }] }] }, { writeKnown: known }).stops[0].why, /words the app makes up/);
+  // A send proven by the name the app gave the new chat (the recorded screen's title), or by a greeting.
+  const titled = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Kestrel PO-450101 Ship-Date Risk Summary"\n`);
+  const sent = { beats: [{ steps: [{ status: 'reached' }, { status: 'write' }] }] };
+  const titleOf = id => id === 'chat-answer' ? 'Kestrel PO-450101 Ship-Date Risk Summary' : null;
+  assert.deepEqual(predictStops(titled, sent, { writeKnown: known, titleOf }).stops.map(x => [x.beat, x.step, x.fix]), [[1, 2, 'Prove it by a control on that screen, such as its message box']]);
+  assert.deepEqual(predictStops(titled, sent, { writeKnown: known }).stops, []);
+  // A one-word name is made up too; a title the screen already had before the write isn't.
+  const kestrel = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n  Lands on: chat-home · "Chat"\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Kestrel"\n`);
+  assert.equal(predictStops(kestrel, sent, { writeKnown: known, titleOf: id => id === 'chat-answer' ? 'Kestrel' : 'New chat' }).stops.length, 1);
+  // The name as a control's (the new chat's link in Recent) is made up too.
+  const linked = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · control "Kestrel"\n`);
+  assert.equal(predictStops(linked, sent, { writeKnown: known, titleOf: id => id === 'chat-answer' ? 'Kestrel PO-450101 Ship-Date Risk Summary' : 'New chat' }).stops.length, 1);
+  // Even when what she typed has the same word in it.
+  const asked = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Type "Summarize Kestrel supplier risk" in "Message"\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · control "Kestrel"\n`);
+  assert.equal(predictStops(asked, { beats: [{ steps: [{ status: 'reached' }, { status: 'reached' }, { status: 'write' }] }] }, { writeKnown: known, titleOf: id => id === 'chat-answer' ? 'Kestrel Risk Summary' : 'New chat' }).stops.length, 1);
+  // Matched as a run matches it: a curly apostrophe is the same name.
+  const curly = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · control "Kestrel's Risk"\n`);
+  assert.equal(predictStops(curly, sent, { writeKnown: known, titleOf: id => id === 'chat-answer' ? 'Kestrel’s Risk' : 'New chat' }).stops.length, 1);
+  const fixed = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to notes\n  Lands on: notes-home · "Saved notes"\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: notes-saved · "Saved notes"\n`);
+  assert.deepEqual(predictStops(fixed, sent, { writeKnown: known, titleOf: () => 'Saved notes' }).stops, []);
+  // A save that goes to a page with its own fixed title isn't flagged: only a send names a chat.
+  const moved = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to notes\n  Lands on: notes-new · "New note"\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: notes-saved · "Saved notes"\n`);
+  assert.deepEqual(predictStops(moved, sent, { writeKnown: known, titleOf: id => id === 'notes-saved' ? 'Saved notes' : 'New note' }).stops, []);
+  const hello = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Good morning"\n`);
+  assert.match(predictStops(hello, sent, { writeKnown: known }).stops[0].why, /words the app makes up \("Good morning"\)/);
 });
 
 test('answer words and the product\'s own phrases', () => {

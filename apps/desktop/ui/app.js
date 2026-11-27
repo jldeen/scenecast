@@ -1,6 +1,7 @@
 // Scenecast's window: the demo library and each step of a demo. Everything goes through the app's commands
 // (window.__TAURI__.core.invoke) and their progress events; nothing here touches files or runs anything itself.
 import { explain } from './errors.js';
+import { runNow, makeAfterRun } from './run.js';
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
@@ -269,6 +270,8 @@ async function refreshDemo(id) {
 listen('job', ({ payload: { demo: id, job, update: u } }) => {
   const j = (J(id)[job] ??= { stages: [], lines: [], items: [], events: [] });
   j.stages ??= []; j.lines ??= []; j.items ??= []; j.events ??= [];
+  // In the order they came, across stages and events (runNow).
+  u.seq = j.seq = (j.seq || 0) + 1;
   switch (u.type) {
     case 'stage':
       j.stages.push(u);
@@ -1273,7 +1276,7 @@ Object.assign(REGIONS, {
     const st = j.status;
     const notes = ev.filter(e => ['adapted', 'skipped', 'note', 'waiting'].includes(e.event)).slice(-4);
     let html = '';
-    if (on) html += `${progressBar(true)}<div class="row"><strong data-test="ai-step" data-n="${cur?.n || 0}">${cur ? `Step ${cur.n} of ${cur.of}: ${esc(cur.text)}` : esc(j.stages?.at(-1)?.label || 'Starting…')}</strong><span class="spacer"></span>
+    if (on) html += `${progressBar(true)}<div class="row"><strong data-test="ai-step" data-n="${cur?.n || 0}">${esc(runNow(j))}</strong><span class="spacer"></span>
       <button class="btn small" data-action="ai-stop" data-test="ai-stop">Stop</button></div>
       ${st ? `<p class="muted small">${plural(st.count || 0, 'screen')} captured, ${plural(st.streams || 0, 'streamed answer')}${st.busy ? ' · capturing this screen…' : ''}</p>` : ''}`;
     if (q) {
@@ -1294,7 +1297,7 @@ Object.assign(REGIONS, {
       // In a separate browser: where it stopped (with its picture), the beats it marked, its changes and the reset.
       const o = j.outcome, at = o.stopped?.at;
       html += `<div class="notice ${o.stopped ? 'warn' : 'ok'}" data-test="ai-record-done" data-steps="${o.steps}" data-stopped="${!!o.stopped}" data-marked="${(o.marked || []).length}"><div><strong>${o.stopped ? 'Copilot stopped' : 'Recorded for you'}:</strong> ${plural(o.summary?.states || 0, 'screen')}, ${plural(o.steps, 'step')}.${o.stopped ? ` ${at ? `Beat ${at.beat + 1}, ${esc(at.text)}: ` : ''}${esc(o.stopped.why)}${o.stopped.picture ? ` <button class="link" data-reveal="${esc(o.stopped.picture)}">See its picture</button>` : ''}` : ''}
-        ${o.writes ? (o.resetAfter === true ? `${plural(o.writes, 'change')} made, then undone.` : `${plural(o.writes, 'change')} made, and <strong>the reset after didn\u2019t finish</strong>: some may still be in the demo.`) : ''}
+        ${J(d.id).keptReplica ? 'Your replica is as it was. ' : ''}${o.writes ? (o.resetAfter === true ? `${plural(o.writes, 'change')} made, then undone.` : `${plural(o.writes, 'change')} made, and <strong>the reset after didn\u2019t finish</strong>: some may still be in the demo.`) : ''}
         ${(o.marked || []).length ? `<ul data-test="ai-record-marked">${o.marked.map(m => `<li>Beat ${m.beat}, ${esc(m.text)}: ${esc(m.why)}${m.picture ? ` <button class="link" data-reveal="${esc(m.picture)}">See it</button>` : ''}</li>`).join('')}</ul>` : ''}</div></div>`;
     } else if (j.outcome) {
       const o = j.outcome;
@@ -2007,7 +2010,9 @@ const ACTIONS = {
     // the separate browser writes no talk track: the finish makes the guide's from the plan (in her browser, the run
     // writes its own, beat for beat). One that stopped before it recorded anything leaves the replica as it was.
     // One that stopped part way: its beats weren't all recorded, so no finish from the whole plan.
-    if (o && (!away || o.summary?.states > 0)) await makeReplica(id, { finish: away && !o.stopped });
+    const built = !!S.demos.find(x => x.id === id)?.status.built;
+    J(id).keptReplica = !!(o && away && o.stopped && built);
+    if (makeAfterRun(o, { away, built })) await makeReplica(id, { finish: away && !o.stopped });
   },
   'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
   separate: async t => {
