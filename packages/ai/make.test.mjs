@@ -1193,6 +1193,10 @@ test('a send is never proven by the name the app gives the new chat: it changes 
   // On the live page too (a plan's own proof, checked as a run goes): a send's new title isn't a proof.
   const live = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'words', text: t } }, { before: [screens.typed], afters: [{ ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }, { ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }] });
   assert.notEqual(formatLands(live.lands), `answer · "${t}"`);
+  // Read before the app names the chat (the page still has the title it had): the recording's name still rules it out.
+  const today = 'Kestrel PO-450101 Ship-Date Risk', early = { ...screens.typed, headings: [today], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: today }] };
+  const soon = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'control', control: 'Message Copilot' } }, { before: [screens.typed], afters: [early, early], walker: { ...walker, screen: id => id === 'answer' ? { ...screens.answer, title: t } : screens[id] || null } });
+  assert.notEqual(formatLands(soon.lands), `answer · "${today}"`);
   // A live read has its page's title: a save that shows "Saved notes" on a page already titled that is proven by them.
   const notes = more => readScreen([{ key: 'main', title: 'Saved notes', html: `<main><button>Save</button>${more}</main>` }]);
   const notesWalker = { flow: { states: { saved: { app: 'notes' } } }, states: ['saved'], screen: id => id === 'saved' ? { ...notes('<h1>Saved notes</h1>'), title: 'Saved notes' } : null, shown: () => null, control: () => null, typedTexts: () => [] };

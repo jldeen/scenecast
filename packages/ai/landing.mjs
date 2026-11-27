@@ -176,9 +176,10 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   // A screen a send made: its title is the name the app gave the new chat ("Kestrel PO-450101 Ship-Date Risk Summary"),
   // a different one on each run, so neither it nor a part of it proves the step.
   // (A capture with no title of its own is named by its screen's id: that isn't one.)
-  const titleNow = pnorm([after.title, rec && rec.title].find(x => x && x !== to) || '');
-  const madeTitle = answer && titleNow && !before.some(b => b && pnorm(b.title || '') === titleNow) ? titleNow : null;
-  const titled = t => { const n = pnorm(t); return !!madeTitle && !!n && (n === madeTitle || n.includes(madeTitle) || madeTitle.includes(n)); };
+  // Today's and the recording's: a live read can come before the app names the chat.
+  const titlesNow = [...new Set([after.title, ...afters.map(a => a && a.title), rec && rec.title].filter(x => x && x !== to).map(pnorm))];
+  const madeTitles = answer ? titlesNow.filter(t => t && !before.some(b => b && pnorm(b.title || '') === t)) : [];
+  const titled = t => { const n = pnorm(t); return !!n && madeTitles.some(m => n === m || n.includes(m) || m.includes(n)); };
   const stable = t => !!t && /[a-z]/i.test(t) && !GREETING.test(String(t).trim()) && !titled(t) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
   const proves = l => afters.every(sc => holds(sc, l) === true) && before.every(b => holds(b, l) === false);
 

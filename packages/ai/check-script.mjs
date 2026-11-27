@@ -10,6 +10,8 @@
 // → { stops: [{ beat, step, text, why, fix }], marks: [same], unchecked: n, ok }
 
 import { formatStep } from './plan.mjs';
+// The run's own normalizing (landing.mjs), so Check my script and a run agree on a title.
+import { pnorm as pn } from './landing.mjs';
 
 const TAG = / · ([\w-]+):([\w-]+)$/;
 // A wait, hover or scroll, and a step group opened by its place, carry the proven screen before them (a run's rule).
@@ -19,7 +21,6 @@ const carries = s => /^(wait|hover|scroll)$/.test(s.kind) || (s.kind === 'click'
 export const answerLike = text => /['"‘’“”]/.test(text) || String(text).trim().split(/\s+/).length >= 6;
 
 const GREETING = /^(hi|hello|hey|good (morning|afternoon|evening)|welcome back)\b/i;
-const pn = t => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 // names: each app's name as the window shows it ({ id: title }). titleOf: a recorded screen's page title (the name
 // the app gave a new chat, on the screen a send made).
