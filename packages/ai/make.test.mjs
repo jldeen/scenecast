@@ -462,11 +462,26 @@ test('a walker never writes; offline, the recording says where a write went', ()
   assert.deepEqual([r.screen.sig, r.screen.app, r.landed, r.wrote], ['chat-saved', 'chat', true, false]);
 });
 
+test('a change goes in only as the app\'s pack knows it, on the control her line names: else it waits for her OK', () => {
+  const walker = walkerFromDemo(demoDir());
+  const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && w.on.target.toLowerCase() === String(step.target).toLowerCase()) || null;
+  const packs = { forApp: { chat: { id: 'notes', writes: [{ id: 'save-note', on: { kind: 'click', target: 'Save' }, undo: { steps: ['Click "Delete {skill}"'] } }] } }, writeFor };
+  const { plan, flags } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs });
+  assert.ok(!plan.beats[0].steps.some(st => st.kind === 'press'));
+  assert.ok(flags.some(f => f.kind === 'needs-ok' && f.text === 'Press Enter in Chat app: it sends prompt 1, and Scenecast can\'t put that back afterwards. Left out of the plan: add it back if you want it.'));
+  // Her words aren't on the screen: the closest control is never clicked for a change, pack or not.
+  const near = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Manage sync.'), 'x.md'), { walker });
+  assert.ok(!near.plan.beats[1].steps.some(st => st.target === 'Enable Sync'));
+  assert.ok(near.flags.some(f => f.kind === 'needs-ok' && f.text === 'Your script says "Manage sync", but that isn\'t on the screen. The closest is "Enable Sync", and clicking it turns "Enable Sync" on. Left out of the plan: add it back if that\'s what you meant.'));
+});
+
 test('the reset: each write undone in reverse, a pack\'s undo with what the run made, read-only checks', () => {
   const demo = demoDir();
   const walker = walkerFromDemo(demo);
-  const pack = { id: 'notes', writes: [{ id: 'save-note', on: { kind: 'click', target: 'Save' }, makes: 'note', undo: { steps: ['Click "Delete {skill}"'] }, check: { look: { absent: '{skill}' } } }] };
-  const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && w.on.target.toLowerCase() === String(step.target).toLowerCase()) || null;
+  const pack = { id: 'notes', writes: [
+    { id: 'save-note', on: { kind: 'click', target: 'Save' }, makes: 'note', undo: { steps: ['Click "Delete {skill}"'] }, check: { look: { absent: '{skill}' } } },
+    { id: 'send', on: { kind: 'press', key: 'Enter' }, makes: 'task', undo: { steps: ['Delete the task it made ("{task}")'] }, check: { expect: 'no task "{task}" from this run in Recent' } }] };
+  const writeFor = (p, step) => (p.writes || []).find(w => w.on.kind === step.kind && (w.on.key ? w.on.key === step.key : w.on.target.toLowerCase() === String(step.target).toLowerCase())) || null;
   const packs = { forApp: { chat: pack }, writeFor };
   const { plan } = planFromTrack(parseTalkTrack(SCRIPT, 'x.md'), { walker, packs });
   assert.match(plan.beats[0].steps[5].writes, / · notes:save-note$/);

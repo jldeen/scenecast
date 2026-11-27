@@ -333,6 +333,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       // A step that could write isn't done by a walker: offline, the recording says where it went; live, mapping stops.
       const go = (st2) => { const guess = writeOf(st2, null, {}); if (!guess) return walker.step(id, st2, S.typed[S.app] || ''); if (walker.recorded) return walker.recorded(id, st2, S.typed[S.app] || ''); throw Object.assign(new Error('stops before a write'), { code: 'WRITE' }); };
       let r = go({ ...step, strict: true, role: opts.role });
+      let near = null;
       if ((step.kind === 'click' || step.kind === 'hover') && !r.control && !r.recorded && !step.title) {
         const strong = (sc2, name, min = 50) => { const h = walker.control(sc2, name); return h && h.score >= min; };
         // To a screen with the control by its own name before one with a name like it ("Add to business plugin", once
@@ -357,11 +358,12 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
           }
         }
         if (!r.control && !r.recorded && !step.differs) {
-          const near = walker.control(sc, step.target);
-          if (near && near.score >= 30 && step.kind === 'click') {
-            step.differs = `there's no "${step.target}" here; the closest is "${near.el.name}"`;
+          const close = walker.control(sc, step.target);
+          if (close && close.score >= 30 && step.kind === 'click') {
+            step.differs = `there's no "${step.target}" here; the closest is "${close.el.name}"`;
             flag('differs', `${cap(formatStep(step))}: ${step.differs}`, where(line));
-            step.target = near.el.name;
+            near = { said: step.target, is: close.el.name };
+            step.target = near.is;
             r = go(step);
           }
         }
@@ -417,6 +419,15 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       // What the pack knows only looks like a change ("Add content to…" opens a picker): no write, no asking.
       const safe = !pw ? packSafe(packs, pack, step, field, r.control) : null;
       if (safe) { step.safe = `${safe.what.replace(/\.$/, '')} · ${pack.id}:${safe.id}`; w = null; }
+      // A change only goes in when the app's pack knows it (so the reset can put it back) and it's the control her line
+      // names: never "Manage all" made into the closest switch. Otherwise it's left out, for her OK.
+      if ((w || pw) && ((pack && packs.writeFor && !pw) || near)) {
+        const what = (w || pw).what.split(/[;:(]/)[0].trim();
+        flag('needs-ok', near
+          ? `Your script says "${near.said}", but that isn't on the screen. The closest is "${near.is}", and clicking it ${what}. Left out of the plan: add it back if that's what you meant.`
+          : `${cap(formatStep(step))} in ${appTitle(S.app)}: it ${what}, and Scenecast can't put that back afterwards. Left out of the plan: add it back if you want it.`, where(line));
+        return drop();
+      }
       if (pw && !w) step.writes = `${pw.what.split(/[;:(]/)[0].trim()} · ${pack.id}:${pw.id}`;
       else if (w) step.writes = pw ? `${w.what} · ${pack.id}:${pw.id}` : w.what;
       if (w || pw) { S.wrote = { kind: w ? w.kind : 'change', picked: S.picked, target: step.target }; if (r.to) wrote.add(r.to); }
