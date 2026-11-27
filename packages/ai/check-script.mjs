@@ -18,16 +18,23 @@ const carries = s => /^(wait|hover|scroll)$/.test(s.kind) || (s.kind === 'click'
 // Words an app wrote, not its own interface: a sentence (6 words or more), or a quoted name in it.
 export const answerLike = text => /['"‘’“”]/.test(text) || String(text).trim().split(/\s+/).length >= 6;
 
-export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } = {}) {
+// names: each app's name as the window shows it ({ id: title }).
+export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), names = {} } = {}) {
   const stops = [], marks = [];
   let unchecked = 0;
   const row = (bi, si, s, why, fix) => ({ beat: bi + 1, step: si + 1, text: s ? s.text || null : null, why, ...(fix ? { fix } : {}) });
+  const name = id => names[id] || (id ? id[0].toUpperCase() + id.slice(1) : 'An app');
+  // A start check as she'd say it: "teams on teams: renders light" is Teams, "renders light".
+  const said = t => { const m = /^([\w-]+)(?: on [\w-]+)?:\s*(.+)$/.exec(t || ''); return m ? `${name(m[1])}: ${m[2]}` : t || ''; };
   const c = walk.check;
-  if (c && c.error) stops.push(row(-1, -1, null, `the demo's start couldn't be checked: ${c.error}`));
-  else if (c && (c.wrong || c.cant)) for (const l of (c.lines || []).filter(l => l.status !== 'pass')) stops.push(row(-1, -1, { text: l.text }, `reset.md's Check: ${l.status}${l.why ? `: ${l.why}` : ''}`, 'Put the demo back as it starts (Reset), or fix the line in reset.md'));
-  for (const o of walk.ownStatus || []) if (!o.ok) stops.push(row(-1, -1, null, o.error || `${o.app} showed her as ${o.status}, not ${(o.expect || []).join(' or ')}`, 'Start again while you\'re at your computer, with that app open'));
+  // The engine's words stay in detail (the CLI's answer), never in what the window shows.
+  if (c && c.error) stops.push({ ...row(-1, -1, null, 'Before it starts, its checks couldn\'t run', 'Check again in a minute'), detail: c.error });
+  else if (c && (c.wrong || c.cant)) for (const l of (c.lines || []).filter(l => l.status !== 'pass')) stops.push({ ...(l.status === 'wrong'
+    ? row(-1, -1, { text: l.text }, `Before it starts, the demo isn't as it should be (${said(l.text)})`, 'Put the demo back as it starts, then check again')
+    : row(-1, -1, { text: l.text }, `Before it starts, it can't check this with the plan as it is (${said(l.text)})`, 'Make the plan again: its start checks are made with it')), ...(l.why ? { detail: l.why } : {}) });
+  for (const o of walk.ownStatus || []) if (!o.ok) stops.push(row(-1, -1, null, o.error || `${name(o.app)} showed you as ${o.status}, not ${(o.expect || []).join(' or ')}`, 'Start again while you\'re at your computer, with that app open'));
   // Each app's start screen, as the run checks it before its first step.
-  for (const st of walk.starts || []) if (st.ok === false) stops.push(row(-1, -1, null, `${st.app}'s start screen: ${st.why || 'not as the plan has it'}`, 'Open it where the demo starts, or fix its start in the plan'));
+  for (const st of walk.starts || []) if (st.ok === false) stops.push(row(-1, -1, null, `${name(st.app)} isn't where the demo starts: ${(st.why || 'not as the plan has it').replace(new RegExp(`^${st.app}\\b`), name(st.app))}`, 'Open it where the demo starts, or fix its start in the plan'));
   // The doubt a run carries in each app, since its last proven screen there.
   const doubt = {};
   let app = null;
@@ -98,7 +105,8 @@ export async function checkScript({ demo, emit = () => {}, cmd }) {
     if (!w) return { ok: false, why: `the ${packId} pack doesn't list ${writeId}` };
     return w.undo ? { ok: true } : { ok: false, why: `the ${packId} pack's ${writeId} has no undo` };
   };
-  const r = { ...predictStops(plan, walk, { writeKnown }), secs: walk.secs };
+  const names = Object.fromEntries((demo.cfg.apps || []).map(x => [x.id, x.title || x.id]));
+  const r = { ...predictStops(plan, walk, { writeKnown, names }), secs: walk.secs };
   fs.mkdirSync(aiDir(demo), { recursive: true });
   fs.writeFileSync(path.join(aiDir(demo), 'check-script.json'), JSON.stringify(r, null, 1) + '\n');
   return r;
