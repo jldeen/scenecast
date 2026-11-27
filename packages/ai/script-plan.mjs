@@ -104,20 +104,33 @@ export function trackFromAnswer(track, answer, draft = null) {
   for (const b of answer.beats) for (const l of (b && Array.isArray(b.lines) ? b.lines : [])) if (l && l.id != null) byId.set(String(l.id), l);
   if (!byId.size) return null;
   const prompts = track.prompts || [];
+  // The app each line is in as the rules read it, at its start and its end (a line with no switch of its own is in the
+  // app before it).
+  const steps0 = draft ? draft.plan.beats.flatMap(b => b.steps) : [];
+  const appAt = new Map(), appEnd = new Map();
+  let cur = null;
+  for (const s of steps0) { if (s.kind === 'app') cur = s.app; if (s.line) { if (!appAt.has(s.line)) appAt.set(s.line, cur); appEnd.set(s.line, cur); } }
+  // The app Copilot's steps are in, line to line.
+  let on = null;
   return {
     ...track,
     beats: track.beats.map((b, bi) => ({
       ...b,
       lines: b.lines.map((l, li) => {
-        const a = byId.get(lineId(bi, li));
-        if (!a) return l;
+        const id = lineId(bi, li), a = byId.get(id);
+        if (!a) { if (appEnd.has(id)) on = appEnd.get(id); return l; }
         let steps = Array.isArray(a.steps) ? a.steps : [];
-        const mine = draft ? draft.plan.beats.flatMap(b => b.steps).filter(s => s.line === lineId(bi, li)) : [];
+        const mine = steps0.filter(s => s.line === id);
         if (!steps.length) steps = mine.map(formatStep);
-        // The app her line is in, as the rules read it: an answer that leaves out the switch to it would do the line in
-        // the app before (her prompt typed and sent in Teams, not Copilot).
-        else if (mine[0] && mine[0].kind === 'app' && !steps.some(x => /^go to\b/i.test(String(x).trim()))) steps = [formatStep(mine[0]), ...steps];
-        return { ...l, intents: steps.map(s => intentOf(s, l, prompts)).filter(Boolean), points: (Array.isArray(a.point) ? a.point : []).filter(p => p && (p.text || (Array.isArray(p.texts) && p.texts.length))).slice(0, 3) };
+        let intents = steps.map(s => intentOf(s, l, prompts)).filter(Boolean);
+        // An answer that doesn't switch to the app her line is in would do the line in the app before (her prompt typed
+        // and sent in Teams, not Copilot): the rules' app goes first.
+        const want = appAt.get(id);
+        if (want && on !== want && !(intents[0] && intents[0].app)) intents = [{ app: want }, ...intents];
+        for (const it of intents) if (it.app) on = it.app;
+        // The controls the rules read her line's changes as: a change Copilot proposes on another must be named by her.
+        const drafted = mine.filter(s => s.writes && s.target).map(s => s.target);
+        return { ...l, intents, drafted, points: (Array.isArray(a.point) ? a.point : []).filter(p => p && (p.text || (Array.isArray(p.texts) && p.texts.length))).slice(0, 3) };
       }),
     })),
   };

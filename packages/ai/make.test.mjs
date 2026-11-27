@@ -234,6 +234,15 @@ test('a change the rules left out stays hers to OK when Copilot\'s answer leaves
   const ask = async () => ({ beats: [{ n: 1, lines: [] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to admin'] }] }] });
   const r = await planWithModel(track, { walker, model: { kind: 'x', ask } });
   assert.equal(r.flags.filter(f => f.kind === 'needs-ok' && /^Your script says "Manage sync"/.test(f.text)).length, 1);
+  // A change Copilot puts on a control her line doesn't name, nor the rules read it as: hers to OK.
+  const swap = await planWithModel(parseTalkTrack(SCRIPT, 'x.md'), { walker, model: { kind: 'x', ask: async () => ({ beats: [{ n: 1, lines: [] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to admin', 'Click "Enable Sync"'] }] }] }) } });
+  assert.ok(!swap.plan.beats[1].steps.some(st => st.writes));
+  assert.ok(swap.flags.some(f => f.kind === 'needs-ok' && /^Copilot's plan clicks "Enable Sync" for ".*", and clicking it turns "Enable Sync" on\. Your script doesn't name it\./.test(f.text)));
+  // With no screens to ground it on, a change its pack can't undo still waits.
+  const packs = { forApp: { chat: { id: 'notes', writes: [{ id: 'save-note', on: { kind: 'click', target: 'Save' }, what: 'saves a note', undo: null }] } }, writeFor: (p, st) => (p.writes || []).find(x => x.on.kind === st.kind && x.on.target.toLowerCase() === String(st.target).toLowerCase()) || null };
+  const bare = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Approve on the Save note card.', 'Click Save.'), 'x.md'), { apps: [{ id: 'chat', key: 'C', title: 'Chat app' }, { id: 'admin', key: 'A', title: 'Admin center' }], packs });
+  assert.ok(!bare.plan.beats[0].steps.some(st => st.target === 'Save'));
+  assert.ok(bare.flags.some(f => f.kind === 'needs-ok' && /^Click "Save" in Chat app: it saves a note, and Scenecast can't put that back/.test(f.text)));
   // Made after all (Copilot's answer has it, and it's her control): not listed.
   const made = await planWithModel(parseTalkTrack(SCRIPT, 'x.md'), { walker, model: { kind: 'x', ask: async () => ({ beats: [{ n: 1, lines: [] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to admin', 'Click "Certified"'] }] }] }) } });
   assert.ok(!made.flags.some(f => f.kind === 'needs-ok'));
@@ -246,6 +255,11 @@ test('an answer that leaves out the switch to the app her line is in keeps the r
   const t = trackFromAnswer(track, answer, draft);
   assert.deepEqual(t.beats[1].lines[0].intents.map(i => Object.keys(i)[0]), ['app', 'type', 'key']);
   assert.equal(t.beats[1].lines[0].intents[0].app, 'copilot');
+  // A later line with no switch of its own is in the app the rules read it in, even after the answer went elsewhere.
+  const two = parseTalkTrack('# T\n\n## 1. Open · ~5s\n\n> I open Teams.\n\n## 2. Ask · ~10s\n\n> So I ask Copilot.\n\n> Then I ask again.\n', 't.md');
+  const draft2 = { plan: { beats: [{ steps: [{ kind: 'app', app: 'teams', line: '1.1' }] }, { steps: [{ kind: 'app', app: 'copilot', line: '2.1' }, { kind: 'press', key: 'Enter', line: '2.1' }, { kind: 'press', key: 'Enter', line: '2.2' }] }] }, flags: [] };
+  const drift = trackFromAnswer(two, { beats: [{ n: 1, lines: [{ id: '1.1', steps: ['Go to teams'] }] }, { n: 2, lines: [{ id: '2.1', steps: ['Go to teams', 'Press Enter'] }, { id: '2.2', steps: ['Press Enter'] }] }] }, draft2);
+  assert.deepEqual(drift.beats[1].lines[1].intents.map(i => i.app || Object.keys(i)[0]), ['copilot', 'key']);
   // One that switches itself is left as it is.
   const own = trackFromAnswer(track, { beats: [answer.beats[0], { n: 2, lines: [{ id: '2.1', steps: ['Go to copilot', 'Press Enter'] }] }] }, draft);
   assert.deepEqual(own.beats[1].lines[0].intents.map(i => Object.keys(i)[0]), ['app', 'key']);

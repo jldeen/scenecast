@@ -249,7 +249,9 @@ export function packWrite(writeFor, pack, step, field, el) {
 
 // Every word of hers in the control's name ("Sync" is "Enable Sync"; "Manage all" isn't "All users").
 const KIND_WORDS = new Set(['the', 'a', 'an', 'button', 'badge', 'link', 'tab', 'switch', 'toggle', 'checkbox', 'box', 'icon', 'menu', 'row', 'card', 'option']);
-const hasWords = (name, hers) => { const n = new Set(norm(name).split(/[^a-z0-9]+/)); return norm(hers).split(/[^a-z0-9]+/).filter(x => x && !KIND_WORDS.has(x)).every(x => n.has(x)); };
+// One word in another form: "certify" is "Certified", "user" is "users".
+const sameWord = (a, b) => { if (a === b) return true; if (Math.min(a.length, b.length) < 4) return false; if (a.startsWith(b) || b.startsWith(a)) return true; let i = 0; while (a[i] && a[i] === b[i]) i++; return i >= 6; };
+const hasWords = (name, hers) => { const n = norm(name).split(/[^a-z0-9]+/).filter(Boolean); return norm(hers).split(/[^a-z0-9]+/).filter(x => x && !KIND_WORDS.has(x)).every(x => n.some(y => sameWord(x, y))); };
 // A pack's write the reset can put back: an undo (its own, or the one it's the same as), and not irreversible.
 const undoable = (pack, pw) => { if (!pw || pw.irreversible) return false; const u = pw.undo && pw.undo.same ? ((pack.writes || []).find(x => x.id === pw.undo.same) || {}).undo : pw.undo; return !!u; };
 
@@ -263,6 +265,7 @@ const writes = m => m.steps.some((s, i) => {
 
 // ---- the walk: intents to grounded steps, then each line's focus -------------------------------------------------
 const APPROVE = /^(approve|save|confirm|allow|ok|yes|continue|submit|done|create)\b/i;
+const SAYS_APPROVE = /\b(approve|save|confirm|allow|ok|yes|continue|submit|done|create)\b/i;
 // The button that does what an approval verb says, when the screen words it differently: on the card the script names
 // first, buttons before other controls.
 function approvalAlt(sc, target, card) {
@@ -330,6 +333,15 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         S.app = step.app;
         if (walker && at()) step.lands = { screen: at(), text: landText(null, scr(at())) };
         return append(step, from);
+      }
+      if (!walker && (step.kind === 'click' || step.kind === 'press')) {
+        // No screens to ground it on: a change the app's pack knows but can't undo still waits for her OK.
+        const pack = ((packs || {}).forApp || {})[S.app];
+        const pw = pack && packs.writeFor ? packWrite(packs.writeFor, pack, step, null, null) : null;
+        if (pw && !undoable(pack, pw)) {
+          flag('needs-ok', `${cap(formatStep(step))} in ${appTitle(S.app)}: it ${pw.what.split(/[;:(]/)[0].trim()}, and Scenecast can't put that back afterwards. Left out of the plan: add it back if you want it.`, { ...where(line), target: step.target });
+          return drop();
+        }
       }
       if (!walker || step.kind === 'manual' || step.kind === 'wait' || step.kind === 'scroll') return append(step, from);
       let id = at(), sc = scr(id);
@@ -431,10 +443,16 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
       // A change only goes in when the app's pack can undo it (so the reset can put it back) and it's the control her
       // line names, however it was found: never "Manage all" made into the closest switch. Otherwise it's left out, for
       // her OK.
-      const other = step.kind === 'click' && !alt && said && !hasWords(step.target, said);
+      // Copilot's step (not her words): its change must be on a control the rules read her line as, or one her own words
+      // name (the card's approve button, when she says approve).
+      const hers = line && Array.isArray(line.intents) ? [line.say || '', ...(line.do || []), line.screen || ''].join(' ') : null;
+      const theirs = hers !== null && step.kind === 'click' && !(line.drafted || []).some(t => norm(t) === norm(step.target)) && !hasWords(hers, step.target) && !(alt && SAYS_APPROVE.test(hers));
+      const other = step.kind === 'click' && ((!alt && said && !hasWords(step.target, said)) || theirs);
       if ((w || pw) && ((pack && packs.writeFor && !undoable(pack, pw)) || other)) {
         const what = (w || pw).what.split(/[;:(]/)[0].trim();
-        flag('needs-ok', other
+        flag('needs-ok', theirs
+          ? `Copilot's plan clicks "${step.target}" for "${clean(hers).slice(0, 80)}", and clicking it ${what}. Your script doesn't name it. Left out of the plan: add it back if that's what you meant.`
+          : other
           ? `Your script says "${said}", but that isn't on the screen. The closest is "${step.target}", and clicking it ${what}. Left out of the plan: add it back if that's what you meant.`
           : `${cap(formatStep(step))} in ${appTitle(S.app)}: it ${what}, and Scenecast can't put that back afterwards. Left out of the plan: add it back if you want it.`, { ...where(line), target: step.target });
         // Nor is it the way to a later step: what it reaches, only it reaches.
