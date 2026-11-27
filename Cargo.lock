@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "scenecast-app"
-version = "0.5.6-rc.3"
+version = "0.5.6-rc.4"
 dependencies = [
  "png",
  "regex",
@@ -882,7 +882,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "stuntdouble-build"
-version = "0.5.6-rc.3"
+version = "0.5.6-rc.4"
 dependencies = [
  "base64",
  "regex",
@@ -897,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "stuntdouble-cli"
-version = "0.5.6-rc.3"
+version = "0.5.6-rc.4"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "stuntdouble-format"
-version = "0.5.6-rc.3"
+version = "0.5.6-rc.4"
 dependencies = [
  "schemars",
  "serde",
