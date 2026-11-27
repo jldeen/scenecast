@@ -57,6 +57,9 @@ export function beatStarts(plan, flow, { nameOf = null, screens = null } = {}) {
   let active = b0.active, at = 0;
   const nameAt = p => specName(p.click) || (nameOf && S[p.checkpoint] && cur[S[p.checkpoint].app] ? nameOf(cur[S[p.checkpoint].app], p.click) || '' : '');
   const recorded = s => {
+    // Every take starts with its first app's checkpoint; a plan that starts by typing or clicking (in its first app)
+    // has no step for it.
+    if (at === 0 && s.kind !== 'app' && path[0] && path[0].app) { const c = path[at++].checkpoint; if (S[c]) cur[S[c].app] = c; }
     // A box emptied: no plan step does it, but its app is on its screen after it.
     while (at < path.length && path[at].clear) { const c = path[at++].checkpoint; if (S[c]) cur[S[c].app] = c; }
     // A recorded click with no name (a test id only) that no plan step can be matched to is passed over when the
@@ -253,6 +256,17 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], l
   const html = reviewHtml({ title: `${demo.cfg.title || plan.title}: review`, beats, timings, needs, added, offCamera, leftOut, stats: [['beats', plan.beats.length], ['screens', beats.reduce((n, b) => n + b.shots.length, 0)], ['writes', writes], ['focus points', points.length], ['things for you', needs.length]] });
   writeFileSync(join(out, 'index.html'), html);
   return { file: join(out, 'index.html'), needs, added, offCamera, leftOut };
+}
+
+// Once a new take is saved, before it's built: what the finish and Script made for the last take names its screens, which
+// this take may not have (the build refuses a beat key or focus point on a screen it doesn't have). The beat keys and
+// the plan's and Script's focus points go; the finish and Script make them again for this take. Her own dots and
+// edits stay.
+export function forgetLastTake(dir) {
+  const ed = readEditorOverrides(dir);
+  if (Object.keys(ed.beats).length) writeJsonAtomic(join(dir, EDITOR_JSON), { ...ed, beats: {} });
+  const fj = readFocusJson(dir), kept = fj.points.filter(p => p.source !== 'plan' && p.source !== 'script');
+  if (kept.length !== fj.points.length) writeJsonAtomic(join(dir, FOCUS_JSON), { ...fj, points: kept });
 }
 
 export async function finish({ demo, packs, emit = () => {} }) {

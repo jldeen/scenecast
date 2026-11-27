@@ -20,7 +20,7 @@ import { undoGroups, checkClaim } from './reset-run.mjs';
 import { startUrls } from './live.mjs';
 import { scriptPlanInput, planWithModel } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
-import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish } from './finish.mjs';
+import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish, forgetLastTake } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { parseScript as guideParse, buildNotes } from '@stuntdouble/core/lib/notes.mjs';
@@ -660,6 +660,23 @@ test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 
   const ed = readEditorOverrides(demo.dir);
   assert.deepEqual(Object.entries(ed.beats).map(([n, b]) => [n, b.label]), [['1', 'The question'], ['2', 'Save it'], ['3', 'Certify it']]);
   assert.deepEqual(applyEditorOverrides(structuredClone(flow), ed).beats.map(b => b.label), ['0 Reset', '1 The question', '2 Save it', '3 Certify it']);
+});
+
+test('a plan that starts by typing still lines up with the take, past its first checkpoint', () => {
+  const { demo, flow } = takeDemo();
+  const plan = parsePlan(readFileSync(join(demo.dir, 'plan.md'), 'utf8').replace('- Go to chat\n  Lands on: old-home · "New chat"\n', ''));
+  assert.deepEqual(beatStarts(plan, flow).map(b => b.states.chat), ['chat-home', 'chat-answer', 'chat-saved']);
+});
+
+test('before a new take is built, what was made for the last one goes; her own dots and edits stay', () => {
+  const { demo, home } = takeDemo();
+  writeFileSync(join(demo.dir, 'flow.editor.json'), JSON.stringify({ version: 1, edits: [{ find: 'Friday', replace: 'Monday' }], beats: { 1: { active: 'chat', states: home } } }));
+  const pt = (id, source) => ({ id, beat: 1, app: 'chat', states: ['old-answer'], find: 'x', source });
+  writeFileSync(join(demo.dir, 'focus.json'), JSON.stringify({ version: 1, points: [pt('a', 'plan'), pt('b', 'script'), pt('c', 'dot')] }));
+  forgetLastTake(demo.dir);
+  const ed = readEditorOverrides(demo.dir);
+  assert.deepEqual([ed.beats, ed.edits.length], [{}, 1]);
+  assert.deepEqual(JSON.parse(readFileSync(join(demo.dir, 'focus.json'), 'utf8')).points.map(p => p.id), ['c']);
 });
 
 test('a step group recorded with another count still moves the next beat\'s start', () => {

@@ -26,6 +26,7 @@ import { liveWalker, walkerPacks } from './live.mjs';
 import { runReset, fillApi, setBefore, setBeforeProblem, claimScreen, checkClaim, checkLines } from './reset-run.mjs';
 import { leaveOutOf, leaveOn, leaveLog, leftFor, leaveApps, leaveFailure } from './leave-run.mjs';
 import { liveProof, writeGate, proofWords } from './landing.mjs';
+import { forgetLastTake } from './finish.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { GROUP_LABEL, groupOpenAfter } from './find.mjs';
 import { regroundPlan, walkReads } from './reground.mjs';
@@ -698,6 +699,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
+      if (run.summary && run.summary.states > 0) forgetLastTake(demo.dir);
       // A save it refused after the last step: the take ends there, and she sees why.
       const os = await ownStopped();
       if (os && !run.stopped) ownStopRun(os);

@@ -2002,7 +2002,8 @@ const ACTIONS = {
     // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away. A run in
     // the separate browser writes no talk track: the finish makes the guide's from the plan (in her browser, the run
     // writes its own, beat for beat). One that stopped before it recorded anything leaves the replica as it was.
-    if (o && (!away || o.summary?.states > 0)) await makeReplica(id, { finish: away });
+    // One that stopped part way: its beats weren't all recorded, so no finish from the whole plan.
+    if (o && (!away || o.summary?.states > 0)) await makeReplica(id, { finish: away && !o.stopped });
   },
   'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
   separate: async t => {
