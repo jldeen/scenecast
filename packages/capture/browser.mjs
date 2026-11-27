@@ -229,7 +229,7 @@ export function tenantsInKeys(keys) {
 // where a tenant is wanted, is a refusal: a wrong account picked silently must never be recorded.
 export function tenantVerdict(seen, want) {
   const all = [...new Set(Object.values(seen).flat())];
-  if (!want) return all.length ? { ok: false, why: `signed in to ${all.length > 1 ? `${all.length} tenants` : 'a tenant'}, and the demo doesn't name its own (capture.tenant in demo.json)`, all } : { ok: true, all };
+  if (!want) return all.length ? { ok: false, why: `signed in to ${all.length > 1 ? `${all.length} tenants` : 'a tenant'}, and the demo doesn't say which tenant to record in: add its domain as "tenant" to the profile's settings (~/.stuntdouble/capture/<profile>.json) or as capture.tenant in demo.json`, all } : { ok: true, all };
   const other = all.filter(t => t !== want.toLowerCase());
   if (other.length) return { ok: false, why: `signed in to another tenant (${other.join(', ')}), not the demo's`, all, other };
   const unseen = Object.entries(seen).filter(([, t]) => !t.length).map(([id]) => id);

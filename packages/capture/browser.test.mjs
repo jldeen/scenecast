@@ -142,7 +142,7 @@ test('the tenant guard: only the demo tenant, and never a page it can\'t read wh
   assert.equal(other.ok, false); assert.deepEqual(other.other, [work]);
   assert.match(tenantVerdict({ teams: [demo], iq: [] }, demo).why, /couldn't tell .* iq/);
   // No tenant named: an app signed in to any tenant isn't captured; one with none (a test page) is.
-  assert.match(tenantVerdict({ teams: [demo] }, null).why, /doesn't name its own/);
+  assert.match(tenantVerdict({ teams: [demo] }, null).why, /doesn't say which tenant to record in/);
   assert.equal(tenantVerdict({ chat: [], admin: [] }, null).ok, true);
 });
 

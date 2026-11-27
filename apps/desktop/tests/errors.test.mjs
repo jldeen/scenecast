@@ -9,6 +9,7 @@ import { CATALOG, explain } from '../ui/errors.js';
 const KNOWN = [
   ['not open: teams (a tab whose address has teams.cloud.microsoft), copilot (a tab whose address has copilot.cloud.microsoft). Open them in the browser the recorder is in, then start again', 'tabs-not-open'],
   ['no tab for admin (admin.cloud.microsoft)', 'tabs-not-open'],
+  ['signed in to a tenant, and the demo doesn\'t say which tenant to record in: add its domain as "tenant" to the profile\'s settings (~/.stuntdouble/capture/<profile>.json) or as capture.tenant in demo.json', 'no-demo-tenant'],
   ['not ready to record: no tab for admin (admin.cloud.microsoft)', 'tabs-not-open'],
   ['not ready to record: admin opened a sign-in page (login.microsoftonline.com): sign in to it in that tab, then check again', 'app-signed-out'],
   ['not ready to record: browser: Chrome isn\u2019t open. Open it with profile "Jessica", then check again (and 2 more)', 'browser-closed'],
