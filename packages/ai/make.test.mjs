@@ -473,6 +473,14 @@ test('a change goes in only as the app\'s pack knows it, on the control her line
   const near = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Manage sync.'), 'x.md'), { walker });
   assert.ok(!near.plan.beats[1].steps.some(st => st.target === 'Enable Sync'));
   assert.ok(near.flags.some(f => f.kind === 'needs-ok' && f.text === 'Your script says "Manage sync", but that isn\'t on the screen. The closest is "Enable Sync", and clicking it turns "Enable Sync" on. Left out of the plan: add it back if that\'s what you meant.'));
+  // Nor does it come back as the way to her next step: a screen only that change reaches isn't bridged to.
+  const demo = demoDir(), flow = JSON.parse(readFileSync(join(demo.dir, 'flow.json'), 'utf8'));
+  flow.states['admin-home'].on.push({ click: { sel: 'div[aria-label="Enable Sync"]' }, to: 'admin-synced' });
+  flow.states['admin-synced'] = { app: 'admin', snap: 'admin-synced' };
+  writeFileSync(join(demo.dir, 'flow.json'), JSON.stringify(flow));
+  writeFileSync(join(demo.dir, 'data', 'snaps', 'admin-synced.html'), '<!doctype html><html><head><title>t</title></head><body><h1>Plugin admin</h1><p>Sync is on</p><button aria-label="Sync now">Sync now</button></body></html>');
+  const then = planFromTrack(parseTalkTrack(SCRIPT.replace('Click Certified.', 'Click Manage sync. Click Sync now.'), 'x.md'), { walker: walkerFromDemo(demo) });
+  assert.ok(!then.plan.beats[1].steps.some(st => st.writes), then.plan.beats[1].steps.map(formatStep).join(' / '));
 });
 
 test('the reset: each write undone in reverse, a pack\'s undo with what the run made, read-only checks', () => {

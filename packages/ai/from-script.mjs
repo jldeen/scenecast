@@ -426,6 +426,8 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         flag('needs-ok', near
           ? `Your script says "${near.said}", but that isn't on the screen. The closest is "${near.is}", and clicking it ${what}. Left out of the plan: add it back if that's what you meant.`
           : `${cap(formatStep(step))} in ${appTitle(S.app)}: it ${what}, and Scenecast can't put that back afterwards. Left out of the plan: add it back if you want it.`, where(line));
+        // Nor is it the way to a later step: what it reaches, only it reaches.
+        if (r.to) wrote.add(r.to);
         return drop();
       }
       if (pw && !w) step.writes = `${pw.what.split(/[;:(]/)[0].trim()} · ${pack.id}:${pw.id}`;
