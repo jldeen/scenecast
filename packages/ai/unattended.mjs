@@ -378,7 +378,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     }
     return null;
   };
-  let recording = false, wRun = null, lastTake = null;
+  let recording = false, wRun = null, lastTake = null, ranAll = false;
   const ran = [], results = {};
   try { main: {
     // Leave out, from the start: the apps that have a line opened again, so what they show comes filtered. Before the
@@ -697,6 +697,7 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       run.beats.push({ beat: bi + 1, title: beat.title, secs: +((Date.now() - tb) / 1000).toFixed(1) });
       if (bi === 0 && ownApps.length) { await settled(cmd, { maxS: 300 }).catch(() => {}); await ownSummary('beat1'); }
     }
+    ranAll = !run.stopped;
   } } finally {
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
@@ -710,12 +711,13 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
       if (u && !run.stopped) restoreStopRun(u);
       const l = await leaveNow().catch(() => null);
       if (l && l.leak && !run.stopped) leakStop(l.leak);
-      // Only a take that ran to the end replaces the last one (its raw recording, beat keys and focus points): one that
-      // stopped part way leaves them, and the replica made from them, as they were. A first take that stopped is kept
-      // (there's nothing to put back). A focus.json she broke by hand stays as it is.
-      if (run.summary && run.summary.states > 0 && !run.stopped) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
     }
-    try { endTake(demo.raw, lastTake, { restore: !!run.stopped }); } catch (e) { log(`the last take's recording wasn't put back: ${e.message}`); }
+    // Only a take that ran every step and saved replaces the last one (its raw recording, beat keys and focus points):
+    // one that stopped part way, failed or didn't save leaves them, and the replica made from them, as they were. A
+    // first take that stopped is kept (there's nothing to put back). A focus.json she broke by hand stays as it is.
+    const whole = ranAll && !run.stopped && !!run.summary && !run.summary.error;
+    if (recording && whole && run.summary.states > 0) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
+    try { endTake(demo.raw, lastTake, { restore: !whole }); } catch (e) { log(`the last take's recording wasn't put back: ${e.message}`); }
     // Each recorded hover and menu: captured, missed, not reached or gone; a missed one is listed for her, with its
     // picture.
     if (run.hovers || run.menus) {

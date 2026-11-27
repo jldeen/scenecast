@@ -128,6 +128,9 @@ test('a start screen that isn\'t as the plan has it, a write after a miss, and a
   // A one-word name is made up too; a title the screen already had before the write isn't.
   const kestrel = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n  Lands on: chat-home · "Chat"\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Kestrel"\n`);
   assert.equal(predictStops(kestrel, sent, { writeKnown: known, titleOf: id => id === 'chat-answer' ? 'Kestrel' : 'New chat' }).stops.length, 1);
+  // The name as a control's (the new chat's link in Recent) is made up too.
+  const linked = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · control "Kestrel"\n`);
+  assert.equal(predictStops(linked, sent, { writeKnown: known, titleOf: id => id === 'chat-answer' ? 'Kestrel PO-450101 Ship-Date Risk Summary' : 'New chat' }).stops.length, 1);
   const fixed = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to notes\n  Lands on: notes-home · "Saved notes"\n- Click "Save" — ask first\n  Writes: saves it · chat:save-skill\n  Lands on: notes-saved · "Saved notes"\n`);
   assert.deepEqual(predictStops(fixed, sent, { writeKnown: known, titleOf: () => 'Saved notes' }).stops, []);
   const hello = parsePlan(`# T\n\n## Beat 1 · A\n\n- Go to chat\n- Press Enter — ask first\n  Writes: sends prompt 1 · chat:new-task\n  Lands on: chat-answer · "Good morning"\n`);

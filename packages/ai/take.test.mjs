@@ -10,6 +10,7 @@ const take = (raw, n) => {
   writeFileSync(join(raw, 'recording.json'), `take ${n}`);
   writeFileSync(join(raw, 'snaps', 'copilot-start.json'), `start ${n}`);
   writeFileSync(join(raw, 'blobs', `b${n}`), 'blob');
+  writeFileSync(join(raw, 'urls.json'), `urls to b1..b${n}`);
 };
 
 test('a take that stops part way puts the last one back whole; one that finishes, or a first take, stays', () => {
@@ -24,6 +25,8 @@ test('a take that stops part way puts the last one back whole; one that finishes
   assert.equal(readFileSync(join(raw, 'snaps', 'copilot-start.json'), 'utf8'), 'start 1');
   assert.equal(existsSync(join(raw, 'snaps', 'copilot-01.json')), false);
   assert.equal(existsSync(join(raw, 'blobs', 'b2')), true);
+  // The blobs' index stays as the receiver has it in memory: it only grows.
+  assert.equal(readFileSync(join(raw, 'urls.json'), 'utf8'), 'urls to b1..b2');
   assert.equal(existsSync(kept), false);
   // Ran to the end: the new take stays.
   const kept2 = keepLastTake(raw);

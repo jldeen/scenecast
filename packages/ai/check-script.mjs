@@ -76,8 +76,10 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
         // A title the write gave its screen: not the one the screen before it had.
         const title = l && l.screen ? pn(titleOf(l.screen)) : '';
         const titled = !!title && title !== pn(titleOf(startsOn.get(s)));
-        const made = l && l.kind === 'words' && l.text && !hers(l.text) && (answerLike(l.text) || GREETING.test(l.text.trim()) || (titled && (pn(l.text) === title || title.includes(pn(l.text)) || pn(l.text).includes(title))));
-        if (made) stops.push(row(bi, si, { text }, `its proof is words the app makes up ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, such as its message box'));
+        // The title can be a control's name too (the new chat's link in Recent).
+        const said = l && (l.kind === 'words' ? l.text : l.kind === 'control' ? l.control : null);
+        const made = !!said && !hers(said) && ((l.kind === 'words' && (answerLike(said) || GREETING.test(said.trim()))) || (titled && (pn(said) === title || title.includes(pn(said)) || pn(said).includes(title))));
+        if (made) stops.push(row(bi, si, { text }, `its proof is words the app makes up ("${said.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, such as its message box'));
         doubt[app] = null;
         if (r.status === 'write') continue;
       }

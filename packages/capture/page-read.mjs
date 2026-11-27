@@ -3,7 +3,8 @@
 // way the recorder writes a screen (serialize.js): form state as attributes (a box's value, a switch's checked, a
 // text area's text), open dialogs and popovers marked, sign-in tokens left out; without CSS. So a live read and a
 // recorded screen give the reader the same marks (values, states, frames, live regions, times).
-//   READ_DOCS_SRC: code for the capture host's `js` command (it has `page`) → [{ key, html }]
+//   READ_DOCS_SRC: code for the capture host's `js` command (it has `page`) → [{ key, html }], the page's with its
+//   title (a new chat's name: a proof can't be that)
 import { readFileSync } from 'node:fs';
 
 const SERIALIZE_SRC = readFileSync(new URL('./serialize.js', import.meta.url), 'utf8');
@@ -14,6 +15,6 @@ for (const f of page.frames()) {
   let key = 'main';
   if (f !== page.mainFrame()) { try { key = new URL(f.url()).host; } catch (e) { key = 'a frame'; } }
   const r = await f.evaluate('(' + SER + ')({ css: false })').catch(() => null);
-  out.push({ key, html: (r && r.html) || '' });
+  out.push({ key, html: (r && r.html) || '', ...(key === 'main' && r && r.meta ? { title: r.meta.title || '' } : {}) });
 }
 return out;`;

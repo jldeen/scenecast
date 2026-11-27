@@ -23,6 +23,7 @@ import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish, forgetLastTake } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
+import { readScreen } from '@scenecast/script/html.mjs';
 import { parseScript as guideParse, buildNotes } from '@stuntdouble/core/lib/notes.mjs';
 import { checkFocusJson, readEditorOverrides, applyEditorOverrides } from '@stuntdouble/core/lib/overrides.mjs';
 
@@ -1189,6 +1190,11 @@ test('a send is never proven by the name the app gives the new chat: it changes 
   // On the live page too (a plan's own proof, checked as a run goes): a send's new title isn't a proof.
   const live = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'words', text: t } }, { before: [screens.typed], afters: [{ ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }, { ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }] });
   assert.notEqual(formatLands(live.lands), `answer · "${t}"`);
+  // A live read has its page's title: a save that shows "Saved notes" on a page already titled that is proven by them.
+  const notes = more => readScreen([{ key: 'main', title: 'Saved notes', html: `<main><button>Save</button>${more}</main>` }]);
+  const notesWalker = { flow: { states: { saved: { app: 'notes' } } }, states: ['saved'], screen: id => id === 'saved' ? { ...notes('<h1>Saved notes</h1>'), title: 'Saved notes' } : null, shown: () => null, control: () => null, typedTexts: () => [] };
+  const saved = liveProof({ kind: 'click', target: 'Save', writes: 'saves it', lands: { screen: 'saved', kind: 'words', text: 'Saved notes' } }, { before: [notes('')], afters: [notes('<h1>Saved notes</h1>'), notes('<h1>Saved notes</h1>')], walker: notesWalker });
+  assert.deepEqual([formatLands(saved.lands), saved.strength], ['saved · "Saved notes"', 'strong']);
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {

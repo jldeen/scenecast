@@ -277,7 +277,9 @@ export function readScreen(docs, { specs = [] } = {}) {
     if (el) { for (let p = el; p && k < 0; p = p.parent) if (ctlOf.has(p)) k = ctlOf.get(p); if (k < 0) k = inside(el); }
     picks[m.key] = k;
   }
-  return { controls, items: items.filter(it => it.text), headings: [...headings, ...barHeadings].slice(0, 30), text: text.join('\n'), theme, regions, lists, ...(specs.length ? { picks } : {}) };
+  // A live read's page title (packages/capture/page-read.mjs): a recorded screen's comes from its capture instead.
+  const main = docs.find(d => (d.key || 'main') === 'main');
+  return { ...(main && typeof main.title === 'string' ? { title: main.title } : {}), controls, items: items.filter(it => it.text), headings: [...headings, ...barHeadings].slice(0, 30), text: text.join('\n'), theme, regions, lists, ...(specs.length ? { picks } : {}) };
 }
 
 // Light or dark, as the page's root says it (a color scheme, a theme attribute, or a theme class); null if it doesn't.
