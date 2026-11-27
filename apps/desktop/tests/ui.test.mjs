@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { remote } from 'webdriverio';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../../examples/fixture-app/server.mjs';
+import { selftestGuard } from '../../../packages/selftest/guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..', '..');
@@ -35,6 +36,7 @@ for (const port of [RX_PORT, WD_PORT, 47801, 47802]) {
 }
 
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-ui-'));
+await selftestGuard({ tmp, receivers: [RX_PORT], extensions: [RX_PORT], ports: [WD_PORT, 47801, 47802] });
 const LIB = join(tmp, 'Scenecast');
 const EXT = join(tmp, 'extension');
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
@@ -52,10 +54,15 @@ const FEED_URL = `http://127.0.0.1:${feed.address().port}/latest.json`;
 
 // ---- The app -----------------------------------------------------------------------------------------------------
 const appLog = [];
+// Windows finds a user's AppData under USERPROFILE: Google Chrome won't start (the checker's, Playwright's) where the
+// home has none.
+for (const d of ['Local', 'Roaming']) mkdirSync(join(tmp, 'home', 'AppData', d), { recursive: true });
 const app = spawn(BIN, [], {
   env: {
     ...process.env,
     TAURI_WEBDRIVER_PORT: String(WD_PORT),
+    // Its home is the test's: a new demo's raw captures (~/.scenecast/<id>/raw) stay in the test's folder.
+    HOME: join(tmp, 'home'), USERPROFILE: join(tmp, 'home'),
     SCENECAST_LIBRARY: LIB,
     SCENECAST_EXTENSION_DIR: EXT,
     SCENECAST_JS: process.env.SCENECAST_JS || join(ROOT, 'packages'),
@@ -668,7 +675,8 @@ try {
   check('the UI test ran to the end', false, e.stack || e);
   if (b && SHOTS) await b.saveScreenshot(join(SHOTS, 'zz-failure.png')).catch(() => {});
   console.log('--- app output ---\n' + appLog.join('').slice(-6000));
-  try { console.log('--- scenecast.log ---\n' + readFileSync(join(tmp, 'ai-home', 'logs', 'scenecast.log'), 'utf8').slice(-3000)); } catch (e) {}
+  // The app's own log (an engine step's error with its last lines), kept with the screenshots CI uploads.
+  try { const log = readFileSync(join(tmp, 'ai-home', 'logs', 'scenecast.log'), 'utf8'); console.log('--- scenecast.log ---\n' + log.slice(-3000)); if (SHOTS) writeFileSync(join(SHOTS, 'scenecast.log'), log); } catch (e) {}
 } finally {
   await ctx?.close().catch(() => {});
   await viewer?.close().catch(() => {});

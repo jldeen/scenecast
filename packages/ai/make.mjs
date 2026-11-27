@@ -8,11 +8,13 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { parsePlan, formatPlan, writesOf, stepCount } from './plan.mjs';
+import { parsePlan, formatPlan, formatStep, writesOf, stepCount } from './plan.mjs';
 import { walkerFromDemo } from './walker.mjs';
 import { planFromTrack } from './from-script.mjs';
 import { planFromRecording } from './walkthrough.mjs';
-import { resetFor, formatReset } from './reset.mjs';
+import { resetFor, formatReset, parseReset, leaveOutSection } from './reset.mjs';
+import { fallbackSteps, undoGroups } from './reset-run.mjs';
+import { checkable, checkValues } from './check-lines.mjs';
 import { readTalkTrack, talkTrackText } from '@scenecast/script/talk.mjs';
 import { aiDir } from './run.mjs';
 
@@ -63,29 +65,83 @@ export async function planFromWalkthrough({ demo, file, script = null, packs, em
   packs = packs === undefined ? await loadPacks(demo) : packs;
   const walker = walkerFromDemo(demo);
   const track = script ? readTalkTrack(script) : null;
-  const plan = planFromRecording(rec, { walker, title: demo.cfg.title, track, packs });
-  const review = { at: new Date().toISOString(), from: basename(file), walkthrough: true, checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags: [] };
+  const flags = [];
+  const plan = planFromRecording(rec, { walker, title: demo.cfg.title, track, packs, flags });
+  const review = { at: new Date().toISOString(), from: basename(file), walkthrough: true, checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags };
   const text = save(demo, plan, review);
-  emit({ event: 'plan', beats: plan.beats.length, steps: review.steps, writes: review.writes.length, flags: 0, askFirst: (text.match(/ — ask first/g) || []).length });
+  emit({ event: 'plan', beats: plan.beats.length, steps: review.steps, writes: review.writes.length, flags: flags.length, askFirst: (text.match(/ — ask first/g) || []).length });
   return { text, plan, review };
 }
 
-// The presenter's one approval: the plan's exact words and the writes it lets the capture pass do. Any edit to plan.md
-// after it needs approving again (Phase 6's guard: a write runs only as approved).
-export function approve(demo) {
+// The presenter's one approval: the plan's exact words and the writes it lets the capture pass do, and the reset's
+// (reset.md: its undo and set-first steps, which change the tenant too). The approval screen lists every one of them
+// by beat and step; list256 is their hash, so the list approved is the list that runs. Any edit to plan.md or reset.md
+// after it needs approving again (a write runs only as approved).
+export function writeList(demo) {
   const f = join(demo.dir, PLAN);
   if (!existsSync(f)) throw new Error('make the plan first');
   const text = readFileSync(f, 'utf8');
-  const a = { at: new Date().toISOString(), sha256: sha(text), writes: writesOf(parsePlan(text)).map(w => ({ beat: w.beat, step: w.step, text: w.text, writes: w.writes })) };
+  const writes = writesOf(parsePlan(text)).map(w => ({ beat: w.beat, step: w.step, text: w.text, writes: w.writes }));
+  const rf = join(demo.dir, RESET), resetText = existsSync(rf) ? readFileSync(rf, 'utf8') : null;
+  const reset = resetText ? resetSteps(resetText) : [];
+  // What she leaves out of the replica: listed apart from the writes (it changes nothing in the tenant); reset256 binds
+  // its text.
+  const leaveOut = resetText ? (parseReset(resetText).leaveOut || []).map(l => ({ app: l.app, what: l.what, from: l.from, label: `Left out of the replica: ${l.what}` })) : [];
+  return { text, writes, resetText, reset, leaveOut };
+}
+// The reset's steps that change something: each undo step (but Go to, which only switches), each set first, and each
+// set before.
+export function resetSteps(resetText) {
+  const r = parseReset(resetText), out = [];
+  r.undo.beats.forEach((b, bi) => b.steps.forEach((s, si) => { if (s.kind !== 'app') out.push({ part: 'undo', app: b.title, n: bi, step: si, text: formatStep(s) }); }));
+  // An API undo's Note can give steps for when it can't run: they're listed too, so they run only as approved.
+  for (const g of undoGroups(resetText)) for (const s of g.steps) if (s.kind === 'free' && /^undo with the app pack:/i.test(s.text || '')) {
+    for (const t of fallbackSteps(g.note)) out.push({ part: 'undo', app: g.title, of: s.text, text: t, fallback: true });
+    // With nothing a run recorded (the reset before), the script's own leftovers found by these names and undone.
+    if ((g.names || []).length) out.push({ part: 'undo', app: g.title, of: s.text, text: `Find by name: ${g.names.map(x => `"${x}"`).join(', ')}`, byName: g.names });
+  }
+  r.set.forEach((x, i) => out.push({ part: 'set', n: i, text: x.what, set: x.set || null }));
+  // Set before: off camera, just before its step, an approved write too (listed only when reset.md has them).
+  for (const b of r.before || []) b.items.forEach((x, i) => out.push({ part: 'before', beat: b.beat, before: b.text, ...(b.n ? { stepN: b.n } : {}), n: i, text: x.what, set: x.set || null, label: `off camera, before ${b.text}: ${x.what}` }));
+  return out;
+}
+const listSha = (writes, reset) => sha(JSON.stringify({ writes, reset }));
+// reset.md's Check lines a run can't check (check-lines.mjs checkable): [{ text, why }].
+export async function uncheckable(demo, { packs, resetText = null, plan = null } = {}) {
+  const rt = resetText !== null ? resetText : (existsSync(join(demo.dir, RESET)) ? readFileSync(join(demo.dir, RESET), 'utf8') : '');
+  if (!rt) return [];
+  plan = plan || parsePlan(readFileSync(join(demo.dir, PLAN), 'utf8'));
+  packs = packs === undefined ? await loadPacks(demo) : packs;
+  const walker = (() => { try { return walkerFromDemo(demo); } catch (e) { return null; } })();
+  const ctx = { plan, packs, cfg: demo.cfg, walker, values: checkValues({ plan, walker, cfg: demo.cfg }), appIds: (demo.cfg.apps || []).map(a => a.id) };
+  return parseReset(rt).checks.map(c => ({ text: `${c.app}${c.screen ? ` on ${c.screen}` : ''}: ${c.text}`, r: checkable(c, ctx) })).filter(x => !x.r.ok).map(x => ({ text: x.text, why: x.r.why }));
+}
+// Refused when a Check line can't be checked: a run would stop at it, after she's said go.
+export async function approve(demo, { packs } = {}) {
+  const { text, writes, resetText, reset, leaveOut } = writeList(demo);
+  const bad = await uncheckable(demo, { packs, resetText: resetText || '' });
+  if (bad.length) throw new Error(`reset.md has ${bad.length === 1 ? 'a check' : `${bad.length} checks`} a run can't check: ${bad.map(b => `"${b.text}" (${b.why})`).join('; ')}. Make the reset again (ai reset), or fix those lines`);
+  const a = { at: new Date().toISOString(), sha256: sha(text), writes, ...(resetText ? { reset256: sha(resetText), reset } : {}), ...(leaveOut.length ? { leaveOut } : {}), list256: listSha(writes, reset) };
   mkdirSync(aiDir(demo), { recursive: true });
   writeFileSync(join(aiDir(demo), 'approved.json'), JSON.stringify(a, null, 1) + '\n');
   return a;
 }
+// approved: the plan is word for word the one approved; full: the reset too, and the list hash (an unattended run
+// needs full).
 export function approval(demo) {
   const f = join(aiDir(demo), 'approved.json'), p = join(demo.dir, PLAN);
-  if (!existsSync(f) || !existsSync(p)) return { approved: false };
+  if (!existsSync(f) || !existsSync(p)) return { approved: false, full: false };
   const a = JSON.parse(readFileSync(f, 'utf8'));
-  return { ...a, approved: a.sha256 === sha(readFileSync(p, 'utf8')) };
+  const approved = a.sha256 === sha(readFileSync(p, 'utf8'));
+  let full = false, why = approved ? null : 'plan.md changed since it was approved';
+  if (approved) {
+    const now = writeList(demo);
+    const resetOk = now.resetText ? a.reset256 === sha(now.resetText) : !a.reset256;
+    if (!resetOk) why = now.resetText ? 'reset.md changed since it was approved' : 'reset.md was approved and is gone';
+    else if (a.list256 !== listSha(now.writes, now.reset)) why = 'the approval doesn\'t list these writes (approve again)';
+    else full = true;
+  }
+  return { ...a, approved, full, ...(why ? { why } : {}) };
 }
 
 export async function writeReset(demo, { packs } = {}) {
@@ -93,8 +149,17 @@ export async function writeReset(demo, { packs } = {}) {
   if (!existsSync(f)) throw new Error('make the plan first');
   const plan = parsePlan(readFileSync(f, 'utf8'));
   packs = packs === undefined ? await loadPacks(demo) : packs;
+  const rf = join(demo.dir, RESET), was = existsSync(rf) ? readFileSync(rf, 'utf8') : '';
   const r = resetFor(plan, { walker: walkerFromDemo(demo), packs });
+  // Her Leave out, word for word: it's hers, not the generator's.
+  r.leaveOutText = leaveOutSection(was);
+  // A check a run can't check isn't one: it's listed for her instead.
+  const walker = (() => { try { return walkerFromDemo(demo); } catch (e) { return null; } })();
+  const ctx = { plan, packs, cfg: demo.cfg, walker, values: checkValues({ plan, walker, cfg: demo.cfg }), appIds: (demo.cfg.apps || []).map(a => a.id) };
+  const keep = [];
+  for (const c of r.checks) { const k = checkable(c, ctx); if (k.ok) keep.push(c); else r.needs.push({ kind: 'check', text: `Check "${c.app}${c.screen ? ` on ${c.screen}` : ''}: ${c.text}" can't be checked by a run: ${k.why}` }); }
+  r.checks = keep;
   const text = formatReset(r);
-  writeFileSync(join(demo.dir, RESET), text);
+  writeFileSync(rf, text);
   return { text, reset: r };
 }

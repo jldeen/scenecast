@@ -15,6 +15,7 @@ import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { chromium } from 'playwright-core';
+import { selftestGuard } from './guard.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT = join(ROOT, 'examples', 'fixture-app', 'script.md');
@@ -246,6 +247,7 @@ async function editorFlow({ browser, url, channel, check, times, DEMO, srv }) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolvePath(process.argv[1])) {
   const i = process.argv.indexOf('--demo');
   const DEMO = resolvePath(process.argv[i + 1]);
+  await selftestGuard({ tmp: dirname(DEMO), kept: [dirname(DEMO)] });
   const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(ROOT, 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
   const fails = [];
   const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 3000)}` : '')); if (!ok) fails.push(name); };

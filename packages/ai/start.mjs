@@ -14,14 +14,14 @@ export function toggleOf(c) {
   return { subject: clean(String(c.name).replace(/^(?:enable|disable|turn (?:on|off)|toggle)\s+/i, '')), on: c.on, control: c.name };
 }
 
-// What one screen says about the start state.
+// What one screen says about the start state. Not what she leaves out of the replica (left): the capture won't show it.
 export function factsOf(sc, { app, pack = null } = {}) {
   if (!sc) return [];
-  const out = [];
-  const toggles = sc.controls.map(toggleOf).filter(Boolean);
+  const out = [], ctls = (sc.controls || []).filter(c => !c.left);
+  const toggles = ctls.map(toggleOf).filter(Boolean);
   for (const t of toggles) out.push({ app, kind: 'toggle', key: norm(t.subject), subject: t.subject, value: t.on ? 'on' : 'off', control: t.control });
   // A group of radios (Chat | Cowork): the one that's picked.
-  const radios = sc.controls.filter(c => c.role === 'radio' && typeof c.on === 'boolean' && c.name);
+  const radios = ctls.filter(c => c.role === 'radio' && typeof c.on === 'boolean' && c.name);
   const picked = radios.find(c => c.on);
   if (picked && radios.length > 1) out.push({ app, kind: 'choice', key: radios.map(c => norm(c.name)).sort().join('|'), subject: radios.map(c => c.name).join(' | '), value: picked.name, control: picked.name });
   // "Version 1.4.9" on a page about one thing: that thing's version.
@@ -72,7 +72,7 @@ export function startState(plan, { walker, packs = null } = {}) {
         // Explained by a step between the two screens that acts on it (its switch, its name, the option picked).
         const between = steps.slice(Math.max(0, was.last.step), Math.max(0, v.step));
         const acts = between.some(s => (s.kind === 'click' || s.kind === 'hover' || s.kind === 'manual') && [f.subject, f.control, f.value].filter(Boolean).some(t => norm(s.target || s.what || '').includes(norm(t))));
-        if (!acts) changes.push({ app: f.app, kind: f.kind, subject: f.subject, control: f.control || was.fact.control, from: was.last.value, to: f.value, before: { beat: was.last.beat, screen: was.last.screen }, after: at });
+        if (!acts) changes.push({ app: f.app, kind: f.kind, key: f.key, subject: f.subject, control: f.control || was.fact.control, from: was.last.value, to: f.value, before: { beat: was.last.beat, screen: was.last.screen }, after: at });
       }
       was.last = { value: f.value, ...at };
     }

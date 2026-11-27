@@ -13,6 +13,7 @@ import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { freePort } from '@stuntdouble/core/lib/server.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = join(KIT, '..');
@@ -93,15 +94,16 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
     const r1 = await run('guide-shots');
     const N0 = notesOf();
     const srv = await serveDemo(DEMO);
-    const b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+    let b = null;
     try {
+      b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
       const g = await guidePictures(b, srv.url);
       check('presenter: before a script, the guide shows each beat\'s screen (no blank or black frame)', r0.code === 0 && r1.code === 0 && N0.fromRecording && N0.shots.length > 0
         && g.frames.length === 2 && g.frames.every(f => f.shown) && !blankFrames(g).length && !/→\s*(\([^)]*\))?\s*→/.test(g.next), JSON.stringify({ r0: r0.out.slice(-300), r1: r1.out.slice(-300), shots: N0.shots, g }));
       rmSync(join(DEMO, 'presenter', 'shots'), { recursive: true, force: true });
       const none = await guidePictures(b, srv.url);
       check('presenter: a picture that isn\'t there leaves no empty frame', none.frames.every(f => !f.shown), JSON.stringify(none));
-    } finally { await b.close(); srv.stop(); }
+    } finally { srv.stop(); if (b) await b.close().catch(() => {}); }
     rmSync(join(DEMO, 'presenter'), { recursive: true, force: true });
   }
   // The script the app keeps (script.md, the one script to focus points reads): the guide reads it as it is.
@@ -149,8 +151,9 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
     const port = await freePort();
     const srv = spawn(process.execPath, [join(KIT, 'player', 'serve.mjs'), '--demo', DEMO, '--port', String(port), '--no-editor'], { cwd: DEMO, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, REPLICA_NO_OPEN: '1' } });
     const url = await new Promise(res => { let o = ''; srv.stdout.on('data', d => { o += d; const m = /(http:\/\/127\.0\.0\.1:\d+\/)/.exec(o); if (m) res(m[1]); }); setTimeout(() => res(null), 15000); });
-    const b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
+    let b = null;
     try {
+      b = await chromium.launch({ channel: process.env.REPLICA_CHROME_CHANNEL || 'chrome', headless: true });
       const served = await Promise.all(['presenter.html', 'presenter/presenter.js', 'presenter/notes.json', `presenter/shots/${N.shots[0].name}.png`, 'presenter/..%2Fdemo.json'].map(async p => (await fetch(url + p)).status));
       check('presenter: the guide, its notes and pictures are served; nothing outside presenter/', served.join() === '200,200,200,200,404', served.join());
       const ctx = await b.newContext();
@@ -162,7 +165,7 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
       const altAlone = pages();
       await p.keyboard.press('Control+Alt+KeyG'); await sleep(600);
       check('presenter: on Windows Alt+G does nothing, Ctrl+Alt+G opens the guide', altAlone === 1 && pages() === 2, JSON.stringify({ altAlone, after: pages() }));
-    } finally { await b.close(); srv.kill(); }
+    } finally { srv.kill(); if (b) await b.close().catch(() => {}); }
   }
   // A change to the script shows: the check says notes.json is out of date until `scenecast notes` runs.
   writeFileSync(SCRIPT, fixtureScript(flow).replace('Line two of beat 2.', 'Line two of beat 2, changed.'));
@@ -206,6 +209,7 @@ export async function presenterWalk({ DEMO, check, BIN = binary() }) {
 if (process.argv[1] && process.argv[1].endsWith('presenter-walk.mjs')) {
   const fails = [];
   const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${detail}` : '')); if (!ok) fails.push(name); };
+  await selftestGuard({ tmp: dirname(resolvePath(process.argv[2])), kept: [dirname(resolvePath(process.argv[2]))] });
   const t = await presenterWalk({ DEMO: process.argv[2], check });
   console.log(`${fails.length ? `${fails.length} FAILED` : 'ALL PASS'} (${JSON.stringify(t)})`);
   process.exit(fails.length ? 1 : 0);

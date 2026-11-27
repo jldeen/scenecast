@@ -27,10 +27,14 @@ export async function observe(cmd, demo, app, opts) {
 // Until the recorder has captured what the last action changed: not busy, nothing being typed, twice in a row.
 export async function settled(cmd, { maxS = 600, on } = {}) {
   await sleep(400);
-  let ok = 0, last = null;
+  let ok = 0, last = null, paused = 0, tPrev = Date.now();
   const t0 = Date.now();
-  while (Date.now() - t0 < maxS * 1000) {
+  // A save held for her own status (capOwnStatus: read again for up to its waitS) doesn't count against maxS.
+  while (Date.now() - t0 - paused < maxS * 1000) {
     const s = await cmd('recordStatus', {}, 30);
+    const now = Date.now();
+    if (s.gateWait) paused += now - tPrev;
+    tPrev = now;
     last = s;
     if (on) on(s);
     if (!s.recording) return s;

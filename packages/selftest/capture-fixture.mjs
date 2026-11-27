@@ -10,9 +10,11 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { selftestGuard } from './guard.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const raw = mkdtempSync(join(tmpdir(), 'd1raw-'));
+await selftestGuard({ tmp: raw, receivers: [47692], extensions: [47692] });
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 // A JWT-shaped value made from pieces (the repo's own secret scan would rightly flag a literal one).
 const FAKE_JWT = ['eyJ' + 'hbGciOiJub25lIn0', 'eyJ' + 'zdWIiOiJ0ZXN0In0', 'c2lnbmF0dXJlLXRlc3Q'].join('.');

@@ -183,5 +183,70 @@
     "spike E presets microsoft-iq.json (auto, frames.skip)",
     "scenecast recorder: powerbi-access-token stripped at capture",
     "demo1-reset SKILL.md and dist (add, certify, checks; product behavior only)"
+  ],
+  "guard": {
+    "allow": [
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/",
+      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/",
+      "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{\"Scenario\":\\{\"Name\":\"MicrosoftIQ\\.Web\\.Copilot_Peek\"(?![\\s\\S]*\"(?:Display)?QueryString\"\\s*:\\s*\"(?!\"))/"
+    ],
+    "why": {
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review).",
+      "/^POST management\\.azure\\.com\\/providers\\/Microsoft\\.ResourceGraph\\/resources$/": "IQ's add picker lists the Azure AI Search services for its Foundry IQ tab; Azure Resource Graph only reads, by design; held, the Foundry IQ tab says \"could not be loaded\" (Nov 23 review).",
+      "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{\"Scenario\":\\{\"Name\":\"MicrosoftIQ\\.Web\\.Copilot_Peek\"(?![\\s\\S]*\"(?:Display)?QueryString\"\\s*:\\s*\"(?!\"))/": "IQ's add picker (and its Copilot peek) lists the account's people, chats, channels, files, sites, messages and meetings with it, with nothing typed: a listing only reads. Only IQ's scenario and empty queries pass (a typed search stays held). Held, the picker has no People, Chats or Channels (Nov 24 checks)."
+    }
+  },
+  "services": [
+    {
+      "name": "IQ's plugin service",
+      "match": "/^GET substrate\\.office\\.com\\/copilotconnectors\\/[^/]+\\/api\\/plugins$/",
+      "start": true,
+      "waitS": 90,
+      "why": "IQ's page asks it for the plugins its add picker lists, as it starts (Nov 24: 3 of 3 starts, 8 to 47 s after IQ's address opened). Answering 500, the picker says \"Plugins could not be loaded\" and the demo's plugin card isn't there (walks 11 and 14).",
+      "cards": {
+        "steps": "/ Plugin$/",
+        "suffix": " Plugin",
+        "name": "/^(.+?) (?=[A-Z])/",
+        "list": "IQ's plugin list",
+        "why": "The add picker's Plugins tab draws this answer's list, filtered in the page as she types: the call carries no search term (only skipFunctions), and typing makes no call (Nov 25, 4 runs). Each row's words are its name, its description, then \"Plugin\". So a plan step that clicks a row whose words end \" Plugin\" needs that row in this list, and the run checks it in the answer before anything runs. name: the row's name for the message, when it isn't there."
+      }
+    }
+  ],
+  "filters": [
+    {
+      "id": "peek-messages",
+      "why": "IQ's add-content picker lists the account's recent mail from one response, asked for by IQ's frame as it starts: substrate's suggestions (Copilot_Peek). A demo leaves out mail from a sender (security and service notices keep arriving in a shared tenant) without deleting anyone's mail. Measured Nov 24: POST substrate.office.com/search/api/v1/suggestions, Groups[] by Type, the mail in the Message group's Suggestions, each with From.EmailAddress.Address and Subject; LayoutHints.BestMatchSuggestions orders the mixed list by ReferenceId, so a removed mail's entry goes too. Some responses carry one type only: only Groups must be a list. Filtered by sender, all 26 left the picker over 2 responses; no local store had them.",
+      "url": "*://substrate.office.com/search/api/v1/suggestions*",
+      "match": "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/",
+      "items": "Groups[Type=Message].Suggestions",
+      "fields": [
+        "From.EmailAddress.Address"
+      ],
+      "refs": [
+        {
+          "list": "LayoutHints.BestMatchSuggestions",
+          "by": "ReferenceId"
+        }
+      ],
+      "shows": "Subject"
+    },
+    {
+      "id": "peek-team",
+      "why": "The same response carries Teams items: a team (Name), its channels (TeamName) and its SharePoint site (Title). With mail left out, lower-ranked items move up into the picker's rows, so a team left out of Teams is left out here too. Measured Nov 24: one team, five channels and one site in the response, none on the picker's screen that day.",
+      "url": "*://substrate.office.com/search/api/v1/suggestions*",
+      "match": "/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/",
+      "items": "Groups[*].Suggestions",
+      "fields": [
+        "Name",
+        "TeamName",
+        "Title"
+      ],
+      "refs": [
+        {
+          "list": "LayoutHints.BestMatchSuggestions",
+          "by": "ReferenceId"
+        }
+      ]
+    }
   ]
 }

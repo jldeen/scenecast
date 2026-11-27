@@ -12,6 +12,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { appPortsGuard } from '../../../packages/selftest/guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAC = process.platform === 'darwin', WIN = process.platform === 'win32';
@@ -28,6 +29,8 @@ async function waitFor(what, fn, ms = 60000, every = 500) {
 // The real path: macOS's temp folder is under /var, a symlink, and the updater won't run an app from there.
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'scenecast-update-')));
 const HOOK = join(tmp, 'hook'), LIB = join(tmp, 'Scenecast'), PORT = 47811;
+// The updated app opens on the app's own ports: nothing may be on them, and no Scenecast of a presenter's running.
+await appPortsGuard({ ports: [PORT] });
 let n = 0;
 async function hook(action, args = {}, ms = 120000) {
   const name = `r${++n}`;

@@ -17,10 +17,13 @@ const lineId = (bi, li) => `${bi + 1}.${li + 1}`;
 
 // draft: the rules' plan from her words (planFromTrack), shown line by line with what didn't fit, for Copilot to keep,
 // fix and complete.
+// How a run checks a step (landing.mjs's flags): not hers to fix, so not for Copilot either.
+const PROOF_KINDS = new Set(['landing', 'number', 'message']);
 export function scriptPlanInput(track, walker, { pageText = false, draft = null } = {}) {
   const R = s => redact(clean(s));
   const drafted = id => draft ? draft.plan.beats.flatMap(b => b.steps).filter(s => s.line === id).map(s => R(formatStep(s))) : [];
-  const issues = id => draft ? draft.flags.filter(f => f.at === id).map(f => R(f.text).slice(0, 220)) : [];
+  // What didn't fit her words (how a run checks a step isn't hers to fix: those stay out).
+  const issues = id => draft ? draft.flags.filter(f => f.at === id && !PROOF_KINDS.has(f.kind)).map(f => R(f.text).slice(0, 220)) : [];
   const script = {
     title: R(track.title),
     prompts: (track.prompts || []).map(p => ({ n: p.n, ...(p.label ? { label: R(p.label) } : {}), text: R(p.text) })),

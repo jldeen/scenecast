@@ -180,6 +180,9 @@
         "key": "Enter",
         "field": "/chat input|message|prompt/i"
       },
+      "opens": [
+        "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/messages$/"
+      ],
       "makes": "task",
       "undo": {
         "open": "https://copilot.cloud.microsoft/home",
@@ -190,6 +193,9 @@
       },
       "check": {
         "open": "https://copilot.cloud.microsoft/home",
+        "look": {
+          "rows": "Recent"
+        },
         "expect": "Recent has no task from the run, other than the ones the demo keeps."
       }
     },
@@ -200,6 +206,9 @@
         "kind": "click",
         "target": "Send"
       },
+      "opens": [
+        "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/messages$/"
+      ],
       "makes": "task",
       "undo": {
         "same": "new-task"
@@ -216,7 +225,14 @@
         "target": "Save",
         "near": "Save skill"
       },
+      "opens": [
+        "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/tool-approval$/",
+        "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/messages$/"
+      ],
       "makes": "skill",
+      "names": {
+        "skill": "/\\bSave skill Skill ([a-z0-9][a-z0-9-]*[a-z0-9]) Changes\\b/"
+      },
       "undo": {
         "open": "https://copilot.cloud.microsoft/plugins?pluginsTab=cowork&coworkPage=added",
         "steps": [
@@ -231,7 +247,8 @@
         "look": {
           "absent": "{skill}"
         },
-        "expect": "Added doesn't list the skill."
+        "expect": "Added doesn't list the skill.",
+        "lands": "Added ("
       }
     },
     {
@@ -241,6 +258,9 @@
         "kind": "click",
         "target": "Approve"
       },
+      "opens": [
+        "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/tool-approval$/"
+      ],
       "undo": null,
       "note": "The undo depends on the tool: the demo names it (or the plan stops at Approve). Approve on a Copy file card into the skills folder makes a skill: its undo is save-skill's.",
       "check": {
@@ -254,6 +274,9 @@
         "kind": "switch",
         "target": "/^Enable /"
       },
+      "opens": [
+        "/^PATCH mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/settings$/"
+      ],
       "undo": {
         "open": "https://copilot.cloud.microsoft/plugins?pluginsTab=cowork&coworkPage=added",
         "steps": [
@@ -316,8 +339,14 @@
       "what": "Every prompt in a new task leaves a task in Recent",
       "check": {
         "open": "https://copilot.cloud.microsoft/home",
+        "look": {
+          "rows": "Recent"
+        },
         "expect": "Recent holds only the tasks the demo keeps."
-      }
+      },
+      "leftOf": [
+        "new-task"
+      ]
     },
     {
       "id": "memories",
@@ -334,9 +363,13 @@
         "steps": [
           "Click \"Settings and more\"",
           "Click \"Settings\"",
-          "Click \"Personalization\""
+          "Click \"Personalization\"",
+          "Click \"Manage Saved memories\""
         ],
-        "expect": "No saved memories from the run (Copilot or Cowork)."
+        "look": {
+          "text": "Copilot hasn't captured any memories yet"
+        },
+        "expect": "No saved memories from the run (Copilot's saved memories; Cowork's aren't on this screen)."
       }
     },
     {
@@ -346,8 +379,13 @@
         "steps": [
           "Click \"Settings and more\"",
           "Click \"Settings\"",
-          "Click \"Personalization\""
+          "Click \"Personalization\"",
+          "Click \"Manage Customize Copilot\""
         ],
+        "look": {
+          "box": "custom instructions",
+          "equals": "{instructions}"
+        },
         "expect": "The custom instructions match the demo's text exactly."
       }
     },
@@ -365,5 +403,34 @@
     "spike E presets m365-copilot.json (busy, stream timings, group selectors, auto budget)",
     "spike A live captures Nov 20 (themes, scores)",
     "demo1-reset SKILL.md and dist (writes, undo steps, checks, effects; product behavior only)"
+  ],
+  "guard": {
+    "allow": [
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/",
+      "/^POST titles\\.prod\\.mos\\.microsoft\\.com\\/marketplace\\/v1\\/users\\/titles\\/query$/",
+      "/^POST copilot\\.cloud\\.microsoft\\/_serverFn\\/[0-9a-f]{64}$/ when body /^\\{\"t\":\\{\"t\":10,\"i\":0,\"p\":\\{\"k\":\\[\"data\"\\],\"v\":\\[\\{\"t\":10,\"i\":1,\"p\":\\{\"k\":\\[(?:\"action\"(?:,\"[A-Za-z]+\")*\\],\"v\":\\[\\{\"t\":1,\"s\":\"(?:GetUserPinnedApps|GetAppLauncherCoreApps|GetCurrentTheme|RefreshNavPane|RefreshNeptuneEntitlements)\"\\}|\"enableCache\",\"source\",\"action\"\\],\"v\":\\[\\{\"t\":2,\"s\":\\d\\},\\{\"t\":1,\"s\":\"[A-Za-z]+\"\\},\\{\"t\":1,\"s\":\"GetTasksFlyout\"\\}|\"filterThreadType\",\"cursor\",\"action\"\\],\"v\":\\[\\{\"t\":1,\"s\":\"[a-z|]+\"\\},\\{\"t\":(?:1|2),\"s\":(?:\\d|\"[^\"]*\")\\},\\{\"t\":1,\"s\":\"GetUnifiedTasks\"\\})/",
+      "/^POST substrate\\.office\\.com\\/m365Copilot\\/EventListener\\/Client$/ when body /^\\{\"ConversationId\":\"[^\"]*\",\"clientData\":\\{\"Verb\":\"list_plugins\",\"Data\":\\{[^{}]*\\},\"MessageId\":\"[^\"]*\",\"VisualElementId\":\"[^\"]*\"\\}\\}$/"
+    ],
+    "why": {
+      "/^POST login\\.microsoftonline\\.com\\/[^/]+\\/oauth2\\/v2\\.0\\/token$/": "Entra's token endpoint: issues access tokens for the signed-in account; changes nothing in the tenant (Nov 23 review).",
+      "/^POST titles\\.prod\\.mos\\.microsoft\\.com\\/marketplace\\/v1\\/users\\/titles\\/query$/": "Copilot's Plugins page lists the marketplace's titles (skills and connectors) with it: the body is a listing filter (public scope, element types, no admin-blocked titles), no IDs, nothing typed. Held, the page has no \"Roles & Industry\" section, which the recording shows (walk 13 screens 4-1 and 7-2; read-only check Nov 24, 3 held on one Plugins click).",
+      "/^POST copilot\\.cloud\\.microsoft\\/_serverFn\\/[0-9a-f]{64}$/ when body /^\\{\"t\":\\{\"t\":10,\"i\":0,\"p\":\\{\"k\":\\[\"data\"\\],\"v\":\\[\\{\"t\":10,\"i\":1,\"p\":\\{\"k\":\\[(?:\"action\"(?:,\"[A-Za-z]+\")*\\],\"v\":\\[\\{\"t\":1,\"s\":\"(?:GetUserPinnedApps|GetAppLauncherCoreApps|GetCurrentTheme|RefreshNavPane|RefreshNeptuneEntitlements)\"\\}|\"enableCache\",\"source\",\"action\"\\],\"v\":\\[\\{\"t\":2,\"s\":\\d\\},\\{\"t\":1,\"s\":\"[A-Za-z]+\"\\},\\{\"t\":1,\"s\":\"GetTasksFlyout\"\\}|\"filterThreadType\",\"cursor\",\"action\"\\],\"v\":\\[\\{\"t\":1,\"s\":\"[a-z|]+\"\\},\\{\"t\":(?:1|2),\"s\":(?:\\d|\"[^\"]*\")\\},\\{\"t\":1,\"s\":\"GetUnifiedTasks\"\\})/": "Copilot's server functions, one dispatcher keyed by its action: only the reads it sends while looked at (pinned apps, the app launcher, the theme, the tasks flyout and list, the nav pane) and its refresh of the account's entitlements, by the action key's own value. Writes and any other action stay held. The recording was made with nothing held: held, Copilot's nav can't show a chat or skill a run's write made (Nov 24 classification, 21 calls, 7 actions).",
+      "/^POST substrate\\.office\\.com\\/m365Copilot\\/EventListener\\/Client$/ when body /^\\{\"ConversationId\":\"[^\"]*\",\"clientData\":\\{\"Verb\":\"list_plugins\",\"Data\":\\{[^{}]*\\},\"MessageId\":\"[^\"]*\",\"VisualElementId\":\"[^\"]*\"\\}\\}$/": "Copilot's Plugins and New pages list the plugins with it (Verb list_plugins, flags only): a read. Any other verb stays held (Nov 24 classification).",
+      "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/messages$/": "Cowork's runtime (its region's host): a task's message, the prompt a send makes (the task with it) and a card's answer (ask_user_answer, elicitation_response); the conversation is in its X-Conversation-ID header. Opened only for a planned write's one step (Nov 25: held, the send never left and Copilot said it couldn't confirm the message was sent). Read from Copilot's own client code (session.send, answer).",
+      "/^POST mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/tool-approval$/": "Cowork's runtime: a tool card's Approve or Deny (approval_id, approved, tool_name): the approved tool then runs its action. Opened only for that click. Read from Copilot's own client code (session.approveAction, denyAction).",
+      "/^PATCH mcsaetherruntime-[a-z0-9]+\\.[a-z0-9-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/settings$/": "Cowork's runtime: its settings, among them each plugin's on or off (plugins.<id>.enabled). Opened only for a plugin switch's click. Read from Copilot's own client code (settings.update)."
+    }
+  },
+  "filters": [
+    {
+      "id": "plugin-catalog",
+      "why": "Copilot's agent and plugin lists (Get started, its Show more, the catalog) come from one response: the plugins available to the account, from Copilot's tab, as it starts. A demo leaves out a plugin its tenant has that the story doesn't need, without blocking it for everyone in a shared tenant. Measured Nov 24: GET <runtime>.<region>.gateway.prod.island.powerapps.com/v1/plugins/available, 1.6 MB of JSON, its only top-level key plugins (510 items, each named by name). Leaving one out (510 to 509) took it from all three lists; no other response or local store had it.",
+      "url": "*://*.gateway.prod.island.powerapps.com/v1/plugins/available*",
+      "match": "/^GET [a-z0-9.-]+\\.gateway\\.prod\\.island\\.powerapps\\.com\\/v1\\/plugins\\/available$/",
+      "items": "plugins",
+      "fields": [
+        "name"
+      ]
+    }
   ]
 }

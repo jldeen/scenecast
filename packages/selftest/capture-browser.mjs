@@ -9,7 +9,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { openCaptureBrowser, launchRealChrome, browserApp, platformWindow } from '@stuntdouble/capture/browser.mjs';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { selftestGuard } from './guard.mjs';
 
+await selftestGuard({ tmp: mkdtempSync(join(tmpdir(), 'scenecast-capture-browser-')) });
 const channel = process.env.CAPTURE_CHANNEL || 'chrome';
 let failed = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${!ok && detail ? ': ' + String(detail).slice(0, 400) : ''}`); if (!ok) failed++; };
@@ -100,16 +105,22 @@ try {
   const si = await cb.signedIn([{ id: 'chat', url: fx.chat }, { id: 'admin', url: fx.admin }], { settleMs: 300 });
   check('signedIn: every app on itself', si.ok && si.apps.every(a => a.at === 'app'), JSON.stringify(si.apps));
 
-  // The read-only guard: the page's POST is held before it leaves; pass() lets a planned one through.
-  const g = await cb.guard({ local: true });
+  // The read-only guard: the page's POST is held before it leaves (a page open before the guard too: a browser-wide
+  // Fetch missed those); pass() lets a planned one through; off and on again, it still holds.
   const sp = await cb.open(SIDE);
   await sp.waitForLoadState('load');
+  const g = await cb.guard({ local: true });
   await sp.click('#send'); await sp.waitForFunction(() => document.title !== '', null, { timeout: 10000 }).catch(() => {});
-  check('the guard holds a POST', await sp.title() === 'held' && !seen.includes('POST /send'), `${await sp.title()} ${seen.join(',')}`);
-  await g.pass(async () => { await sp.evaluate(() => { document.title = ''; }); await sp.click('#send'); await sp.waitForFunction(() => document.title !== '', null, { timeout: 10000 }).catch(() => {}); });
+  check('the guard holds a POST (from a page open before it)', await sp.title() === 'held' && !seen.includes('POST /send'), `${await sp.title()} ${seen.join(',')}`);
+  await g.pass(async () => { await sp.evaluate(() => { document.title = ''; }); await sp.click('#send'); await sp.waitForFunction(() => document.title !== '', null, { timeout: 10000 }).catch(() => {}); }, { hosts: [new URL(SIDE).host] });
   check('pass() lets a planned one through', (await sp.title()).startsWith('sent') && seen.includes('POST /send'), `${await sp.title()} ${seen.join(',')}`);
   check('the guard counts what it held and passed', Object.keys(g.counts()).some(k => k.startsWith('held POST')) && g.held().length === 1, JSON.stringify(g.counts()));
   await g.stop();
+  const g2 = await cb.guard({ local: true });
+  const sent = seen.filter(x => x === 'POST /send').length;
+  await sp.evaluate(() => { document.title = ''; }); await sp.click('#send'); await sp.waitForFunction(() => document.title !== '', null, { timeout: 10000 }).catch(() => {});
+  check('off and on again, the guard still holds it', await sp.title() === 'held' && seen.filter(x => x === 'POST /send').length === sent && g2.held().length === 1, `${await sp.title()} ${JSON.stringify(g2.counts())}`);
+  await g2.stop();
 
   // Closed shadow roots, through the DevTools protocol (the extension's way), for the serializer.
   const EXPOSE = new Function(readFileSync(fileURLToPath(import.meta.resolve('@stuntdouble/capture/cdp-shadow.js')), 'utf8') + '\nreturn EXPOSE_SHADOW;')();

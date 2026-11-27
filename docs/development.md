@@ -4,7 +4,7 @@ Building it, testing it, and releasing it. The repository layout is in [architec
 
 ## Set up
 
-Rust (stable), Node 20 or later, and Google Chrome or Microsoft Edge, on macOS, Windows or Linux.
+Rust (stable), Node 22 or later, and Google Chrome or Microsoft Edge, on macOS, Windows or Linux.
 
 ```bash
 git clone https://github.com/jldeen/scenecast && cd scenecast
@@ -22,7 +22,7 @@ The desktop app's shell (`apps/desktop/src-tauri`) is its own Cargo workspace: r
 |---|---|---|
 | Rust | `cargo fmt --all`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` | Also in `apps/desktop/src-tauri`, where CI lints with `--features webdriver` too. |
 | JS unit tests | `npm run test:unit` | Seconds, no browser. `npm test` runs the same list first. |
-| Everything else | `npm test` | Builds the binary, then the extension in branded Chrome and Edge, capture, the end-to-end selftest on `examples/fixture-app`, the fidelity loop and the AI modes (on a stand-in model). Headless. |
+| Everything else | `npm test` | Builds the binary, then the extension in branded Chrome and Edge, capture, the end-to-end selftest on `examples/fixture-app`, the fidelity loop, the capture browser and its unattended run, and the AI modes (on a stand-in model). Headless. Every harness calls `selftestGuard` (`packages/selftest/guard.mjs`) first, so nothing it starts reaches a presenter's Scenecast. |
 | The app's window, without the app | `node apps/desktop/tests/preview/shots.mjs <folder> [--only record,present] [--browser chromium]` | The real `apps/desktop/ui` with a stand-in for the Rust side (`tests/preview/mock.js`), in headless WebKit (the Mac's engine) or Chromium (Windows' WebView2). Saves each screen on both systems and reports any screen with more than one primary button or engine words on its default view. |
 | The app itself | `npm run build:test && npm run test:ui` in `apps/desktop` | The real app window, driven through its embedded WebDriver server, from New demo to Share. It opens a window on your screen: let CI run it. `SCENECAST_UI_SHOTS=<folder>` saves each screen. |
 | The installers | `apps/desktop/tests/packaged.test.mjs`, `update.test.mjs` | Install and start the app as a presenter would, and update version N to N+1 (CI). |

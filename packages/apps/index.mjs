@@ -185,6 +185,40 @@ export function writeFor(pack, step, field) {
   if (!pack || !step) return null;
   return (pack.writes || []).find(w => stepIs(w.on, step, field)) || null;
 }
+// A | outside every group in a "/pattern/": it splits the whole pattern, so its ^ and $ no longer hold
+// ("/^POST a\/b$|.*x$/" passes any call ending in x).
+export function barOutsideGroups(src) {
+  let depth = 0, inClass = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '\\') i++;
+    else if (inClass) inClass = c !== ']';
+    else if (c === '[') inClass = true;
+    else if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === '|' && depth <= 0) return true;
+  }
+  return false;
+}
+// A "/body/flags" string as a RegExp (extra flags added), or null.
+const reOf = (src, extra = '') => {
+  const m = typeof src === 'string' ? /^\/(.+)\/([a-z]*)$/s.exec(src) : null;
+  if (!m) return null;
+  try { return new RegExp(m[1], [...new Set((m[2] + extra).split(''))].join('')); } catch (e) { return null; }
+};
+// What a write makes, by name, from the screen's words just before it: its names ({ <placeholder>: "/regex/" with one
+// group }), each the last match (the card nearest the end of the page). Its undo finds what it made by that name.
+// → { values: { <placeholder>: name }, missing: [placeholders the screen doesn't name] }
+export function writeNames(w, text) {
+  const t = String(text || '').replace(/\s+/g, ' '), values = {}, missing = [];
+  for (const [k, src] of Object.entries((w && w.names) || {})) {
+    const re = reOf(src, 'g');
+    let m, last = null;
+    if (re) while ((m = re.exec(t))) { if (m[1]) last = m[1]; if (!m[0].length) re.lastIndex++; }
+    if (last) values[k] = last; else missing.push(k);
+  }
+  return { values, missing };
+}
 // The pack's safe entry for a plan step (or null): a control that looks like a write but only opens a picker or a
 // menu ("Add content to Our numbers"); the write is a later step (Add to business plugin).
 export function safeFor(pack, step, field) {
@@ -199,6 +233,97 @@ const OPENS = /\bonly opens\b[^.;]*\b(?:picker|menu)\b/i;
 const SIGN_IN = /\b(?:sign|log)[ -]?(?:in|on|out)\b|\baccount\b|\bpassword\b|\bauthenticat|\bconsent\b/i;
 const WRITE_NAME = /^(?:send|post|save|delete|remove|approve|submit|merge|publish|confirm|certified|promoted|commit|resolve|archive)\b/i;
 const SECRET = /(?:authorization"\s*:\s*"|\bbearer\s+[a-z0-9._-]{12,}|\beyJ[a-zA-Z0-9_-]{20,}\.|\bghp_[A-Za-z0-9]{20,}|\bgithub_pat_|\bxox[bp]-|\bsk-[A-Za-z0-9]{20,}|access[_-]?token"\s*:\s*"[^"]{8,}|password"\s*:\s*"[^"]+)/i;
+
+// The read-only guard for a demo (stage D): every request that isn't a read is held unless its app's pack allows it.
+// A pack's guard: { allow: ['host/path-prefix' | '/regex over METHOD host/path/'], hosts: [more hosts its app uses],
+// stayHeld: [entries as allow's: its own background calls to those hosts, held even while a write opens them] }.
+// What the apps send while they're only looked at (telemetry, presence, search) goes in allow, from measured traffic,
+// reviewed by hand; a tenant's own hosts only in a private pack (~/.stuntdouble/packs).
+export function guardFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list);
+  const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https://${s}`).host; } catch (e) { return null; } };
+  const hosts = new Set(), allow = [], stayHeld = [];
+  for (const a of (cfg && cfg.apps) || []) {
+    for (const h of [a.url, a.match].map(hostOf).filter(Boolean)) hosts.add(h);
+    const p = byApp[a.id];
+    if (!p) continue;
+    for (const m of p.match || []) { const h = hostOf(m); if (h && !h.includes('*')) hosts.add(h); }
+    for (const h of ((p.guard || {}).hosts) || []) hosts.add(h);
+    for (const x of ((p.guard || {}).allow) || []) if (!allow.includes(x)) allow.push(x);
+    for (const x of ((p.guard || {}).stayHeld) || []) if (!stayHeld.includes(x)) stayHeld.push(x);
+  }
+  for (const x of ((cfg && cfg.capture && cfg.capture.allow) || [])) if (!allow.includes(x)) allow.push(x);
+  return { hosts: [...hosts], allow, stayHeld };
+}
+
+// A demo's pack-named services: what an app needs from a service of its own to show its recorded screens (IQ's
+// plugin service). A pack's services: [{ name, match (a guard entry over "METHOD host/path"), start (its page asks for
+// it as the app starts), waitS }]. The capture watches the page's own calls to them: one answering 500 means try
+// later, not a half-done run. → [{ app, name, match, start, waitS }]
+export function servicesFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) for (const sv of ((byApp[a.id] || {}).services) || []) if (sv && sv.name && sv.match) out.push({ app: a.id, name: sv.name, match: sv.match, start: !!sv.start, waitS: +sv.waitS || 90, ...(sv.cards ? { cards: sv.cards } : {}) });
+  return out;
+}
+
+// A demo's own-status controls: where an app shows the signed-in person's own status (Teams' avatar: Available, Away),
+// which a replica would keep. A pack's ownStatus: { name (a /pattern/ over the control's name, by the reader's rule,
+// whose group is the status), role, expect (what a save may show when the recording has none), waitS }.
+// → [{ app, pack, label (what people call the app), name, role, expect, waitS }]
+export function ownStatusFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id], o = p && p.ownStatus;
+    if (!o || !o.name) continue;
+    out.push({ app: a.id, pack: p.id, label: (p.names || [])[0] || p.title || p.id, name: o.name, role: o.role || null, expect: [].concat(o.expect || []), waitS: +o.waitS || 90 });
+  }
+  return out;
+}
+
+// Notices an app shows for a while that a replica must never keep (Teams' "Loading latest updates…"), for each of a
+// demo's apps whose pack names them (notices: [{ words, close, waitS }]): words, the notice's own (it shows when the
+// page's text has them); close, a /pattern/ over the name of its own close button; waitS, how long a save waits for it
+// to go before closing it (60 s). → [{ app, pack, label, notices: [{ words, close, waitS }] }]
+export function noticesFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id], ns = ((p && p.notices) || []).filter(n => n && typeof n.words === 'string' && n.words.trim());
+    if (!ns.length) continue;
+    out.push({ app: a.id, pack: p.id, label: (p.names || [])[0] || p.title || p.id, notices: ns.map(n => ({ words: n.words.trim(), close: n.close || null, waitS: n.waitS === undefined ? 60 : +n.waitS })) });
+  }
+  return out;
+}
+
+// Her own presence, for each of a demo's apps whose pack names where it comes from (presence: [{ id, url, match, why }]:
+// url, a browser request pattern; match, a guard entry over "METHOD host/path"): in the capture browser, her entry in
+// those answers reads as the status her recording shows (capture/presence.mjs). → [{ app, pack, rules: [{ id, url, match }] }]
+export function presenceFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = [];
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id], rs = ((p && p.presence) || []).filter(r => r && r.id && r.url && r.match);
+    if (!rs.length || !p.ownStatus) continue;
+    out.push({ app: a.id, pack: p.id, rules: rs.map(r => ({ id: r.id, url: r.url, match: r.match })) });
+  }
+  return out;
+}
+
+// A demo's pack filters, for reset.md's Leave out: what an app shows of the tenant's own data that a demo can leave out
+// of its replica, in the capture browser only (packages/capture/leave-out.mjs). A pack's filters: [{ id, why, and either
+// url (where its responses come from, a browser request pattern), match (a guard entry over "METHOD host/path"), items
+// (where the items are), fields (any of which names one), refs?, shows?, or kind "dom" and list (a CSS selector of a
+// list's items the app draws from its own store) }]. The values (which items) are the demo's own, never the pack's.
+// → { "<pack>:<filter>": { ...filter, pack, app, hosts } }, for the demo's apps
+export function filtersFor(cfg, list = packs()) {
+  const byApp = packsForDemo(cfg, list), out = {};
+  const hostOf = s => { try { return new URL(/^[a-z]+:\/\//i.test(s) ? s : `https://${s}`).host; } catch (e) { return null; } };
+  for (const a of (cfg && cfg.apps) || []) {
+    const p = byApp[a.id];
+    if (!p) continue;
+    const hosts = [...new Set([a.url, a.match, ...(p.match || [])].map(hostOf).filter(h => h && !h.includes('*')))];
+    for (const f of p.filters || []) if (f && f.id && !out[`${p.id}:${f.id}`]) out[`${p.id}:${f.id}`] = { ...f, pack: p.id, app: a.id, hosts };
+  }
+  return out;
+}
 
 // Problems with a pack's shape (the tests and the drafting tool check every pack with it).
 export function checkPack(p) {
@@ -225,7 +350,25 @@ export function checkPack(p) {
       if (what === 'writes' && w.undo === undefined) out.push(`${at}: undo (steps, api, or null with irreversible: true or a note)`);
       if (!w.check) out.push(`${at}: check (read-only)`);
       for (const s of ((w.check || {}).steps || [])) if (WRITE_WORDS.test(s)) out.push(`${at}: check step "${s}" could change something; checks only look`);
+      const lk = (w.check || {}).look;
+      if (lk && !(lk.absent || lk.text || lk.rows || lk.sel || (lk.box && lk.equals))) out.push(`${at}: check look is absent, text, rows, sel, or box with equals`);
+      const fd = (w.undo || {}).find;
+      if (fd && (!fd.use || !fd.path || !fd.list || !fd.name || !fd.id || !fd.as || !fd.by)) out.push(`${at}: undo find needs use, path, list, name, id, as (the placeholder it fills) and by (what the script made: task, skill)`);
       if (w.undo && w.undo.api && !w.undo.api.use) out.push(`${at}: undo.api.use names an api (apis.<name>) whose host comes from the browser's own requests`);
+      // What a write makes, named from the screen just before it: each a "/regex/" whose one group is the name.
+      if (w.names !== undefined) {
+        if (what !== 'writes' || !w.names || typeof w.names !== 'object' || Array.isArray(w.names)) out.push(`${at}: names is a write's { <placeholder>: "/regex/" }`);
+        else for (const [k, src] of Object.entries(w.names)) {
+          const re = reOf(src);
+          if (!re || new RegExp(`${re.source}|`).exec('').length !== 2) out.push(`${at}: names.${k} is a "/regex/" with one group (the name, from the screen just before the write)`);
+        }
+      }
+      // A write's own calls to a service of its app's: each one kind of call (a method, a host, a path), with a why.
+      for (const e of (what === 'writes' && w.opens) || []) {
+        const [x] = typeof e === 'string' ? e.split(' when body ') : [null];
+        if (typeof x !== 'string' || !/^\/\^(?:\(\?:)?(?:POST|PUT|PATCH|DELETE)(?:\|(?:POST|PUT|PATCH|DELETE))*\)? [a-z0-9\\[\]+.-]+\\\/.+\$\/[a-z]*$/i.test(x) || barOutsideGroups(x) || /\.\*\$\/[a-z]*$|\\\/\.\+\$\/[a-z]*$/.test(x)) out.push(`${at}: opens "${e}": a /^METHOD host\\/path$/ pattern for one kind of call, never every path`);
+        else if (!(((p.guard || {}).why) || {})[e]) out.push(`${at}: opens "${e}": a why in guard.why (what the write sends there)`);
+      }
     }
   }
   for (const s of p.safe || []) {
@@ -239,7 +382,70 @@ export function checkPack(p) {
     const hits = (p.writes || []).filter(w => literal ? stepIs(w.on, { kind: 'click', target: literal }) : w.on && w.on.target && !isRe(w.on.target) && like(on.target, w.on.target));
     for (const w of hits) out.push(`${at}: write ${w.id} has the same step; a safe step never writes`);
   }
+  // A guard's allow-list names what's let through: a host (and path), never everything; ' when body /pattern/' after it
+  // narrows it to the bodies that only read. Its stay-held list (held even while a write opens the host) is named the
+  // same way.
+  for (const list of ['allow', 'stayHeld']) for (const e of ((p.guard || {})[list]) || []) {
+    const [x, when] = typeof e === 'string' && e.includes(' when body ') ? e.split(' when body ') : [e, null];
+    const re = typeof x === 'string' && /^\/.+\/[a-z]*$/.test(x);
+    if (typeof x !== 'string' || !x.trim()) out.push(`guard.${list}: strings, a host and path prefix or a /pattern/`);
+    else if (re ? /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(x) : !/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?(\/|$)|^[0-9.]+(:\d+)?(\/|$)/i.test(x)) out.push(`guard.${list} "${x}": a host and path prefix ("host.example.com/api/") or a /pattern/ over "METHOD host/path", never everything`);
+    if (when !== null && (!/^\/.+\/[a-z]*$/.test(when) || /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(when))) out.push(`guard.${list} "${e}": after "when body", a /pattern/ the body has to match, not every body`);
+  }
   for (const [name, a] of Object.entries(p.apis || {})) if (!a.open || !(a.host || a.hostPattern)) out.push(`apis ${name}: open (the page that signs in) and host or hostPattern`);
+  // A service: a name people read, and the one call it is (a /pattern/ over "METHOD host/path", never everything).
+  for (const sv of p.services || []) {
+    if (!sv || !sv.name) out.push('services: every service has a name ("IQ\'s plugin service")');
+    else if (typeof sv.match !== 'string' || !/^\/\^[A-Z]+ .+\/[a-z]*$/.test(sv.match)) out.push(`services ${sv.name}: match is a /^METHOD host\\/path$/ pattern`);
+    // Its list's cards: which plan steps click one (a /pattern/ over the step's words), the type label they end with,
+    // what the list is called; never a card's own words (those are a demo's, from its plan).
+    const c = sv && sv.cards;
+    if (c && (typeof c.steps !== 'string' || !/^\/.+\/[a-z]*$/.test(c.steps) || !c.list || !c.why)) out.push(`services ${sv.name}: cards has steps (a /pattern/ over a step's words), list and why`);
+  }
+  // Her own status: the control by a /pattern/ over its name whose group is the status, and what a save may show.
+  { const o = p.ownStatus;
+    if (o !== undefined) {
+      if (!o || typeof o.name !== 'string' || !/^\/.*\(.+\).*\/[a-z]*$/.test(o.name)) out.push('ownStatus: name is a /pattern/ over the control\'s name, its group the status ("/^Your profile, status (.+?) for /")');
+      if (!o || ![].concat(o.expect || []).length) out.push('ownStatus: expect (what a save may show when the recording has none: "Available")');
+      if (!o || !o.why) out.push('ownStatus: why (plain words, with the evidence)');
+    } }
+  // Notices a replica must never keep: each by its own words, with why, and its close button by a /pattern/.
+  if (p.notices !== undefined) {
+    if (!Array.isArray(p.notices)) out.push('notices: a list ([{ words, close, waitS, why }])');
+    else for (const n of p.notices) {
+      if (!n || typeof n.words !== 'string' || !n.words.trim()) out.push('notices: words (the notice\'s own, as the page shows them)');
+      if (n && n.close !== undefined && n.close !== null && !/^\/.+\/[a-z]*$/.test(String(n.close))) out.push('notices: close is a /pattern/ over its close button\'s name');
+      if (n && n.waitS !== undefined && !(+n.waitS >= 0)) out.push('notices: waitS (seconds a save waits for it to go)');
+      if (!n || !n.why) out.push('notices: why (plain words, with the evidence)');
+    }
+  }
+  // Her own presence: where it comes from (a request pattern and a guard entry over one answer, never everything), why,
+  // and only with ownStatus (the status it reads as).
+  if (p.presence !== undefined) {
+    if (!Array.isArray(p.presence)) out.push('presence: a list ([{ id, url, match, why }])');
+    else for (const r of p.presence) {
+      if (!r || !r.id || !/^[a-z0-9][a-z0-9-]*$/.test(r.id)) out.push('presence: every entry has an id (lowercase letters, digits and dashes)');
+      if (!r || typeof r.url !== 'string' || !r.url || r.url === '*') out.push(`presence ${(r && r.id) || '?'}: url (a browser request pattern for its answers, never every request)`);
+      if (!r || typeof r.match !== 'string' || !/^\/\^.+\$\/[a-z]*$/.test(r.match)) out.push(`presence ${(r && r.id) || '?'}: match (an anchored /^…$/ over "METHOD host/path")`);
+      if (!r || !r.why) out.push(`presence ${(r && r.id) || '?'}: why (plain words, with the evidence)`);
+    }
+    if (!p.ownStatus) out.push('presence: only with ownStatus (the status her entry reads as)');
+  }
+  // A filter (Leave out): why, and the one response it reads (a pattern over "METHOD host/path", never everything) and
+  // where its items are; or a DOM list. Never which items: those are a demo's.
+  for (const f of p.filters || []) {
+    const at = `filters ${(f && f.id) || '?'}`;
+    if (!f || !f.id || !/^[a-z0-9][a-z0-9-]*$/.test(f.id)) out.push('filters: every filter has an id (lowercase letters, digits and dashes)');
+    if (!f || !f.why) out.push(`${at}: why (plain words, with the evidence)`);
+    if (f && f.values) out.push(`${at}: no values: which items is the demo's (reset.md's Leave out)`);
+    if (f && f.kind === 'dom') { if (typeof f.list !== 'string' || !f.list.trim()) out.push(`${at}: list (a CSS selector of the list's items)`); continue; }
+    if (f && f.kind !== undefined) out.push(`${at}: kind is "dom", or none (a response)`);
+    if (!f || typeof f.match !== 'string' || !/^\/\^[A-Z]+ .+\/[a-z]*$/.test(f.match) || /^\/(\.\*|\^?\.\*\$?)\/[a-z]*$/.test(f.match)) out.push(`${at}: match is a /^METHOD host\\/path$/ pattern`);
+    if (!f || typeof f.url !== 'string' || !/^\*?:?\/\/|^https?:|^\*:\/\//.test(f.url) || f.url === '*') out.push(`${at}: url is where its responses come from ("*://host/path*")`);
+    if (!f || typeof f.items !== 'string' || !f.items) out.push(`${at}: items (where the item list is: "plugins", "Groups[Type=Message].Suggestions")`);
+    if (!f || ![].concat(f.fields || []).length) out.push(`${at}: fields (the item's fields that name it)`);
+    for (const r of (f && f.refs) || []) if (!r || !r.list || !r.by) out.push(`${at}: refs are { list, by }`);
+  }
   const text = JSON.stringify(p, (k, v) => k.startsWith('_') ? undefined : v);
   if (SECRET.test(text)) out.push('looks like a credential or token: packs never hold them (an API undo uses the browser\'s signed-in session)');
   for (const f of [...(((p.flow || {}).vendorCss) || []), ...Object.values(((p.theme || {}).themes) || {}), ...Object.values(((p.platform || {}).platforms) || {}), ((p.build || {}).repairs || {}).css].filter(Boolean)) if (!packFile(p, f)) out.push(`missing file ${f}`);

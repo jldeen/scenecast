@@ -6,6 +6,24 @@
 //         neutral?: [[x, y]], waitMs?, maxS?, snapId?, skipKeys?: [key], max? }
 // skipKeys: controls already audited on another screen of the app ("sel|text"), not hovered again; out.keys are the
 // ones this run hovered. max: at most this many controls.
+// floor: the demo's recorded hovers ([{ id, anchor, scope, rect, card }]): the controls that are theirs on this screen
+// (hover-page floorTargets: by place, else by words) are hovered first, never skipped for their kind (skipSels) or
+// past max, maxS or perSel, and when nothing shows in waitMs, hovered once more for floorWaitMs (2.5 s); until one of
+// a hover's controls shows its card (floorMatch(card, words): the same words, numbers aside; any card when the
+// recorded one has no words). out.floorFound: { <id>: 'place' | 'words' }, the recorded hovers whose anchor is here.
+// out.floor: per recorded hover, { shown, retried, why? }, or { tried: false } when its controls were there and not
+// hovered. out.floorTries: each of their controls hovered ({ key, ids, result: card | other card | nothing, retried,
+// picture? }; floorShot(name): a picture of the screen as it showed nothing). out.cards: every hover that showed,
+// its card's words ({ key, cards }). out.floorMissKeys: the controls ("sel|text") that showed nothing, to be hovered
+// again on the app's next screens.
+// floorDefer: a recorded hover whose first try shows nothing (or can't be read) isn't tried again here but listed in
+// out.floorDeferred, for a pass of its own after the screen's other side states (floorRetry). The recorded hovers'
+// first tries don't count against maxS (out.floorMs: their time), so the rest get the time they had without them.
+// floorRetry: only the recorded hovers in ARGS.floor (their anchors found again, from scratch), each waited on for
+// floorWaitMs, within maxS (the second tries' own cap: out.floorCapped); one that showed nothing gets a picture, and
+// those not tried again (out of time, or no longer on the screen) one picture between them.
+// Every control's point is read again just before the pointer goes there (hover-page pos): out.moved, out.refound,
+// out.left count the ones that had moved, were found again, or had left the screen.
 const p = ARGS.p || await H.pageFor(ARGS.tab);
 await p.bringToFront();
 let f = p.mainFrame();
@@ -21,14 +39,26 @@ const ev = (fn, a) => f.evaluate(fn, a);
 const move = (x, y, steps = 2) => p.mouse.move(off.x + x, off.y + y, { steps });
 const quiet = async (ms, max) => { const s = Date.now(); while (Date.now() - s < max) { if ((await ev(() => window.__d1h.quietFor())) >= ms) return true; await H.poll(60); } return false; };
 const t0 = Date.now();
-const out = { page: ARGS.page, n: 0, tried: 0, steps: [], neutral: null };
+const out = { page: ARGS.page, n: 0, tried: 0, steps: [], neutral: null, floor: {}, floorMissKeys: [], floorTries: [], cards: [], floorMs: 0 };
+const floorShown = new Set(), deferred = new Set(), entries = new Map((ARGS.floor || []).map(e => [e.id, e]));
+const fl = c => (c.floor || []).some(id => !floorShown.has(id));
+const cardsMatch = ARGS.floorMatch || ((a, b) => { const n = x => String(x || '').toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim(); return !!n(a) && n(a) === n(b); });
+const partText = h => String(h || '').replace(/<[^>]*>/g, ' ');
 const vw = await ev(() => [innerWidth, innerHeight]);
+const fresh = async c => {
+  const q = await ev(o => window.__d1h.pos(o), { id: c.id, sel: c.sel, text: c.text, x: c.x, y: c.y }).catch(() => null);
+  if (!q) { out.left = (out.left || 0) + 1; return null; }
+  if (q.how !== 'same') { out[q.how] = (out[q.how] || 0) + 1; c.x = q.x; c.y = q.y; }
+  return q;
+};
+if (entries.size) out.floorFound = await ev(fl0 => window.__d1h.floorFound(fl0), ARGS.floor).catch(() => ({}));
 
-// Nothing new to hover on this screen (every control was hovered on another): done, before any waiting.
-if (!ARGS.scroll && !ARGS.only) {
+// Nothing new to hover on this screen (every control was hovered on another): done, before any waiting (not the
+// recorded hovers' second tries: each still missed gets its picture).
+if (!ARGS.scroll && !ARGS.only && !ARGS.floorRetry) {
   const skip0 = new Set(ARGS.skipKeys || []);
-  const c0 = await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel });
-  if (!c0.some(c => !skip0.has(c.sel + '|' + c.text))) return { page: ARGS.page, n: 0, tried: 0, skipped: c0.length, steps: [0], keys: [], frameUrl: f === p.mainFrame() ? null : f.url().split('?')[0], secs: Math.round((Date.now() - t0) / 1000) };
+  const c0 = await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
+  if (!c0.some(c => !skip0.has(c.sel + '|' + c.text))) return { page: ARGS.page, n: 0, tried: 0, skipped: c0.length, ...(out.floorFound ? { floorFound: out.floorFound, floor: {}, floorTries: [], cards: [] } : {}), steps: [0], keys: [], frameUrl: f === p.mainFrame() ? null : f.url().split('?')[0], secs: Math.round((Date.now() - t0) / 1000) };
 }
 // ARGS.ctx: the neutral spot and the noise this app showed on its last screen (the recorder keeps them): the spot is
 // used again and the noise only topped up, instead of finding both from scratch on every screen.
@@ -65,57 +95,152 @@ for (let step = 0; step <= steps; step++) {
   }
   const cands = ARGS.only
     ? await ev(only => only.map(m => { const els = [...document.querySelectorAll(m.sel)].filter(e => { const t = (e.innerText || '').replace(/\s+/g, ' ').trim(); return (m.text === undefined || t === m.text) && (m.textStarts === undefined || t.startsWith(m.textStarts)); }); const e = els[m.nth || 0]; if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(r.width / 2, 40)), y: Math.round(r.y + r.height / 2), id: -1, sel: m.sel, text: m.text || m.textStarts || '' }; }).filter(Boolean), ARGS.only)
-    : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel });
+    : await ev(o => window.__d1h.candidates(o), { region: ARGS.region, sel: ARGS.sel, perSel: ARGS.perSel, floor: ARGS.floor });
   const skip = new Set(ARGS.skipKeys || []), skipSels = new Set(ARGS.skipSels || []);
-  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && !skipSels.has(c.sel));
-  out.skippedKinds = (out.skippedKinds || 0) + cands.filter(c => skipSels.has(c.sel)).length;
+  // How many controls each recorded hover has here (one: its anchor is that control; more: a container's).
+  const ctlCount = {}; for (const c of cands) for (const id of c.floor || []) ctlCount[id] = (ctlCount[id] || 0) + 1;
+  const todo = cands.filter(c => !skip.has(c.sel + '|' + c.text) && (!skipSels.has(c.sel) || fl(c)));
+  // The recording's own hovers first (the next one is always one of theirs while any is left), so a screen's cap or
+  // time never cuts them.
+  out.skippedKinds = (out.skippedKinds || 0) + cands.filter(c => skipSels.has(c.sel) && !fl(c)).length;
   out.skipped = (out.skipped || 0) + cands.length - todo.length;
   out.steps.push(todo.length);
   // After a control that showed nothing (not one change in the page since the rest copy), the page is still at
   // rest: straight on to the next one, without the trip back to the neutral spot.
   let atRest = false;
-  for (const c of todo) {
-    if (ARGS.max && out.tried >= ARGS.max) { out.capped = true; break; }
-    (out.keys = out.keys || []).push(c.sel + '|' + c.text);
-    if (Date.now() - t0 > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
-    out.tried++;
-    if (!atRest) { await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest()); }
-    atRest = false;
-    if (c.id > 0) await ev(id => window.__d1h.markDone(id), c.id);
-    await move(c.x, c.y);
-    const s = Date.now(); let first = null;
-    while (Date.now() - s < (ARGS.waitMs || 1300)) {
-      await sleep(70);
-      if ((await ev(() => window.__d1h.count())) > 0 && (await ev(() => window.__d1h.sig()))) { first = Date.now() - s; break; }
-    }
-    // Per kind of control (its selector), how often it was tried and showed something: the recorder stops trying a
-    // kind that never shows anything in this app (sweep by sweep, ARGS.skipSels).
-    const kind = (out.kinds = out.kinds || {})[c.sel] = (out.kinds || {})[c.sel] || { tried: 0, shown: 0 }; kind.tried++;
-    if (first === null) { atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
-    kind.shown++; (out.firsts = out.firsts || []).push(first);
-    let last = await ev(() => window.__d1h.sig()), stable = Date.now(), farMs = null;
-    while (Date.now() - s < (ARGS.settleMaxMs || 4000)) {
-      if (farMs === null && await ev(([x, y]) => window.__d1h.farVisible(x, y), [c.x, c.y])) farMs = Date.now() - s;
-      await sleep(farMs === null ? 50 : 150);
-      const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500 && (farMs !== null || Date.now() - s > 1500)) break;
-    }
-    const res = await ev(([x, y]) => window.__d1h.result(x, y), [c.x, c.y]);
-    if (!res) continue;
-    const ser = await f.evaluate(H.SERX({ parts: '[data-d1-hpart]' }));
-    await ev(() => window.__d1h.unmark());
-    try { await H.fetchResources(p, [{ urls: ser.urls, frame: f }]); } catch (e) {}
-    // A picture of the hover (the element and whatever it showed), for the side-by-side check.
-    const boxes = [res.anchorRect, ...(res.portals || []).map(q => q.pos ? q.pos.rect : q.rect), ...(res.portals || []).map(q => q.triggerRect)].filter(b => b && b.w > 0 && b.h > 0);
-    let shot = null;
-    if (boxes.length) {
-      const x0 = Math.max(0, Math.min(...boxes.map(b => b.x)) - 40 + off.x), y0 = Math.max(0, Math.min(...boxes.map(b => b.y)) - 40 + off.y);
-      const x1 = Math.min(off.x + vw[0], Math.max(...boxes.map(b => b.x + b.w)) + 40 + off.x), y1 = Math.min(off.y + vw[1], Math.max(...boxes.map(b => b.y + b.h)) + 40 + off.y);
-      if (x1 - x0 > 4 && y1 - y0 > 4) { try { shot = (await p.screenshot({ clip: { x: x0, y: y0, width: Math.min(x1 - x0, 1900), height: Math.min(y1 - y0, 1060) }, timeout: 20000 })).toString('base64'); res.shotClip = { x: x0 - off.x, y: y0 - off.y, w: x1 - x0, h: y1 - y0 }; } catch (e) {} }
-    }
-    await H.post('/hover', { page: ARGS.page, n: out.n, firstMs: first, farMs, cand: c, step, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, shot, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
-    out.n++;
+  while (todo.length) {
+    const next = todo.findIndex(fl), c = todo.splice(next < 0 ? 0 : next, 1)[0];
+    const key = c.sel + '|' + c.text, inFloor = fl(c);
+    // In the list only for a recorded hover that's since been captured: its kind's learned skip applies again.
+    if (!inFloor && skipSels.has(c.sel)) { out.skippedKinds = (out.skippedKinds || 0) + 1; continue; }
+    if (ARGS.max && out.tried >= ARGS.max && !inFloor) { out.capped = true; break; }
+    if (ARGS.floorRetry && !inFloor) break;
+    if (ARGS.floorRetry && Date.now() - t0 > (ARGS.maxS || 45) * 1000) { out.timedOut = out.floorCapped = true; todo.unshift(c); break; }
+    (out.keys = out.keys || []).push(key);
+    // The recorded hovers' first tries don't count against the screen's time: the rest get what they had without them.
+    if (Date.now() - t0 - out.floorMs > (ARGS.maxS || 900) * 1000 && !inFloor) { out.timedOut = true; break; }
+    const tc = Date.now();
+    try {
+      out.tried++;
+      if (!atRest) { await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest()); }
+      atRest = false;
+      // A second try starts with no card on the screen (one left from the control before would read as this one's).
+      if (ARGS.floorRetry) {
+        const s0 = Date.now(), cardUp = () => ev(() => [...document.querySelectorAll('[role=tooltip],[role=dialog],[popover]')].some(e => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && getComputedStyle(e).visibility !== 'hidden'; })).catch(() => false);
+        while (Date.now() - s0 < 3000 && await cardUp()) await sleep(150);
+        await ev(() => window.__d1h.takeRest());
+      }
+      if (c.id > 0) await ev(id => window.__d1h.markDone(id), c.id);
+      let s = Date.now(), first = null, retried = !!ARGS.floorRetry;
+      const floorMiss = async why => {
+        const picture = ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${out.tried}`).catch(() => null) : null;
+        for (const id of c.floor || []) if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why };
+        out.floorTries.push({ key, ids: c.floor, result: why === 'nothing showed' ? 'nothing' : why === 'its control left the screen' ? 'left' : 'unreadable', retried, picture });
+        out.floorMissKeys.push(key);
+      };
+      // floorDefer: a recorded hover's first miss waits for its own pass at the end of the screen's sweep.
+      const miss = async why => {
+        if (!inFloor) return;
+        if (!ARGS.floorDefer || retried) return floorMiss(why);
+        for (const id of c.floor || []) { deferred.add(id); if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried: false, deferred: true, why }; }
+        out.floorTries.push({ key, ids: c.floor, result: why === 'nothing showed' ? 'nothing' : why === 'its control left the screen' ? 'left' : 'unreadable', retried: false, deferred: true });
+        out.floorMissKeys.push(key);
+      };
+      if (!(await fresh(c))) { await miss('its control left the screen'); continue; }
+      await move(c.x, c.y);
+      const waitShow = async ms => { while (Date.now() - s < ms) { await sleep(70); if ((await ev(() => window.__d1h.count())) > 0 && (await ev(() => window.__d1h.sig()))) return Date.now() - s; } return null; };
+      first = await waitShow(ARGS.floorRetry ? (ARGS.floorWaitMs || 2500) : (ARGS.waitMs || 1300));
+      // A recorded hover that showed nothing: once more, from the neutral spot, waiting longer (a slow card on a busy
+      // computer); with floorDefer, at the end of the screen's sweep instead.
+      if (first === null && inFloor && !ARGS.floorDefer && !retried) {
+        retried = true;
+        await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest());
+        if (!(await fresh(c))) { await miss('its control left the screen'); continue; }
+        await move(c.x, c.y);
+        s = Date.now();
+        first = await waitShow(ARGS.floorWaitMs || 2500);
+      }
+      // Per kind of control (its selector), how often it was tried and showed something: the recorder stops trying a
+      // kind that never shows anything in this app (sweep by sweep, ARGS.skipSels).
+      const kind = (out.kinds = out.kinds || {})[c.sel] = (out.kinds || {})[c.sel] || { tried: 0, shown: 0 }; kind.tried++;
+      if (first === null) { await miss('nothing showed'); atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
+      kind.shown++; (out.firsts = out.firsts || []).push(first);
+      let farMs = null;
+      const settleRead = async () => {
+        let last = await ev(() => window.__d1h.sig()), stable = Date.now();
+        farMs = null;
+        while (Date.now() - s < (ARGS.settleMaxMs || 4000)) {
+          if (farMs === null && await ev(([x, y]) => window.__d1h.farVisible(x, y), [c.x, c.y])) farMs = Date.now() - s;
+          await sleep(farMs === null ? 50 : 150);
+          const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500 && (farMs !== null || Date.now() - s > 1500)) break;
+        }
+        return ev(([x, y]) => window.__d1h.result(x, y), [c.x, c.y]);
+      };
+      let res = await settleRead();
+      // A recorded hover whose card couldn't be read: once more, the same way.
+      if (!res && inFloor && !retried && !ARGS.floorDefer) {
+        retried = true;
+        await move(...out.neutral); await quiet(250, 1500); await ev(() => window.__d1h.takeRest());
+        if (!(await fresh(c))) { await miss('its control left the screen'); continue; }
+        await move(c.x, c.y);
+        s = Date.now();
+        first = await waitShow(ARGS.floorWaitMs || 2500);
+        res = first === null ? null : await settleRead();
+        if (first === null) { await floorMiss('nothing showed'); atRest = (await ev(() => window.__d1h.count())) === 0; continue; }
+      }
+      if (!res) { await miss("what it showed couldn't be read"); continue; }
+      const ser = await f.evaluate(H.SERX({ parts: '[data-d1-hpart]' }));
+      await ev(() => window.__d1h.unmark());
+      try { await H.fetchResources(p, [{ urls: ser.urls, frame: f }]); } catch (e) {}
+      // A picture of the hover (the element and whatever it showed), for the side-by-side check.
+      const boxes = [res.anchorRect, ...(res.portals || []).map(q => q.pos ? q.pos.rect : q.rect), ...(res.portals || []).map(q => q.triggerRect)].filter(b => b && b.w > 0 && b.h > 0);
+      let shot = null;
+      if (boxes.length) {
+        const x0 = Math.max(0, Math.min(...boxes.map(b => b.x)) - 40 + off.x), y0 = Math.max(0, Math.min(...boxes.map(b => b.y)) - 40 + off.y);
+        const x1 = Math.min(off.x + vw[0], Math.max(...boxes.map(b => b.x + b.w)) + 40 + off.x), y1 = Math.min(off.y + vw[1], Math.max(...boxes.map(b => b.y + b.h)) + 40 + off.y);
+        if (x1 - x0 > 4 && y1 - y0 > 4) { try { shot = (await p.screenshot({ clip: { x: x0, y: y0, width: Math.min(x1 - x0, 1900), height: Math.min(y1 - y0, 1060) }, timeout: 20000 })).toString('base64'); res.shotClip = { x: x0 - off.x, y: y0 - off.y, w: x1 - x0, h: y1 - y0 }; } catch (e) {} }
+      }
+      await H.post('/hover', { page: ARGS.page, n: out.n, firstMs: first, farMs, cand: c, step, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, shot, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
+      out.n++;
+      // Its card's words: each popup's, and what changed in place.
+      const cards = [...(res.portals || []).map(q => q.text || ''), (res.ops || []).map(o => o.kind === 'add' ? partText((ser.parts || [])[o.part]) : o.kind === 'addText' || o.kind === 'text' ? (o.text || '') : '').join(' ')].map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      out.cards.push({ key, cards });
+      // A recorded hover of this control: shown when it's that card (any card, when the recording's has no words).
+      if (c.floor && c.floor.length) {
+        const results = {};
+        for (const id of c.floor) {
+          const e = entries.get(id), same = !e || !e.card || cards.some(x => cardsMatch(e.card, x));
+          results[id] = same ? 'card' : 'other card';
+          if (same) { out.floor[id] = { shown: true, retried }; floorShown.add(id); }
+          else if (!(out.floor[id] && out.floor[id].shown)) out.floor[id] = { shown: false, retried, why: 'it showed another card' };
+        }
+        // A recorded hover whose anchor is this one control and that showed another card: once more last (floorDefer),
+        // once no card is showing; a container's controls' other cards are a firm answer.
+        const single = ARGS.floorDefer && !retried ? c.floor.filter(id => results[id] === 'other card' && ctlCount[id] === 1 && !floorShown.has(id)) : [];
+        for (const id of single) { deferred.add(id); out.floor[id] = { ...out.floor[id], deferred: true }; }
+        out.floorTries.push({ key, ids: c.floor, results, result: Object.values(results).includes('card') ? 'card' : 'other card', retried, ...(single.length ? { deferred: true } : {}) });
+      }
+    } finally { if (inFloor && !ARGS.floorRetry) out.floorMs += Date.now() - tc; }
   }
+  for (const c of todo) for (const id of c.floor || []) if (!out.floor[id]) out.floor[id] = { tried: false };
   if (out.timedOut) break;
+}
+// A recorded hover whose controls showed other cards only (a firm answer: a real card, not the recorded one; a
+// container's every control is its, so trying them again costs a pass): one picture of the screen between them.
+{ const other = Object.entries(out.floor).filter(([id, v]) => v && v.shown === false && v.why === 'it showed another card' && !floorShown.has(id) && !(ARGS.floorDefer && deferred.has(id))).map(([id]) => id);
+  if (other.length && ARGS.floorShot) { const picture = await ARGS.floorShot(`${ARGS.page}-other`).catch(() => null); if (picture) out.floorTries.push({ key: 'other', ids: other, result: 'other card', retried: !!ARGS.floorRetry, picture }); } }
+// Found here but never hovered (none of its controls could be pointed at): tried again last too.
+if (ARGS.floorDefer) for (const id of Object.keys(out.floorFound || {})) if (!floorShown.has(id) && !out.floorTries.some(t => (t.ids || []).includes(id))) deferred.add(id);
+out.floorDeferred = [...deferred].filter(id => !floorShown.has(id));
+// The second tries: those not tried again (the cap, or none of their controls could be pointed at), one picture
+// between them.
+if (ARGS.floorRetry) {
+  const untried = (ARGS.floor || []).map(e => e.id).filter(id => !floorShown.has(id) && !out.floorTries.some(t => (t.ids || []).includes(id)));
+  if (untried.length) {
+    const why = out.floorCapped ? 'capped' : 'unpointed';
+    const picture = ARGS.floorShot ? await ARGS.floorShot(`${ARGS.page}-${why}`).catch(() => null) : null;
+    out.floorTries.push({ key: why, ids: untried, result: why, retried: true, picture });
+  }
 }
 await move(...out.neutral); await quiet(400, 2500);
 if (ARGS.scroll && ARGS.scroll.sel !== undefined) { await ev(sel => { const e = sel ? document.querySelector(sel) : document.scrollingElement; if (e) e.scrollTop = 0; }, ARGS.scroll.sel || null); await sleep(600); }

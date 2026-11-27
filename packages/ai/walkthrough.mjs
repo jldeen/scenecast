@@ -3,12 +3,13 @@
 // With the presenter's script, its lines go on the beats (beat by beat when the counts match).
 import { formatStep } from './plan.mjs';
 import { specName } from './walker.mjs';
-import { writeOf, packWrite, packSafe } from './from-script.mjs';
+import { writeOf, packWrite, packSafe, proveLandings, packChecked } from './from-script.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 
-export function planFromRecording(rec, { walker = null, title = '', track = null, packs = null } = {}) {
+// flags: where a landing a run can't check goes (proveLandings(), the review's Needs you).
+export function planFromRecording(rec, { walker = null, title = '', track = null, packs = null, flags = [] } = {}) {
   const flow = walker ? walker.flow : null;
   const S = (flow && flow.states) || rec.states || {};
   const streamEnds = new Set(Object.values((flow && flow.streams) || rec.streams || {}).map(s => s.to));
@@ -53,6 +54,7 @@ export function planFromRecording(rec, { walker = null, title = '', track = null
   plan.beats = plan.beats.filter(b => b.steps.length);
   // Her lines, beat by beat, when the script has as many beats.
   if (track && track.beats.length === plan.beats.length) track.beats.forEach((tb, i) => { plan.beats[i].title = tb.title || plan.beats[i].title; for (const l of tb.lines) { plan.beats[i].say.push(l.say); plan.beats[i].lines.push({ text: l.say, focus: [] }); } });
+  proveLandings(plan, walker, flags, { checked: packChecked(packs) });
   return plan;
 }
 

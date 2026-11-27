@@ -14,7 +14,10 @@
 // Undo steps are plan steps (Record for me runs them the same way, read on screen; a step it can't place, it asks
 // about). An app pack's `writes` (packages/apps, when it lands) can give a write its exact undo; without one, the undo
 // is the plain opposite, in words. Writes that can't be undone (a deletion, a sent message to someone else) are listed
-// under "Needs you".
+// under "Needs you". A state her script says is already so when a later screen shows it ("they're already on"), with
+// no step that makes it, is set off camera just before that step (Set before), when the app pack can set it. What she
+// leaves out of the replica (Leave out: an app's own data the capture browser filters before the page draws it) is
+// hers: made again, reset.md keeps it word for word.
 import { formatStep, parsePlan } from './plan.mjs';
 import { startState, setterOf } from './start.mjs';
 
@@ -84,7 +87,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
     };
     const inv = fromPack(w, ctx, packs) || inverseOf(w, ctx);
     if (inv.needs) out.needs.push({ beat: w.beat, text: inv.needs });
-    if (inv.undo.length) out.undo.push({ app: w.app, steps: inv.undo, undoes: `beat ${w.beat}, ${w.text}`, note: inv.note || null });
+    if (inv.undo.length) out.undo.push({ app: w.app, steps: inv.undo, undoes: `beat ${w.beat}, ${w.text}`, note: inv.note || null, names: inv.names || [] });
     for (const c of inv.check) out.checks.push({ app: w.app, text: c, from: `beat ${w.beat}` });
   }
   // What a run leaves besides its writes (the app's pack: tasks in Recent, saved memories), with their checks.
@@ -107,21 +110,24 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
       const later = writes.filter(w => w.app === a && w.to).map(w => walker.shown(w.to) || walker.screen(w.to)).filter(Boolean);
       const gone = start.items.map(i => clean(i.text)).filter(t => t.length > 3 && t.length < 50 && t.split(' ').length <= 6 && /\d|[A-Z]/.test(t))
         .filter(t => later.some(sc => !norm(sc.text).includes(norm(t))) && later.some(sc => numberSwap(t, sc.text)));
-      for (const t of [...new Set(gone)].slice(0, 3)) out.checks.push({ app: a, text: `shows "${t}"`, from: 'its start screen' });
+      for (const t of [...new Set(gone)].slice(0, 3)) out.checks.push({ app: a, screen: walker.start(a), text: `shows "${t}"`, from: 'its start screen' });
     }
   }
   // The state the demo starts in (start.mjs), as its first screens show it: set first, then checked. What the
   // demo points at on an app's first screen is checked to be there too. A state no step of the plan changes, but a
-  // later screen shows changed, is something a run can't show: it needs a step.
+  // later screen shows changed, is set off camera just before that step when the app pack can set it (Set before);
+  // otherwise a run can't show it: it needs a step.
   out.set = [];
+  out.before = [];
   if (walker) {
     const st = startState(plan, { walker, packs });
     const packOf = app => ((packs || {}).forApp || {})[app] || null;
+    const settable = new Set();
     for (const f of st.facts) {
       const how = setterOf(f, packOf(f.app), packs && packs.writeFor);
       const text = startText(f);
-      if (how) out.set.push({ app: f.app, text, how, seen: `beat ${f.seen.beat}, ${f.seen.screen}` });
-      out.checks.push({ app: f.app, text, from: `start: beat ${f.seen.beat}, ${f.seen.screen}` });
+      if (how) { out.set.push({ app: f.app, text, how, seen: `beat ${f.seen.beat}, ${f.seen.screen}` }); settable.add(f); }
+      out.checks.push({ app: f.app, screen: f.seen.screen, text, from: `start: beat ${f.seen.beat}, ${f.seen.screen}` });
     }
     const first = {};
     plan.beats.forEach(b => b.steps.forEach(s => { if (s.kind === 'app' && s.lands && s.lands.screen && !first[s.app]) first[s.app] = s.lands.screen; }));
@@ -130,12 +136,28 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
       if (!sc) continue;
       const said = plan.beats.flatMap(b => (b.lines || []).flatMap(l => (l.focus || []).filter(f => f.on === sig && f.texts.length === 1).map(f => f.texts[0])));
       const appTitle = norm(((walker.apps || []).find(a => a.id === app) || {}).title || app);
-      const shown = [...new Set(said)].filter(t => t.split(' ').length <= 6 && t.length <= 48 && !/^(show|see|view|open|add|go|back|more)\b/i.test(t) && !norm(t).includes(appTitle))
-        .filter(t => { const it = sc.items.find(i => norm(i.text) === norm(t)); return it && !/^(heading|tab|menuitem|switch|checkbox|radio|textbox|searchbox|combobox)$/.test(it.role); });
-      for (const t of shown.slice(0, 3)) out.checks.push({ app, text: `shows "${t}"`, from: 'what the demo points at on its first screen' });
+      // Not words its captures show differently (a greeting that changes on each visit): a run can't count on them.
+      const shown = [...new Set(said)].filter(t => t.split(' ').length <= 6 && t.length <= 48 && !/^(show|see|view|open|add|go|back|more)\b/i.test(t) && !norm(t).includes(appTitle) && !(walker.unstable && walker.unstable(t, app)))
+        .filter(t => { const it = sc.items.find(i => norm(i.text) === norm(t)); return it && !it.left && !/^(heading|tab|menuitem|switch|checkbox|radio|textbox|searchbox|combobox)$/.test(it.role); });
+      for (const t of shown.slice(0, 3)) out.checks.push({ app, screen: sig, text: `shows "${t}"`, from: 'what the demo points at on its first screen' });
     }
+    // Her script says it's already so ("they're already on"): the capture pass sets it just before the step whose
+    // screen first shows it, when the app pack has the write and Set first puts it back after the run.
+    const steps = plan.beats.flatMap((b, bi) => b.steps.map((s, si) => ({ s, beat: bi + 1, si, of: b.steps })));
+    const before = new Map(), left = [];
+    for (const c of st.changes) {
+      const at = steps[c.after.step - 1], how = setterOf({ ...c, value: c.to }, packOf(c.app), packs && packs.writeFor);
+      const start = st.facts.find(f => f.app === c.app && f.kind === c.kind && f.key === c.key);
+      if (!at || !how || !settable.has(start)) { left.push(c); continue; }
+      if (!before.has(c.after.step)) {
+        const text = formatStep(at.s);
+        before.set(c.after.step, { beat: at.beat, text, n: at.of.filter(x => formatStep(x) === text).length > 1 ? at.si + 1 : null, items: [] });
+      }
+      before.get(c.after.step).items.push({ app: c.app, kind: c.kind, subject: c.subject, value: c.to, text: startText({ ...c, value: c.to }), how, seen: `beat ${c.after.beat}, ${c.after.screen}` });
+    }
+    out.before = [...before.values()];
     const groups = new Map();
-    for (const c of st.changes) { const k = `${c.app}|${c.before.screen}|${c.after.screen}|${c.from}|${c.to}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
+    for (const c of left) { const k = `${c.app}|${c.before.screen}|${c.after.screen}|${c.from}|${c.to}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
     const allSteps = plan.beats.flatMap(b => b.steps);
     for (const g of groups.values()) {
       const c = g[0], step = allSteps[c.after.step - 1];
@@ -162,6 +184,7 @@ export function resetFor(plan, { walker = null, packs = null } = {}) {
     const k = `${u.app}|${u.steps.join('|')}`, was = undone.get(k);
     if (!was) { undone.set(k, u); return true; }
     was.undoes += `; ${u.undoes}`; was.times = (was.times || 1) + 1;
+    was.names = [...new Set([...(was.names || []), ...(u.names || [])])];
     return false;
   });
   out.appTitle = appTitle;
@@ -185,7 +208,12 @@ function fromPack(w, ctx, packs) {
     const from = [...new Set((JSON.stringify(undo.api).match(/\{(\w+)\}/g) || []).map(x => x.slice(1, -1)))];
     const byHand = out.undo.length ? `if it can't: ${out.undo.join(' › ')}` : null;
     out.undo = [`Undo with the app pack: ${pack.id}:${pw.id}`];
-    out.note = [`an API call in the capture browser's own signed-in session${from.length ? `, with ${from.map(x => `{${x}}`).join(', ')} from the run` : ''}`, byHand].filter(Boolean).join('; ');
+    // Its find (the reset before, with nothing a run recorded): the script's own leftovers by name, as the captures
+    // show what the write made.
+    if (undo.find && undo.find.by && known[undo.find.by]) out.names = [known[undo.find.by]];
+    // Its {placeholders} come from the demo's own values first (demo.json apps[].values: which plugin, which section),
+    // then from what the run made.
+    out.note = [`an API call in the capture browser's own signed-in session${from.length ? `, with ${list(from.map(x => `{${x}}`))} from the demo's values (demo.json, apps[].values), else from the run` : ''}`, byHand].filter(Boolean).join('; ');
     if (pw.verified === false) out.needs = `${w.text}: its undo (${pack.id}: ${pw.id}) hasn't been tried yet`;
     return out;
   }
@@ -201,7 +229,7 @@ function startText(f) {
   if (f.kind === 'toggle') return `"${f.subject}" is ${f.value}`;
   if (f.kind === 'choice') return `"${f.value}" is picked (${f.subject})`;
   if (f.kind === 'version') return `${f.subject} is version ${f.value}`;
-  if (f.kind === 'list') return `"${f.subject}" lists ${list(f.value.split(', '))}`;
+  if (f.kind === 'list') return `"${f.subject.replace(/\s*\(\d+\)$/, '')}" lists ${list(f.value.split(', '))}`;
   if (f.kind === 'theme') return `renders ${f.value}`;
   return `${f.subject}: ${f.value}`;
 }
@@ -223,45 +251,92 @@ export function formatReset(r) {
       out.push(`- ${s}`);
       if (i) return;
       out.push(`  Undoes: ${u.undoes}`);
+      if ((u.names || []).length) out.push(`  Names: ${u.names.map(x => `"${x}"`).join(', ')}`);
       const note = [u.times > 1 ? `do these steps ${u.times} times, once for each` : null, u.note].filter(Boolean).join('; ');
       if (note) out.push(`  Note: ${note}`);
     });
     out.push('');
   }
+  const setLines = s => {
+    out.push(`- ${s.app}: ${s.text}`, `  Set: "${s.how.control}"${s.how.path ? ` (${s.how.path})` : ''} · ${s.how.pack}:${s.how.write}`);
+    if (s.how.open) out.push(`  Opens: ${s.how.open}`);
+    out.push(`  Seen: ${s.seen}`);
+  };
   if ((r.set || []).length) {
     out.push('## Set first', '', '<!-- The state the demo starts in, as its first screens show it. The capture pass sets each one that isn\'t already, then checks them all. -->', '');
-    for (const s of r.set) {
-      out.push(`- ${s.app}: ${s.text}`, `  Set: "${s.how.control}"${s.how.path ? ` (${s.how.path})` : ''} · ${s.how.pack}:${s.how.write}`);
-      if (s.how.open) out.push(`  Opens: ${s.how.open}`);
-      out.push(`  Seen: ${s.seen}`);
-    }
+    for (const s of r.set) setLines(s);
     out.push('');
   }
+  (r.before || []).forEach((b, i) => {
+    out.push(`## Set before beat ${b.beat}, ${b.text}${b.n ? ` (step ${b.n})` : ''}`, '');
+    if (!i) out.push('<!-- Off camera, during the run: a later screen shows it, and no step makes it. Just before that step, the capture pass sets each one that isn\'t already, as an approved write, and saves no screen of it. Set first puts it back. -->', '');
+    for (const s of b.items) setLines(s);
+    out.push('');
+  });
+  if (r.leaveOutText) out.push(r.leaveOutText, '');
   if (r.checks.length) {
     out.push('## Check', '', '<!-- Read-only: each line is something the screen shows. -->', '');
-    for (const c of r.checks) out.push(`- ${c.app}: ${c.text}`, `  From: ${c.from}`);
+    for (const c of r.checks) out.push(`- ${c.app}${c.screen ? ` on ${c.screen}` : ''}: ${c.text}`, `  From: ${c.from}`);
     out.push('');
   }
   if (r.needs.length) {
     out.push('## Needs you', '');
-    for (const n of r.needs) out.push(`- Beat ${n.beat}: ${n.text}`);
+    for (const n of r.needs) out.push(n.beat ? `- Beat ${n.beat}: ${n.text}` : `- ${n.text}`);
     out.push('');
   }
   return out.join('\n');
 }
 
-// reset.md read back: its Undo steps as a plan the capture pass runs, what to set first, its checks, what needs her.
+// Her Leave out section as she (or the tool that drafts it) wrote it, from its heading to the next: reset.md made again
+// keeps it word for word (formatReset, r.leaveOutText). null when there's none.
+export function leaveOutSection(text) {
+  const p = String(text || '').split(/^(?=## )/m).find(x => /^## Leave out[ \t]*$/m.test(x.split('\n')[0]));
+  return p ? p.replace(/\s+$/, '') : null;
+}
+
+// reset.md read back: its Undo steps as a plan the capture pass runs, what to set first, what to set before a step
+// (each { beat, text: the step's words, n: its number in the beat when the beat has those words twice, items }), what
+// she leaves out of the replica (each { app, what, values: the words in quotes, for the app pack's filter, from: that
+// filter, shows: the words the screens show it by, its Shows line's, else values }), its checks (each with the screen
+// it's read on, when the line names it: the capture pass gets there by the plan's read-only steps), what needs her.
 export function parseReset(text) {
   const parts = String(text).split(/^(?=## )/m);
   const undo = parsePlan(parts.filter(p => /^## Undo · /.test(p)).map(p => p.replace(/^## Undo · /, '## ')).join('\n'));
   const lines = name => { const p = parts.find(x => new RegExp(`^## ${name}\\b`).test(x)); return p ? (p.match(/^- .+$/gm) || []).map(l => l.slice(2)) : []; };
-  const set = [];
-  const sp = parts.find(x => /^## Set first\b/.test(x));
-  if (sp) for (const block of sp.split(/^(?=- )/m).slice(1)) {
+  const items = p => p.split(/^(?=- )/m).slice(1).map(block => {
     const [head, ...rest] = block.split('\n');
     const d = { what: head.slice(2).trim() };
     for (const l of rest) { const m = /^\s+(Set|Opens|Seen):\s*(.*)$/.exec(l); if (m) d[m[1].toLowerCase()] = m[2].trim(); }
-    set.push(d);
+    return d;
+  });
+  const sp = parts.find(x => /^## Set first\b/.test(x));
+  const set = sp ? items(sp) : [];
+  const before = [];
+  for (const p of parts) {
+    const m = /^## Set before beat (\d+), (.+?)(?: \(step (\d+)\))?[ \t]*$/.exec(p.split('\n')[0]);
+    if (m) before.push({ beat: +m[1], text: m[2], n: m[3] ? +m[3] : null, items: items(p) });
   }
-  return { undo, set, checks: lines('Check'), needs: lines('Needs you') };
+  // Leave out: "- teams: the team "Contoso Beta"", its From, and Shows when the screens show it in other words (a
+  // mail's sender by name, not by address): those are what's left out of each screen (values otherwise).
+  const leaveOut = [];
+  const lp = leaveOutSection(text);
+  const quoted = t => [...String(t).matchAll(/["“]([^"“”]+)["”]/g)].map(x => x[1].trim()).filter(Boolean);
+  if (lp) for (const block of lp.split(/^(?=- )/m).slice(1)) {
+    const [head, ...rest] = block.split('\n');
+    const m = /^- ([^\s:]+): (.+)$/.exec(head.trim()), what = m ? m[2].trim() : head.slice(2).trim();
+    const detail = k => rest.map(l => new RegExp(`^\\s+${k}:\\s*(.*)$`).exec(l)).find(Boolean);
+    const from = detail('From'), shows = detail('Shows'), values = quoted(what);
+    leaveOut.push({ app: m ? m[1] : null, what, values, from: from ? from[1].trim() : null, shows: shows ? quoted(shows[1]) : values });
+  }
+  // Check: "- chat on chat-home: "Notes" is picked (Chat | Notes)" and its From, as { app, screen, text, from }
+  // (screen null when the line doesn't name one).
+  const checks = [];
+  const cp = parts.find(x => /^## Check\b/.test(x));
+  if (cp) for (const block of cp.split(/^(?=- )/m).slice(1)) {
+    const [head, ...rest] = block.split('\n');
+    const m = /^- ([^\s:]+)(?: on ([^\s:]+))?: (.*)$/.exec(head.trim());
+    const from = rest.map(l => /^\s+From:\s*(.*)$/.exec(l)).find(Boolean);
+    checks.push(m ? { app: m[1], screen: m[2] || null, text: m[3].trim(), from: from ? from[1].trim() : null } : { app: null, screen: null, text: head.slice(2).trim(), from: from ? from[1].trim() : null });
+  }
+  return { undo, set, before, leaveOut, checks, needs: lines('Needs you') };
 }

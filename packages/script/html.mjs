@@ -1,8 +1,10 @@
-// A captured page read without a browser: its controls (named the way the recorder's outline names them,
-// packages/capture/outline-page.js), its text items (the way the script matcher indexes a screen,
+// A captured page read without a browser: its controls (what's a control, its role and its name:
+// @stuntdouble/core/lib/control-name.mjs, the rule a run uses on the live page too), its text items (the way the script matcher indexes a screen,
 // packages/player/app/focus-target.js, with a box that's its place in the page's order) and its words. Captures are
 // serialized DOM, so a small stack parser is enough. Used to map a talk track's Do lines to real controls, and its
 // lines to what's on screen, before there's a replica to look at.
+import { controlOf } from '@stuntdouble/core/lib/control-name.mjs';
+
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const RAW = new Set(['script', 'style', 'template', 'noscript', 'title']);
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”', mdash: '—', ndash: '–', hellip: '…', middot: '·', rsaquo: '›' };
@@ -38,6 +40,11 @@ export function parseHtml(html) {
 // Not on screen at all (text marked aria-hidden is still seen, so it counts as words; controls skip it).
 const hiddenEl = el => 'hidden' in el.attrs || /display\s*:\s*none|visibility\s*:\s*hidden/i.test(el.attrs.style || '') || el.tag === 'svg' || el.tag === 'head';
 const unreachable = el => el.attrs['aria-hidden'] === 'true' || 'inert' in el.attrs;
+const TIMES = /^(time|relative-time|local-time|time-ago|time-until)$/;
+// A list (a list, a listbox, a grid, a table, a tree, tabs, a menu, a feed) and a row in it (an item, an option, a row,
+// a tab, a menu item, a post).
+const LISTS = /^(list|listbox|grid|treegrid|table|tree|tablist|menu|menubar|radiogroup|feed)$/, ROWS = /^(listitem|option|row|treeitem|tab|menuitem|menuitemcheckbox|menuitemradio|radio|article)$/;
+const says = n => +n > 0 ? +n : null;
 const BLOCK = new Set(['p', 'div', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'th', 'section', 'article', 'header', 'footer', 'nav', 'main', 'aside', 'button', 'a', 'label', 'dt', 'dd', 'table', 'form', 'fieldset', 'figure', 'figcaption', 'blockquote', 'pre', 'summary', 'details', 'br', 'hr', 'option']);
 // Inline formatting: its text runs on with what's around it. Any other element is set apart by a space (a page's CSS
 // often makes spans blocks, which innerText would show apart).
@@ -54,30 +61,6 @@ export function textOf(el, out = []) {
   return out;
 }
 export const wordsOf = el => textOf(el).join('').split('\n').map(clean).filter(Boolean).join('\n');
-
-// Roles and names as packages/capture/outline-page.js gives them.
-const ROLE_SEL = /^(button|link|tab|menuitem|menuitemcheckbox|menuitemradio|option|treeitem|switch|checkbox|radio|textbox|searchbox|combobox|gridcell)$/;
-function roleOf(el) {
-  const r = el.attrs.role;
-  if (r) return r;
-  const t = el.tag;
-  if (t === 'a' && 'href' in el.attrs) return 'link';
-  if (t === 'button' || t === 'summary') return 'button';
-  if (t === 'select') return 'combobox';
-  if (t === 'textarea') return 'textbox';
-  if (t === 'input') { const ty = (el.attrs.type || 'text').toLowerCase(); return ty === 'checkbox' ? 'checkbox' : ty === 'radio' ? 'radio' : /^(button|submit|reset|image)$/.test(ty) ? 'button' : ty === 'search' ? 'searchbox' : 'textbox'; }
-  if (el.attrs.contenteditable === '' || el.attrs.contenteditable === 'true') return 'textbox';
-  return t;
-}
-function isControl(el) {
-  const a = el.attrs, t = el.tag;
-  if (t === 'input') return !/^(hidden|password)$/i.test(a.type || '');
-  if (/^(button|summary|select|textarea)$/.test(t) || (t === 'a' && 'href' in a)) return true;
-  if (a.contenteditable === '' || a.contenteditable === 'true') return true;
-  if (a.role && ROLE_SEL.test(a.role)) return true;
-  if ((a.role === 'row' || a.role === 'listitem') && 'tabindex' in a) return true;
-  return a.tabindex === '0';
-}
 
 // A small CSS selector engine, for the recorder's matchers ([data-testid="x"], #id, a[href*="/edit/"],
 // section[aria-label="Reviewers"] button): tags, ids, classes, attributes (= ^= $= *= ~= |=), and the descendant,
@@ -170,32 +153,75 @@ function findSpec(roots, m) {
 
 // The page's controls, items and words, from one or more documents (the page and its frames). specs: recorded
 // matchers ({ key, sel, text, … }) to resolve to the controls they pick (picks: key → control index, or -1).
+// A box's text, as read: up to BOX_MAX characters (custom instructions run to hundreds); longer (a document's body, a
+// long draft) is marked cut, so an exact match on it can't be decided from the read.
+export const BOX_MAX = 4000;
 export function readScreen(docs, { specs = [] } = {}) {
   // A page's own headings come first; an app bar's or a menu's (inside a header, banner or nav) after them.
   const controls = [], items = [], text = [], headings = [], barHeadings = [], roots = [], ctlOf = new Map();
-  let pos = 0, theme = null;
+  let pos = 0, theme = null, times = 0, lives = 0;
+  const regions = {}, lists = {};
   for (const { key, html } of docs) {
     const root = parseHtml(html);
     roots.push({ key: key || 'main', root });
     if (!theme) theme = themeOf(root);
-    const ids = new Map();
-    const index = el => { if (typeof el === 'string') return; if (el.attrs.id) ids.set(el.attrs.id, el); el.children.forEach(index); };
+    // Ids as getElementById finds them (the first with that id), and each field's <label>s as el.labels gives them:
+    // a label's `for` names its field (when that's a field), else it's the first field inside it.
+    const ids = new Map(), labelEls = [], labels = new Map();
+    const index = el => { if (typeof el === 'string') return; if (el.attrs.id && !ids.has(el.attrs.id)) ids.set(el.attrs.id, el); if (el.tag === 'label') labelEls.push(el); el.children.forEach(index); };
     index(root);
+    const labelable = el => el && typeof el !== 'string' && (/^(button|meter|output|progress|select|textarea)$/.test(el.tag) || (el.tag === 'input' && String(el.attrs.type || '').toLowerCase() !== 'hidden'));
+    const firstIn = el => { for (const c of el.children) { if (labelable(c)) return c; const f = typeof c !== 'string' && firstIn(c); if (f) return f; } return null; };
+    for (const l of labelEls) { const f = 'for' in l.attrs ? ids.get(l.attrs.for) : firstIn(l); if (labelable(f)) (labels.get(f) || labels.set(f, []).get(f)).push(l); }
     const own = el => clean(el.children.filter(c => typeof c === 'string').join(' '));
-    const nameOf = el => {
-      const a = el.attrs;
-      const by = a['aria-labelledby'] ? a['aria-labelledby'].split(/\s+/).map(id => ids.get(id)).filter(Boolean).map(wordsOf).join(' ') : '';
-      const inner = el.tag === 'input' || el.tag === 'textarea' || a.contenteditable === 'true' || a.contenteditable === '' ? '' : wordsOf(el).replace(/\n/g, ' ');
-      return clean(a['aria-label'] || by || inner || a.placeholder || a['data-placeholder'] || a['aria-placeholder'] || a.title || a.alt || a.value).replace(/^(.{2,}?) ?\1$/, '$1').slice(0, 90);
-    };
-    const walk = (el, aria = false, bar = false) => {
+    const acc = { tag: el => el.tag, attr: (el, n) => (n in el.attrs ? el.attrs[n] : null), text: el => wordsOf(el), byId: id => ids.get(id) || null, labels: el => labels.get(el) || [] };
+    // Marks on items and controls, kept as they are (what a landing can be proven by: docs/engine/plan-format.md):
+    // shut: inside a closed dialog (no open attribute) or a template, so not on the page as it shows (innerText).
+    // nav:  in the page's frame rather than its own content: a nav or an aside, the page's own header or footer (not
+    //       one inside an article, aside, main, nav or section), or a banner, navigation, complementary or
+    //       contentinfo landmark.
+    // live: in a live region (role status, alert, log, marquee or timer; aria-live polite or assertive; an output), or
+    //       holding one: words that come and go by themselves (a toast, "Message sent").
+    // time: a time (time, relative-time, local-time, time-ago, time-until), in one, or holding one: words that change
+    //       as time passes.
+    // article: where the item's nearest article (role article, or an article: a message, a post, a comment) starts.
+    // region: where the nearest part of the page named by its aria-label starts (a section, a dialog, a panel, a
+    //         group: regions[at] is [its name, the region around it]).
+    // list, row: where the nearest list starts (lists[at] is [its name or null, its role, the rows it says it has
+    //         (aria-rowcount or aria-setsize, its own or its first row's) or null]) and the row in it (none for the
+    //         list itself, or what's in it outside a row). What describes one row's element (aria-describedby: a
+    //         tooltip in a portal) is in that row too, marked described.
+    // restored: in a row a capture put back (data-d1-row: packages/capture/flows/virtual-list.js scrolls a list that
+    //         shows only the rows in view and keeps every row), not one the page showed.
+    // tip:  in a tooltip (role tooltip): on the screen only while its control is hovered.
+    const desc = new Map(), spans = new Map();
+    const walk = (el, aria = false, bar = false, shut = false, nav = false, live = false, time = false, sect = false, art = null, reg = null, lst = null, row = null, back = false, tip = false) => {
       if (typeof el === 'string') return;
       if (el.tag !== '#root' && hiddenEl(el)) return;
+      const role = el.attrs.role || '';
       aria = aria || (el.tag !== '#root' && unreachable(el));
-      bar = bar || el.tag === 'header' || el.tag === 'nav' || /^(banner|navigation)$/.test(el.attrs.role || '');
+      bar = bar || el.tag === 'header' || el.tag === 'nav' || /^(banner|navigation)$/.test(role);
+      shut = shut || (el.tag === 'dialog' && !('open' in el.attrs)) || el.tag === 'template';
+      nav = nav || /^(nav|aside)$/.test(el.tag) || (/^(header|footer)$/.test(el.tag) && !sect) || /^(banner|navigation|complementary|contentinfo)$/.test(role);
+      live = live || el.tag === 'output' || /^(status|alert|log|marquee|timer)$/.test(role) || /^(polite|assertive)$/.test(el.attrs['aria-live'] || '');
+      time = time || TIMES.test(el.tag);
+      sect = sect || /^(article|aside|main|nav|section)$/.test(el.tag);
+      const t0 = times, l0 = lives;
+      if (time) times++;
+      if (live) lives++;
       const start = pos++;
-      if (!aria && isControl(el)) {
-        const role = roleOf(el), name = nameOf(el);
+      if (el.tag === 'article' || role === 'article') art = start;
+      if (clean(el.attrs['aria-label']) && (/^(section|article|aside|dialog|main|form|nav)$/.test(el.tag) || /^(region|group|dialog|alertdialog|article|tabpanel|document|main|complementary|navigation|form|feed)$/.test(role))) { regions[start] = [clean(el.attrs['aria-label']).slice(0, 120), reg]; reg = start; }
+      if (LISTS.test(role) || (!role && /^(ul|ol|table|menu)$/.test(el.tag))) { lists[start] = [clean(el.attrs['aria-label']).slice(0, 120) || null, role || el.tag, says(el.attrs['aria-rowcount']) || says(el.attrs['aria-setsize'])]; lst = start; row = null; }
+      else if (lst !== null && (ROWS.test(role) || (!role && /^(li|tr)$/.test(el.tag)))) { row = start; if (!lists[lst][2]) lists[lst][2] = says(el.attrs['aria-setsize']); }
+      back = back || 'data-d1-row' in el.attrs;
+      tip = tip || role === 'tooltip';
+      if (row !== null && el.attrs['aria-describedby']) for (const id of el.attrs['aria-describedby'].split(/\s+/).filter(Boolean)) { const was = desc.get(id); desc.set(id, was === undefined || (was && was.lst === lst && was.row === row) ? { lst, row } : null); }
+      const i0 = items.length, c0 = controls.length;
+      const ctl = el.tag === '#root' ? null : controlOf(el, acc);
+      let mark = null;
+      if (!aria && ctl && ctl.control) {
+        const { role, name } = ctl;
         if (name || /textbox|searchbox|combobox/.test(role)) {
           const c = { i: controls.length, role, name, frame: key === 'main' ? undefined : key };
           if (role === 'textbox' || el.tag === 'textarea' || el.attrs.contenteditable) { c.editable = el.attrs.contenteditable !== undefined ? 'content' : 'field'; if (el.tag === 'textarea' || c.editable === 'content') c.multiline = true; }
@@ -208,18 +234,37 @@ export function readScreen(docs, { specs = [] } = {}) {
           if (ac === 'true' || ac === 'false') c.on = ac === 'true';
           else if (el.tag === 'input' && /^(checkbox|radio)$/i.test(el.attrs.type || '')) c.on = 'checked' in el.attrs;
           if (el.attrs['aria-pressed'] === 'true' || el.attrs['aria-pressed'] === 'false') c.pressed = el.attrs['aria-pressed'] === 'true';
+          if (el.attrs['aria-selected'] === 'true' || el.attrs['aria-selected'] === 'false') c.selected = el.attrs['aria-selected'] === 'true';
+          // What's in a box, as captured: a text input's value (a search box's too), a text area's text, an editable
+          // area's words.
+          const textInput = el.tag === 'input' && !/^(checkbox|radio|button|submit|reset|image|hidden|password|file|range|color)$/i.test(el.attrs.type || '');
+          if (c.editable || textInput) { const v = el.tag === 'input' ? clean(el.attrs.value) : el.tag === 'textarea' ? clean(el.children.filter(x => typeof x === 'string').join('')) : clean(wordsOf(el)); if (v) { c.value = v.slice(0, BOX_MAX); if (v.length > BOX_MAX) c.cut = true; } }
+          if (shut) c.shut = true;
+          if (nav) c.nav = true;
+          if (lst !== null) c.list = lst;
+          if (row !== null) c.row = row;
+          if (back) c.restored = true;
+          if (tip) c.tip = true;
           controls.push(c);
           ctlOf.set(el, c.i);
+          mark = c;
         }
       }
       if (/^h[1-6]$/.test(el.tag) || el.attrs.role === 'heading') { const h = clean(wordsOf(el)); if (h) (bar ? barHeadings : headings).push(h); }
       const mine = own(el);
-      const item = mine && el.tag !== '#root' ? { i: items.length, kind: isControl(el) ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
-      if (item) items.push(item);
-      el.children.forEach(c => walk(c, aria, bar));
+      const item = mine && el.tag !== '#root' ? { i: items.length, kind: ctl && ctl.control ? 'control' : 'text', role: el.attrs.role || ({ li: 'listitem', p: 'paragraph', a: 'link', button: 'button', td: 'cell', th: 'cell' }[el.tag] || (/^h[1-6]$/.test(el.tag) ? 'heading' : 'generic')), tag: el.tag, frame: key === 'main' ? undefined : key } : null;
+      if (item) { if (shut) item.shut = true; if (nav) item.nav = true; if (art !== null) item.article = art; if (reg !== null) item.region = reg; if (lst !== null) item.list = lst; if (row !== null) item.row = row; if (back) item.restored = true; if (tip) item.tip = true; items.push(item); }
+      el.children.forEach(c => walk(c, aria, bar, shut, nav, live, time, sect, art, reg, lst, row, back, tip));
+      if (el.attrs.id && ids.get(el.attrs.id) === el) spans.set(el.attrs.id, [i0, items.length, c0, controls.length]);
       if (item) { item.text = clean(wordsOf(el).replace(/\n/g, ' ')).slice(0, 2000); item.box = [start, 0, pos, 1]; }
+      for (const m of [item, mark]) if (m) { if (lives > l0) m.live = true; if (times > t0) m.time = true; }
     };
     walk(root);
+    // What describes one row's element, and isn't in a list itself, is in that row.
+    for (const [id, ref] of desc) {
+      const sp = ref && spans.get(id);
+      if (sp) for (const x of [...items.slice(sp[0], sp[1]), ...controls.slice(sp[2], sp[3])]) if (x.list === undefined) { x.list = ref.lst; x.row = ref.row; x.described = true; }
+    }
     text.push(wordsOf(root));
   }
   if (!theme) { const t = controls.find(c => /^switch to (dark|light) (mode|theme)$/i.test(c.name) && c.pressed !== undefined); if (t) theme = /dark/i.test(t.name) === !t.pressed ? 'light' : 'dark'; }
@@ -232,7 +277,7 @@ export function readScreen(docs, { specs = [] } = {}) {
     if (el) { for (let p = el; p && k < 0; p = p.parent) if (ctlOf.has(p)) k = ctlOf.get(p); if (k < 0) k = inside(el); }
     picks[m.key] = k;
   }
-  return { controls, items: items.filter(it => it.text), headings: [...headings, ...barHeadings].slice(0, 30), text: text.join('\n'), theme, ...(specs.length ? { picks } : {}) };
+  return { controls, items: items.filter(it => it.text), headings: [...headings, ...barHeadings].slice(0, 30), text: text.join('\n'), theme, regions, lists, ...(specs.length ? { picks } : {}) };
 }
 
 // Light or dark, as the page's root says it (a color scheme, a theme attribute, or a theme class); null if it doesn't.

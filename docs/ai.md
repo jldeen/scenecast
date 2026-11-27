@@ -27,7 +27,9 @@ click in each, and makes the plan:
   - a section it names or describes ("the right people") frames its first card, and "every step" frames the list's
     heading and its first step;
 - where the product isn't what your script says, it says so once (your script says **Approve** on a **Copy file**
-  card; the product shows **Save skill**). Steps your script leaves out, it takes from the recording and marks.
+  card; the product shows **Save skill**). Steps your script leaves out, it takes from the recording and marks. A
+  search the recording made before a click (and that isn't a write) goes in as you recorded it, and the review lists
+  it under **Added from your recording**, for information.
 
 When the demo has been recorded before, the plan is checked against every recorded screen, so a new version of your
 script takes minutes. A script written for presenting the replica works too: its ⌥ keys say where each beat starts.
@@ -47,7 +49,11 @@ Without Copilot, the plan comes from your Do lines alone.
 
 Afterwards Scenecast writes `reset.md`: each change undone, the state your demo starts in (what's switched on or off,
 the mode picked, the theme, as your first screens show it) set first, and a checklist that only looks. If a later
-screen shows something switched that no step of your plan switches, it says which step to add. Once the demo is
+screen shows something switched that no step of your plan switches (your script says it's already on), the capture
+switches it off camera just before that step, when it knows how, and the review lists it under **Set off camera**;
+otherwise it says which step to add. Something you'd rather your replica didn't show, in a tenant you share (an app in
+a catalog, a team, emails from a sender), goes under **Leave out** in `reset.md`: the capture filters it out in its own
+browser, nothing in your tenant changes, and the review lists it under **Left out of your replica**. Once the demo is
 built, the finish: your script for the presenter guide with its Do lines in presenter keys, ⌥1–⌥9 on your beats, the
 focus points, and one page to look at (`.out/review/index.html`): every screen, the timings (how long each beat takes
 to say against the time your script gives it), and anything that needs you. One walkthrough works the same way
@@ -99,6 +105,10 @@ in the plan, and when it gets there it stops and asks: **Do it**, **I'll click i
 fine. When a screen isn't what it expected, it waits for it, then works out what to do instead, then asks you
 (**I did it**, **Skip it**, or tell it what to do in plain words).
 
+Unattended (in the capture browser, nobody there: `ai record --unattended`), there's nobody to ask, so you approve
+every write before it starts: the approval lists each one by beat and step, and the run does only those. Anything
+else that could change something is held, and stops the run with a picture of where it was.
+
 ## The plan
 
 `plan.md` in the demo folder, in plain words you can edit on the Record step:
@@ -137,7 +147,9 @@ one beat per beat of the replica: edit it under **Script** like any script.
   beats, Say, Do and Screen lines and prompts), `html.mjs` (a capture's controls and words, without a browser);
   `packages/ai/walker.mjs` (the recorded screens and where each step leads, the capture browser's interface),
   `from-script.mjs` (Do lines to steps, grounded, with writes, landings, differences and focus), `walkthrough.mjs`,
-  `reset.mjs`, `make.mjs` (plan, approval, reset), `finish.mjs` (guide script, beat keys, focus points, the review).
+  `reset.mjs`, `make.mjs` (plan, approval, reset), `finish.mjs` (guide script, beat keys, focus points, the review),
+  `landing.mjs` (what proves each step), `reground.mjs` (those proofs again, on the screens a live walk read today:
+  `scenecast ai reground`).
   The plan's format: [engine/plan-format.md](engine/plan-format.md). App packs (`@stuntdouble/apps`) give each app's names,
   writes and their undos when they're there; without them, plain rules.
 - The recorder's `observe` command (`packages/capture/outline-page.js`) gives the page as the AI sees it; the AI

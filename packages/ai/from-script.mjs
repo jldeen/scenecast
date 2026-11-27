@@ -4,6 +4,7 @@
 // every time, and what the tests run); Copilot works out what the rules can't, on screen, when the plan runs.
 import { formatStep, risk } from './plan.mjs';
 import { findItem, composer, searchBox } from './find.mjs';
+import { proveLandings, isBox, packChecked } from './landing.mjs';
 import { words, facts, pickItems, sentences } from '@scenecast/script/match.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
@@ -385,6 +386,25 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
         const ms = walker.moves(id).filter(m => m.steps.length === 1 && m.steps[0].kind === 'click' && APPROVE.test(m.steps[0].target));
         if (ms.length === 1) r = { ...r, to: ms[0].to, recorded: ms[0].recorded || ms[0].steps[0].target };
       }
+      // A click the recording made after typing in a box here (a search before a tab: the list after it shows only what
+      // the search found): the screen it lands on has those words in the box, and this one doesn't. The recording's
+      // typing goes first, as recorded.
+      if (step.kind === 'click' && r.to && r.to !== id) {
+        const here = sc.controls || [], same = (a, b) => norm(a || '') === norm(b || '');
+        const typedThere = ((scr(r.to) || {}).controls || []).filter(c => isBox(c) && c.value && !here.some(x => isBox(x) && same(x.name, c.name) && same(x.value, c.value)));
+        for (const box of typedThere) {
+          if (same(S.typed[S.app], box.value)) continue;
+          const m = walker.moves(id).find(mv => mv.steps.length === 1 && mv.steps[0].kind === 'type' && same(mv.steps[0].value, box.value) && same(mv.steps[0].target, box.name));
+          const then = m && (walker.recorded || walker.step)(m.to, { ...step, strict: true, role: opts.role });
+          if (!m || !then || then.to !== r.to) continue;
+          const text = `Before "${step.target}", a step your script leaves out, as recorded: ${formatStep(m.steps[0])} (the screen after it shows what that found)`;
+          const typed = push({ kind: 'type', target: m.steps[0].target, value: m.steps[0].value }, '(not in your script: as recorded)', line);
+          // Her own recording's, and not a write: for information (the review's "Added from your recording").
+          flag(typed && typed.writes ? 'added' : 'restored', text, where(line));
+          id = at(); sc = scr(id); r = go({ ...step, strict: true, role: opts.role });
+          break;
+        }
+      }
       const prev = beat.steps[beat.steps.length - 1];
       if (step.kind === 'click' && prev && prev.kind === 'click' && prev.target === step.target && (prev.lands || {}).screen === id && r.to === id) return drop();
       if (step.kind === 'click' && r.control && PICKED.test(r.control.role)) S.picked = titleOf(sc, cleanTarget(s.target).length > 2 ? cleanTarget(s.target) : r.control.name);
@@ -597,6 +617,7 @@ export function planFromTrack(track, { walker = null, apps = [], title, trace = 
     walker.save();
   }
   plan.beats = plan.beats.filter(b => b.steps.length || b.say.length);
+  proveLandings(plan, walker, flags, { checked: packChecked(packs) });
   return { plan, flags };
 }
 
@@ -610,6 +631,9 @@ function landText(before, after) {
   const t = after.items.find(i => i.kind === 'text' && !had.has(norm(i.text)) && i.text.split(' ').length >= 2 && i.text.length < 70 && /[a-z]/i.test(i.text));
   return t ? t.text : null;
 }
+
+// Where a step lands, proven: landing.mjs (proveLandings runs at the end of every plan, walkthroughs' too).
+export { proveLandings, packChecked };
 
 // Beat-level targets (a Do list before the lines) go to the line they share the most words with, keeping their order.
 function assignHints(hints, lines) {

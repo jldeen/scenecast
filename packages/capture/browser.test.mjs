@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage } from './browser.mjs';
+import { windowTrouble, otherWindow, platformWindow, landedOn, cookieExpiries, graphqlOperation, guardVerdict, profileInUse, SIGN_IN_HOST, profileDir, pinnedAuthorizeUrl, tenantsInKeys, tenantVerdict, hintedUrl, ownSignInPage, openFor, senderOrigin, staysHeld, allowedBy, postAction } from './browser.mjs';
+import { at } from '@stuntdouble/core/lib/at.mjs';
 import { captureOpts } from './host.mjs';
 import { agentCode } from './build.mjs';
 
@@ -75,6 +76,12 @@ test('the read-only guard holds what could write, and only that', () => {
   assert.equal(guardVerdict({ method: 'POST', url: 'https://tenant.example.com/search/query?q=1' }, { ...T, allow: ['tenant.example.com/search/'] }), 'pass');
   assert.equal(guardVerdict({ method: 'POST', url: 'https://tenant.example.com/telemetry' }, { ...T, allow: ['/^POST [^/]+\\/telemetry$/'] }), 'pass');
   assert.equal(guardVerdict({ method: 'PUT', url: 'https://tenant.example.com/telemetry' }, { ...T, allow: ['/^POST [^/]+\\/telemetry$/'] }), 'hold');
+  // A listing that only reads when nothing is typed in it: the body has to say so, and no body seen holds it.
+  const list = { ...T, allow: ['/^POST tenant\\.example\\.com\\/catalog\\/search$/ when body /^\\{"search":"","filter":"[^"]*"\\}$/'] };
+  const url = 'https://tenant.example.com/catalog/search';
+  assert.equal(guardVerdict({ method: 'POST', url, body: '{"search":"","filter":"Type eq \'Model\'"}' }, list), 'pass');
+  assert.equal(guardVerdict({ method: 'POST', url, body: '{"search":"Fabrikam orders","filter":"Type eq \'Model\'"}' }, list), 'hold');
+  assert.equal(guardVerdict({ method: 'POST', url }, list), 'hold');
 });
 
 test('a profile another browser has open is in use; a stale lock is not', { skip: process.platform === 'win32' }, () => {
@@ -154,4 +161,134 @@ test('an app\'s own "which account" landing gets the demo account in its address
   assert.equal(ownSignInPage(landedOn('https://app.example.com/', 'Welcome. Sign in to start chatting', 'app.example.com')), true);
   assert.equal(ownSignInPage(landedOn('https://login.microsoftonline.com/x', 'Pick an account')), false);
   assert.equal(ownSignInPage(landedOn('https://app.example.com/', 'Hello', 'app.example.com')), false);
+});
+
+test("what a write or an API undo opened: its hosts, or its one call (method and exact address)", () => {
+  const u = x => new URL(x);
+  const call = [{ hosts: ['api.example.com'], method: 'DELETE', url: 'https://api.example.com/v1/a?x=1' }];
+  assert.equal(openFor(call, u('https://api.example.com/v1/a?x=1'), 'delete'), true);
+  assert.equal(openFor(call, u('https://api.example.com/v1/b'), 'POST'), false);
+  assert.equal(openFor(call, u('https://api.example.com/v1/a?x=1'), 'PUT'), false);
+  assert.equal(openFor([{ hosts: ['example.com'] }], u('https://api.example.com/v1/b'), 'POST'), true);
+  assert.equal(openFor([{ hosts: [] }, { method: 'POST' }], u('https://api.example.com/v1/b'), 'POST'), false);
+});
+
+test("a write's own calls to its app's service: that method, host and path only, while the write is open", () => {
+  const u = x => new URL(x);
+  const open = [{ hosts: ['app.example.com'], entries: ['/^POST runtime-[a-z0-9]+\\.gateway\\.example\\.net\\/v1\\/messages$/'] }];
+  assert.equal(openFor(open, u('https://runtime-eus.gateway.example.net/v1/messages'), 'post'), true);
+  assert.equal(openFor(open, u('https://runtime-eus.gateway.example.net/v1/settings'), 'POST'), false);
+  assert.equal(openFor(open, u('https://runtime-eus.gateway.example.net/v1/messages'), 'PATCH'), false);
+  assert.equal(openFor(open, u('https://other-eus.gateway.example.net/v1/messages'), 'POST'), false);
+  assert.equal(openFor(open, u('https://app.example.com/send'), 'POST'), true);
+  assert.equal(openFor([], u('https://runtime-eus.gateway.example.net/v1/messages'), 'POST'), false);
+});
+
+test("what a write's call asked for: a server function's action, a GraphQL operation, a body's Verb; never the rest", () => {
+  const fn = action => JSON.stringify({ t: { t: 10, i: 0, p: { k: ['data'], v: [{ t: 10, i: 1, p: { k: ['enableCache', 'action'], v: [{ t: 2, s: 1 }, { t: 1, s: action }] } }] } } });
+  assert.equal(postAction(fn('SetUserStorageState')), 'SetUserStorageState');
+  assert.equal(postAction('{"query":"mutation SaveSkill { x }"}'), 'SaveSkill');
+  assert.equal(postAction('{"ConversationId":"c","clientData":{"Verb":"list_plugins","Data":{}}}'), 'list_plugins');
+  assert.equal(postAction('{"message":"Sam asked me about PO-1"}'), null);
+  assert.equal(postAction('not json'), null);
+});
+
+test("which page or frame sent a request: its Origin, else its Referer's", () => {
+  assert.equal(senderOrigin({ Origin: 'https://frame.example.com' }), 'https://frame.example.com');
+  assert.equal(senderOrigin({ origin: 'null', referer: 'https://frame.example.com/app?x=1' }), 'https://frame.example.com');
+  assert.equal(senderOrigin({}), null);
+});
+
+test("a pack's stay-held entries: its own background calls, matched as allow entries are", () => {
+  const list = ['/^POST api\\.example\\.com\\/v1\\/refresh$/', 'api.example.com/v1/subscribe', '/^POST api\\.example\\.com\\/v1\\/search$/ when body /^\\{"q":""\\}$/'];
+  assert.equal(staysHeld({ method: 'post', url: 'https://api.example.com/v1/refresh' }, list), true);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/subscribe/x' }, list), true);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/items' }, list), false);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":""}' }, list), true);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":"x"}' }, list), false);
+  assert.equal(staysHeld({ method: 'POST', url: 'https://api.example.com/v1/refresh' }, []), false);
+});
+
+test('the allow entry that let a request through', () => {
+  const allow = ['api.example.com/v1/telemetry', '/^POST api\\.example\\.com\\/v1\\/search$/ when body /^\\{"q":""\\}$/'];
+  assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/telemetry/x' }, allow), allow[0]);
+  assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":""}' }, allow), allow[1]);
+  assert.equal(allowedBy({ method: 'POST', url: 'https://api.example.com/v1/search', body: '{"q":"x"}' }, allow), null);
+});
+
+test("Teams' people card: Loki's GraphQL passes a query only, and its name is kept", () => {
+  const pack = JSON.parse(readFileSync(at('apps', 'packs', 'teams', 'pack.json'), 'utf8'));
+  const GQ = pack.guard.allow.find(a => /graphql/.test(a));
+  const v = (body, url = 'https://nam.loki.delve.office.com/api/v2/graphql') => guardVerdict({ method: 'POST', url, body }, { allow: [GQ] });
+  const b = (query, more = {}) => JSON.stringify({ operationName: 'BadgesWithData_LPCBadges_DataQuery', variables: { personIds: ['x'] }, query, ...more });
+  const q = 'query BadgesWithData_LPCBadges_DataQuery($personIds: [String!]) { badges(personIds: $personIds) { id name } }';
+  assert.equal(v(b(q)), 'pass');
+  assert.equal(v(b(q), 'https://eur.loki.delve.office.com/api/v2/graphql/'), 'pass');
+  assert.equal(v(JSON.stringify({ query: '  query { me { id } }' })), 'pass');
+  for (const held of [
+    b('mutation SetBadge { setBadge(id: 1) { id } }'),
+    b('subscription Live { badges { id } }'),
+    b(q + ' mutation Also { x }'),
+    // JSON-encoded, a newline or tab before it is an escape (\n, \t, \u000a): the letter before "mutation" is a word's.
+    b(q + '\nmutation Also { x }', { operationName: 'Also' }),
+    b(q + '\tsubscription Also { x }'),
+    JSON.stringify({ query: q }).replace(/"}$/, '\\u000amutation Also { x }"}'),
+    // A letter of the keyword escaped: \u006dutation is "mutation" once decoded.
+    b(q + ' mutation Also { x }', { operationName: 'Also' }).replace(' mutation', ' \\u006dutation'),
+    b('{ badges { id } }'),
+    JSON.stringify({ extensions: { persistedQuery: { version: 1, sha256Hash: 'a'.repeat(64) } }, variables: {} }),
+    JSON.stringify([{ query: q }]),
+    null,
+  ]) assert.equal(v(held), 'hold', String(held));
+  assert.equal(v(b(q), 'https://loki.delve.office.com/api/v2/graphql/'), 'hold');
+  assert.equal(v(b(q), 'https://nam.loki.delve.office.com/api/v2/graphql/x'), 'hold');
+  assert.equal(graphqlOperation(b(q)), 'BadgesWithData_LPCBadges_DataQuery');
+  assert.equal(graphqlOperation(JSON.stringify({ query: 'query People { me }' })), 'People');
+  assert.equal(graphqlOperation('{"a":1}'), null);
+});
+
+test("IQ's picker suggestions: its own scenario, nothing typed (public) or exactly the demo's search (private)", () => {
+  const PUB = '/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{"Scenario":\\{"Name":"MicrosoftIQ\\.Web\\.Copilot_Peek"(?![\\s\\S]*"(?:Display)?QueryString"\\s*:\\s*"(?!"))/';
+  const PRIV = '/^POST substrate\\.office\\.com\\/search\\/api\\/v1\\/suggestions$/ when body /^\\{"Scenario":\\{"Name":"MicrosoftIQ\\.Web\\.Copilot_Peek"(?![\\s\\S]*"(?:Display)?QueryString"\\s*:\\s*"(?!"|Fabrikam orders"))/';
+  const url = 'https://substrate.office.com/search/api/v1/suggestions';
+  const v = (allow, body) => guardVerdict({ method: 'POST', url, body }, { allow: [allow] });
+  const peek = reqs => JSON.stringify({ Scenario: { Name: 'MicrosoftIQ.Web.Copilot_Peek', Dimensions: [] }, EntityRequests: reqs, TimeZone: 'UTC', LogicalId: 'x', Cvid: 'y' });
+  const q = (t, s) => ({ EntityType: t, Query: { QueryString: s } });
+  const empty = peek([q('People', ''), q('Chat', ''), q('TeamsChannel', '')]), typed = peek([q('People', 'Fabrikam orders'), q('File', 'Fabrikam orders')]);
+  for (const a of [PUB, PRIV]) assert.equal(v(a, empty), 'pass');
+  assert.equal(v(PRIV, typed), 'pass');
+  assert.equal(v(PUB, typed), 'hold');
+  const held = [
+    peek([q('People', 'Fabrikam orderss')]),
+    peek([q('People', ''), q('File', 'x')]),
+    JSON.stringify(JSON.parse(empty), null, 1).replace('"Name":', '"Name": '),
+    peek([q('People', '')]).replace('"QueryString":""', '"QueryString": "x"'),
+    peek([{ EntityType: 'People', Query: { QueryString: '', DisplayQueryString: 'x' } }]),
+    peek([q('People', 'Fabrikam orders\\" or x')]),
+    JSON.stringify({ Scenario: { Name: 'peoplecache' }, EntityRequests: [q('People', '')] }),
+    null,
+  ];
+  for (const b of held) for (const a of [PUB, PRIV]) assert.equal(v(a, b), 'hold', String(b));
+  assert.equal(v(PUB, peek([{ EntityType: 'People', Query: { QueryString: null } }])), 'pass');
+});
+
+test("Copilot's server functions pass by the action key's own value, and only its reads; list_plugins only", () => {
+  const FN = '/^POST copilot\\.cloud\\.microsoft\\/_serverFn\\/[0-9a-f]{64}$/ when body /^\\{"t":\\{"t":10,"i":0,"p":\\{"k":\\["data"\\],"v":\\[\\{"t":10,"i":1,"p":\\{"k":\\[(?:"action"(?:,"[A-Za-z]+")*\\],"v":\\[\\{"t":1,"s":"(?:GetUserPinnedApps|GetAppLauncherCoreApps|GetCurrentTheme|RefreshNavPane|RefreshNeptuneEntitlements)"\\}|"enableCache","source","action"\\],"v":\\[\\{"t":2,"s":\\d\\},\\{"t":1,"s":"[A-Za-z]+"\\},\\{"t":1,"s":"GetTasksFlyout"\\}|"filterThreadType","cursor","action"\\],"v":\\[\\{"t":1,"s":"[a-z|]+"\\},\\{"t":(?:1|2),"s":(?:\\d|"[^"]*")\\},\\{"t":1,"s":"GetUnifiedTasks"\\})/';
+  const EL = '/^POST substrate\\.office\\.com\\/m365Copilot\\/EventListener\\/Client$/ when body /^\\{"ConversationId":"[^"]*","clientData":\\{"Verb":"list_plugins","Data":\\{[^{}]*\\},"MessageId":"[^"]*","VisualElementId":"[^"]*"\\}\\}$/';
+  const fnUrl = 'https://copilot.cloud.microsoft/_serverFn/' + 'a'.repeat(64), elUrl = 'https://substrate.office.com/m365Copilot/EventListener/Client';
+  const v = (url, allow, body) => guardVerdict({ method: 'POST', url, body }, { allow: [allow] });
+  const S = x => ({ t: 1, s: x }), N = x => ({ t: 2, s: x }), obj = (k, vals) => ({ t: 10, i: 2, p: { k, v: vals }, o: 0 });
+  const ser = (k, vals) => JSON.stringify({ t: { t: 10, i: 0, p: { k: ['data'], v: [{ t: 10, i: 1, p: { k, v: vals }, o: 0 }] }, o: 0 }, f: 127, m: [] });
+  for (const b of [ser(['action'], [S('GetCurrentTheme')]), ser(['action'], [S('RefreshNeptuneEntitlements')]),
+    ser(['action', 'skipNotebooks', 'state'], [S('RefreshNavPane'), N(3), obj(['accountInfo'], [S('someone')])]),
+    ser(['enableCache', 'source', 'action'], [N(1), S('refreshNav'), S('GetTasksFlyout')]),
+    ser(['filterThreadType', 'cursor', 'action'], [S('taskchat|coworkchat'), N(1), S('GetUnifiedTasks')]),
+    ser(['filterThreadType', 'cursor', 'action'], [S('taskchat'), S('next-page'), S('GetUnifiedTasks')])]) assert.equal(v(fnUrl, FN, b), 'pass', b);
+  for (const b of [ser(['action'], [S('DeleteConversation')]), ser(['action', 'state'], [S('PinChat'), obj(['x'], [S('GetCurrentTheme')])]),
+    ser(['action', 'enableCache', 'source'], [S('GetTasksFlyout'), N(1), S('refreshNav')]), null]) assert.equal(v(fnUrl, FN, b), 'hold', String(b));
+  assert.equal(v('https://copilot.cloud.microsoft/_serverFn/abc', FN, ser(['action'], [S('GetCurrentTheme')])), 'hold');
+  const el = (verb, data, conv = '') => JSON.stringify({ ConversationId: conv, clientData: { Verb: verb, Data: data, MessageId: '', VisualElementId: '' } });
+  assert.equal(v(elUrl, EL, el('list_plugins', { skipFunctions: true, skipUnacquired: true })), 'pass');
+  assert.equal(v(elUrl, EL, el('list_plugins', { skipFunctions: true }, 'c1')), 'pass');
+  for (const b of [el('toggle_plugin', { id: 'p' }), el('list_plugins', { nested: { x: 1 } }), null]) assert.equal(v(elUrl, EL, b), 'hold', String(b));
 });

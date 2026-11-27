@@ -128,6 +128,60 @@ test('talk tracks: quotes with Do and Screen under them, Do and Say sections, Ru
   assert.deepEqual(plain.beats[0].lines.map(l => [l.say, l.do]), [['Hello.', ['Click Plugins.']], ['Bye.', []]]);
 });
 
+test('a capture read without a browser: a field\'s <label>, by its for or around it, as the browser ties them', () => {
+  const sc = readScreen([{ key: 'main', html: '<label for="code">Promo code</label><input id="code" placeholder="Enter code">'
+    + '<label><input type="checkbox"> Remember me</label>'
+    + '<label for="d">Not a field</label><div id="d" tabindex="0">Its own words</div>'
+    + '<label for="far">Far field<input placeholder="Inside"></label><input id="far">' }]);
+  assert.deepEqual(sc.controls.map(c => [c.role, c.name]), [['textbox', 'Promo code'], ['checkbox', 'Remember me'], ['div', 'Its own words'], ['textbox', 'Inside'], ['textbox', 'Far field']]);
+});
+
+test('a capture read without a browser: where words are (its frame, a live region, a time, a message, a named part) and what a control is set to', () => {
+  const sc = readScreen([{ key: 'main', html: '<header><a href="/">Admin center</a></header><nav aria-label="Pages"><a href="/a">Plugins</a></nav>'
+    + '<main><article><h2>Copilot said:</h2><p>Fabrikam moved the date.</p></article><section aria-label="Skill preview: triage"><h3>When to use</h3></section>'
+    + '<p>Updated <relative-time datetime="2026-11-17">Nov 17, 2026</relative-time></p><div role="status">Message sent</div>'
+    + '<div role="tablist"><div role="tab" aria-selected="true">Overview</div><div role="tab" aria-selected="false">Files</div></div>'
+    + '<input aria-label="Promo code" value="SPRING25"><input type="search" aria-label="Search tools" value="IQ"><div contenteditable="true" aria-label="Message">Hello there</div>'
+    + '<aside><h4>Details</h4></aside><article><header><span>Card header</span></header></article></main>' }]);
+  const item = t => sc.items.find(i => i.text === t) || {};
+  assert.deepEqual(['Admin center', 'Plugins', 'Details', 'Card header', 'When to use'].map(t => !!item(t).nav), [true, true, true, false, false]);
+  assert.deepEqual([item('Message sent').live, item('Nov 17, 2026').time, item('Updated Nov 17, 2026').time], [true, true, true]);
+  assert.equal(item('Copilot said:').article, item('Fabrikam moved the date.').article);
+  assert.equal(sc.regions[item('When to use').region][0], 'Skill preview: triage');
+  const ctl = n => sc.controls.find(c => c.name === n) || {};
+  assert.deepEqual([ctl('Overview').selected, ctl('Files').selected, ctl('Promo code').value, ctl('Search tools').value, ctl('Message').value], [true, false, 'SPRING25', 'IQ', 'Hello there']);
+  // Each tab is a row of the tablist; what isn't in a list has neither.
+  assert.deepEqual([ctl('Overview').list, ctl('Files').list, sc.lists[ctl('Overview').list]], [ctl('Files').list, ctl('Files').list, [null, 'tablist', null]]);
+  assert.notEqual(ctl('Overview').row, ctl('Files').row);
+  assert.deepEqual([item('Overview').row, ctl('Promo code').list, item('When to use').list], [ctl('Overview').row, undefined, undefined]);
+  // A list inside a row of another: what's in it is in the inner list, in its own rows.
+  const nested = readScreen([{ key: 'main', html: '<ul aria-label="Groups"><li><h3>Our numbers</h3><ul role="listbox" aria-label="Results"><li role="option">Fabrikam Orders</li><li role="option">Contoso Returns</li></ul></li></ul>' }]);
+  const n = t => nested.items.find(i => i.text === t);
+  assert.deepEqual([nested.lists[n('Our numbers').list][0], nested.lists[n('Fabrikam Orders').list][0]], ['Groups', 'Results']);
+  assert.deepEqual([n('Fabrikam Orders').list === n('Contoso Returns').list, n('Fabrikam Orders').row === n('Contoso Returns').row], [true, false]);
+  // A list that shows only the rows in view: the rows it says it has, the rows a capture put back, and a tooltip that
+  // describes one row (in a portal) in that row; one that describes two rows in neither.
+  const grid = readScreen([{ key: 'main', html: '<div role="grid" aria-rowcount="40"><div role="row"><span aria-describedby="t1">Contoso Ledger</span></div>'
+    + '<div role="row" data-d1-row=""><span aria-describedby="t2 both">Fabrikam Payroll</span><button>Open</button></div><div role="row"><span aria-describedby="both">Contoso Notes</span></div></div>'
+    + '<ul><li aria-setsize="7">Spring</li></ul><div role="tooltip" id="t1"><span>Name: Contoso Ledger</span></div><div role="tooltip" id="both"><span>Owner: Avery Chen</span></div>' }]);
+  const g = t => grid.items.find(i => i.text === t) || {}, open = grid.controls.find(c => c.name === 'Open');
+  assert.deepEqual(Object.values(grid.lists).map(l => l[2]), [40, 7]);
+  assert.deepEqual([g('Name: Contoso Ledger').row, g('Owner: Avery Chen').row], [g('Contoso Ledger').row, undefined]);
+  assert.deepEqual([g('Name: Contoso Ledger').tip, g('Contoso Ledger').tip], [true, undefined]);
+  assert.deepEqual([g('Contoso Ledger').restored, g('Fabrikam Payroll').restored, open.restored, open.row === g('Fabrikam Payroll').row], [undefined, true, true, true]);
+});
+
+test('a capture read without a browser: an id names what getElementById finds, the first with it', () => {
+  const sc = readScreen([{ key: 'main', html: '<span id="t">Close panel</span><span id="t">Other</span><button aria-labelledby="t">x</button>' }]);
+  assert.deepEqual(sc.controls.map(c => [c.role, c.name]), [['button', 'Close panel']]);
+});
+
+test('a capture read without a browser: what\'s in a closed dialog is marked shut', () => {
+  const sc = readScreen([{ key: 'main', html: '<h1>Pull request</h1><dialog><h2>Response time details</h2><button>Close</button></dialog><dialog open><p>Saved as draft</p></dialog>' }]);
+  assert.deepEqual(sc.items.map(i => [i.text, !!i.shut]), [['Pull request', false], ['Response time details', true], ['Close', true], ['Saved as draft', false]]);
+  assert.deepEqual(sc.controls.map(c => [c.name, !!c.shut]), [['Close', true]]);
+});
+
 test('a capture read without a browser: controls as the outline names them, words as the screen shows them', () => {
   const sc = readScreen([{ key: 'main', html: '<html><head><style>b{}</style></head><body><header><h1>Catalog</h1></header><h1>Tools</h1><div role="tab">Users<span>Users</span></div><button aria-label="Save: Save skill"><span>Save</span></button><span aria-hidden="true">Certified</span><button style="display:none">Hidden</button><a href="/x">Agents&#x200e;</a><div role="textbox" contenteditable="true" aria-label="Message"></div></body></html>' }, { key: 'f4', html: '<button data-testid="badge">Add endorsement</button>' }]);
   assert.deepEqual(sc.controls.map(c => [c.role, c.name, c.frame || null]), [['tab', 'Users', null], ['button', 'Save: Save skill', null], ['link', 'Agents', null], ['textbox', 'Message', null], ['button', 'Add endorsement', 'f4']]);

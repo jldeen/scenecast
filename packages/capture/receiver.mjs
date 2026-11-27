@@ -8,11 +8,13 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync, rmS
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { loadDemo } from '@stuntdouble/core/lib/demo.mjs';
+import { fencePort, fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
 
 const argv = process.argv.slice(2);
 const demo = argv.includes('--demo') || !argv[0] ? loadDemo(argv) : null;
 let RAW = demo ? demo.raw : argv[0];
 const PORT = +(demo ? (process.env.REPLICA_RX_PORT || demo.cfg.receiverPort) : (argv[1] || 47621));
+fencePort(PORT); fencePath(RAW, 'raw folder');
 for (const d of ['snaps', 'streams', 'shots', 'blobs']) mkdirSync(join(RAW, d), { recursive: true });
 let URLS = join(RAW, 'urls.json');
 let urlIndex = existsSync(URLS) ? JSON.parse(readFileSync(URLS, 'utf8')) : {};
@@ -218,4 +220,6 @@ createServer(async (req, res) => {
     }
   } catch (e) { log('error ' + e.stack); json(res, 500, { error: String(e) }); }
 }).on('error', e => { console.error(`receiver: ${e.code === 'EADDRINUSE' ? `port ${PORT} is in use (another receiver?)` : e.message}`); process.exit(1); })
-  .listen(PORT, '127.0.0.1', () => log(`receiver on http://127.0.0.1:${PORT} → ${RAW}`));
+  // Idle connections kept 65 s, not Node's 5: a caller busy for a few seconds between two commands (building the
+  // offline walker under load) reused one this end had just closed, and its command failed ("other side closed").
+  .listen(PORT, '127.0.0.1', function () { this.keepAliveTimeout = 65000; this.headersTimeout = 66000; log(`receiver on http://127.0.0.1:${PORT} → ${RAW}`); });

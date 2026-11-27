@@ -2,7 +2,8 @@
 // browser and the recording looked for them in another, so Record said "not open" right after "Ready to record").
 //   1. The receiver serves one recorder: every command goes to the same browser, the other waits (standby).
 //   2. Preflight says the recorder is in two places, by name, instead of passing.
-//   3. A recorder built for a test's port never finds a presenter's Scenecast (an app's receiver on 47621-47630).
+//   3. A recorder built for a test's port never looks where a presenter's Scenecast is (the app's receivers,
+//      47621–47630): read from the recorder itself, so the test never starts or asks anything there.
 //   node packages/selftest/two-recorders.mjs
 import './reap.mjs';
 import { spawn } from 'node:child_process';
@@ -13,10 +14,12 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { buildExtension } from '@stuntdouble/capture/build.mjs';
 import { send } from '@stuntdouble/capture/cli.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RX = 47697, APP_RX = 47629;
+const RX = 47697;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-two-'));
+await selftestGuard({ tmp, receivers: [RX], extensions: [RX] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1200)}` : '')); if (!ok) fails.push(name); };
@@ -40,7 +43,6 @@ async function browser(name) {
 try {
   buildExtension(join(tmp, 'ext'), RX);
   await receiver(RX, 'cli');
-  await receiver(APP_RX, 'app');
   const one = await browser('one');
   for (let i = 0; i < 60; i++) { const p = await ping(RX); if (p && p.agent && p.agent.id) break; await sleep(250); }
   const first = (await ping(RX)).agent.id;
@@ -51,8 +53,9 @@ try {
   const seen = new Set();
   for (let i = 0; i < 12; i++) { const r = await send({ op: 'diag' }, 30, RX); seen.add(r.ok ? `${r.value.agent} ${r.value.pages.length}` : r.error); }
   check('every command goes to the same browser', seen.size === 1 && [...seen][0].startsWith(first), [...seen].join(' | '));
-  const app = await ping(APP_RX);
-  check('a test\'s recorder never finds a presenter\'s Scenecast (an app receiver on 47621-47630)', app && !app.agent.id && app.agent.secsAgo === null, JSON.stringify(app.agent));
+  const sw = readFileSync(join(tmp, 'ext', 'sw.js'), 'utf8');
+  const ports = new Function([/const DEFAULT_PORT = \d+;/, /const APP_PORTS = .*;/, /const PORTS = .*;/].map(re => sw.match(re)[0]).join('\n') + '\nreturn PORTS;')();
+  check('a test\'s recorder never looks where a presenter\'s Scenecast is (the app\'s receivers, 47621–47630)', ports.includes(RX) && ports.every(p => p < 47621 || p > 47630), JSON.stringify(ports));
   // Preflight says so (through the engine, as the app runs it).
   const demo = join(tmp, 'demo');
   const { mkdirSync } = await import('node:fs');

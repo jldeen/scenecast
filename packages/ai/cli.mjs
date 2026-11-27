@@ -6,8 +6,19 @@
 //   ai plan    --demo <dir> --walkthrough <recording.json> [--script <file>]   the same from one walkthrough
 //   ai approve --demo <dir>     approve plan.md as it is now (its writes included; any edit needs approving again)
 //   ai reset   --demo <dir>     reset.md: the plan's writes undone, and a read-only checklist
+//   ai reground --demo <dir> [--walk <dir>] [--plan <file>]   the plan's proofs again, on the screens a live walk
+//                               read today (walk.json and walk-screens/; --plan: the plan it walked, if not plan.md):
+//                               reground.md, and plan.reground.md (plan.md stays)
 //   ai finish  --demo <dir>     after the build: her script for the guide, the beat keys, focus points, the review
 //   ai record  --demo <dir>     Record for me: run the approved plan in the browser while recording; then the script
+//   ai record  --demo <dir> --unattended   the same in the capture browser, with nobody there: pre-approved writes
+//                               only, the read-only guard, the demo's reset before and after (run.json)
+//   ai ready   --demo <dir> [--plan f] [--keep dir]  look-only: each start service answers, and the rows the plan
+//                                         clicks are in its list (the run's first check); one line, ready or not
+//   ai check   --demo <dir>     reset.md's Check read live in the capture browser, read-only: each line pass, wrong or
+//                               can't, with a picture (.out/ai/check.json); a live walk runs it first too
+//   ai walk    --demo <dir> [--live]       a read-only walk of plan.md: the recording's screens, or the product in the
+//                               capture browser (walk.json); a walker never writes
 //   ai script  --demo <dir>     the talk track (script.md) from what was recorded
 //   ai coach   --demo <dir>     Coach me: the next step and line, live, until the recording stops
 //   ai answer  --demo <dir> <id> <do|self|skip|stop|done> [text]      answer a question the AI asked
@@ -27,7 +38,7 @@ const exitWhenOut = code => process.stdout.write('', () => process.exit(code));
 const args = process.argv.slice(2);
 const sub = args[0];
 const emit = e => console.log('@ai ' + JSON.stringify(e));
-const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model', '--plan', '--yes', '--script', '--walkthrough'].includes(args[i - 1]));
+const pos = () => args.filter((a, i) => i > 0 && !a.startsWith('--') && !['--demo', '--from', '--set', '--model', '--plan', '--yes', '--script', '--walkthrough', '--walk'].includes(args[i - 1]));
 
 async function main() {
   const settings = readSettings();
@@ -66,9 +77,12 @@ async function main() {
     }
     case 'approve': { const { approve } = await import('./make.mjs'); return approve(demo()); }
     case 'reset': { const { writeReset } = await import('./make.mjs'); const r = await writeReset(demo()); return { undo: r.reset.undo.length, checks: r.reset.checks.length, needs: r.reset.needs, file: 'reset.md' }; }
+    case 'reground': { const d = demo(); const { reground } = await import('./reground.mjs'); const { loadPacks } = await import('./make.mjs'); return reground(d, { from: arg(args, '--walk', null), plan: arg(args, '--plan', null), packs: await loadPacks(d) }); }
     case 'finish': { const { finish } = await import('./finish.mjs'); return finish({ demo: demo(), emit }); }
     case 'record': {
       const d = demo();
+      // Unattended is the capture browser's only: refused before the check, whose fixes would reach her own browser.
+      if (args.includes('--unattended') && d.cfg.recorder !== 'capture') throw new Error('an unattended run needs the capture browser: "recorder": "capture" in demo.json, then preflight');
       // The same readiness check as Record's (--checked: the app ran it just now).
       if (!args.includes('--checked')) {
         const pf = await import('@stuntdouble/core/lib/preflight.mjs');
@@ -77,12 +91,33 @@ async function main() {
         if (!r.ready) throw new Error(pf.notReady(r));
       }
       const { recordForMe } = await import('./drive.mjs');
+      if (args.includes('--unattended')) return recordForMe({ demo: d, emit, unattended: true });
       const { writeScript } = await import('./write.mjs');
       const m = await model(d);
       const r = await recordForMe({ demo: d, model: m, settings, emit });
       emit({ event: 'stage', name: 'script', label: 'Writing the talk track from what happened' });
       const s = await writeScript({ demo: d, model: m, settings, emit });
       return { ...r, script: { beats: s.beats, lines: s.lines } };
+    }
+    // Ready? The run's first check, look-only (the capture browser): each start service answered, and the rows the plan
+    // clicks in its list. --plan <file>: that plan's rows, not the demo's plan.md. --keep <dir>: every answer's body
+    // there (a person's local look; never the repo). → { ready, line, services }
+    case 'ready': {
+      const d = demo(), { readyCheck } = await import('./unattended.mjs'), { parsePlan } = await import('./plan.mjs');
+      const pf = arg(args, '--plan', null), keep = arg(args, '--keep', null);
+      const { readFileSync: rf } = await import('node:fs');
+      return readyCheck({ demo: d, emit, plan: pf ? parsePlan(rf(pf, 'utf8')) : null, keep });
+    }
+    case 'check': { const { checkLive } = await import('./unattended.mjs'); const c = await checkLive({ demo: demo(), emit }); return { pass: c.pass, wrong: c.wrong, cant: c.cant, secs: c.secs, lines: c.lines.map(l => ({ text: l.text, status: l.status, ...(l.why ? { why: l.why } : {}) })), ...(c.ownStatus ? { ownStatus: c.ownStatus } : {}) }; }
+    case 'walk': {
+      const d = demo();
+      if (args.includes('--live')) { const { walkLive } = await import('./unattended.mjs'); const w = await walkLive({ demo: d, emit }); return { ...(w.check && !w.check.error ? { check: { pass: w.check.pass, wrong: w.check.wrong, cant: w.check.cant } } : {}), ...(w.ownStatus ? { ownStatus: w.ownStatus } : {}), secs: w.secs, beats: w.beats.map(b => ({ beat: b.beat, secs: b.secs, steps: b.steps.map(s => s.status) })), held: (w.guard.held || []).length, suspect: w.suspect || null }; }
+      const { walkerFromDemo } = await import('./walker.mjs'), { walkPlan } = await import('./walk.mjs'), { readPlan } = await import('./draft.mjs');
+      const walker = walkerFromDemo(d);
+      if (!walker) throw new Error('build the demo first: an offline walk needs its screens');
+      const w = await walkPlan(readPlan(d), walker, { emit });
+      walker.save();
+      return { beats: w.beats.map(b => ({ beat: b.beat, steps: b.steps.map(s => s.status) })) };
     }
     case 'bench': {
       const d = demo(), { bench } = await import('./bench.mjs');
@@ -105,7 +140,7 @@ async function main() {
       return { sent: readdirSync(dir).sort().map(f => { const r = JSON.parse(readFileSync(join(dir, f), 'utf8')); return { file: join(dir, f), task: r.task, model: r.model, at: r.at, chars: r.prompt.length, pageText: r.pageText }; }) };
     }
     default:
-      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|approve|reset|finish|record|bench|script|coach|answer|stop|sent');
+      console.log('scenecast ai status|sign-in|sign-out|models|runtime|settings|plan|approve|reset|reground|finish|record|ready|bench|script|coach|answer|stop|sent');
       return null;
   }
 }

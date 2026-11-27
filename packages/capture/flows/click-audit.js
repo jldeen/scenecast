@@ -35,8 +35,12 @@ const BLOCK0 = /^(Send|Like|Dislike|Delete|Remove|Duplicate|Start dictation|Stop
 const BLOCK = ARGS.block ? new RegExp(BLOCK0.source + '|' + ARGS.block, 'i') : BLOCK0;
 
 
-// Controls: the listed ones, then (pick) every visible expander or menu button that isn't blocked.
-let controls = ARGS.controls || [];
+// Controls: the recording's own menus (ARGS.floorClicks: [{ id, name, ctl, ctlRect, restore }], found here by
+// hover-page floorClick, clicked whatever the cap or the time, put back their recorded way; out.floorClicks: per id,
+// { found, shown, why?, picture? }; their time, out.floorMs, isn't counted against maxS), the listed ones, then (pick)
+// every visible expander or menu button that isn't blocked.
+out.floorClicks = {}; out.floorMs = 0;
+let controls = [...(ARGS.floorClicks || []).map(e => ({ name: e.name, floor: e, ...(e.restore === 'toggle' ? { noEscape: true } : {}) })), ...(ARGS.controls || [])];
 if (ARGS.pick) {
   const picked = await ev(([o, block]) => {
     const B = new RegExp(block, 'i');
@@ -57,7 +61,7 @@ if (ARGS.pick) {
   const have = new Set(controls.map(c => c.name));
   controls = controls.concat(picked.filter(c => !have.has(c.name)));
 }
-if (ARGS.skipNames) { const sk = new Set(ARGS.skipNames); out.skippedSeen = controls.filter(c => sk.has(c.name)).length; controls = controls.filter(c => !sk.has(c.name)); }
+if (ARGS.skipNames) { const sk = new Set(ARGS.skipNames); out.skippedSeen = controls.filter(c => !c.floor && sk.has(c.name)).length; controls = controls.filter(c => c.floor || !sk.has(c.name)); }
 out.controls = controls.map(c => c.name);
 // Nothing to click (none here, or all clicked on another screen): done, before any waiting.
 if (!controls.length && !ARGS.probeSend) { out.frameUrl = f === p.mainFrame() ? null : f.url().split('?')[0]; out.secs = Math.round((Date.now() - t0) / 1000); return out; }
@@ -70,35 +74,91 @@ async function settle(maxMs = 3000) {
   while (Date.now() - s < maxMs) { await H.poll(150); const g = await ev(() => window.__d1h.sig()); if (g !== last) { last = g; stable = Date.now(); } else if (Date.now() - stable > 500) break; }
 }
 const vis = () => ev(() => window.__d1h.visibleOps());
+// Put back: nothing the click opened left (an app's own churn on other attributes aside; put-back checks the screen
+// after the kind).
+const left = () => ev(() => window.__d1h.openOps());
+// Back on the screen the audit is on (ARGS.reland, the saved screen: its address and title) after a reload or a click
+// that went elsewhere (Teams opens its last conversation, its address unchanged): out.relanded / out.lost.
+const reland = async () => {
+  if (!ARGS.reland || !H.reland) return true;
+  const ok = await H.reland(p, ARGS.reland).catch(() => false);
+  if (ok) out.relanded = (out.relanded || 0) + 1; else out.lost = (out.lost || 0) + 1;
+  return ok;
+};
+const titleKey = t => String(t || '').replace(/^\(\d+\)\s*/, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+const titleNow = () => p.mainFrame().evaluate(() => document.title).catch(() => '');
+// After a reload, a new page helper: the page's own churn learned again (else every click after it reads as stuck).
+// A reloaded app goes on loading for a while (Teams draws a channel's posts for 10 s and more): it waits for a second
+// with no change (15 s at most), then learns 2 s of what changes by itself. out.relearnMs: the time it took.
+const relearn = async () => { const s0 = Date.now(); await move(...NEUTRAL); await quiet(1000, ARGS.relearnMaxMs || 15000); await ev(() => window.__d1h.takeRest()); await sleep(2000); await ev(() => window.__d1h.noise()); out.relearnMs = (out.relearnMs || 0) + Date.now() - s0; out.relearns = (out.relearns || 0) + 1; };
 async function backToRest() {
-  // Reload as a last resort (the page's own state, nothing in the tenant).
-  await p.goto(url0, { waitUntil: 'domcontentloaded' }); await sleep(ARGS.reloadWaitMs || 9000);
+  // Reload as a last resort (the page's own state, nothing in the tenant). An address with a #/ route (the admin
+  // center's) only changes its route when it's opened again: no new page, and what a click changed stays (its bell's
+  // count, cleared when Notifications opened). Then a real reload.
+  const was = await p.mainFrame().evaluate(() => performance.timeOrigin).catch(() => null);
+  await p.goto(url0, { waitUntil: 'domcontentloaded' });
+  if (was !== null && was === await p.mainFrame().evaluate(() => performance.timeOrigin).catch(() => null)) { await p.reload({ waitUntil: 'domcontentloaded' }).catch(() => {}); out.hardReloads = (out.hardReloads || 0) + 1; }
+  await sleep(ARGS.reloadWaitMs || 9000);
   // Teams opens the last conversation after a reload: back to the channel the audit was on.
   if (ARGS.reopenText) { for (let i = 0; i < 30; i++) { const el = p.getByText(ARGS.reopenText, { exact: true }).first(); if (await el.isVisible().catch(() => false)) { const b = await el.boundingBox(); await p.mouse.click(b.x + b.width / 2, b.y + b.height / 2); await sleep(5000); break; } await sleep(1000); } }
+  await reland();
   f = await pickFrame(); off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox();
-  await install(); await move(...NEUTRAL); await quiet(400, 3000);
+  await install(); await relearn();
 }
 
+// Menus, dialogs and listboxes showing (a click that opened one and read as nothing: see the retry below).
+const overlays = () => ev(() => [...document.querySelectorAll('[role=menu],[role=dialog],[role=alertdialog],[role=listbox],[aria-modal=true]')].filter(e => { const b = e.getBoundingClientRect(); return b.width > 2 && b.height > 2 && getComputedStyle(e).visibility !== 'hidden'; }).length).catch(() => 0);
+const floorShot = async name => ARGS.floorShot ? ARGS.floorShot(`click-${ARGS.page}-${name}`).catch(() => null) : null;
+let floorAt = null;
 for (const c of controls) {
-  if (Date.now() - t0 > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
+  if (floorAt !== null) { out.floorMs += Date.now() - floorAt; floorAt = null; }
+  if (!c.floor && Date.now() - t0 - out.floorMs > (ARGS.maxS || 900) * 1000) { out.timedOut = true; break; }
+  if (c.floor) floorAt = Date.now();
   out.tried++;
-  const r = { name: c.name };
+  const r = { name: c.name, ...(c.floor ? { floor: c.floor.id } : {}) };
+  // A recorded menu: found here now (its point read just before the click, as every control's).
+  const mOf = async () => { if (!c.floor) return c; const fm = await ev(e => window.__d1h.floorClick(e), c.floor).catch(() => null); if (fm) r.found = fm.found; return fm ? fm.m : null; };
   try {
     await move(...NEUTRAL); await quiet(300, 2000);
-    const ctl = await ev(m => window.__d1h.markCtl(m), c);
-    if (!ctl) { r.skip = 'not on screen'; out.results.push(r); continue; }
+    const m0 = await mOf();
+    const ctl = m0 ? await ev(m => window.__d1h.markCtl(m), m0) : null;
+    if (!ctl) { r.skip = 'not on screen'; if (c.floor) out.floorClicks[c.floor.id] = { found: null, shown: false }; out.results.push(r); continue; }
     await sleep(100);
     await ev(() => window.__d1h.takeRest());
-    const urlBefore = p.url();
+    // Its point now, just before the press: a page that moved since (a banner on top) is clicked where the control
+    // is. Gone from the screen: found once more.
+    const now = await ev(() => window.__d1h.ctlPos());
+    if (!now) {
+      const m1 = await mOf();
+      const again = m1 ? await ev(m => window.__d1h.markCtl(m), m1) : null;
+      if (!again) { r.skip = 'left the screen'; if (c.floor) out.floorClicks[c.floor.id] = { found: r.found || null, shown: false, why: 'its control left the screen', picture: await floorShot(`${c.floor.id}-left`) }; out.results.push(r); continue; }
+      await sleep(100); await ev(() => window.__d1h.takeRest());
+      Object.assign(ctl, again); r.refound = true; out.refound = (out.refound || 0) + 1;
+    } else if (now.x !== ctl.x || now.y !== ctl.y) { Object.assign(ctl, now); r.moved = true; out.moved = (out.moved || 0) + 1; }
+    const urlBefore = p.url(), titleBefore = titleKey(await titleNow()), ov0 = await overlays();
     await move(ctl.x, ctl.y, 3); await sleep(120);
     await p.mouse.down(); await sleep(60); await p.mouse.up();
     const tc = Date.now();
     await sleep(150); await move(...NEUTRAL); await settle(c.settleMs || 3000);
     r.ms = Date.now() - tc;
-    if (p.url() !== urlBefore) { r.navigated = p.url().slice(0, 120); await p.goto(urlBefore, { waitUntil: 'domcontentloaded' }); await sleep(8000); f = await pickFrame(); await install(); out.results.push(r); continue; }
+    if (p.url() !== urlBefore) { r.navigated = p.url().slice(0, 120); if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'it went to another screen', picture: await floorShot(`${c.floor.id}-elsewhere`) }; await p.goto(urlBefore, { waitUntil: 'domcontentloaded' }); await sleep(8000); await reland(); f = await pickFrame(); off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox(); await install(); await relearn(); out.results.push(r); continue; }
+    // Another screen at the same address (an app's own route: its title says where): back where the audit was.
+    { const tn = await titleNow(); if (ARGS.reland && titleKey(tn) !== titleBefore) { r.navigated = 'title: ' + String(tn).slice(0, 120); if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'it went to another screen', picture: await floorShot(`${c.floor.id}-elsewhere`) }; if (!(await reland())) await backToRest(); else { f = await pickFrame(); off = f === p.mainFrame() ? { x: 0, y: 0 } : await (await f.frameElement()).boundingBox(); await install(); await relearn(); } out.results.push(r); continue; } }
     r.visible = await vis();
-    const res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
-    if (!res || !r.visible) { r.effect = 'none'; await ev(() => window.__d1h.unmark()); out.results.push(r); continue; }
+    let res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
+    // A recorded menu that opened (a menu or dialog more is showing) and read as nothing: its parts' kind was learned
+    // as the page's own churn (after a reload, as Teams' "Settings and more" was). Closed, the learned churn
+    // forgotten, and pressed once more.
+    if ((!res || !r.visible) && c.floor && (await overlays()) > ov0) {
+      r.again = true;
+      await p.keyboard.press('Escape'); await sleep(150); await settle(1500);
+      await ev(() => { window.__d1h.noiseSigs.clear(); window.__d1h.takeRest(); });
+      const q = await ev(() => window.__d1h.ctlPos()).catch(() => null); if (q) { ctl.x = q.x; ctl.y = q.y; if (q.rect) ctl.rect = q.rect; }
+      await move(ctl.x, ctl.y, 3); await sleep(120); await p.mouse.down(); await sleep(60); await p.mouse.up();
+      await sleep(150); await move(...NEUTRAL); await settle(c.settleMs || 3000);
+      r.visible = await vis(); res = await ev(rect => window.__d1h.clickResult(rect), ctl.rect);
+    }
+    if (!res || !r.visible) { r.effect = 'none'; if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: false, why: 'nothing opened', picture: await floorShot(c.floor.id) }; await ev(() => window.__d1h.unmark()); out.results.push(r); continue; }
     const ser = await f.evaluate(H.SERX({ parts: '[data-d1-hpart]' }));
     await ev(() => window.__d1h.unmark());
     try { await H.fetchResources(p, [{ urls: ser.urls, frame: f }]); } catch (e) {}
@@ -115,25 +175,49 @@ for (const c of controls) {
     if (c.snap) { try { await H.snap(p, c.snap, { shot: false }); r.snap = c.snap; } catch (e) { r.snapError = String(e).slice(0, 120); } }
     // Putting it back, the way the page does.
     let restore = null, reopen = null, revertMs = null;
-    if (c.auto) { const s = Date.now(); while (Date.now() - s < c.auto) { await sleep(150); if (!(await vis())) { restore = 'auto'; revertMs = Date.now() - tc; break; } } }
-    if (!restore && !c.noEscape) { await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await vis())) restore = 'escape'; }
-    if (!restore) {
-      const again = await ev(() => { const e = window.__d1h.ctl; if (!e || !e.isConnected) return null; const b = e.getBoundingClientRect(); return b.width > 2 ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null; });
-      if (again) { await move(again.x, again.y, 3); await sleep(100); await p.mouse.click(off.x + again.x, off.y + again.y); await sleep(200); await move(...NEUTRAL); await settle(2000); if (!(await vis())) restore = 'toggle'; }
+    if (c.auto) { const s = Date.now(); while (Date.now() - s < c.auto) { await sleep(150); if (!(await left())) { restore = 'auto'; revertMs = Date.now() - tc; break; } } }
+    // In order, before any reload: its recorded way (Escape, or for a toggle the control again), the control again (the
+    // same element, or one drawn in its place that says it's on: aria-pressed or aria-expanded true, or "toggle" in its
+    // test id, as Teams' Find in channel), the close button of what it opened, then a control that says it opens or
+    // closes something.
+    if (!restore && !c.noEscape) {
+      await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await left())) restore = 'escape';
+      // Once more, from inside what it opened (a search box clears on the first Escape and closes on the second; a
+      // dialog that didn't take focus closes once it has it: Teams' Find in channel, its account menu).
+      if (!restore) {
+        await ev(() => { const o = [...document.querySelectorAll('[role=dialog],[role=menu],[aria-modal=true],[role=search]')].filter(e => { const b = e.getBoundingClientRect(); return b.width > 2 && b.height > 2; }).pop(); const t = o && (o.querySelector('input,textarea,[tabindex]:not([tabindex="-1"]),button') || o); if (t && t.focus && !(o && o.contains(document.activeElement))) t.focus(); }).catch(() => {});
+        await p.keyboard.press('Escape'); await sleep(150); await settle(1500); if (!(await left())) restore = 'escape';
+      }
     }
-    // Only a control that says it opens, closes, expands or shows something: never a menu or list item.
-    const cand = newCtls.find(x => /^(open|close|expand|show|collapse|hide|back)\b/i.test(x.label || ''));
+    if (!restore) {
+      let again = await ev(() => { const e = window.__d1h.ctl; if (!e || !e.isConnected) return null; const b = e.getBoundingClientRect(); return b.width > 2 ? { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) } : null; });
+      if (!again) {
+        const m1 = await mOf(), g = m1 ? await ev(m => window.__d1h.markCtl(m), m1).catch(() => null) : null, at = (g && g.attrs) || {};
+        if (g && (at['aria-pressed'] === 'true' || at['aria-expanded'] === 'true' || /toggle/i.test(`${at['data-testid'] || ''} ${at['data-tid'] || ''}`))) again = g;
+      }
+      if (again) { await move(again.x, again.y, 3); await sleep(100); await p.mouse.click(off.x + again.x, off.y + again.y); await sleep(200); await move(...NEUTRAL); await settle(2000); if (!(await left())) restore = 'toggle'; }
+    }
+    // Only a control that says it opens, closes, expands or shows something: never a menu or list item. What it opened
+    // has its own close button first (Close, Dismiss, Cancel alone, or an ×).
+    const closer = newCtls.find(x => /^(close|dismiss)\b|^cancel$|^[×✕✖xX]$/i.test(String(x.label || '').trim()));
+    const cand = closer || newCtls.find(x => /^(open|close|expand|show|collapse|hide|back)\b/i.test(x.label || ''));
     if (!restore && cand) {
       await move(cand.x, cand.y, 3); await sleep(100); await p.mouse.click(off.x + cand.x, off.y + cand.y); await sleep(200); await move(...NEUTRAL); await settle(2500);
-      if (!(await vis())) { restore = 'reopen'; reopen = cand.spec; }
+      if (!(await left())) { restore = 'reopen'; reopen = cand.spec; }
     }
-    if (!restore) { restore = 'stuck'; r.stuckOps = await vis(); await backToRest(); }
+    // A click on the empty spot the sweep rests on, as a person dismisses a popup. Kept as 'escape' (the replica
+    // closes it on Escape or a click elsewhere; the build and player know no other way for it), marked dismissed.
+    if (!restore) { await move(...NEUTRAL, 3); await sleep(100); await p.mouse.click(off.x + NEUTRAL[0], off.y + NEUTRAL[1]); await sleep(200); await settle(2000); if (!(await left())) { restore = 'escape'; r.dismissed = true; } }
+    // Stuck: what stayed (for the record), then a reload as the last resort.
+    if (!restore) { restore = 'stuck'; r.stuckOps = await vis(); r.stayed = await ev(() => window.__d1h.visibleOpsList().slice(0, 6).map(x => x.slice(0, 160))).catch(() => null); await backToRest(); }
     await H.post('/hover', { page: 'click-' + ARGS.page, n: out.n, kind: 'click', cand: { text: c.name }, ctl, res, parts: ser.parts, urls: ser.urls, inline: ser.inline, restore, reopen, revertMs, clickMs: r.ms, auto: c.auto || null, shot, css, frameUrl: f.url().split('?')[0], frameOff: off, viewport: vw });
     Object.assign(r, { n: out.n, restore, reopen: reopen && reopen.sel, ops: (res.ops || []).length, portals: (res.portals || []).length });
+    if (c.floor) out.floorClicks[c.floor.id] = { found: r.found, shown: true, restore };
     out.n++;
-  } catch (e) { r.error = String(e && e.message || e).slice(0, 200); try { await backToRest(); } catch (e2) {} }
+  } catch (e) { r.error = String(e && e.message || e).slice(0, 200); if (c.floor && !out.floorClicks[c.floor.id]) out.floorClicks[c.floor.id] = { found: r.found || null, shown: false, why: r.error, picture: await floorShot(`${c.floor.id}-error`) }; try { await backToRest(); } catch (e2) {} }
   out.results.push(r);
 }
+if (floorAt !== null) out.floorMs += Date.now() - floorAt;
 
 // Send: what it looks like with the box empty, after typing, and when hovered; then the box is emptied again.
 if (ARGS.probeSend) {
@@ -170,6 +254,8 @@ if (ARGS.probeSend) {
   out.sendProbe = { empty: probe.empty && probe.empty.attrs, typed: probe.typed && probe.typed.attrs, boxText: probe.boxText };
 }
 await move(...NEUTRAL); await quiet(300, 1500);
+// Its mark off the last control it clicked (a later save of the screen must never carry it).
+await ev(() => document.querySelectorAll('[data-d1-ctl]').forEach(e => e.removeAttribute('data-d1-ctl'))).catch(() => {});
 if (ARGS.snapId && out.n) out.snap = (await H.snap(p, ARGS.snapId, { shot: false })).docs.slice(0, 3);
 out.frameUrl = f === p.mainFrame() ? null : f.url().split('?')[0];
 out.secs = Math.round((Date.now() - t0) / 1000);

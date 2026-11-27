@@ -103,3 +103,25 @@ test('demo.json static: a folder of the demo served as is, with byte ranges and 
   assert.equal(await part.text(), '234');
   assert.equal((await fetch(base + '/trace/../demo.json')).status, 404);
 });
+
+test('a server started for a check goes when what started it goes (REPLICA_EXIT_WITH_PARENT)', { skip: process.platform === 'win32' }, async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'scenecast-serve-parent-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, 'data', 'snaps'), { recursive: true });
+  writeFileSync(join(dir, 'demo.json'), JSON.stringify({ name: 'fixture', apps: [{ id: 'a', key: 'A' }] }));
+  writeFileSync(join(dir, 'recording.json'), JSON.stringify({ states: { start: { app: 'a', snap: 'start' } }, beats: [{ active: 'a', states: { a: 'start' } }] }));
+  writeFileSync(join(dir, 'data', 'snaps', 'start.html'), '<p>x</p>');
+  const port = await new Promise(res => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  const serve = fileURLToPath(new URL('./serve.mjs', import.meta.url));
+  // A parent that starts the server and ends without stopping it (a check that crashed).
+  const parent = spawn(process.execPath, ['-e', `const c = require('node:child_process').spawn(process.execPath, [${JSON.stringify(serve)}, '--demo', ${JSON.stringify(dir)}, '--port', '${port}', '--no-editor'], { stdio: 'ignore', env: { ...process.env, REPLICA_NO_OPEN: '1', REPLICA_EXIT_WITH_PARENT: '1' } }); console.log(c.pid); setTimeout(() => process.exit(0), 1500);`], { stdio: ['ignore', 'pipe', 'inherit'] });
+  let out = ''; parent.stdout.on('data', d => { out += d; });
+  await new Promise(res => parent.on('exit', res));
+  const pid = +out.trim();
+  assert.ok(pid > 0, out);
+  const alive = () => { try { process.kill(pid, 0); return true; } catch (e) { return false; } };
+  for (let i = 0; i < 50 && alive(); i++) await new Promise(r => setTimeout(r, 100));
+  const left = alive();
+  if (left) process.kill(pid, 'SIGTERM');
+  assert.equal(left, false, 'the server outlived its parent');
+});

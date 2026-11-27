@@ -15,12 +15,13 @@ import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'no
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readScreen } from '@scenecast/script/html.mjs';
-import { findItem } from './find.mjs';
+import { findItem, norm } from './find.mjs';
+import { holds, proofWords, isBox, leftOut } from './landing.mjs';
+import { parseReset } from './reset.mjs';
 
 // Bump when what readScreen() gives changes: screens cached by an older reader are read again.
-const READER = 9;
+const READER = 19;
 
-const norm = s => String(s || '').toLowerCase().replace(/[“”"'’]/g, '').replace(/\s+/g, ' ').trim();
 
 // A recorded matcher's name and what it pins down: its aria-label, test id, text.
 export function specParts(m) {
@@ -46,12 +47,52 @@ function specMatches(m, c, sc) {
   return false;
 }
 
-export function walkerFromDemo(demo, { cache = true } = {}) {
+// Two captures of one screen, item by item in page order: the items that changed in place (up to three for up to
+// three, between items both have): [what one says, what the other says].
+export function inPlace(a, b) {
+  const seq = sc => (sc.items || []).filter(i => !i.shut).map(i => ({ t: String(i.text || '').toLowerCase().replace(/[^a-z0-9$%]+/g, ' ').trim() })).filter(x => x.t);
+  const A0 = seq(a), B0 = seq(b);
+  let i = 0, j = 0;
+  while (i < A0.length && i < B0.length && A0[i].t === B0[i].t) i++;
+  while (j < A0.length - i && j < B0.length - i && A0[A0.length - 1 - j].t === B0[B0.length - 1 - j].t) j++;
+  const A = A0.slice(i, A0.length - j), B = B0.slice(i, B0.length - j);
+  if (A.length * B.length > 4e6) return null;
+  const W = B.length + 1, L = new Uint16Array((A.length + 1) * W);
+  for (let x = A.length - 1; x >= 0; x--) for (let y = B.length - 1; y >= 0; y--) L[x * W + y] = A[x].t === B[y].t ? L[(x + 1) * W + y + 1] + 1 : Math.max(L[(x + 1) * W + y], L[x * W + y + 1]);
+  const changed = [], hunk = { del: [], ins: [] };
+  const close = () => {
+    // A number that changed is the number rule's (landing.mjs), not this one's: "× 1" for "× 2" isn't counted.
+    const was = hunk.del.map(x => x.t).join(' | '), now = hunk.ins.map(x => x.t).join(' | ');
+    if (hunk.del.length && hunk.ins.length && hunk.del.length <= 3 && hunk.ins.length <= 3 && was.replace(/\d+/g, '#') !== now.replace(/\d+/g, '#')) changed.push([was, now]);
+    hunk.del = []; hunk.ins = [];
+  };
+  let x = 0, y = 0;
+  while (x < A.length || y < B.length) {
+    if (x < A.length && y < B.length && A[x].t === B[y].t) { close(); x++; y++; }
+    else if (y >= B.length || (x < A.length && L[(x + 1) * W + y] >= L[x * W + y + 1])) hunk.del.push(A[x++]);
+    else hunk.ins.push(B[y++]);
+  }
+  close();
+  return { changed };
+}
+
+// leaveOut: what she leaves out of the replica (reset.md's Leave out, parseReset's); without it, the demo's reset.md's.
+// Each screen of its app has it marked left (landing.mjs leftOut), so it never proves a step; the cache keeps the screens
+// as read.
+export function walkerFromDemo(demo, { cache = true, leaveOut } = {}) {
   const flowPath = join(demo.dir, 'flow.json');
   if (!existsSync(flowPath)) return null;
   const flow = JSON.parse(readFileSync(flowPath, 'utf8'));
   const S = flow.states || {};
   const apps = (flow.apps || []).map(a => ({ id: a.id, key: a.key || null, title: a.title || a.id, ...(((demo.cfg || {}).apps || []).find(x => x.id === a.id) || {}) }));
+  const leave = leaveOut !== undefined ? leaveOut || [] : (() => { try { return parseReset(readFileSync(join(demo.dir, 'reset.md'), 'utf8')).leaveOut; } catch (e) { return []; } })();
+  const leftMemo = new WeakMap();
+  const mark = (sc, app) => {
+    const values = leave.filter(l => l.app === app).flatMap(l => l.shows || l.values || []);
+    if (!sc || !values.length) return sc;
+    if (!leftMemo.has(sc)) leftMemo.set(sc, leftOut(sc, values));
+    return leftMemo.get(sc);
+  };
   const cacheFile = join(demo.out || join(demo.dir, '.out'), 'ai', 'screens.json');
   let saved = {};
   if (cache) try { saved = JSON.parse(readFileSync(cacheFile, 'utf8')); } catch (e) { saved = {}; }
@@ -92,7 +133,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     // The page's own title (a Copilot task's name), from the build's record of the capture.
     let title = st.title || null;
     if (!title) try { title = JSON.parse(readFileSync(join(demo.dir, 'data', 'snaps', snap + '.json'), 'utf8')).title || null; } catch (e) {}
-    const out = { id, app: st.app, title: title || id, ...sc, fills: (st.fill || []).map(f => ({ ...f, name: specName(f) })), captured: !!src };
+    const out = mark({ id, app: st.app, title: title || id, ...sc, fills: (st.fill || []).map(f => ({ ...f, name: specName(f) })), captured: !!src }, st.app);
     memo.set(k, out);
     return out;
   };
@@ -106,7 +147,7 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
     if (!st) return null;
     for (const g of flow.groups || []) for (const o of g.open || []) if (o.closed === (st.snap || id) && g.app === st.app) {
       const k = `${id}~open`;
-      if (!memo.has(k)) { const src = builtOf(o.open) || rawOf(o.open); memo.set(k, src ? { id, app: st.app, ...readScreen(src.docs()), fills: [] } : null); }
+      if (!memo.has(k)) { const src = builtOf(o.open) || rawOf(o.open); memo.set(k, src ? mark({ id, app: st.app, ...readScreen(src.docs()), fills: [] }, st.app) : null); }
       return memo.get(k) ? { screen: memo.get(k), label: (g.template || {}).label || null } : null;
     }
     return null;
@@ -255,5 +296,106 @@ export function walkerFromDemo(demo, { cache = true } = {}) {
   const recorded = (at, s, typed = '') => shaped(sigOf(at), follow(sigOf(at), s, typed));
   // The name of the control a recorded matcher picks on a screen (one recorded by its test id has no name of its own).
   const nameOf = (sig, m) => { for (const sc of [screen(sig), shown(sig)]) { const c = sc && sc.controls.find(x => specMatches(m, x, sc)); if (c && c.name) return c.name; } return null; };
-  return { flow, apps, start, screen, view, shown, opened, step, recorded, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [] };
+  // Words Copilot wrote as the recording ran, which a run gets differently: its answers (what a stream added inside the
+  // message it wrote: an article holding new sentences), what it named in words (a heading a stream added, or a
+  // button, named in three words or more, a button's without a number: a chat's or a task's title), and the names it
+  // made up (weekly-risk-review, a report's file name), wherever they show. What the app shows around an answer (a count, a status, a side panel)
+  // isn't Copilot's: a count is a number that can change (landing.mjs), the rest stays.
+  let wrote = null;
+  const wnorm = t => String(t || '').toLowerCase().replace(/[^a-z0-9$%]+/g, ' ').trim();
+  const words = t => wnorm(t).split(' ').filter(Boolean).length;
+  const writtenSets = () => {
+    if (wrote) return wrote;
+    const answers = new Set(), titles = new Set(), names = new Set();
+    for (const [name, st] of Object.entries(flow.streams || {})) {
+      let first = null;
+      try { const f = JSON.parse(readFileSync(join(demo.dir, 'data', 'streams', name + '.json'), 'utf8')).frames[0]; first = readScreen([{ key: 'main', html: readFileSync(join(demo.dir, 'data', 'streams', name, f.file), 'utf8') }]); } catch (e) {}
+      const to = first && st.to && screen(st.to);
+      if (!to) continue;
+      const had = wnorm(first.text), added = to.items.filter(i => wnorm(i.text) && !had.includes(wnorm(i.text)));
+      const said = new Set(added.filter(i => i.article !== undefined && words(i.text) >= 4).map(i => i.article));
+      for (const i of added) {
+        if (i.article !== undefined && said.has(i.article)) answers.add(wnorm(i.text));
+        else if ((i.kind === 'control' && words(i.text) >= 3 && !/\d/.test(i.text)) || (i.role === 'heading' && words(i.text) >= 3)) titles.add(wnorm(i.text));
+        for (const m of String(i.text).toLowerCase().matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+)+(?:\.(?:md|html|txt|json|csv|docx|xlsx|pptx))?\b/g)) if (m[0].split('-').length >= 3 || m[0].length >= 12) names.add(wnorm(m[0]));
+      }
+    }
+    return (wrote = { answers: [...answers], titles: [...titles], names: [...names] });
+  };
+  const named = n => { const { names } = writtenSets(); return names.some(x => ` ${n} `.includes(` ${x} `)); };
+  const written = t => {
+    const n = wnorm(t);
+    if (!n) return false;
+    const { answers, titles } = writtenSets();
+    if (answers.includes(n) || titles.includes(n) || (words(n) >= 4 && answers.some(x => x.includes(n)))) return true;
+    return named(n);
+  };
+  // An item on a screen Copilot wrote: written words, or inside something named by a name it made up (the skill it
+  // wrote, shown in a section named weekly-risk-review).
+  const writtenItem = (i, sc) => {
+    if (written(i.text)) return true;
+    for (let r = i.region, k = 0; r !== undefined && r !== null && k < 20; k++) { const [label, up] = (sc.regions || {})[r] || []; if (label === undefined) break; if (named(wnorm(label))) return true; r = up; }
+    return false;
+  };
+  // Words that differ between captures of one screen, which a run can't count on: a greeting that changes on each
+  // visit, a title in Recent. A screen's captures: its own and its variants (flow.variants: zoom levels v200-teams,
+  // toggles tog-home-collapsed, plugins-more), taken at other moments. Only what changed in place counts (one
+  // item for another between items both have), not what one capture adds, and not a number (that's a number that can
+  // change). Another screen at the same address isn't a capture of this one: what a step changed (the cart before and
+  // after adding a ticket) would count, and those are the words that prove it.
+  let shaky = null;
+  const snapScreen = snap => {
+    const src = rawOf(snap) || builtOf(snap);
+    if (!src) return null;
+    const k = `snap:${snap}`, key = `${READER}:${src.from}:${statSync(src.from).mtimeMs}`;
+    if (saved[k] && saved[k].key === key) return saved[k].screen;
+    const sc = readScreen(src.docs());
+    saved[k] = { key, screen: sc }; dirty = true;
+    return sc;
+  };
+  const variantOf = v => { const m = /^v\d+-(.+)$/.exec(v) || /^tog-(.+)-[a-z]+$/.exec(v) || /^(.+)-(?:more|open)$/.exec(v); return m && S[m[1]] ? m[1] : null; };
+  // Every capture the recording has of a screen: its own, then its variants'.
+  const captures = sig => [screen(sig), ...(flow.variants || []).filter(v => variantOf(v) === sig).map(v => mark(snapScreen(v), (S[sig] || {}).app))].filter(Boolean);
+  const unstableSet = () => {
+    if (shaky) return shaky;
+    const set = [], pairs = [];
+    for (const v of flow.variants || []) {
+      const id = variantOf(v);
+      if (!id) continue;
+      const a = screen(id), b = snapScreen(v);
+      if (a && b) pairs.push([a, b, S[id].app]);
+    }
+    for (const [a, b, app] of pairs) {
+      const d = inPlace(a, b);
+      if (d) set.push(...d.changed.map(([x, y]) => ({ app, x: x.split(' | '), y: y.split(' | ') })));
+    }
+    save();
+    return (shaky = set);
+  };
+  // Words one capture of a place in the app shows and the other doesn't: a whole item that changed, or three words or
+  // more of one.
+  const unstable = (t, app = null) => {
+    const n = wnorm(t), long = n.split(' ').length >= 3;
+    if (!n) return false;
+    const has = side => side.includes(n) || (long && side.some(u => ` ${u} `.includes(` ${n} `)));
+    return unstableSet().some(c => (!app || c.app === app) && has(c.x) !== has(c.y));
+  };
+  // Every text the recording typed (its boxes' values, the path's typing): another step's words, never a proof.
+  const typedTexts = () => [...new Set([...Object.values(S).flatMap(st => (st.fill || []).map(f => f.value)), ...recPath.filter(p => p.type && p.text).map(p => p.text)].filter(v => typeof v === 'string' && v.trim()))];
+  // Whether a step landed as its plan says, on the screen a walk reached (`at`): the screen its "Lands on" names, and
+  // its proof holding there, checked the way a run checks the live page (landing.mjs). → { ok, why }: ok is true or
+  // false (a walk counts anything else as a miss); why says what's wrong, or what wasn't checked. A step with nothing
+  // to land on passes. Typing the recording didn't capture with these words (the plan's own prompt where another was
+  // recorded) passes with a note: the recording can't show it, a run checks it.
+  function landed(at, s) {
+    const sig = sigOf(at), l = s && s.lands;
+    if (!l || (!l.screen && !l.kind)) return { ok: true, why: null };
+    if (l.screen && sig !== l.screen) return { ok: false, why: `on ${sig}, not ${l.screen}` };
+    const sc = screen(sig);
+    if (!sc) return { ok: false, why: `no screen ${sig}` };
+    if (!l.kind) return { ok: true, why: 'nothing to check this step by' };
+    if (s.kind === 'type' && (s.differs || (l.kind === 'box' && !sc.controls.some(c => isBox(c) && c.value)))) return { ok: true, why: `the recording has other words typed here${s.differs ? `: ${s.differs}` : ''}` };
+    return holds(sc, l) ? { ok: true, why: null } : { ok: false, why: `${proofWords(l)} isn't on ${sig}` };
+  }
+  return { flow, apps, start, screen, captures, view, shown, opened, step, recorded, landed, written, writtenItem, unstable, typedTexts, moves, bridge, control, find, nameOf, save, states: Object.keys(S), streams: flow.streams || {}, path: flow.path || [], leaveOut: leave };
 }

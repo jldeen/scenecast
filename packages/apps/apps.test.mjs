@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack } from './index.mjs';
+import { loadPacks, mergePack, packFor, packForName, packsForDemo, activePacks, applyPacks, writeFor, safeFor, checkPack, themePack, ownStatusFor, noticesFor, writeNames } from './index.mjs';
 import { flowDefaults, htmlPasses } from './build.mjs';
 import { packRules } from '@stuntdouble/core/lib/text-rules.mjs';
 import { elementEnd } from '@stuntdouble/capture/compose.mjs';
@@ -123,6 +123,22 @@ test('a plan step maps to the write it makes, and checks only look', () => {
   const bad = { ...cop, writes: [{ id: 'w', what: 'x', on: { kind: 'click', target: 'X' }, undo: null, check: { steps: ['Click "Delete"'] } }], apis: { a: { open: 'https://x', host: 'h' } }, notes: ['Bear', 'er ', 'x'.repeat(24)].join('') };
   const problems = checkPack(bad);
   assert.ok(problems.some(p => /could change something/.test(p)) && problems.some(p => /credential or token/.test(p)));
+  // A write's own calls: one kind each (/^METHOD host\/path$/), with a why; never every path or a read.
+  const op = e => checkPack({ ...cop, writes: [{ ...cop.writes[0], opens: [e] }], guard: { ...cop.guard, why: { ...cop.guard.why, [e]: 'x' } } }).filter(p => /opens/.test(p));
+  assert.deepEqual(op('/^POST rt-[a-z]+\\.example\\.com\\/v1\\/messages$/'), []);
+  assert.equal(op('/^POST rt\\.example\\.com\\/.*$/').length, 1);
+  assert.equal(op('/^GET rt\\.example\\.com\\/v1\\/x$/').length, 1);
+  assert.equal(op('rt.example.com/v1/messages').length, 1);
+  assert.equal(op('/^POST rt\\.example\\.com\\/v1\\/x$|.*x$/').length, 1);
+  assert.deepEqual(op('/^POST rt\\.example\\.com\\/v1\\/(?:x|y)$/'), []);
+  assert.equal(checkPack({ ...cop, writes: [{ ...cop.writes[0], opens: ['/^POST rt\\.example\\.com\\/v1\\/x$/'] }] }).filter(p => /opens/.test(p)).length, 1);
+  // What a write makes, named from the screen just before it: Copilot names a skill differently each run.
+  const save = cop.writes.find(w => w.id === 'save-skill');
+  assert.deepEqual(writeNames(save, 'Save skill Skill old-name Changes 1 new file … Save skill\nSkill supplier-ship-date-change-triage  Changes 1 new file').values, { skill: 'supplier-ship-date-change-triage' });
+  assert.deepEqual(writeNames(save, 'You already have this skill.').missing, ['skill']);
+  const nm = n => checkPack({ ...cop, writes: [{ ...save, names: n }] }).filter(p => /names/.test(p));
+  assert.equal(nm({ skill: '/Skill ([a-z-]+) Changes/' }).length, 0);
+  for (const bad of [{ skill: '/Skill [a-z-]+/' }, { skill: '/(a)(b)/' }, { skill: 'Skill x' }, ['x']]) assert.equal(nm(bad).length, 1, JSON.stringify(bad));
 });
 
 test('safe steps only open a picker or a menu: never a write, never a sign-in', () => {
@@ -136,4 +152,22 @@ test('safe steps only open a picker or a menu: never a write, never a sign-in', 
   assert.match(bad({ id: 's', on: { kind: 'click', target: 'Filter' }, what: 'Filter changes nothing' }).join(), /only opens a picker or a menu/);
   assert.match(bad({ id: 's', on: { kind: 'click', target: 'Certified' }, what: 'Certified only opens a menu' }).join(), /write endorse has the same step/);
   assert.match(bad({ id: 's', on: { kind: 'press', key: 'Enter' }, what: 'Enter only opens the menu' }).join(), /kind: 'click'/);
+});
+
+test("where an app shows your own status: Teams' avatar, from its pack; a pack's ownStatus needs a pattern with a group, expect and why", () => {
+  const cfg = { apps: [{ id: 'teams', url: 'https://teams.cloud.microsoft/' }, { id: 'admin', url: 'https://admin.cloud.microsoft/' }] };
+  assert.deepEqual(ownStatusFor(cfg).map(o => [o.app, o.label, o.role, o.expect, o.waitS]), [['teams', 'Teams', 'button', ['Available'], 90]]);
+  // Its name with the account after the status (Nov 19), and without (Nov 25).
+  const rx = new RegExp(ownStatusFor(cfg)[0].name.slice(1, -1));
+  assert.deepEqual(['Your profile, status Available for jessica@contoso.test in Contoso ', 'Your profile, status Away', 'Your profile, status Do not disturb'].map(n => (rx.exec(n) || [])[1]), ['Available', 'Away', 'Do not disturb']);
+  const bad = checkPack({ id: 'x', match: ['x.test'], ownStatus: { name: '/status/', expect: [] } });
+  assert.deepEqual(bad.filter(b => b.startsWith('ownStatus')).map(b => b.split(' ')[1]), ['name', 'expect', 'why']);
+});
+
+test("a notice a replica never keeps: Teams' \"Loading latest updates\", by its words, with its close button and wait", () => {
+  const cfg = { apps: [{ id: 'teams', url: 'https://teams.cloud.microsoft/' }, { id: 'admin', url: 'https://admin.cloud.microsoft/' }] };
+  assert.deepEqual(noticesFor(cfg).map(o => [o.app, o.label, o.notices.map(n => [n.words, n.waitS])]), [['teams', 'Teams', [['Loading latest updates', 60]]]]);
+  assert.ok(new RegExp(...noticesFor(cfg)[0].notices[0].close.slice(1).split(/\/(?=[a-z]*$)/)).test('Close'));
+  const bad = checkPack({ id: 'x', match: ['x.test'], notices: [{ words: '', close: 'Close' }] });
+  assert.deepEqual(bad.filter(b => b.startsWith('notices')).map(b => b.split(' ')[1]), ['words', 'close', 'why']);
 });

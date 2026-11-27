@@ -305,4 +305,275 @@ export function startFixture({ chatPort = 47801, adminPort = 47802 } = {}) {
   return { chat: `http://127.0.0.1:${chatPort}/`, admin: `http://127.0.0.1:${adminPort}/`, close: () => { a.close(); b.close(); } };
 }
 
+// A third app with a server of its own, for the unattended capture pass (selftest/capture-run.mjs): its writes change
+// what the server keeps, so a test can see what reached it.
+//   tasks http://127.0.0.1:47821/  a task list (each with "Delete <name>"), a "New task" box that adds one on Enter
+//         (the page moves to /task/<id>), a Sync switch, Refresh (it posts, asks for a count the server doesn't have:
+//         a 404, then says "Up to date: <n> tasks"), and a catalog service it calls as it loads and as you type
+//         (GET /api/catalog; catalog(mode) makes it answer 500),
+//         Archive all, and Help on another host (localhost). Every load posts /api/telemetry. The page gets a session
+//         (GET /api/session) and sends it as Authorization; deleting a task without it is refused (401), so an undo by
+//         the API has to use the page's own session. ?signin=<ms>&tid=<tenant id>: the page keeps a sign-in library's
+//         account key for that tenant (MSAL's shape) after that many ms (never: none), for the capture start's wait.
+//         suggest(true): the page also lists Suggested items from GET /api/suggested ({ items, order }: the items by ref,
+//         drawn in order's order; an order ref with no item draws an empty row) with their count, and a Teams tree it
+//         draws from its own store (localStorage, as Teams keeps its teams in IndexedDB): Leave out's two ways.
+//         chips(true): a Chips button that draws Chips one in the page (/chips/1), then two and three (Next; each its
+//         own address, pushed, as an app's in-page routes are): six plain buttons a screen that show
+//         nothing on hover, and on the third a "Slow chip" (in a wrapper, as a card's anchor often is) whose card
+//         shows 1.5 s after the pointer arrives, a "Quiet chip" that shows nothing, and a sidebar-like section (Projects,
+//         whose card "Collapse projects" shows after 0.3 s; Add project here; a Recent list): the recorded hovers' floor.
+//         moving(true): Chips one also has three buttons with a card each (Tip one, two, three) and a Details expander,
+//         (no aria-controls: a click's, not a step group's), and the page moves while it's swept: a 90 px banner comes on top as the pointer leaves the first tip it
+//         hovered, and another just after the recorder picks Details to click (a page that moves mid-sweep).
+//         extras('fix' | 'stuck'): a side section outside the chips screens (Projects, expanded, with its list) whose
+//         Peek button collapses it on hover; Chips one also has four menus (Menu A–D, each opening a menu that Escape
+//         closes) and a Dud menu that opens nothing; Chips two has a Help button whose hover opens a Help pane that
+//         Escape doesn't close ('stuck': it's kept in the tab's session, so a reload draws it again). Each chips
+//         screen has its own title ("Chips one | Fixture Tasks"), the side section a "Chips one" button that goes
+//         back there, and Chips one an "Elsewhere" menu that swaps the screen for another at the same address (as
+//         Teams' conversations do), a "Find here" toggle drawn again when pressed whose bar Escape doesn't close (as
+//         Teams' Find in channel), a "Fill box" menu that also fills the side section's Ask box (as a suggestion fills
+//         Copilot's composer), and a status button ("Your status Away") with a menu.
+//         Chips three always has an avatar ("Profile picture of Pat Doe.") whose people card shows after 0.3 s.
+//         presence({ self, other }): the page keeps a sign-in library's account key (its account 00…aa) and asks
+//         POST /api/presence for its account and a colleague's every 2 s, as Teams' getpresence: the Me button names
+//         your status from the answer ("Your profile, status <self>") and "Pat Doe: <other>" shows the colleague's.
+//         Each request body is kept (presenceBodies), to check it went out as the page sent it.
+//         counts('late' | 'never'): the home screen's Inbox button is named with its count ("Inbox, 2 unread items")
+//         8 s after the page loads (after the run's first save of it), or never (just "Inbox"), as admin's bell loads
+//         its count; by default, at once.
+//         notice('close' | 'stuck'): 0.3 s after Chips is clicked, Teams' "Loading latest updates…" notice comes on top
+//         of the page and stays, with its own Close button ('close') or none ('stuck').
+//         status(text): the page also shows your own status on a "Me" button ("Your profile, status <text>", as Teams'
+//         avatar), and follows GET /api/status as it changes (status(null): none).
+//   notes http://127.0.0.1:47824/  a panel in the tasks page's frame, on a host of its own with a session of its own
+//         (it refuses a call without it): "Pin note" and "Unpin note" post to it, for a write inside a frame and an
+//         API undo that has to go from that frame.
+// The chips screens (main's markup), drawn in place by the tasks page, as an app's in-page routes are.
+const chipsPart = (n, moving = false, extras = null) => `<h1>Chips ${['', 'one', 'two', 'three'][n]}</h1>${n === 1 && extras ? `<p class="menus"><button type="button" data-testid="find-toggle-button" aria-pressed="false" aria-label="Find here">Find</button>${['A', 'B', 'C', 'D'].map(x => `<button type="button" class="mb" aria-haspopup="menu" aria-expanded="false">Menu ${x}</button>`).join('')}<button type="button" aria-haspopup="menu">Dud menu</button><button type="button" aria-haspopup="menu" id="away">Elsewhere</button><button type="button" class="mb" aria-haspopup="menu" aria-expanded="false" data-fill="Prompt text">Fill box</button><button type="button" class="mb" data-tid="me-btn" aria-label="Your status Away" aria-haspopup="menu" aria-expanded="false">PD</button></p>` : ''}${n === 2 && extras ? '<p><button id="helpb">Help</button></p>' : ''}${n === 1 && moving ? '<p data-moving><button id="tip1">Tip one</button><br><button id="tip2">Tip two</button><br><button id="tip3">Tip three</button></p><p><button id="details" aria-expanded="false">Details</button></p><div id="dpanel" hidden>Details panel open</div>' : ''}<p>
+${n === 3 ? '<span class="wrap"><button id="slow">Slow chip</button></span><button>Quiet chip</button><button id="pat" aria-label="Profile picture of Pat Doe.">PD</button>' : ''}${(n === 3 ? ['c1', 'c2', 'c3', 'c4'] : [1, 2, 3, 4, 5, 6].map(i => (n === 1 ? 'a' : 'b') + i)).map(x => `<button>Chip ${x}</button>`).join('')}
+</p>${n < 3 ? `<p><button id="next" data-n="${n + 1}">Next</button></p>` : '<div class="sect"><button id="proj">Projects</button><button>Add project here</button><span>Recent</span><span>Item B</span><span>Item A</span></div>'}`;
+const tasksPage = (port, notesPort, suggest = false, status = null, chips = false, notice = null, extras = null, counts = null, presence = false) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Fixture Tasks</title>
+<link rel="icon" href="/icon.png"><style>
+body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:0;background:#fff;color:#1f2328}
+main{max-width:720px;margin:32px auto;padding:0 24px} h1{font-size:22px;margin:0 0 12px}
+.bar{display:flex;gap:8px;align-items:center;margin:0 0 16px} button{font:inherit;padding:4px 10px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;cursor:pointer}
+button[role=switch][aria-checked=true]{background:#1f6feb;color:#fff} ul{list-style:none;padding:0;margin:0 0 16px}
+li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #eaeef2}
+textarea{width:100%;box-sizing:border-box;font:inherit;padding:8px;border:1px solid #d0d7de;border-radius:6px}
+.card{position:fixed;background:#fff;border:1px solid #c9ccd1;border-radius:6px;padding:8px 10px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+</style></head><body><main>
+<h1>Tasks</h1>
+${status ? `<p><button id="me" aria-label="Your profile, status ${status}">Me</button></p>` : ''}${presence ? '<p><button id="me" aria-label="Your profile, status Unknown">Me</button> <span id="pat">Pat Doe: Unknown</span></p>' : ''}
+<div class="bar"><button role="switch" aria-checked="false" aria-label="Sync" id="sync">Sync</button><span id="syncText">Sync is off</span>
+<button aria-label="Refresh" id="refresh">Refresh</button><button aria-label="Archive all" id="archive">Archive all</button>
+<a href="http://localhost:${port}/help" id="help">Help</a>${chips ? '<button id="chipsbtn">Chips</button>' : ''}<button id="inbox" aria-label="${counts ? 'Inbox' : 'Inbox, 2 unread items'}">Inbox</button><span id="fresh" role="status"></span></div>
+<ul id="list" aria-label="Task list"></ul>
+<p id="none">No tasks yet</p>
+<textarea aria-label="New task" id="box" rows="2" placeholder="New task"></textarea>
+<p id="saved" role="status"></p>
+<iframe title="Notes" src="http://127.0.0.1:${notesPort}/" style="width:100%;height:90px;border:1px solid #d0d7de;border-radius:6px"></iframe>
+${suggest ? '<h2>Suggested</h2><p id="sugCount"></p><ul id="sug" aria-label="Suggested"></ul><h2>Teams</h2><div role="tree" aria-label="Teams" id="teams"></div>' : ''}
+</main><script>
+const $ = id => document.getElementById(id);
+let AUTH = '';
+const EXTRAS = ${JSON.stringify(extras)};
+// Presence, as Teams': the sign-in library's key for this account, then the presence service every 2 s.
+const PKEY = '00000000-0000-0000-0000-0000000000aa.99999999-0000-0000-0000-000000000099-login.windows.net-idtoken-fixture-99999999-0000-0000-0000-000000000099---';
+if (${JSON.stringify(!!presence)}) {
+  try { localStorage.setItem(PKEY, '1'); } catch (e) {}
+  const ask = () => fetch('/api/presence', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mris: ['8:orgid:00000000-0000-0000-0000-0000000000aa', '8:orgid:00000000-0000-0000-0000-0000000000bb'] }) }).then(r => r.json()).then(list => {
+    for (const e of list) { const a = (e.presence || {}).availability; if (/00000000-0000-0000-0000-0000000000aa/.test(e.mri)) document.getElementById('me').setAttribute('aria-label', 'Your profile, status ' + a); else document.getElementById('pat').textContent = 'Pat Doe: ' + a; }
+  }).catch(() => {});
+  ask(); setInterval(ask, 2000);
+} else try { localStorage.removeItem(PKEY); } catch (e) {}
+if (${JSON.stringify(counts)} === 'late') setTimeout(() => { const b = $('inbox'); if (b) b.setAttribute('aria-label', 'Inbox, 2 unread items'); }, 8000);
+if (EXTRAS !== 'stuck') try { sessionStorage.removeItem('fx-pane'); } catch (e) {}
+if ($('chipsbtn')) {
+  // The chips screens, in place: Slow chip's card shows 1.5 s after the pointer arrives.
+  const bind = () => {
+    const nx = $('next'); if (nx) nx.addEventListener('click', () => show(+nx.dataset.n));
+    const cardOn = (el, text, ms) => { if (!el) return; let t = null, card = null; el.addEventListener('mouseenter', () => { t = setTimeout(() => { const r = el.getBoundingClientRect(); card = document.createElement('div'); card.className = 'card'; card.setAttribute('role', 'tooltip'); card.textContent = text; card.style.left = r.x + 'px'; card.style.top = (r.bottom + 6) + 'px'; document.body.appendChild(card); }, ms); }); el.addEventListener('mouseleave', () => { clearTimeout(t); if (card) card.remove(); card = null; }); };
+    cardOn($('slow'), 'Takes its time', 1500);
+    cardOn($('proj'), 'Collapse projects', 300);
+    cardOn($('pat'), 'PD Pat Doe Engineer Profile pat@example.com', 300);
+    if (EXTRAS) {
+      // The side section, outside the chips screens (it stays as they change), and what each extra does.
+      if (!$('xside')) {
+        document.body.insertAdjacentHTML('afterbegin', '<aside aria-label="Side" id="xside"><button id="peek">Peek</button> <button id="fold" aria-expanded="true">Projects</button><ul id="xlist"><li>Alpha</li><li>Beta</li></ul><button id="goone">Chips one</button><textarea aria-label="Ask" id="ask"></textarea></aside>');
+        document.addEventListener('click', e => { const t = e.target.closest('[data-testid=find-toggle-button]'); if (!t) return; const on = t.getAttribute('aria-pressed') !== 'true', n = t.cloneNode(true); n.setAttribute('aria-pressed', String(on)); t.replaceWith(n); const fb = $('findbar'); if (on && !fb) n.insertAdjacentHTML('afterend', '<span role="search" id="findbar">Find bar <input aria-label="Find text"></span>'); if (!on && fb) fb.remove(); });
+        $('goone').addEventListener('click', () => show(1));
+        $('peek').addEventListener('mouseenter', () => { $('fold').setAttribute('aria-expanded', 'false'); $('xlist').hidden = true; });
+        $('fold').addEventListener('click', () => { const open = $('fold').getAttribute('aria-expanded') !== 'true'; $('fold').setAttribute('aria-expanded', String(open)); $('xlist').hidden = !open; });
+      }
+      const pane = () => { if ($('xpane')) return; document.body.insertAdjacentHTML('beforeend', '<section aria-label="Help pane" id="xpane">Help pane text</section>'); if (EXTRAS === 'stuck') sessionStorage.setItem('fx-pane', '1'); };
+      if (EXTRAS === 'stuck' && sessionStorage.getItem('fx-pane')) pane();
+      if ($('helpb')) $('helpb').addEventListener('mouseenter', pane);
+      if ($('away')) $('away').addEventListener('click', () => { document.querySelector('main').innerHTML = '<h1>Elsewhere</h1><p>Somewhere else</p>'; document.title = 'Elsewhere | Fixture Tasks'; });
+      document.querySelectorAll('.mb').forEach(b => b.addEventListener('click', () => {
+        const open = b.getAttribute('aria-expanded') === 'true';
+        document.querySelectorAll('.fxm').forEach(m => m.remove()); document.querySelectorAll('.mb').forEach(x => x.setAttribute('aria-expanded', 'false'));
+        if (open) return;
+        if (b.dataset.fill) $('ask').value = b.dataset.fill;
+        const r = b.getBoundingClientRect(), m = document.createElement('div');
+        m.className = 'fxm card'; m.setAttribute('role', 'menu'); m.setAttribute('aria-label', b.textContent + ' items');
+        m.innerHTML = '<div role="menuitem">' + b.textContent + ' one</div><div role="menuitem">' + b.textContent + ' two</div>';
+        m.style.left = r.x + 'px'; m.style.top = (r.bottom + 4) + 'px'; document.body.appendChild(m); b.setAttribute('aria-expanded', 'true');
+      }));
+    }
+    ['one', 'two', 'three'].forEach((w, i) => cardOn($('tip' + (i + 1)), 'Tip ' + w + ' card', 200));
+    const d = $('details');
+    if (d) d.addEventListener('click', () => { const open = d.getAttribute('aria-expanded') !== 'true'; d.setAttribute('aria-expanded', String(open)); $('dpanel').hidden = !open; });
+    if (document.querySelector('[data-moving]')) {
+      const banner = id => { if ($(id)) return; const b = document.createElement('div'); b.id = id; b.style.cssText = 'height:90px;background:#ddf4ff'; b.textContent = 'Catching up'; document.body.prepend(b); };
+      ['tip1', 'tip2', 'tip3'].forEach(t => $(t).addEventListener('mouseleave', () => banner('banner1')));
+      new MutationObserver(() => { if (d.hasAttribute('data-d1-ctl')) setTimeout(() => banner('banner2'), 40); }).observe(d, { attributes: true, attributeFilter: ['data-d1-ctl'] });
+    }
+  };
+  const show = (n, push = true) => fetch('/chips-part/' + n).then(r => r.text()).then(h => { document.querySelector('main').innerHTML = h; if (push && location.pathname !== '/chips/' + n) history.pushState({}, '', '/chips/' + n); if (EXTRAS) document.title = 'Chips ' + ['', 'one', 'two', 'three'][n] + ' | Fixture Tasks'; bind(); });
+  $('chipsbtn').addEventListener('click', () => show(1));
+  // Teams' notice, a moment after the click, on top of the page; its own Close button takes it away.
+  const NOTICE = ${JSON.stringify(notice)};
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.querySelectorAll('.fxm').forEach(m => m.remove()); document.querySelectorAll('.mb').forEach(x => x.setAttribute('aria-expanded', 'false')); } });
+  if (NOTICE) $('chipsbtn').addEventListener('click', () => setTimeout(() => { if ($('notice')) return; const b = document.createElement('div'); b.id = 'notice'; b.setAttribute('role', 'status'); b.style.cssText = 'padding:8px;background:#fff8c5'; b.innerHTML = 'Loading latest updates… in the meantime, you can still send and respond to messages' + (NOTICE === 'close' ? ' <button aria-label="Close" id="nclose">×</button>' : ''); document.body.prepend(b); const c = $('nclose'); if (c) c.addEventListener('click', () => b.remove()); }, 300));
+  const at = new RegExp('^/chips/([123])$').exec(location.pathname); if (at) show(+at[1], false);
+}
+if ($('me')) setInterval(() => fetch('/api/status').then(r => r.json()).then(j => { const l = 'Your profile, status ' + j.status; if (j.status && $('me').getAttribute('aria-label') !== l) $('me').setAttribute('aria-label', l); }).catch(() => {}), 400);
+const session = fetch('/api/session').then(r => r.json()).then(j => { AUTH = 'Bearer ' + j.token; }).catch(() => {});
+const post = (u, b) => session.then(() => fetch(u, { method: 'POST', headers: { 'content-type': 'application/json', authorization: AUTH }, body: JSON.stringify(b || {}) })).then(r => r.json());
+function render(st) {
+  if (!$('list')) return;
+  $('list').innerHTML = st.tasks.map(t => '<li><span>' + t.name + '</span><button aria-label="Delete ' + t.name + '" data-id="' + t.id + '">Delete</button></li>').join('');
+  $('none').hidden = st.tasks.length > 0;
+  $('sync').setAttribute('aria-checked', String(st.sync)); $('syncText').textContent = 'Sync is ' + (st.sync ? 'on' : 'off');
+}
+const load = () => session.then(() => fetch('/api/tasks', { headers: { authorization: AUTH } })).then(r => r.json()).then(render);
+$('box').addEventListener('keydown', async e => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  e.preventDefault();
+  const name = $('box').value.trim(); if (!name) return;
+  const r = await post('/api/tasks', { name });
+  history.pushState({}, '', '/task/' + r.id);
+  $('saved').textContent = 'Task saved: ' + name; $('box').value = '';
+  await load();
+});
+$('list').addEventListener('click', async e => { const b = e.target.closest('button[data-id]'); if (!b) return; await fetch('/api/tasks/' + b.dataset.id, { method: 'DELETE', headers: { authorization: AUTH } }); $('saved').textContent = ''; await load(); });
+$('sync').addEventListener('click', async () => { await post('/api/sync', { on: $('sync').getAttribute('aria-checked') !== 'true' }).catch(() => {}); await load(); });
+$('refresh').addEventListener('click', async () => { await post('/api/refresh').catch(() => {}); fetch('/api/fresh-count').catch(() => {}); await load(); const n = $('list').children.length; $('fresh').textContent = 'Up to date: ' + n + (n === 1 ? ' task' : ' tasks'); });
+$('archive').addEventListener('click', async () => { await post('/api/archive').catch(() => {}); await load(); });
+post('/api/telemetry', { at: location.pathname }).catch(() => {});
+// Its catalog service, as it loads and as you type (a lookup, 300 ms after the last key).
+fetch('/api/catalog?from=load').catch(() => {});
+let lookup = null;
+$('box').addEventListener('input', () => { clearTimeout(lookup); lookup = setTimeout(() => fetch('/api/catalog?from=type').catch(() => {}), 300); });
+load();
+if ($('sug')) {
+  fetch('/api/suggested').then(r => r.json()).then(j => {
+    const by = new Map(j.items.map(i => [i.ref, i]));
+    $('sug').innerHTML = j.order.map(o => by.has(o.ref) ? '<li><span>' + by.get(o.ref).name + '</span></li>' : '<li class="blank"></li>').join('');
+    $('sugCount').textContent = j.order.length + ' suggested';
+  }).catch(() => {});
+  if (!localStorage.getItem('fx-teams')) localStorage.setItem('fx-teams', JSON.stringify(['Contoso Alpha', 'Contoso Beta', 'Northwind Ops']));
+  $('teams').innerHTML = JSON.parse(localStorage.getItem('fx-teams')).map(t => '<div role="treeitem" aria-level="2" aria-expanded="true">' + t + '</div><div role="group"><div role="treeitem" aria-level="3">General</div></div>').join('');
+}
+{ const q = new URLSearchParams(location.search), ms = q.get('signin'), tid = q.get('tid');
+  if (ms && ms !== 'never' && tid) setTimeout(() => localStorage.setItem('00000000-0000-0000-0000-0000000000aa.' + tid + '-login.windows.net-idtoken-fixture-' + tid + '---', '1'), +ms); }
+</script></body></html>`;
+
+const notesPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Notes</title><style>
+body{font:14px/1.4 -apple-system,"Segoe UI",system-ui,sans-serif;margin:8px;color:#1f2328} button{font:inherit;padding:4px 10px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;cursor:pointer}
+</style></head><body><span id="state" role="status"></span> <button aria-label="Pin note" id="pin">Pin note</button> <button aria-label="Unpin note" id="unpin">Unpin note</button>
+<script>
+let AUTH = '', pinging = false;
+const session = fetch('/api/session').then(r => r.json()).then(j => { AUTH = 'Bearer ' + j.token; }).catch(() => {});
+const call = (path, method, body) => session.then(() => fetch(path, { method: method || 'GET', headers: { authorization: AUTH, ...(body ? { 'content-type': 'application/json' } : {}) }, body }));
+const show = st => { document.getElementById('state').textContent = st.pinned ? 'Note is pinned' : 'Nothing pinned'; if (st.ping && !pinging) { pinging = true; setInterval(() => call('/api/seen', 'POST', JSON.stringify({ seen: Date.now() })).catch(() => {}), 150); } };
+const load = () => call('/api/note').then(r => r.json()).then(show);
+for (const [id, path] of [['pin', '/api/pin'], ['unpin', '/api/unpin']]) document.getElementById(id).addEventListener('click', async () => { await call(path, 'POST').catch(() => {}); await load(); });
+load();
+</script></body></html>`;
+
+export function startTasks({ port = 47821, notesPort = 47824 } = {}) {
+  const st = { tasks: [], sync: false, refreshes: 0, archives: 0, next: 100001, pinned: false, ping: false, seen: [], unpins: [], catalog: 'ok', suggest: false, status: null, chips: false, moving: false, notice: null, extras: null, counts: null, presence: null, presenceBodies: [] };
+  const token = Math.random().toString(36).slice(2), notesToken = Math.random().toString(36).slice(2);
+  const log = [];
+  const body = q => new Promise(res => { let b = ''; q.on('data', d => { b += d; }); q.on('end', () => { try { res(JSON.parse(b || '{}')); } catch (e) { res({}); } }); });
+  const send = (s, code, type, out) => { s.writeHead(code, { 'content-type': type }); s.end(out); };
+  const view = () => ({ tasks: st.tasks.map(t => ({ ...t })), sync: st.sync });
+  const server = createServer(async (q, s) => {
+    const path = q.url.split('?')[0];
+    log.push(`${q.method} ${path.replace(/\/\d{6}\b/, '/{id}')}`);
+    if (q.method === 'GET' && (path === '/' || /^\/task\/\d+$/.test(path))) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, st.chips, st.notice, st.extras, st.counts, !!st.presence));
+    if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token }));
+    if (q.method === 'GET' && /^\/chips\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', tasksPage(port, notesPort, st.suggest, st.status, true, null, st.extras, st.counts));
+    if (q.method === 'GET' && /^\/chips-part\/[123]$/.test(path)) return send(s, 200, 'text/html; charset=utf-8', chipsPart(+path.slice(-1), st.moving, st.extras));
+    if (q.method === 'POST' && path === '/api/presence') { let b = ''; for await (const d of q) b += d; st.presenceBodies.push(b); const p = st.presence || {}; return send(s, 200, 'application/json', JSON.stringify([{ mri: '8:orgid:00000000-0000-0000-0000-0000000000aa', presence: { availability: p.self || 'Away', activity: p.self || 'Away' } }, { mri: '8:orgid:00000000-0000-0000-0000-0000000000bb', presence: { availability: p.other || 'Busy', activity: 'InAMeeting' } }])); }
+    if (q.method === 'GET' && path === '/api/status') return send(s, 200, 'application/json', JSON.stringify({ status: st.status }));
+    if (q.method === 'GET' && path === '/help') return send(s, 200, 'text/html; charset=utf-8', '<!doctype html><title>Help</title><h1>Help</h1><p>Fixture Tasks help.</p>');
+    if (q.method === 'GET' && path === '/icon.png') return send(s, 200, 'image/png', PNG);
+    if (q.method === 'GET' && path === '/api/tasks') return send(s, 200, 'application/json', JSON.stringify(view()));
+    if (q.method === 'GET' && path === '/api/suggested') return send(s, 200, 'application/json', JSON.stringify({ items: [{ ref: 'r1', name: 'Contoso Notes' }, { ref: 'r2', name: 'Fabrikam Payroll' }, { ref: 'r3', name: 'Northwind Ledger' }], order: [{ ref: 'r2' }, { ref: 'r1' }, { ref: 'r3' }] }));
+    if (q.method === 'GET' && path === '/api/catalog') {
+      const from = new URLSearchParams(q.url.split('?')[1] || '').get('from');
+      // 'drop': the connection closed with no answer at all (a call with no status, as a failed CORS preflight is).
+      if (st.catalog === 'drop') { q.socket.destroy(); return; }
+      const down = st.catalog === 'fail' || (st.catalog === 'fail-on-type' && from === 'type');
+      // 'cards': its list has one row (a plan can click "Kestrel ledger Tracks every shipment. Plugin"); else empty.
+      return send(s, down ? 500 : 200, 'application/json', down ? '{"error":"catalog unavailable"}' : st.catalog === 'cards' ? '{"items":[{"id":"k1","name":"Kestrel ledger","about":"Tracks every shipment."}]}' : '{"items":[]}');
+    }
+    if (q.method === 'POST' && path === '/api/tasks') { const b = await body(q); const t = { id: st.next++, name: String(b.name || '').slice(0, 200) }; st.tasks.push(t); return send(s, 200, 'application/json', JSON.stringify(t)); }
+    const del = /^\/api\/tasks\/(\d+)$/.exec(path);
+    if (q.method === 'DELETE' && del) {
+      if (q.headers.authorization !== `Bearer ${token}`) { log[log.length - 1] += ' 401'; return send(s, 401, 'application/json', '{"error":"no session"}'); }
+      st.tasks = st.tasks.filter(t => t.id !== +del[1]); return send(s, 200, 'application/json', '{}');
+    }
+    if (q.method === 'POST' && path === '/api/sync') { st.sync = !!(await body(q)).on; return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && path === '/api/refresh') { await body(q); st.refreshes++; return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && path === '/api/archive') { await body(q); st.archives++; st.tasks = []; return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && path === '/api/telemetry') { await body(q); return send(s, 200, 'application/json', '{}'); }
+    send(s, 404, 'text/plain', 'not found');
+  }).listen(port, '127.0.0.1');
+  const notes = createServer(async (q, s) => {
+    const path = q.url.split('?')[0];
+    if (path !== '/favicon.ico') log.push(`${q.method} notes${path}`);
+    if (q.method === 'GET' && path === '/') return send(s, 200, 'text/html; charset=utf-8', notesPage());
+    if (q.method === 'GET' && path === '/api/session') return send(s, 200, 'application/json', JSON.stringify({ token: notesToken }));
+    if (/^\/api\/(note|pin|unpin|seen)$/.test(path) && q.headers.authorization !== `Bearer ${notesToken}`) { log[log.length - 1] += ' 401'; return send(s, 401, 'application/json', '{"error":"no session"}'); }
+    if (q.method === 'GET' && path === '/api/note') return send(s, 200, 'application/json', JSON.stringify({ pinned: st.pinned, ping: st.ping }));
+    if (q.method === 'POST' && path === '/api/seen') { await body(q); st.seen.push(Date.now()); return send(s, 200, 'application/json', '{}'); }
+    if (q.method === 'POST' && (path === '/api/pin' || path === '/api/unpin')) {
+      await body(q);
+      const t0 = Date.now();
+      if (st.ping && path === '/api/unpin') await new Promise(r => setTimeout(r, 1500));
+      st.pinned = path === '/api/pin';
+      if (path === '/api/unpin') st.unpins.push([t0, Date.now()]);
+      return send(s, 200, 'application/json', '{}');
+    }
+    send(s, 404, 'text/plain', 'not found');
+  }).listen(notesPort, '127.0.0.1');
+  return {
+    url: `http://127.0.0.1:${port}/`, help: `http://localhost:${port}/help`, notes: `127.0.0.1:${notesPort}`, log,
+    state: () => ({ ...view(), refreshes: st.refreshes, archives: st.archives, pinned: st.pinned, seen: st.seen.slice(), unpins: st.unpins.slice() }),
+    // What an earlier run could have left: a task, Sync on, a pinned note.
+    seed: ({ tasks = [], sync = false, next, pinned = false } = {}) => { if (next) st.next = next; st.tasks = tasks.map(name => ({ id: st.next++, name })); st.sync = sync; st.pinned = pinned; },
+    // The notes panel posts /api/seen every 150 ms while it's open, and Unpin takes 1.5 s: the app's own non-reads to
+    // a host while an API undo's call to it is open.
+    notePing: on => { st.ping = !!on; st.seen = []; st.unpins = []; },
+    // Its catalog service: 'ok' (an empty list), 'cards' (one row), 'fail' (500 always), 'fail-on-type' (500 for the
+    // lookup as you type) or 'drop' (no answer: the connection closed).
+    catalog: mode => { st.catalog = mode; },
+    suggest: on => { st.suggest = !!on; },
+    status: text => { st.status = text || null; },
+    chips: on => { st.chips = !!on; },
+    moving: on => { st.moving = !!on; },
+    notice: mode => { st.notice = mode || null; },
+    extras: mode => { st.extras = mode || null; },
+    counts: mode => { st.counts = mode || null; },
+    presence: p => { st.presence = p || null; st.presenceBodies = []; },
+    presenceBodies: () => st.presenceBodies.slice(),
+    close: () => { server.close(); notes.close(); },
+  };
+}
+
 if (process.argv[1] && process.argv[1].endsWith('server.mjs')) { const f = startFixture(); console.log(`fixture: ${f.chat} ${f.admin}`); }

@@ -6,24 +6,10 @@
   opts = opts || {};
   const vis = e => { const b = e.getBoundingClientRect(); if (!(b.width > 1 && b.height > 1 && b.bottom > 0 && b.right > 0 && b.top < innerHeight && b.left < innerWidth)) return null; const s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity === 0) return null; return b; };
   const trim = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
-  const roleOf = e => {
-    const r = e.getAttribute('role'); if (r) return r;
-    const t = e.localName;
-    if (t === 'a' && e.hasAttribute('href')) return 'link';
-    if (t === 'button' || t === 'summary') return 'button';
-    if (t === 'select') return 'combobox';
-    if (t === 'textarea') return 'textbox';
-    if (t === 'input') { const ty = (e.type || 'text').toLowerCase(); return ty === 'checkbox' ? 'checkbox' : ty === 'radio' ? 'radio' : /^(button|submit|reset|image)$/.test(ty) ? 'button' : ty === 'search' ? 'searchbox' : 'textbox'; }
-    if (e.isContentEditable) return 'textbox';
-    return t;
-  };
-  const nameOf = e => {
-    const by = e.getAttribute('aria-labelledby');
-    const lb = by ? by.split(/\s+/).map(id => (document.getElementById(id) || {}).innerText || '').join(' ') : '';
-    const label = e.labels && e.labels[0] ? e.labels[0].innerText : '';
-    const own = e.localName === 'input' || e.localName === 'textarea' || e.isContentEditable ? '' : e.innerText;
-    return trim(e.getAttribute('aria-label') || lb || label || own || e.getAttribute('placeholder') || e.getAttribute('data-placeholder') || e.getAttribute('title') || e.getAttribute('alt') || e.value, 90);
-  };
+  // Roles and names by the one rule (@stuntdouble/core/lib/control-name.mjs; page-naming.mjs puts it here, via build.mjs).
+  /*CONTROL_NAME*/
+  const roleOf = e => domControl(e).role;
+  const nameOf = e => domControl(e).name;
   const SEL = 'a[href],button,summary,select,textarea,input:not([type=hidden]):not([type=password]),[contenteditable=""],[contenteditable=true],[role=button],[role=link],[role=tab],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[role=option],[role=treeitem],[role=switch],[role=checkbox],[role=radio],[role=textbox],[role=searchbox],[role=combobox],[role=gridcell],[role=row][tabindex],[role=listitem][tabindex],[tabindex="0"]';
   const items = [], seen = new Set();
   for (const e of document.querySelectorAll(SEL)) {

@@ -8,6 +8,8 @@
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fencePort, fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
+import { CONTROL_NAME_SRC } from './page-naming.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = f => readFileSync(join(here, f), 'utf8');
@@ -19,7 +21,7 @@ export function core() {
   return `const SER = ${JSON.stringify(read('serialize.js'))};
 const HOVER_PAGE = ${JSON.stringify(strip(read('hover-page.js')))};
 const REC_PAGE = ${JSON.stringify(strip(read('recorder-page.js')))};
-const OUTLINE_PAGE = ${JSON.stringify(strip(read('outline-page.js')))};
+const OUTLINE_PAGE = ${JSON.stringify(strip(read('outline-page.js')).replace('/*CONTROL_NAME*/', CONTROL_NAME_SRC))};
 ${read('driver.js')}
 const SIDE_HOVERS = async (ARGS) => {
 ${read('flows/hover-audit.js')}
@@ -44,19 +46,21 @@ ${read('recorder.js')}
 // The agent: the recorder for a Playwright page, as one function (page0) => 'agent started'. browser: what it tells
 // the receiver it runs in ('agent', or 'capture' in the capture browser); shadow: the code that hands closed shadow
 // roots to the serializer (the capture browser has the DevTools protocol for it, as the extension does).
-export function agentCode(port, { browser = 'agent', shadow = '' } = {}) {
+// extra: code run after the recorder is defined (the capture host adds its own commands to OPS there).
+export function agentCode(port, { browser = 'agent', shadow = '', extra = '' } = {}) {
   return `async (page0) => {
 const RX = ${JSON.stringify('http://127.0.0.1:' + port)};
 const AGENT_ID = '${browser}-' + Math.random().toString(36).slice(2, 10);
 const AGENT_QS = async () => '?agent=' + AGENT_ID + '&browser=${browser}&tabs=' + page0.context().pages().length;
 ${shadow}${core()}
-startLoop();
+${extra}startLoop();
 return 'agent started';
 }
 `;
 }
 
 export function buildAgent(outDir, port) {
+  fencePort(port, 'extension'); fencePath(outDir, 'recorder folder');
   const code = agentCode(port);
   new Function('return ' + code);
   mkdirSync(outDir, { recursive: true });
@@ -65,6 +69,7 @@ export function buildAgent(outDir, port) {
 }
 
 export function buildExtension(outDir, port) {
+  fencePort(port, 'extension'); fencePath(outDir, 'recorder extension folder');
   const ext = f => readFileSync(join(here, 'extension', f), 'utf8');
   // One classic service worker script: the debugger shim, the recorder, then the glue that starts it.
   const sw = `// Built by scenecast (packages/capture/build.mjs --extension); edit the sources, not this file.

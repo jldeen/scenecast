@@ -20,7 +20,8 @@ use thiserror::Error;
 
 /// The engine's entry point, relative to the `packages` folder.
 pub const ENTRY: &str = "core/bin/engine.mjs";
-const MIN_NODE_MAJOR: u32 = 20;
+// 22: the capture browser's guard talks to Chrome over the global WebSocket, which Node 20 doesn't have.
+const MIN_NODE_MAJOR: u32 = 22;
 type Control<'a> = dyn FnMut(&str) -> Option<String> + 'a;
 
 #[derive(Debug, Error)]
@@ -359,5 +360,41 @@ pub(crate) fn dunce(path: PathBuf) -> PathBuf {
             }
         }
         Err(_) => path,
+    }
+}
+
+// A fake Node is a shell script: Unix only.
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    // A Node that prints this version, as `node --version` does.
+    fn node_saying(dir: &Path, version: &str) -> Engine {
+        use std::os::unix::fs::PermissionsExt;
+        let node = dir.join("node");
+        std::fs::write(&node, format!("#!/bin/sh\necho {version}\n")).unwrap();
+        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Engine {
+            packages: dir.to_path_buf(),
+            node,
+            env: Vec::new(),
+            cancel: None,
+        }
+    }
+
+    #[test]
+    fn node_20_is_refused_before_anything_runs() {
+        let temp = tempfile::tempdir().unwrap();
+        let err = node_saying(temp.path(), "v20.19.0")
+            .check_node()
+            .unwrap_err();
+        assert!(
+            err.to_string().starts_with("Node.js 22 or later is needed"),
+            "{err}"
+        );
+        assert_eq!(
+            node_saying(temp.path(), "v22.12.0").check_node().unwrap(),
+            "v22.12.0"
+        );
     }
 }

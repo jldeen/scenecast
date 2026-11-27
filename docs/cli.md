@@ -6,7 +6,7 @@ JavaScript in `packages/`, under Node) and keeps the bundle manifest in step, an
 ## Install
 
 Presenters use the desktop app, which carries everything it needs. For the CLI, or to work on Scenecast: Rust
-(stable), Node 20 or later, and Google Chrome or Microsoft Edge.
+(stable), Node 22 or later, and Google Chrome or Microsoft Edge.
 
 ```bash
 git clone https://github.com/jldeen/scenecast && cd scenecast
@@ -229,10 +229,20 @@ scenecast ai plan   --demo <dir>      # plan.md from ai.json's goal and/or sourc
 scenecast ai plan   --demo <dir> --script <file>        # Make it from my script: Word, Markdown, RunLines or text
                                                         # (Copilot proposes the steps when signed in; --model stub: rules only)
 scenecast ai plan   --demo <dir> --walkthrough <recording.json> [--script <file>]   # the same from one walkthrough
-scenecast ai approve --demo <dir>     # approve plan.md as it is (its writes); any edit needs approving again
+scenecast ai approve --demo <dir>     # approve plan.md as it is (its writes); any edit needs approving again;
+                                      # refused while reset.md has a check a run can't check
 scenecast ai reset  --demo <dir>      # reset.md: each write undone, and a read-only checklist
+scenecast ai reground --demo <dir> [--walk <dir>] [--plan <file>]   # each step's proof again, on the screens a live
+                                                    # walk read today (--plan: the plan it walked, if not plan.md):
+                                                    # .out/ai/reground.md and plan.reground.md (plan.md stays)
 scenecast ai finish --demo <dir>      # after the build: script.md for the guide, ⌥1–⌥9, focus points, .out/review/
 scenecast ai record --demo <dir>      # Record for me: the approved plan, in the browser, while recording; then script.md
+scenecast ai record --demo <dir> --unattended   # the same in the capture browser with nobody there: the approved
+                                      # writes only, the read-only guard, the reset before and after (.out/ai/run.json)
+scenecast ai check  --demo <dir>      # reset.md's Check read live in the capture browser, read-only: each line
+                                      # pass, wrong or can't, with a picture (.out/ai/check.json)
+scenecast ai walk   --demo <dir> [--live]       # a read-only walk of plan.md: the recording's screens, or the product
+                                      # in the capture browser (.out/ai/walk.json); it never writes; --live reads the Check first
 scenecast ai script --demo <dir>      # the talk track (script.md) from the recording: one beat per replica beat
 scenecast ai coach  --demo <dir>      # Coach me: the next step and line, live, until the recording stops
 scenecast ai answer --demo <dir> q2 do|self|skip|stop|done [text]   # answer a question it asked

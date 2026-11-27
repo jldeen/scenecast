@@ -23,6 +23,37 @@ const recApp = id => { const A = REC.apps.find(a => a.id === id); if (!A) throw 
 // waits), held (the presenter's action waiting for the recorder), stop. The rest of the take is the presenter's.
 const recTl = (what, t0, meta = {}) => { const e = { what, at: t0 - REC.t0, ms: Date.now() - t0, ...meta }; (REC.tl = REC.tl || []).push(e); if (REC.tl.length > 5000) REC.tl.shift(); return e; };
 
+// Leave out (the capture browser only: host-ops capLeaveOut puts its gate in globalThis): nothing is saved that shows
+// what she leaves out of the replica. Each snapshot, hover's parts and stream frame is checked first; one that shows it
+// isn't saved, and the gate refuses every save after it (the run stops at its next step).
+const recLeave = () => globalThis.__stuntdoubleLeaveOut || null;
+// Her own status (the capture browser only: host-ops capOwnStatus): before a screen of an app whose pack names her
+// status control is saved, it must show what the recording does (Teams: Available); read again for a while, else the
+// take stops there. First, so Leave out's check reads the screen as it's saved.
+const recOwn = () => globalThis.__stuntdoubleOwnStatus || null;
+const recNotice = () => globalThis.__stuntdoubleNotices || null;
+const recCounts = () => globalThis.__stuntdoubleCounts || null;
+// The recording's own hovers (the capture browser only: host-ops capHoverFloor): per app, the controls the demo's
+// recording has a hover for. The hovers sweep never skips them for their kind, tries them twice, and says how each went.
+const recFloor = () => globalThis.__stuntdoubleHoverFloor || null;
+const recAppOfPage = p => { const A = (REC.apps || []).find(a => a.page === p); return A ? A.id : REC.active; };
+const recAppOfState = s => { const st = REC.states && REC.states[String(s || '').replace(/^click-/, '')]; return st ? st.app : REC.active; };
+if (!H.leaveGated) {
+  const snap0 = H.snap, post0 = H.post;
+  H.snap = async (p, id, opts) => { if (REC.unrestored) throw new Error(`a screen wasn't put back: ${REC.unrestored.state} after its ${REC.unrestored.after} (${REC.unrestored.left})`);
+    // A page's first save after it loads (a new screen's; a list's or a sweep's after the click audit reloaded it,
+    // admin's bell back without its count yet) waits for the counts its recording shows (capCounts): else a note.
+    { const C = recCounts(); if (C) { const app = recAppOfPage(p); const r = await C.gate(p, app, id).catch(() => null); if (r && r.missing.length) for (const m of r.missing) REC.notes.push(`${app}: "${m.base}" shows no count; the recording has "${m.name}"`); } } const N = recNotice(); if (N) await N.gate(p, recAppOfPage(p), id); const O = recOwn(); if (O) await O.gate(p, recAppOfPage(p), id); const L = recLeave(); if (L) await L.gate(p, recAppOfPage(p), id); return snap0(p, id, opts); };
+  H.post = async (path, data) => {
+    const O = recOwn();
+    if (O && path === '/hover') O.after();
+    const L = recLeave();
+    if (L && path === '/hover' && data && data.parts && data.parts.length) { const app = recAppOfState(data.page), A = (REC.apps || []).find(a => a.id === app); await L.gateHtml(data.parts.join('\n'), app, `hover ${data.page} ${data.n}`, A && A.page); }
+    return post0(path, data);
+  };
+  H.leaveGated = true;
+}
+
 async function recFrameKey(p, f) { if (f === p.mainFrame()) return null; const keys = await frameKeys(p); return keys.get(f) || null; }
 const withFrame = (m, fk) => fk ? { frame: fk, ...m } : m;
 // The recorder's own small calls into each frame: one with no script context yet is skipped (it's asked again next
@@ -102,9 +133,140 @@ async function recSettle(p, ms, maxMs) {
   return sig;
 }
 function recUniq(id) { let k = id, n = 1; while (REC.states[k]) k = `${id}-${++n}`; return k; }
+// What's open on a screen, for putting it back after its side states (not a signature: admin's grid order changes on
+// every load): overlays (menus, dialogs, listboxes, popovers), panes (asides, complementary and named regions and
+// sections), each expandable control's state (numbers aside in names), and its title and first heading.
+const OPEN_STATE = () => {
+  const vis = e => { const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return false; const cs = getComputedStyle(e); return cs.visibility !== 'hidden' && cs.display !== 'none' && +cs.opacity > 0.05; };
+  const nm = e => (e.getAttribute('aria-label') || e.getAttribute('title') || (e.innerText || '').replace(/\s+/g, ' ').trim()).replace(/\d+/g, '#').slice(0, 60);
+  const uniq = a => [...new Set(a)].sort();
+  const overlays = uniq([...document.querySelectorAll('[role=menu],[role=dialog],[role=alertdialog],[role=listbox],[aria-modal=true],[popover]')].filter(vis).map(e => (e.getAttribute('role') || 'popover') + ': ' + nm(e).slice(0, 40)));
+  const panes = uniq([...document.querySelectorAll('aside,[role=complementary],[role=region][aria-label],section[aria-label]')].filter(vis).map(e => (e.getAttribute('role') || e.localName) + ': ' + (e.getAttribute('aria-label') || '').replace(/\d+/g, '#')));
+  const expanded = uniq([...document.querySelectorAll('[aria-expanded]')].filter(vis).map(e => nm(e) + '=' + e.getAttribute('aria-expanded')));
+  // Text boxes and what's in them (a side path that typed or filled one: Copilot's composer).
+  const seen = {}, boxes = [...document.querySelectorAll('textarea,input:not([type]),input[type=text],input[type=search],[contenteditable=true]')].filter(e => vis(e) && !(e.parentElement && e.parentElement.closest('[contenteditable=true]'))).map(e => { const k = (e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.localName).slice(0, 40); return [k + '#' + (seen[k] = (seen[k] || 0) + 1), (e.isContentEditable ? e.innerText : e.value || '').replace(/\s+/g, ' ').trim().slice(0, 200)]; });
+  const h = document.querySelector('h1,[role=heading][aria-level="1"]');
+  return { overlays, panes, expanded, boxes, title: document.title, heading: h ? (h.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80) : null, path: location.origin + location.pathname, href: location.href };
+};
+// A screen's title as a key: an unread count in front and numbers aside ("(3) Chat | Design | Launch plans").
+const titleKey = t => String(t || '').replace(/^\(\d+\)\s*/, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+// Back on a saved screen (want: OPEN_STATE's path, href and title) after a side path left it, or a reload landed
+// elsewhere (Teams opens its last conversation; its address never changes): its address again when that's what
+// differs, then the control its title names, most specific part first ("Launch plans" for "Chat | Design |
+// Launch plans | Microsoft Teams"), clicked as a person would. The recorder steps aside. → true once it's there.
+H.reland = async (p, want) => {
+  if (!want || !want.title) return true;
+  const here = () => p.mainFrame().evaluate(() => ({ path: location.origin + location.pathname, title: document.title })).catch(() => null);
+  const there = h => !!h && titleKey(h.title) === titleKey(want.title) && (!want.path || h.path === want.path);
+  let h = await here();
+  if (there(h)) return true;
+  if (h && want.path && h.path !== want.path && want.href) {
+    await p.goto(want.href, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    await recInstall(p); await recSetOff(p, true); await recSettle(p, 900, 20000);
+    h = await here();
+    if (there(h)) return true;
+  }
+  const parts = String(want.title).replace(/^\(\d+\)\s*/, '').split(/\s+[|·–—]\s+/).map(x => x.trim()).filter(Boolean);
+  for (const part of parts.slice(0, -1).reverse()) {
+    for (let i = 0; i < 10; i++) {
+      const pt = await p.mainFrame().evaluate(name => {
+        const vis = e => { const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2 || r.bottom < 0 || r.top > innerHeight) return null; const cs = getComputedStyle(e); return cs.visibility !== 'hidden' && cs.display !== 'none' ? r : null; };
+        const own = e => (e.getAttribute('aria-label') || (e.innerText || '')).replace(/\s+/g, ' ').trim();
+        for (const sel of ['[role=treeitem]', '[role=tab],[role=option]', 'a[href],[role=link]', 'button,[role=button]']) for (const e of document.querySelectorAll(sel)) { if (own(e) !== name) continue; const r = vis(e); if (r) return { x: r.x + Math.min(r.width / 2, 60), y: r.y + r.height / 2 }; }
+        return null;
+      }, part).catch(() => null);
+      if (!pt) { await sleep(1000); continue; }
+      await p.mouse.click(pt.x, pt.y);
+      await sleep(1500); await recSettle(p, 900, 15000);
+      h = await here();
+      if (there(h)) { rlogr(`back on "${want.title}" (by "${part}")`); return true; }
+      break;
+    }
+  }
+  return there(await here());
+};
+// What a screen has now that its saved state didn't: overlays opened, panes opened or closed, controls whose
+// expanded state flipped (only ones on both). null when it's as saved.
+function recOpenDiff(want, now) {
+  if (!want || !now) return null;
+  const opened = now.overlays.filter(x => !want.overlays.includes(x));
+  const panesIn = now.panes.filter(x => !want.panes.includes(x)), panesOut = want.panes.filter(x => !now.panes.includes(x));
+  const was = new Map(want.expanded.map(x => [x.replace(/=(true|false)$/, ''), x])), flipped = now.expanded.filter(x => { const k = x.replace(/=(true|false)$/, ''); return was.has(k) && was.get(k) !== x; });
+  const had = new Map(want.boxes || []), typed = (now.boxes || []).filter(([k, v]) => had.has(k) && had.get(k) !== v).map(([k, v]) => ({ key: k, was: had.get(k), now: v }));
+  const moved = (want.path && now.path && want.path !== now.path) || (want.title !== undefined && titleKey(want.title) !== titleKey(now.title)) ? [`${want.title} → ${now.title}`] : [];
+  return moved.length || opened.length || panesIn.length || panesOut.length || flipped.length || typed.length ? { moved, opened, panesIn, panesOut, flipped, typed } : null;
+}
+const recOpenSay = d => [(d.moved || []).length ? `another screen: ${d.moved.join('; ')}` : '', d.opened.length ? `open: ${d.opened.join('; ')}` : '', d.panesIn.length ? `pane opened: ${d.panesIn.join('; ')}` : '', d.panesOut.length ? `pane closed: ${d.panesOut.join('; ')}` : '', d.flipped.length ? `changed: ${d.flipped.join('; ')}` : '', (d.typed || []).length ? `text in: ${d.typed.map(t => `${t.key.replace(/#1$/, '')} ("${t.now.slice(0, 40)}")`).join('; ')}` : ''].filter(Boolean).join(' | ');
+// After a side path, and at the end of a screen's sweep: the screen must be as it was saved. Closed (Escape, then each
+// control whose expanded state flipped, flipped back), else the tab reloaded and the screen landed again (its title and
+// first heading), else nothing more is saved: the next save stops (REC.unrestored, with a picture).
+async function recPutBack(A, state, after) {
+  const p = A.page, want = (REC.openFp || {})[state];
+  if (!want || REC.unrestored) return !REC.unrestored;
+  const now = () => p.mainFrame().evaluate(OPEN_STATE).catch(() => null);
+  const n0 = await now();
+  // A dialog the screen was saved with, gone (a side path closed it: Escape can't open it again). Said, so a later
+  // step that doesn't land on it is explained.
+  const dialogs = o => ((o && o.overlays) || []).filter(x => /^(dialog|alertdialog):/.test(x)).length;
+  if (n0 && dialogs(want) > dialogs(n0)) REC.notes.push(`${state}: after ${after}, a dialog it was saved with is gone (${want.overlays.filter(x => /^(dialog|alertdialog):/.test(x) && !n0.overlays.includes(x)).join('; ') || 'one of them'})`);
+  let d = recOpenDiff(want, n0);
+  if (!d) return true;
+  const first = recOpenSay(d), F = recFloor();
+  const pic = async name => (F && F.pic ? F.pic(p, `putback-${state}-${name}`) : null);
+  const before = await pic(String(after).replace(/\W+/g, '-'));
+  const fix = { state, app: A.id, after, found: first, picture: before };
+  // The recorder steps aside while it puts the screen back (an Escape or a click here is no step of the run's).
+  await recSetOff(p, true);
+  try { return await recPutBackOff(A, state, after, want, d, first, fix, now, pic); } finally { await recSetOff(p, false); }
+}
+async function recPutBackOff(A, state, after, want, d, first, fix, now, pic) {
+  const p = A.page;
+  // Another screen: back on it first (its address, else the control its title names).
+  if (d && d.moved.length) { await H.reland(p, want); d = recOpenDiff(want, await now()); }
+  for (let i = 0; i < 2 && d && (d.opened.length || d.panesIn.length); i++) { await p.keyboard.press('Escape').catch(() => {}); await sleep(500); d = recOpenDiff(want, await now()); }
+  // Text a side path left in a box that was empty: cleared as a person would (click in, select all, Delete; never
+  // Enter, never Send).
+  if (d && d.typed.some(t => t.was === '')) {
+    for (const t of d.typed.filter(x => x.was === '')) {
+      const at = await p.mainFrame().evaluate(key => {
+        const vis = e => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && getComputedStyle(e).visibility !== 'hidden'; };
+        const seen = {};
+        for (const e of document.querySelectorAll('textarea,input:not([type]),input[type=text],input[type=search],[contenteditable=true]')) {
+          if (!vis(e) || (e.parentElement && e.parentElement.closest('[contenteditable=true]'))) continue;
+          const k = (e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.localName).slice(0, 40), id = k + '#' + (seen[k] = (seen[k] || 0) + 1);
+          if (id === key) { const r = e.getBoundingClientRect(); return { x: r.x + Math.min(r.width / 2, 80), y: r.y + Math.min(r.height / 2, 20) }; }
+        }
+        return null;
+      }, t.key).catch(() => null);
+      if (!at) continue;
+      await p.mouse.click(at.x, at.y); await sleep(200);
+      await p.keyboard.press((globalThis.process && globalThis.process.platform) === 'darwin' ? 'Meta+A' : 'Control+A'); await p.keyboard.press('Delete'); await sleep(400);
+    }
+    await p.mainFrame().evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }).catch(() => {});
+    await sleep(300); d = recOpenDiff(want, await now());
+  }
+  if (d && d.flipped.length) {
+    await p.mainFrame().evaluate(keys => { const nm = e => (e.getAttribute('aria-label') || e.getAttribute('title') || (e.innerText || '').replace(/\s+/g, ' ').trim()).replace(/\d+/g, '#').slice(0, 60); for (const e of document.querySelectorAll('[aria-expanded]')) if (keys.includes(nm(e) + '=' + e.getAttribute('aria-expanded'))) e.click(); }, d.flipped).catch(() => {});
+    await sleep(800); d = recOpenDiff(want, await now());
+  }
+  if (!d) { fix.how = 'closed'; (REC.putBack = REC.putBack || []).push(fix); rlogr(`${state}: after ${after}, put back (${first})`); return true; }
+  await p.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+  await recInstall(p); await recSetOff(p, true); await recSettle(p, 900, 20000);
+  await H.reland(p, want);
+  const n2 = await now();
+  d = recOpenDiff(want, n2);
+  if (!d && n2) { fix.how = 'reloaded'; (REC.putBack = REC.putBack || []).push(fix); rlogr(`${state}: after ${after}, put back by a reload (${first})`); return true; }
+  fix.how = 'stopped'; fix.left = d ? recOpenSay(d) : `it landed elsewhere (${n2 ? n2.title : 'no page'})`; fix.after = after; fix.pictureAfter = await pic('after-reload');
+  (REC.putBack = REC.putBack || []).push(fix);
+  REC.unrestored = fix;
+  rlogr(`${state}: after ${after}, not as saved even after a reload (${fix.left}); nothing more is saved`);
+  REC.notes.push(`${state}: after its ${after}, the screen wasn't as saved (${first}) and a reload didn't put it back: the take stopped before its next save`);
+  return false;
+}
 async function recAddState(A, id, sig) {
   const tSnap = Date.now();
   await H.snap(A.page, id, { clean: true });
+  (REC.openFp = REC.openFp || {})[id] = await A.page.mainFrame().evaluate(OPEN_STATE).catch(() => null);
   REC.time.capture += Date.now() - tSnap;
   const meta = await A.page.mainFrame().evaluate(() => ({ title: document.title, cs: window.__rkrec ? window.__rkrec.colorScheme() : null })).catch(() => ({}));
   const st = { app: A.id, snap: id, sig: sig || await recSig(A.page), title: meta.title, on: [] };
@@ -181,6 +343,13 @@ async function recCapture(A, ev, trigger) {
       const r = await p.mainFrame().evaluate(SERX({ body: true, css: false }));
       if (r.html === prev) return;
       prev = r.html; lastHtml = Date.now();
+      const L = recLeave();
+      if (L) await L.gateHtml(r.html, A.id, `${name} frame ${frames.length}`, p);
+      // A notice on it (waited out or closed by now): not this frame, as it was; the next one, as it is.
+      const N = recNotice();
+      if (N && await N.gateHtml(r.html, A.id, `${name} frame ${frames.length}`, p)) { prev = null; return; }
+      const O = recOwn();
+      if (O) O.after();
       await fetchResources(p, [{ urls: r.urls, frame: p.mainFrame() }]);
       const t = Date.now() - t0;
       await post('/frame', { stream: name, n: frames.length, t, html: r.html, urls: r.urls, inline: r.inline, meta: r.meta });
@@ -297,7 +466,16 @@ async function recLoop() {
       if (!REC.paused && REC.autoQueue.length) {
         REC.busyNow = true;
         REC.sweepWhy = 'start';
-        try { while (REC.autoQueue.length && !REC.stop) { const A = recApp(REC.autoQueue.shift()); await recAuto(A); recCheckpoint(); } const act = REC.apps.find(a => a.id === REC.active); if (act) await act.page.bringToFront(); }
+        try {
+          // The capture browser (parallel): an app per window, each window draws on its own, so their start sweeps
+          // run side by side. Elsewhere one at a time (the extension's tabs only draw at the front).
+          if (REC.parallel && REC.autoQueue.length > 1) {
+            const ids = REC.autoQueue.splice(0);
+            for (const r of await Promise.allSettled(ids.map(id => REC.stop ? null : recAuto(recApp(id))))) if (r.status === 'rejected') rlogr('auto: ' + String(r.reason && r.reason.message || r.reason).slice(0, 200));
+            recCheckpoint();
+          }
+          while (REC.autoQueue.length && !REC.stop) { const A = recApp(REC.autoQueue.shift()); await recAuto(A); recCheckpoint(); }
+          const act = REC.apps.find(a => a.id === REC.active); if (act) await act.page.bringToFront(); }
         finally { REC.busyNow = false; REC.sweepWhy = 'screen'; }
       }
       let got = 0;
@@ -335,8 +513,10 @@ function recSeen(kind, key) { const m = REC.seen[kind] = REC.seen[kind] || {}; r
 //   hovers  controls not hovered on another screen          clicks  expanders and menus not clicked before
 //   drags   resize handles, once per kind of screen         zoom    once per kind of screen
 //   list    a list with more rows than it shows (all of them, last: it changes the page)
-// The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen.
-const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, chipWidths: [1366, 1100], ...(a || {}) }; };
+// The same for each frame that holds most of the screen (hovers and clicks). Budget: auto.maxS per screen, not
+// counting the recording's own hovers (the floor): their first tries are outside it, and the ones that showed nothing
+// are tried once more after everything else, within auto.floorRetryS of their own.
+const recAutoOpts = () => { const a = REC.opts.auto; return a === false ? null : { hovers: true, clicks: true, groups: true, chips: true, lists: true, drags: true, zoom: true, maxS: 90, hoverMax: 40, hoverMaxS: 45, clickMax: 25, clickMaxS: 45, zoomMinS: 30, zoomMaxS: 90, floorRetryS: 45, chipWidths: [1366, 1100], ...(a || {}) }; };
 async function recAuto(A) {
   const o = recAutoOpts(), state = A.state, st = REC.states[state];
   if (!o || !st || st.typedOf || REC.autoDone.has(state)) return;
@@ -345,50 +525,97 @@ async function recAuto(A) {
   await p.bringToFront();
   const f = await p.mainFrame().evaluate(sel => window.__rkrec ? window.__rkrec.features(sel) : null, REC.opts.groups.button).catch(() => null);
   if (!f) return;
-  const kinds = recSeen('kinds', A.id), newKind = !kinds.has(f.kind); kinds.add(f.kind);
+  // Once per kind of screen (chips, zoom, drags): counted done only when it ran, so a screen whose time ran out
+  // leaves it to the app's next screen of that kind.
+  recSeen('kinds', A.id).add(f.kind);
+  const need = k => !recSeen('kinds-' + k, A.id).has(f.kind), ran = k => recSeen('kinds-' + k, A.id).add(f.kind);
+  let floorMs = 0;
+  const again = [];
   const run = async (kind, c = {}) => {
-    // One budget for the whole screen (the presenter waits for it): each kind gets what's left, and zoom, which can't
-    // stop part way, only starts with zoomMinS left. On real apps a screen's sweep ran 9 to 13 minutes before this.
-    const left = o.maxS - (Date.now() - t0) / 1000;
-    if (left < 5 || (kind === 'zoom' && left < o.zoomMinS)) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return; }
-    if (kind === 'hovers' || kind === 'clicks' || kind === 'zoom') c = { ...c, maxS: Math.min(c.maxS || left, left) };
+    // One budget for the whole screen (the presenter waits for it): groups, chips, hovers and clicks each get what's
+    // left. On real apps a screen's sweep ran 9 to 13 minutes before this.
+    // The recorded hovers' time isn't in it: the kinds after them get what they had without them.
+    const left = o.maxS - (Date.now() - t0 - floorMs) / 1000;
+    // The recording's own hovers and menus are never out of time (only the rest of their kind are); zoom, lists and
+    // drags have their own time (zoom: auto.zoomMaxS), outside the screen's budget, as the floor's first tries are.
+    const own = kind === 'zoom' || kind === 'list' || kind === 'drags';
+    const floorHere = (kind === 'hovers' && (c.floor || []).length > 0) || (kind === 'clicks' && (c.floorClicks || []).length > 0);
+    if (left < 5 && !floorHere && !own) { did.push(kind + ' (out of time: record side ' + kind + ' on ' + state + ' if needed)'); return false; }
+    if (kind === 'hovers' || kind === 'clicks') c = { ...c, maxS: Math.max(0.1, Math.min(c.maxS || left, left)) };
+    if (kind === 'zoom') c = { ...c, maxS: o.zoomMaxS };
     REC.side = `${kind} on ${state}`;
     const t1 = Date.now(), s1 = SLEPT.ms;
-    let n = null;
+    let n = null, r = null, ok = false;
     try {
-      const r = await recSide(A, { kind, ...c });
+      r = await recSide(A, { kind, ...c });
+      ok = !r.error;
+      floorMs += r.floorMs || 0;
+      if (kind === 'hovers') { if ((r.floorDeferred || []).length) again.push({ frameRe: c.frameRe, page: c.page || state, ids: r.floorDeferred, firm: (r.floorTries || []).filter(t => t.result === 'other card' && t.key !== 'other' && !t.deferred).map(t => t.key) }); }
       const what = r.error ? 'failed: ' + r.error : kind === 'hovers' ? `${r.n} of ${r.tried}${r.skipped ? ` (${r.skipped} seen before)` : ''}${r.skippedKinds ? ` (${r.skippedKinds} of kinds that never show)` : ''}, waits ${c.waitMs} ms` : kind === 'clicks' ? `${(r.clicks || []).length} of ${(r.controls || []).length}` : kind === 'groups' ? `${(r.groups || []).length}` : kind === 'chips' ? (r.rule ? 'found' : 'none') : kind === 'drags' ? `${(r.rules || []).length}` : kind === 'zoom' ? `${(r.zooms || []).length}` : kind === 'list' ? `${r.list && r.list.seen} rows` : 'done';
       n = kind === 'hovers' ? r.n : kind === 'clicks' ? (r.clicks || []).length : kind === 'groups' ? (r.groups || []).length : kind === 'zoom' ? (r.zooms || []).length : kind === 'drags' ? (r.rules || []).length : kind === 'chips' ? (r.rule ? 1 : 0) : null;
       did.push(`${kind}${c.frameRe ? ' (frame)' : ''} ${what}, ${((Date.now() - t1) / 1000).toFixed(1)} s (${((SLEPT.ms - s1) / 1000).toFixed(1)} s fixed waits)`);
     } catch (e) { did.push(`${kind} failed: ${String(e.message || e).slice(0, 120)}`); REC.notes.push(`${state}: the automatic ${kind} failed (${String(e.message || e).slice(0, 120)}); record side ${kind} on it if it matters`); }
-    finally { recTl('sweep', t1, { why: REC.sweepWhy || 'screen', kind, app: A.id, state, frame: !!c.frameRe || undefined, n, waits: SLEPT.ms - s1 }); }
+    finally {
+      if (own) floorMs += Date.now() - t1;
+      recTl('sweep', t1, { why: REC.sweepWhy || 'screen', kind, app: A.id, state, frame: !!c.frameRe || undefined, n, waits: SLEPT.ms - s1, ...(r && r.floorMs ? { floorMs: r.floorMs } : {}), ...(own ? { own: true } : {}) });
+    }
+    await recPutBack(A, state, kind);
+    return ok;
   };
   const gseen = recSeen('groups', A.id);
   if (o.groups && f.groups.some(id => !gseen.has(id))) { await run('groups'); f.groups.forEach(id => gseen.add(id)); }
-  if (o.chips && newKind) await run('chips', { widths: o.chipWidths });
+  if (o.chips && need('chips') && await run('chips', { widths: o.chipWidths })) ran('chips');
   // How long to wait for a hover to show: learned per app from its own (a Fluent tooltip shows after 250–400 ms in
   // Teams and the admin center, up to 800 ms in Copilot): 1.5× the slowest seen, 450–900 ms, once three have shown.
   // A control that shows nothing costs that wait, and most show nothing.
   const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
   const learned = hs.firsts.length >= 3 ? Math.round(Math.min(900, Math.max(450, 1.5 * Math.max(...hs.firsts)))) : 900;
   const skipSels = Object.entries(hs.kinds).filter(([, k]) => k.tried >= 10 && !k.shown).map(([sel]) => sel);
-  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...c });
+  const F = recFloor(), floor = F ? F.keys(A.id) : [];
+  const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorDefer: true, floorShot: name => F.shot(A.page, name), floorMatch: F.match } : {}), ...c });
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
-  if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id)] });
+  // The recording's menus are a floor too: clicked whatever the cap or the time, before the ones the audit picks.
+  const fc = inFrame => F && F.clicks ? { floorClicks: F.clicks(A.id, inFrame), floorShot: name => F.shot(A.page, name) } : {};
+  // The clicks the demo's build dropped (its flow's clickPages drop: a click that goes elsewhere): never clicked again.
+  const dropped = () => F && F.dropped ? F.dropped(A.id) : [];
+  if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id), ...dropped()], reland: (REC.openFp || {})[state] || null, ...fc(false) });
   for (const [i, fu] of f.frames.entries()) {
     const frameRe = '^' + fu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (o.hovers) await run('hovers', hv({ frameRe, page: `${state}-frame${i}`, skipKeys: [...recSeen('hovers', A.id + fu)] }));
-    if (o.clicks) await run('clicks', { frameRe, page: `${state}-frame${i}`, pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id + fu)] });
+    if (o.clicks) await run('clicks', { frameRe, page: `${state}-frame${i}`, pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id + fu), ...dropped()], reland: (REC.openFp || {})[state] || null, ...fc(true) });
   }
-  if (o.zoom && newKind) await run('zoom', { zooms: o.zooms || REC.zooms });
+  if (o.zoom && need('zoom') && await run('zoom', { zooms: o.zooms || REC.zooms })) ran('zoom');
   if (o.lists && f.list) await run('list');
   // Last: the drag audit moves panes (and puts them back).
-  if (o.drags && newKind && f.handles) await run('drags', { range: 240, step: 40 });
+  if (o.drags && need('drags') && f.handles && await run('drags', { range: 240, step: 40 })) ran('drags');
+  // The recorded hovers that showed nothing the first time: each once more, last, its control found again from
+  // scratch (the page may have moved), waiting 2.5 s, within floorRetryS for the screen; not the controls that
+  // showed another card (a firm answer). Those still missed, or not
+  // tried again, go to her with a picture (the run's hover outcomes).
+  if (again.length) {
+    const tA = Date.now(), byId = new Map(floor.map(e => [e.id, e]));
+    for (const d of again) {
+      const entries = d.ids.map(id => byId.get(id)).filter(Boolean);
+      if (!entries.length) continue;
+      const capS = Math.max(1, o.floorRetryS - (Date.now() - tA) / 1000);
+      REC.side = `recorded hovers again on ${state}`;
+      const t1 = Date.now();
+      let shown = 0, capped = false;
+      try {
+        const r = await recSide(A, { kind: 'hovers', ...hv({ frameRe: d.frameRe, page: `${d.page}-again`, floor: entries, floorDefer: false, floorRetry: true, floorWaitMs: 2500, maxS: capS, skipKeys: d.firm || [] }) });
+        shown = entries.filter(e => r.floor && r.floor[e.id] && r.floor[e.id].shown).length; capped = !!r.floorCapped;
+        if (capped) { REC.floorRetryCapped = (REC.floorRetryCapped || 0) + 1; REC.notes.push(`${state}: the recorded hovers' second tries reached their ${o.floorRetryS} s before all were tried`); }
+        did.push(`recorded hovers again${d.frameRe ? ' (frame)' : ''} ${shown} of ${entries.length}${capped ? ` (stopped at ${o.floorRetryS} s)` : ''}, ${((Date.now() - t1) / 1000).toFixed(1)} s`);
+      } catch (e) { did.push(`recorded hovers again failed: ${String(e.message || e).slice(0, 120)}`); }
+      finally { recTl('sweep', t1, { why: REC.sweepWhy || 'screen', kind: 'hovers-again', app: A.id, state, frame: !!d.frameRe || undefined, n: shown, tried: entries.length, capped }); }
+    }
+  }
   REC.side = null;
   const tRest = Date.now();
   await recSetBusy(p, true); await recSettle(p, 700, 8000); await recSetBusy(p, false);
   recTl('sweep', tRest, { why: REC.sweepWhy || 'screen', kind: 'restore', app: A.id, state });
-  if ((await recSig(p)) !== st.sig) REC.notes.push(`${state}: after the automatic side paths the page isn't as it was; check it (reload the tab if a panel stayed open)`);
+  // The screen as it was saved (its side paths each put it back; this is the last look).
+  await recPutBack(A, state, 'side states');
   REC.time.sweep += Date.now() - t0;
   REC.autos.push({ state, secs: Math.round((Date.now() - t0) / 1000), did });
   rlogr(`auto ${state} (${Math.round((Date.now() - t0) / 1000)} s): ${did.join('; ') || 'nothing new'}`);
@@ -432,7 +659,8 @@ OPS.recordStart = async c => {
   if (REC.on) return { error: 'already recording' };
   const opts = { everyMs: 400, settleMs: 2500, typeIdleMs: 1200, streamMinMs: 1500, streamMinFrames: 4, streamMaxMs: 10000, maxS: 240, busy: [], ignore: [], ...(c.record || {}) };
   opts.groups = { button: 'button[aria-expanded][aria-controls]', ...(opts.groups || {}) };
-  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {} });
+  Object.assign(REC, { on: true, resumed: undefined, held: null, time: { sweep: 0, capture: 0, confirm: 0, product: 0 }, stop: false, paused: false, opts, apps: [], states: {}, sigs: {}, streams: {}, beats: [], path: [], notes: [], drags: [], log: [], sides: { zoom: [], lists: [], hovers: [], clicks: [], drags: [], groups: [], chips: [] }, actions: 0, blocked: 0, t0: Date.now(), seq: 0, active: null, autoDone: new Set(), autos: [], autoQueue: [], seen: {}, side: null, zooms: c.zooms, tl: [], sweepWhy: 'start', hoverStats: {}, openFp: {}, putBack: [], unrestored: null });
+  REC.parallel = !!c.parallel;
   if (c.resume) return recResume(c);
   // Every app's tab, or nothing starts: which aren't open, all at once.
   const missing = [];
@@ -446,17 +674,20 @@ OPS.recordStart = async c => {
   // A new take starts clean: the page keeps what was clicked since the last one (its queue outlives Stop, and a
   // reload), and Nov 20's second take began with a click made between takes.
   for (const A of REC.apps) { const t1 = Date.now(); rlogr(`start: ${A.id}: getting ready (${A.page.frames().length} frames)`); await A.page.bringToFront(); await recLight(A); await recInstall(A.page); await recEach(A.page, () => { if (window.__rkrec) window.__rkrec.drain(); }); A.viewport = await A.page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100 })).catch(() => null); if (A.viewport) { A.viewport.zoom = Math.round(((A.page.zoom ? await A.page.zoom() : 1) || 1) * 1000) / 1000; A.viewport.browser = await A.page.evaluate(() => { const b = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map(x => x.brand).join(' '); return /Microsoft Edge/.test(b) ? 'msedge' : /Google Chrome/.test(b) ? 'chrome' : 'chromium'; }).catch(() => 'chromium'); const ts = A.page.tabSize ? await A.page.tabSize() : null; if (ts) { A.viewport.tabWidth = ts.width; A.viewport.tabHeight = ts.height; } } recTl('start.ready', t1, { app: A.id, frames: A.page.frames().length }); }
-  for (const A of REC.apps) {
-    const t1 = Date.now();
-    rlogr(`start: ${A.id}: capturing its start screen`);
-    await A.page.bringToFront();
-    if (c.neutral) await A.page.mouse.move(c.neutral[0], c.neutral[1]);
-    const sig = await recSettle(A.page, 800, 15000);
-    await recSetBusy(A.page, true);
-    try { await recAddState(A, `${A.id}-start`, sig); } finally { await recSetBusy(A.page, false); }
-    A.state = `${A.id}-start`;
-    recTl('start.capture', t1, { app: A.id, state: A.state });
-  }
+  // A start screen that can't be saved (Leave out refused it) ends the take before it begins: nothing to stop after.
+  try {
+    for (const A of REC.apps) {
+      const t1 = Date.now();
+      rlogr(`start: ${A.id}: capturing its start screen`);
+      await A.page.bringToFront();
+      if (c.neutral) await A.page.mouse.move(c.neutral[0], c.neutral[1]);
+      const sig = await recSettle(A.page, 800, 15000);
+      await recSetBusy(A.page, true);
+      try { await recAddState(A, `${A.id}-start`, sig); } finally { await recSetBusy(A.page, false); }
+      A.state = `${A.id}-start`;
+      recTl('start.capture', t1, { app: A.id, state: A.state });
+    }
+  } catch (e) { REC.on = false; await CDPX_release().catch(() => {}); throw e; }
   const first = c.first ? recApp(c.first) : REC.apps[0];
   await first.page.bringToFront();
   REC.active = first.id;
@@ -541,7 +772,7 @@ function recTiming() {
     recorderSecs: r(start + startSweeps + screenSweeps + sideSweeps + actions + typed - product), sweepSecs: r(t.sweep), captureSecs: r(t.capture), confirmSecs: r(t.confirm),
   };
 }
-OPS.recordStatus = async () => REC.on ? { recording: true, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
+OPS.recordStatus = async () => REC.on ? { recording: true, unrestored: REC.unrestored || undefined, gateWait: (recOwn() && recOwn().waiting()) || (recNotice() && recNotice().waiting()) || undefined, held: REC.held ? { why: REC.held.why, secs: Math.round((Date.now() - REC.held.since) / 1000) } : undefined, at: REC.at, atSecs: REC.atSince ? Math.round((Date.now() - REC.atSince) / 1000) : null, resumed: REC.resumed, timing: recTiming(), busy: !!REC.busyNow || REC.autoQueue.length > 0, side: REC.side || undefined, autos: REC.autos.length, chromeSecs: Math.round((Date.now() - REC.t0) / 1000), typing: REC.apps.filter(a => a.typing && !a.typing.done).map(a => a.id), actions: REC.actions, blocked: REC.blocked, active: REC.active, states: Object.fromEntries(REC.apps.map(a => [a.id, a.state])), count: Object.keys(REC.states).length, streams: Object.keys(REC.streams).length, log: REC.log.slice(-8), steps: REC.path.length, recent: REC.path.slice(-8) } : { recording: false };
 OPS.recordStop = async () => {
   if (!REC.on) return { error: 'not recording' };
   // What the page still holds (a click it's waiting to do: the loop picks it up a second or more later on a busy app)
@@ -558,7 +789,7 @@ OPS.recordStop = async () => {
   const rec = { kit: 1, recordedAt: new Date(REC.t0).toISOString(), secs: Math.round((Date.now() - REC.t0) / 1000), opts: REC.opts,
     timing: recTiming(), apps: REC.apps.map(a => ({ id: a.id, match: a.match, start: `${a.id}-start`, end: a.state, viewport: a.viewport || undefined })),
     // The window it was recorded in (the first app's): the replica is compared and laid out at this size, not demo.json's default.
-    viewport: (REC.apps.find(a => a.viewport) || {}).viewport || undefined, states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log, timeline: REC.tl };
+    viewport: (REC.apps.find(a => a.viewport) || {}).viewport || undefined, states, streams: REC.streams, beats: REC.beats, path: REC.path, notes: REC.notes, drags: REC.drags, sides: REC.sides, autos: REC.autos, log: REC.log, timeline: REC.tl, ...(REC.putBack && REC.putBack.length ? { putBack: REC.putBack } : {}) };
   await post('/recording', rec);
   REC.on = false;
   // The recording's done: let go of every tab, so Chrome's debugging bar isn't on the stage when you rehearse or present.
@@ -704,12 +935,14 @@ async function recSide(A, c) {
       const out = await SIDE_CLICKS({ ...c, p, page, snapId: 'hov-click-' + page, skip: c.skip || REC.opts.groups.button });
       let frame = null;
       if (out.frameUrl) { const f = p.frames().find(x => x.url().split('?')[0] === out.frameUrl); if (f) frame = await recFrameKey(p, f); }
-      const results = out.results.map(r => ({ name: r.name, n: r.n, restore: r.restore, ops: r.ops, portals: r.portals, lazyCss: r.lazyCss, skip: r.skip, effect: r.effect, navigated: r.navigated, error: r.error }));
+      const results = out.results.map(r => ({ name: r.name, n: r.n, restore: r.restore, ops: r.ops, portals: r.portals, lazyCss: r.lazyCss, skip: r.skip, effect: r.effect, navigated: r.navigated, ...(r.stayed ? { stayed: r.stayed } : {}), ...(r.again ? { again: true } : {}), ...(r.dismissed ? { dismissed: true } : {}), error: r.error }));
       // Every control tried is known now (another screen of the app won't try it again); a page only if one opened.
-      const seen = recSeen('clicks', A.id + (out.frameUrl || '')); for (const r of out.results) seen.add(r.name);
-      if (results.some(r => r.restore)) REC.sides.clicks.push({ page, app: A.id, base: REC.states[state].snap, frame: frame || undefined, results });
+      const seen = recSeen('clicks', A.id + (out.frameUrl || '')); for (const r of out.results) if (!r.floor) seen.add(r.name);
+      const F = recFloor();
+      if (F && F.seenClicks && Object.keys(out.floorClicks || {}).length) F.seenClicks({ app: A.id, state, page, floor: out.floorClicks });
+      if (results.some(r => r.restore)) REC.sides.clicks.push({ page, app: A.id, base: REC.states[state].snap, frame: frame || undefined, results, ...(out.relearns ? { relearns: out.relearns, relearnMs: out.relearnMs } : {}), ...(out.relanded ? { relanded: out.relanded } : {}), ...(out.lost ? { lost: out.lost } : {}), ...(out.hardReloads ? { hardReloads: out.hardReloads } : {}) });
       await recInstall(p); await recSettle(p, 900, 12000);
-      if ((await recSig(p)) !== REC.states[state].sig) REC.notes.push(`${state}: after the click audit the page isn't as it was (a control it couldn't close?); check the screen before going on`);
+      await recPutBack(A, state, 'click audit');
       return { page, frame, controls: out.controls, clicks: results.filter(r => r.restore).map(r => `${r.name}: closes by ${r.restore}${r.lazyCss ? `, ${r.lazyCss} lazy stylesheet(s)` : ''}`), skipped: results.filter(r => !r.restore).map(r => `${r.name}: ${r.skip || r.effect || r.navigated || r.error || 'no effect'}`), secs: out.secs };
     }
     if (c.kind === 'groups') return await recGroups(A, state, c);
@@ -736,7 +969,11 @@ async function recSide(A, c) {
       if (out.ctx && out.ctx.neutral) REC.hoverCtx[hk] = out.ctx;
       let frame = null;
       if (out.frameUrl) { const f = p.frames().find(x => x.url().split('?')[0] === out.frameUrl); if (f) frame = await recFrameKey(p, f); }
-      const seen = recSeen('hovers', A.id + (out.frameUrl || '')); for (const k of out.keys || []) seen.add(k);
+      // A recorded hover that showed nothing here is tried again on the app's next screens.
+      const missed = k => (out.floorMissKeys || []).includes(k);
+      const seen = recSeen('hovers', A.id + (out.frameUrl || '')); for (const k of out.keys || []) if (!missed(k)) seen.add(k);
+      const F = recFloor();
+      if (F && (out.floorFound || (out.cards || []).length)) F.seen({ app: A.id, state, page: c.page || state, floor: out.floor || {}, found: out.floorFound || {}, tries: out.floorTries || [], cards: out.cards || [] });
       const hs = (REC.hoverStats = REC.hoverStats || {})[A.id] = (REC.hoverStats || {})[A.id] || { firsts: [], kinds: {} };
       hs.firsts.push(...(out.firsts || []));
       for (const [sel, k] of Object.entries(out.kinds || {})) { const t = hs.kinds[sel] = hs.kinds[sel] || { tried: 0, shown: 0 }; t.tried += k.tried; t.shown += k.shown; }

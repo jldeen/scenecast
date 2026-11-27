@@ -8,7 +8,11 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// CI runs the capture run as a job of its own, beside the rest: SELFTEST_PART=capture-run runs only it, rest the others.
+// The CLI's build is for both.
+const part = process.env.SELFTEST_PART || null;
 const step = (name, cmd, args) => {
+  if (part && name !== 'cargo build' && (part === 'capture-run') !== (name === 'capture run')) return;
   console.log(`\n== ${name}`);
   const r = spawnSync(cmd, args, { cwd: ROOT, stdio: 'inherit' });
   if (r.status !== 0) { console.log(`${name} failed`); process.exit(r.status || 1); }
@@ -29,4 +33,5 @@ step('selftest', process.execPath, ['packages/selftest/selftest.mjs']);
 step('fidelity loop', process.execPath, ['packages/selftest/fidelity-loop.mjs']);
 step('real Chrome checker', process.execPath, ['packages/selftest/real-chrome-checker.mjs']);
 step('capture browser', process.execPath, ['packages/selftest/capture-browser.mjs']);
+step('capture run', process.execPath, ['packages/selftest/capture-run.mjs']);
 step('ai modes', process.execPath, ['packages/selftest/ai-modes.mjs']);

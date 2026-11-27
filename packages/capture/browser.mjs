@@ -23,18 +23,22 @@
 //   cb.twins(app | url, n, opts) → Page[]          n windows of one app at once, for side sweeps in parallel
 //   cb.probe(page) → { raf, timer250, fonts, dark, hidden, size, screen, dpr }
 //   cb.signedIn(apps) → { apps: [{ id, at: 'app' | 'signin' | 'blocked', host, secs }], cookies }
-//   cb.guard({ hosts, allow, mode }) → { pass(fn, { hosts }), counts(), held(), stop() }
+//   cb.guard({ hosts, allow, stayHeld, mode }) → { pass(fn, { hosts, method?, url? }), counts(), held(), stop() }
 //   cb.pinAccount({ loginHint, domainHint }) → { pinned(), stop() }   no account picker at Entra's sign-in
 //   cb.tenantsOf({ id: page }) → { id: [tenant ids] }                 what each page is signed in to
 //   cb.info(), cb.cpu(), cb.close()
 //   signInWindow({ profile, apps, timeoutS }) → { ok, secs, apps, cookies }   the one window that shows on her screen
 //   launchRealChrome({ zoom, channel, log }) → { browser, ctx, newPage(), close() }   the checker's shape (Phase 6)
+import { presenceBody } from './presence.mjs';
 import { chromium } from 'playwright-core';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
+import { fencePath } from '@stuntdouble/core/lib/test-fence.mjs';
+import { fetchEveryTarget } from './fetch-all.mjs';
+import { filterBody } from './leave-out.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -59,7 +63,9 @@ export function browserApp(channel = 'chrome') {
 }
 
 // The window mode that draws off the screen on this OS.
-export const platformWindow = (platform = process.platform) => platform === 'win32' ? 'offscreen' : 'minimized';
+// Linux (a CI runner, no display): Chrome's own headless mode, the same browser and the same DevTools protocol, for
+// what doesn't depend on drawing (the run, its writes and guard, the recorder's output).
+export const platformWindow = (platform = process.platform) => platform === 'win32' ? 'offscreen' : platform === 'linux' ? 'headless' : 'minimized';
 // The mode to try when this one doesn't draw here. Windows has none: a minimized window there passes a short probe
 // and then barely draws under work (measured: 3 fps, screenshots timing out).
 export const otherWindow = (mode, platform = process.platform) => mode === 'minimized' ? 'offscreen' : mode === 'offscreen' && platform !== 'win32' ? 'minimized' : null;
@@ -104,11 +110,40 @@ export const cookieExpiries = cookies => cookies.filter(c => AUTH_COOKIE.test(c.
 
 // The read-only guard's call on one request: a read (GET, HEAD, OPTIONS) passes; anything else to a guarded host is
 // held, unless the allow-list names it. hosts: null guards every web host but this machine's own. allow: strings
-// ('host/path-prefix', any method) or regular expressions over 'METHOD host/path'.
+// ('host/path-prefix', any method) or regular expressions over 'METHOD host/path', either with ' when body /regex/'
+// after it for a request that only reads when its body says so (a listing with nothing typed in it): no body seen, no
+// pass.
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const LOOPBACK = /^(127\.\d+\.\d+\.\d+|localhost|\[::1\])(:\d+)?$/i;
 const hostIs = (host, h) => { const bare = host.replace(/:\d+$/, ''); return host === h || bare === h || bare.endsWith('.' + h); };
-export function guardVerdict({ method, url }, { hosts = null, allow = [], local = false } = {}) {
+// What a planned write or an API undo opened, for one request: its hosts, and when given its method and exact address
+// (an API undo opens that one call, not its host); or one of a write's own calls to a service of its app's (entries,
+// as allow's: a /pattern/ over "METHOD host/path"). Never every host.
+export function openFor(open, u, method, body = null) {
+  const M = String(method).toUpperCase();
+  return (open || []).some(o => (Array.isArray(o.hosts) && o.hosts.some(h => hostIs(u.host, h)) && (!o.method || o.method === M) && (!o.url || o.url === u.href))
+    || (Array.isArray(o.entries) && o.entries.some(e => entryMatches(e, M, u.host + u.pathname, body))));
+}
+// The origin of the page or frame that sent a request: its Origin, else its Referer's (a same-origin GET has no Origin).
+const hostOfOrigin = o => { try { return new URL(o).host; } catch (e) { return null; } };
+export function senderOrigin(headers) {
+  const get = k => headers && (headers[k] || headers[k.toLowerCase()]);
+  const o = get('Origin');
+  if (o && o !== 'null') return o;
+  try { return new URL(get('Referer')).origin; } catch (e) { return null; }
+}
+const reOf = s => s instanceof RegExp ? s : typeof s === 'string' && /^\/.+\/[a-z]*$/.test(s) ? new RegExp(s.slice(1, s.lastIndexOf('/')), s.slice(s.lastIndexOf('/') + 1)) : null;
+// One guard entry (an allow entry, or a stay-held one) against a request: a regex over "METHOD host/path", else a
+// host/path prefix; "… when body /regex/" also needs its body to match (a body it can't see doesn't).
+function entryMatches(a, m, at, body) {
+  const [req, when] = typeof a === 'string' && a.includes(' when body ') ? a.split(' when body ') : [a, null];
+  const re = reOf(req);
+  if (!(re ? re.test(`${m} ${at}`) : at.startsWith(req))) return false;
+  if (when === null) return true;
+  const bre = reOf(when);
+  return !!(bre && typeof body === 'string' && bre.test(body));
+}
+export function guardVerdict({ method, url, body = null }, { hosts = null, allow = [], local = false } = {}) {
   const m = String(method || 'GET').toUpperCase();
   if (READS.has(m)) return 'pass';
   let u; try { u = new URL(url); } catch (e) { return 'pass'; }
@@ -116,11 +151,48 @@ export function guardVerdict({ method, url }, { hosts = null, allow = [], local 
   if (!local && LOOPBACK.test(u.host)) return 'pass';
   if (hosts && !hosts.some(h => hostIs(u.host, h))) return 'pass';
   const at = u.host + u.pathname;
-  for (const a of allow) {
-    const re = a instanceof RegExp ? a : typeof a === 'string' && /^\/.+\/[a-z]*$/.test(a) ? new RegExp(a.slice(1, a.lastIndexOf('/')), a.slice(a.lastIndexOf('/') + 1)) : null;
-    if (re ? re.test(`${m} ${at}`) : at.startsWith(a)) return 'pass';
-  }
-  return 'hold';
+  // A JSON body is checked as it came and with its escapes decoded (\u006d is "m"), so an escape can't slip a write past
+  // a rule's words.
+  let plain = null; if (typeof body === 'string') try { plain = JSON.stringify(JSON.parse(body)); } catch (e) {}
+  return allow.some(a => entryMatches(a, m, at, body) && (plain === null || plain === body || entryMatches(a, m, at, plain))) ? 'pass' : 'hold';
+}
+// A GraphQL call's operation, by name, from its body (for the record of what passed): its operationName, else the
+// name after its first keyword. null for anything else.
+export function graphqlOperation(body) {
+  if (typeof body !== 'string' || !/"query"\s*:|"operationName"\s*:/.test(body)) return null;
+  const n = /"operationName"\s*:\s*"([\w.-]{1,120})"/.exec(body) || /"query"\s*:\s*"\s*(?:query|mutation|subscription)\s+([A-Za-z_]\w{0,119})/.exec(body);
+  return n ? n[1] : /"query"\s*:\s*"\s*(query|mutation|subscription)?/.test(body) ? '(anonymous)' : null;
+}
+// What a write's call asked for, by name, for the record: a GraphQL operation, a server function's action (Copilot's
+// _serverFn: the value its "action" key carries), or a JSON body's own action, Verb or operationName. Never the rest of
+// the body. → a name, or null.
+export function postAction(body) {
+  if (typeof body !== 'string' || body.length > 500000) return null;
+  const op = graphqlOperation(body);
+  if (op) return op;
+  let j; try { j = JSON.parse(body); } catch (e) { return null; }
+  let found = null;
+  const walk = (o, d = 0) => {
+    if (found || !o || typeof o !== 'object' || d > 16) return;
+    if (o.p && Array.isArray(o.p.k) && Array.isArray(o.p.v)) { const i = o.p.k.indexOf('action'); if (i >= 0 && o.p.v[i] && typeof o.p.v[i].s === 'string') { found = o.p.v[i].s; return; } }
+    for (const k of ['action', 'Verb', 'verb', 'operationName']) if (typeof o[k] === 'string' && /^[\w.:-]{1,80}$/.test(o[k])) { found = o[k]; return; }
+    for (const v of Array.isArray(o) ? o : Object.values(o)) walk(v, d + 1);
+  };
+  walk(j);
+  return found;
+}
+// The allow entry that let a request through (for the record: passed non-reads by entry), or null.
+export function allowedBy({ method, url, body = null }, allow = []) {
+  let u; try { u = new URL(url); } catch (e) { return null; }
+  const m = String(method || 'GET').toUpperCase();
+  return (allow || []).find(a => entryMatches(a, m, u.host + u.pathname, body)) || null;
+}
+// A pack's stay-held entries: what an app sends by itself to a host its writes use (a refresh, a subscription), held
+// even while a planned write opens that host. Same form as allow entries.
+export function staysHeld({ method, url, body = null }, stayHeld = []) {
+  let u; try { u = new URL(url); } catch (e) { return false; }
+  const m = String(method || 'GET').toUpperCase();
+  return (stayHeld || []).some(a => entryMatches(a, m, u.host + u.pathname, body));
 }
 
 // Entra's sign-in page asked for an account (authorize) gets the demo's account pinned: login_hint and domain_hint
@@ -144,6 +216,13 @@ export function pinnedAuthorizeUrl(url, { loginHint = null, domainHint = null } 
 const GUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const HOME_ACCOUNT = new RegExp(`(${GUID})\\.(${GUID})(?=[-|]login\\.)`, 'gi');
 export const isTenantId = v => new RegExp(`^${GUID}$`, 'i').test(String(v || ''));
+// The signed-in accounts' own object ids, from the same keys (the first id of "<object id>.<tenant id>"): who "she" is
+// in an app's presence answers (presence.mjs). Never written anywhere but the log's count.
+export function selfIdsInKeys(keys) {
+  const out = new Set();
+  for (const k of keys) for (const m of String(k).matchAll(HOME_ACCOUNT)) out.add(m[1].toLowerCase());
+  return [...out];
+}
 export function tenantsInKeys(keys) {
   const out = new Set();
   for (const k of keys) for (const m of String(k).matchAll(HOME_ACCOUNT)) out.add(m[2].toLowerCase());
@@ -196,6 +275,10 @@ export async function storageKeys(page) {
   return out;
 }
 
+// A request's path as a shape, for the guard's log and a pack's allow-list: ids and long numbers as {id}, never a
+// query string or a body.
+export const pathShape = path => String(path || '/').split('/').map(seg => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) || /^\d{4,}$/.test(seg) || /^[A-Za-z0-9_-]{24,}$/.test(seg) && /\d/.test(seg) || /^[0-9a-f]{16,}$/i.test(seg) || /@/.test(seg) ? '{id}' : seg).join('/');
+
 const freePort = () => new Promise((res, rej) => { const s = createServer(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 // A profile a running browser has open (Chrome hands a second start on it to the first, which never answers us).
@@ -228,6 +311,8 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   const where = browserApp(channel);
   if (!where) { log(`capture browser: no ${channel} installed here`); return null; }
   const throwaway = !profile;
+  // A capture profile is signed in to a tenant: a selftest only ever uses one of its own.
+  if (!throwaway) fencePath(profile, 'capture profile');
   const dir = throwaway ? mkdtempSync(join(tmpdir(), 'stuntdouble-capture-')) : resolve(profile);
   if (!throwaway) {
     mkdirSync(dir, { recursive: true });
@@ -280,11 +365,12 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   // macOS: through open, hidden (-g: not brought forward, -j: launched hidden), so it never takes her screen. On CI
   // (and when open gets no answer) the browser's own binary instead: a CI Mac's first start through open waits on a
   // dialog no one can answer (measured: open never answered; the binary answered in 1 to 3 s).
-  const viaOpen = !!where.app && (launch === 'open' || (launch === 'auto' && !process.env.CI));
+  const viaOpen = !!where.app && mode !== 'headless' && (launch === 'open' || (launch === 'auto' && !process.env.CI));
   const startDirect = () => {
     direct = true;
     const out = openSync(chromeLog, 'a');
-    child = spawn(where.exe, [...(mode === 'visible' || where.app ? [] : ['--start-minimized', `--window-position=${OFF.left},${OFF.top}`]), ...flags], { stdio: ['ignore', out, out], detached: false });
+    const placed = mode === 'headless' ? ['--headless=new'] : mode === 'visible' || where.app ? [] : ['--start-minimized', `--window-position=${OFF.left},${OFF.top}`];
+    child = spawn(where.exe, [...placed, ...flags], { stdio: ['ignore', out, out], detached: false });
     child.on('error', e => log(`capture browser: ${e.message}`));
   };
   if (viaOpen) {
@@ -493,52 +579,177 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     return { ok: out.every(r => r.at === 'app'), apps: out, cookies: cookieExpiries(await ctx.cookies()), secs: +((Date.now() - t0) / 1000).toFixed(1) };
   }
 
-  // One Fetch dispatcher on the browser (every page and frame): the read-only guard and the pinned account each
-  // add a hook with the requests it wants; a hook may change the address or fail the request.
+  // One Fetch dispatcher on every target (fetch-all.mjs: each page, frame and worker, now and new): the read-only
+  // guard and the pinned account each add a hook with the requests it wants; a hook may change the address or fail
+  // the request. A response hook (response: true, Leave out) sees what comes back and may give the page another body.
   const hooks = new Set();
-  let fetching = false;
-  const onPaused = async e => {
+  let everyTarget = null;
+  const onPaused = async (e, from = {}) => {
     let url = e.request.url;
     for (const h of hooks) {
-      const r = await h.on(e.request, url).catch(() => null);
-      if (r && r.fail) return top.send('Fetch.failRequest', { requestId: e.requestId, errorReason: 'BlockedByClient' }).catch(() => {});
+      if (h.response) continue;
+      const r = await h.on(e.request, url, from).catch(() => null);
+      if (r && r.fail) return { fail: true };
       if (r && r.url) url = r.url;
     }
-    await top.send('Fetch.continueRequest', { requestId: e.requestId, ...(url !== e.request.url ? { url } : {}) }).catch(() => {});
+    return url !== e.request.url ? { url } : null;
+  };
+  const onResponse = async (e, from = {}) => {
+    for (const h of hooks) {
+      if (!h.response) continue;
+      const r = await h.on(e, from);
+      if (r && typeof r.body === 'string') return r;
+    }
+    return null;
   };
   const refetch = async () => {
-    const pats = [...hooks].flatMap(h => h.patterns);
-    if (!pats.length) { if (fetching) { top.off('Fetch.requestPaused', onPaused); fetching = false; await top.send('Fetch.disable').catch(() => {}); } return; }
-    if (!fetching) { top.on('Fetch.requestPaused', onPaused); fetching = true; }
-    await top.send('Fetch.enable', { patterns: pats.some(p => p.urlPattern === '*' && !p.resourceType) ? [{ urlPattern: '*', requestStage: 'Request' }] : pats });
+    const req = [...hooks].filter(h => !h.response).flatMap(h => h.patterns), res = [...hooks].filter(h => h.response).flatMap(h => h.patterns);
+    if (!req.length && !res.length) { if (everyTarget) await everyTarget.set(null); return; }
+    if (!everyTarget) everyTarget = await fetchEveryTarget(at, { onPaused, onResponse, log });
+    // A request that matches both is paused twice: before it goes (the guard), and at its response (Leave out).
+    await everyTarget.set([...(req.some(p => p.urlPattern === '*' && !p.resourceType) ? [{ urlPattern: '*', requestStage: 'Request' }] : req), ...res]);
   };
   const addHook = async h => { hooks.add(h); await refetch(); return async () => { hooks.delete(h); await refetch(); }; };
 
   // Read-only steps: every request that isn't a read, to a guarded host, held before it leaves. pass(fn) lets them
   // through while fn runs (a planned write). mode 'watch' only counts. WebSocket messages don't go through Fetch:
-  // a guard doesn't cover them.
+  // a guard doesn't cover them. A new guard replaces the one on: its hook goes in before the old one comes out, so no
+  // request ever goes by with neither.
   let guarding = null;
-  async function guard({ hosts = null, allow = [], mode: gm = 'hold', local = false } = {}) {
-    if (guarding) await guarding.stop();
-    const st = { open: [], counts: {}, held: [] };
-    const passing = u => st.open.some(o => !o || o.some(h => hostIs(u.host, h)));
-    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method }, url) => {
+  // keepBodies: entries (as allow's) whose held requests' bodies it keeps, for a person to review (local only).
+  async function guard({ hosts = null, allow = [], stayHeld = [], keepBodies = [], mode: gm = 'hold', local = false } = {}) {
+    const prev = guarding;
+    const st = { open: [], counts: {}, held: [], passed: [], bodies: [], writeBodies: [], authFor: null, authFrom: null, auth: null };
+    // What's open: a planned write's hosts, or one call (its method and exact address). Never every host.
+    const passing = (u, method, body) => openFor(st.open, u, method, body);
+    const remove = await addHook({ patterns: [{ urlPattern: '*', requestStage: 'Request' }], on: async ({ method, postData, headers }, url, from = {}) => {
       let u = null; try { u = new URL(url); } catch (x) {}
-      let v = guardVerdict({ method, url }, { hosts, allow, local });
-      if (v === 'hold' && u && passing(u)) v = 'pass';
+      // Who sent it: the tab (its page's host) and the frame (the document's origin, from its Origin or Referer; else
+      // the target's own address), not the time it came: a background tab sends during another app's step.
+      const hostOfUrl = x => { try { return new URL(x).host || null; } catch (y) { return null; } };
+      const sender = { tab: hostOfUrl(from.page), frame: hostOfOrigin(senderOrigin(headers)) || hostOfUrl(from.target && from.target.url), ...(from.target && from.target.type !== 'page' && from.target.type !== 'iframe' ? { by: from.target.type } : {}) };
+      // An API undo's session: the Authorization the page itself sends to that host, kept in memory for the one call,
+      // and which page or frame sent it (the call goes from there: the API's CORS rules allow the app's own frame).
+      if (st.authFor && u && st.authFor.test(u.host)) {
+        const a = headers && (headers.Authorization || headers.authorization), from = senderOrigin(headers);
+        if (a && (!st.authFrom || (from && hostOfOrigin(from) === st.authFrom))) st.auth = { origin: u.origin, host: u.host, value: a, from };
+      }
+      let v = guardVerdict({ method, url, body: postData }, { hosts, allow, local }), by = v === 'pass' ? 'allowed' : null;
+      // Open for a planned write, unless it's one of the app's own background calls a pack keeps held (stay).
+      let stay = false;
+      if (v === 'hold' && u && passing(u, method, postData)) { if (staysHeld({ method, url, body: postData }, stayHeld)) stay = true; else { v = 'pass'; by = 'a planned write'; } }
       const k = `${v === 'hold' ? (gm === 'hold' ? 'held' : 'would hold') : 'passed'} ${method} ${u ? u.host : '?'}`;
       st.counts[k] = (st.counts[k] || 0) + 1;
-      if (v === 'hold' && gm === 'hold') { st.held.push({ method, host: u && u.host, at: new Date().toISOString() }); return { fail: true }; }
+      if (v === 'hold') {
+        st.held.push({ method, host: u && u.host, path: u ? pathShape(u.pathname) : '', at: new Date().toISOString(), held: gm === 'hold', ...sender, ...(stay ? { duringWrite: true } : {}) });
+        if (u && keepBodies.length && staysHeld({ method, url, body: postData }, keepBodies)) st.bodies.push({ method, host: u.host, path: u.pathname, at: new Date().toISOString(), body: postData == null ? null : String(postData).slice(0, 4000) });
+      }
+      // Every non-read that went out, and why: the allow-list (or a read, a local or an unguarded host), or a planned
+      // write's opening.
+      else if (!READS.has(String(method).toUpperCase()) && u && /^(https?|wss?):$/.test(u.protocol)) st.passed.push({ method, host: u.host, path: pathShape(u.pathname), at: new Date().toISOString(), by, ...sender, ...(by === 'allowed' && /graphql/i.test(u.pathname) && graphqlOperation(postData) ? { operation: graphqlOperation(postData) } : {}), ...(by === 'allowed' ? { entry: allowedBy({ method, url, body: postData }, allow) } : {}), ...(by === 'a planned write' && postAction(postData) ? { action: postAction(postData) } : {}) });
+      // What a planned write let through, its body kept for a person's review (local only, as held ones are).
+      if (v === 'pass' && by === 'a planned write' && u && !READS.has(String(method).toUpperCase())) st.writeBodies.push({ method, host: u.host, path: u.pathname, at: new Date().toISOString(), body: postData == null ? null : String(postData).slice(0, 4000) });
+      if (v === 'hold' && gm === 'hold') return { fail: true };
       return null;
     } });
     guarding = {
-      async pass(fn, { hosts: only = null } = {}) { const o = only; st.open.push(o); try { return await fn(); } finally { st.open.splice(st.open.indexOf(o), 1); } },
+      // Open for fn's while: those hosts (a planned write) and its own calls (entries), or with method and url, that one
+      // call only. No hosts: refused.
+      async pass(fn, { hosts = null, method = null, url = null, entries = null } = {}) {
+        if (!Array.isArray(hosts) || !hosts.length) throw new Error('the guard opens only for named hosts');
+        const o = { hosts, method: method ? String(method).toUpperCase() : null, url, ...(Array.isArray(entries) && entries.length ? { entries } : {}) };
+        st.open.push(o);
+        try { return await fn(); } finally { st.open.splice(st.open.indexOf(o), 1); }
+      },
       counts: () => ({ ...st.counts }),
       held: () => st.held.slice(),
-      async stop() { await remove(); guarding = null; },
+      passed: () => st.passed.slice(),
+      bodies: () => st.bodies.slice(),
+      writeBodies: () => st.writeBodies.slice(),
+      // Arm (a host pattern) or disarm (null) catching an API's session; take() hands it over once and forgets it.
+      // from: only a call sent by the page or frame on that host (IQ's Power BI frame, not the portal around it).
+      watchAuth(re, from = null) { st.authFor = re; st.authFrom = from; st.auth = null; },
+      takeAuth() { const a = st.auth; st.auth = null; st.authFor = null; st.authFrom = null; return a; },
+      peekAuth() { return !!st.auth; },
+      async stop() { await remove(); if (guarding === me) guarding = null; },
     };
-    return guarding;
+    const me = guarding;
+    if (prev) await prev.stop();
+    return me;
   }
+
+  // Notifications "denied" for these sites, never "granted" (one granted would pop up on her screen): a fresh profile's
+  // "ask" makes an app nag for it (Teams' "Turn on desktop notifications" banner), and no recording had that banner.
+  async function denyNotifications(origins) {
+    const out = [];
+    for (const origin of origins) {
+      const r = await top.send('Browser.setPermission', { permission: { name: 'notifications' }, setting: 'denied', origin }).then(() => 'denied', e => e.message);
+      out.push({ origin, r });
+    }
+    return out;
+  }
+
+  // Leave out (reset.md, leave-out.mjs): each rule's responses (url: where they come from, for the browser; match: as a
+  // guard entry over "METHOD host/path") filtered before the page has them, in every tab, frame and worker. The request
+  // goes as it was; the page gets the body without the items. One that can't be read or no longer has its list goes on
+  // as it came, and is logged as a failure (the run stops before that app's screens). A new set replaces the one on.
+  let leaving = null;
+  async function leaveOut(rules = []) {
+    const prev = leaving;
+    const st = { rules: rules.map(r => ({ id: r.id, app: r.app || null, requests: [], removed: [], failures: [] })) };
+    const ruleLog = id => st.rules.find(x => x.id === id);
+    const at2 = () => new Date().toISOString();
+    const remove = rules.length ? await addHook({ response: true, patterns: rules.map(r => ({ urlPattern: r.url, requestStage: 'Response' })), on: async (e, from) => {
+      if (e.responseStatusCode < 200 || e.responseStatusCode >= 300) return null;
+      const mine = rules.filter(r => allowedBy({ method: e.request.method, url: e.request.url }, [r.match]));
+      if (!mine.length) return null;
+      let u = null; try { u = new URL(e.request.url); } catch (x) {}
+      const where = { method: e.request.method, host: u ? u.host : '?', path: u ? pathShape(u.pathname) : '' };
+      let text;
+      try { text = await from.body(); } catch (x) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: `its body couldn't be read (${String(x.message || x).split('\n')[0]})` }); return null; }
+      const f = filterBody(text, mine);
+      if (!f.ok) { for (const r of mine) ruleLog(r.id).failures.push({ at: at2(), ...where, why: f.why }); log(`leave out: ${where.method} ${where.host}${where.path}: ${f.why}`); return null; }
+      for (const r of mine) {
+        const gone = f.removed.filter(x => x.rule === r.id), l = ruleLog(r.id);
+        l.requests.push({ at: at2(), ...where, removed: gone.length, kept: f.kept[r.id] || 0, ...(gone.length ? { refs: f.refs } : {}) });
+        for (const x of gone) if (!l.removed.some(y => y.value === x.value && y.field === x.field && y.shows === x.shows)) l.removed.push({ field: x.field, value: x.value, shows: x.shows });
+      }
+      if (f.removed.length) log(`leave out: ${where.method} ${where.host}${where.path}: ${f.removed.length} left out${f.refs ? `, ${f.refs} references` : ''}`);
+      return f.removed.length ? { body: f.body } : null;
+    } }) : async () => {};
+    leaving = { log: () => JSON.parse(JSON.stringify(st.rules)), async stop() { await remove(); if (leaving === me) leaving = null; } };
+    const me = leaving;
+    if (prev) await prev.stop();
+    return me;
+  }
+
+  // Her own presence (presence.mjs): in each rule's answers (url, a browser request pattern; match, a guard entry over
+  // "METHOD host/path"), the entries naming one of ids read as status. Requests go out unchanged; only the body the
+  // page is given changes. → { log(), stop() }
+  let presencing = null;
+  async function presence(rules = []) {
+    const prev = presencing;
+    const st = { rules: rules.map(r => ({ id: r.id, app: r.app || null, answers: 0, changed: 0, failures: [] })) };
+    const remove = rules.length ? await addHook({ response: true, patterns: rules.map(r => ({ urlPattern: r.url, requestStage: 'Response' })), on: async (e, from) => {
+      if (e.responseStatusCode < 200 || e.responseStatusCode >= 300) return null;
+      const r = rules.find(x => allowedBy({ method: e.request.method, url: e.request.url }, [x.match]));
+      if (!r) return null;
+      const l = st.rules.find(x => x.id === r.id);
+      let text; try { text = await from.body(); } catch (x) { l.failures.push({ at: new Date().toISOString(), why: `its body couldn't be read (${String(x.message || x).split('\n')[0]})` }); return null; }
+      const ids = typeof r.ids === 'function' ? await r.ids().catch(() => []) : r.ids;
+      const f = presenceBody(text, ids, r.status);
+      l.answers++;
+      if (!f.ok) { l.failures.push({ at: new Date().toISOString(), why: f.why }); return null; }
+      if (!f.changed) return null;
+      l.changed++;
+      return { body: f.body };
+    } }) : async () => {};
+    presencing = { log: () => JSON.parse(JSON.stringify(st.rules)), async stop() { await remove(); if (presencing === me) presencing = null; } };
+    const me = presencing;
+    if (prev) await prev.stop();
+    return me;
+  }
+  const selfIdsOf = async p => selfIdsInKeys(await storageKeys(p));
 
   // The demo's account, pinned at Entra's sign-in (pinnedAuthorizeUrl): no account picker, whatever else the
   // profile holds. Counts how often it pinned.
@@ -565,7 +776,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
   async function close() {
     process.removeListener('exit', kill);
     for (const sig of ['SIGINT', 'SIGTERM']) process.removeListener(sig, onSignal);
-    hooks.clear(); await refetch().catch(() => {});
+    hooks.clear(); if (everyTarget) await everyTarget.close().catch(() => {});
     await top.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
     if (bpid) for (let i = 0; i < 30; i++) { if (!alive(bpid.id)) break; await sleep(150); if (i === 29) try { process.kill(bpid.id, 'SIGKILL'); } catch (e) {} }
@@ -575,7 +786,7 @@ export async function openCaptureBrowser({ profile = null, channel = 'chrome', w
     killAll('SIGKILL');
     for (let i = 0; i < 20; i++) { cleanup(); if (!throwaway || !existsSync(dir)) break; await sleep(150); }
   }
-  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, pinAccount, tenantsOf, info, cpu, close, dir };
+  return { browser, ctx, top, mode, port: at, open, twins, probe, signedIn, guard, leaveOut, presence, selfIdsOf, pinAccount, denyNotifications, tenantsOf, info, cpu, close, dir };
 }
 
 // The one window that shows on her screen: the capture profile, visible, on the first app that needs a sign-in. She

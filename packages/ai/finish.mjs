@@ -13,6 +13,7 @@ import { walkerFromDemo, specName } from './walker.mjs';
 import { parseTalkTrack } from '@scenecast/script/talk.mjs';
 import { cleanTarget } from './from-script.mjs';
 import { readFocusJson, readEditorOverrides, writeJsonAtomic, checkFocusJson, FOCUS_JSON, EDITOR_JSON } from '@stuntdouble/core/lib/overrides.mjs';
+import { proofWords } from './landing.mjs';
 
 const clean = s => String(s || '').replace(/\s+/g, ' ').trim();
 const norm = s => clean(s).toLowerCase().replace(/[“”"'’‘]/g, '');
@@ -109,16 +110,34 @@ export function guideScript(track, plan, flow, { keys = [], apps = [] } = {}) {
 
 // ---- the one-page review -----------------------------------------------------------------------------------------
 const readJson = f => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch (e) { return null; } };
+// Steps the plan took from her own recording that aren't writes (a search the recording made before a click): for
+// information, not for her to do.
+const INFO = new Set(['restored']);
+export const addedFromRecording = planReview => ((planReview && planReview.flags) || []).filter(f => INFO.has(f.kind)).map(f => ({ where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text }));
+// What the capture sets off camera just before a step, because her script says it's already so (reset.md's Set
+// before): for information, in place of a step to add.
+export const setOffCamera = reset => ((reset && reset.before) || []).flatMap(b => b.items.map(i => ({
+  where: `beat ${b.beat}`,
+  text: `${i.kind === 'choice' ? `Picks "${i.value}" (${i.subject})` : `Switches "${i.subject}" ${i.value}`} in ${reset.appTitle ? reset.appTitle(i.app) : i.app}, just before ${b.text}${b.n ? ` (step ${b.n})` : ''}`,
+})));
+// What she leaves out of the replica (reset.md's Leave out, parseReset's), in her words, by app, for information: by the
+// words the screens show it by (a sender's name, not an address).
+export const leftOutLines = (leaveOut, apps = []) => (leaveOut || []).filter(l => l.app).map(l => {
+  let k = 0;
+  const text = (l.shows || []).length === (l.values || []).length ? l.what.replace(/["“]([^"“”]+)["”]/g, (m, v) => { const s = l.shows[k++]; return s && s !== v.trim() ? `"${s}"` : m; }) : l.what;
+  return { where: ((apps || []).find(a => a.id === l.app) || {}).title || l.app, text };
+});
 export function needsYou({ planReview, reset, plan, fidelity, points }) {
   const out = [];
-  for (const f of (planReview && planReview.flags) || []) out.push({ kind: f.kind === 'added' ? 'Added from the recording' : f.kind === 'order' ? 'Not where your script says' : 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
+  const KIND = { added: 'Added from the recording', order: 'Not where your script says', landing: "A run can't check this step", number: 'A number that can change', message: 'Words in a message' };
+  for (const f of ((planReview && planReview.flags) || []).filter(f => !INFO.has(f.kind))) out.push({ kind: KIND[f.kind] || 'Differs from your script', where: f.line ? `line ${f.line}` : f.beat ? `beat ${f.beat}` : '', text: f.text });
   for (const n of (reset && reset.needs) || []) out.push({ kind: n.kind === 'start' ? 'A step is missing' : 'Reset', where: `beat ${n.beat}`, text: n.text });
   plan.beats.forEach((b, bi) => (b.lines || []).forEach((l, li) => { if (!(l.focus || []).some(f => f.on)) out.push({ kind: 'No focus point', where: `line ${bi + 1}.${li + 1}`, text: `Nothing on its screens backs “${l.text.slice(0, 80)}${l.text.length > 80 ? '…' : ''}”. Add one in the editor if it needs one.` }); }));
   for (const i of ((fidelity && fidelity.items) || []).filter(i => i.status === 'fail' || i.status === 'manual')) out.push({ kind: i.status === 'fail' ? 'Check failed' : 'Look yourself', where: '', text: `${i.title}: ${(i.detail || '').split('\n')[0]}` });
   if (points && !points.length) out.push({ kind: 'No focus point', where: '', text: 'The plan has no focus points yet: build the demo, then finish again.' });
   return out;
 }
-export function reviewHtml({ title, beats, timings, needs, stats }) {
+export function reviewHtml({ title, beats, timings, needs, added = [], offCamera = [], leftOut = [], stats }) {
   const card = s => `<figure><div class="img">${s.img ? `<img loading="lazy" src="${esc(s.img)}" alt="">` : '<span>No picture</span>'}</div><figcaption><b>${esc(s.step)}</b>${s.words ? `<span>${esc(s.words)}</span>` : ''}</figcaption></figure>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}: review</title><style>
 body{margin:0;padding:24px 28px;font:14px/1.45 -apple-system,"Segoe UI",system-ui,sans-serif;color:#1b1b1b;background:#fff}
@@ -128,6 +147,9 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;text-transform:uppercase;lett
 figcaption{font-size:12px;margin-top:4px}figcaption span{display:block;color:#666}table{border-collapse:collapse}td,th{padding:4px 12px 4px 0;text-align:left;border-bottom:1px solid #eee;font-variant-numeric:tabular-nums}</style></head><body>
 <h1>${esc(title)}</h1><div class="sum">${stats.map(([k, v]) => `<b>${esc(v)}</b> ${esc(k)}`).join(' · ')}</div>
 <h2>Needs you</h2>${needs.length ? `<ul class="needs">${needs.map(n => `<li><span class="k">${esc(n.kind)}</span><span class="w">${esc(n.where)}</span>${esc(n.text)}</li>`).join('')}</ul>` : '<p class="ok">Nothing. It\u2019s ready to present.</p>'}
+${added.length ? `<h2>Added from your recording</h2><p class="sum">Steps your script leaves out, done as you recorded them. Nothing to do.</p><ul class="needs">${added.map(a => `<li><span class="w">${esc(a.where)}</span>${esc(a.text)}</li>`).join('')}</ul>` : ''}
+${offCamera.length ? `<h2>Set off camera</h2><p class="sum">Your script has these already set when you get there. The capture sets each one off camera, just before that step, and the cleanup puts it back. Nothing to do.</p><ul class="needs">${offCamera.map(a => `<li><span class="w">${esc(a.where)}</span>${esc(a.text)}</li>`).join('')}</ul>` : ''}
+${leftOut.length ? `<h2>Left out of your replica</h2><p class="sum">Nothing changes in your tenant. The capture leaves these out of what it saves, so your replica never shows them. Nothing to do.</p><ul class="needs">${leftOut.map(a => `<li><span class="w">${esc(a.where)}</span>${esc(a.text)}</li>`).join('')}</ul>` : ''}
 <h2>Timings</h2><table>${timings.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>Every screen</h2>${beats.map(b => `<div class="beat">Beat ${b.n} · ${esc(b.title)}</div><div class="sheet">${b.shots.map(card).join('')}</div>`).join('')}
 </body></html>`;
@@ -157,7 +179,7 @@ export function beatTimings(plan, slots = []) {
 }
 
 // The review, with each screen's picture (the capture's own screenshot) copied next to it.
-export function writeReview(demo, { plan, planReview, reset, flow, slots = [], out = join(demo.out, 'review') }) {
+export function writeReview(demo, { plan, planReview, reset, flow, slots = [], leaveOut = [], out = join(demo.out, 'review') }) {
   mkdirSync(join(out, 'shots'), { recursive: true });
   const S = flow ? flow.states || {} : {};
   const shotOf = id => {
@@ -165,7 +187,8 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], o
     for (const f of [join(demo.raw || '', 'shots', snap + '.png'), join(demo.dir, 'presenter', 'shots', snap + '.png')]) if (existsSync(f)) { copyFileSync(f, join(out, 'shots', snap + '.png')); return `shots/${snap}.png`; }
     return null;
   };
-  const beats = plan.beats.map((b, i) => ({ n: i + 1, title: b.title, shots: b.steps.filter(s => s.lands && s.lands.screen).map(s => ({ step: formatStep(s), words: s.lands.text || '', img: shotOf(s.lands.screen) })) }));
+  // Under each step, what a run checks it by (plan-format.md, "What proves a step").
+  const beats = plan.beats.map((b, i) => ({ n: i + 1, title: b.title, shots: b.steps.filter(s => s.lands && s.lands.screen).map(s => ({ step: formatStep(s), words: s.lands.kind ? `Checks ${proofWords(s.lands)}` : 'Nothing a run can check', img: shotOf(s.lands.screen) })) }));
   const fidelity = readJson(join(demo.out, 'fidelity.json')), bench = readJson(join(demo.out, 'bench.json'));
   const rec = readJson(join(demo.dir, 'recording.json')) || readJson(join(demo.raw || '', 'recording.json'));
   const timings = [];
@@ -178,11 +201,11 @@ export function writeReview(demo, { plan, planReview, reset, flow, slots = [], o
   if (fidelity) timings.push(['Checks', `${fidelity.secs} s · ${fidelity.items.filter(i => i.status === 'pass').length} of ${fidelity.items.length} pass`]);
   timings.push(...beatTimings(plan, slots));
   const points = (readFocusJson(demo.dir).points || []).filter(p => p.source === 'plan');
-  const needs = needsYou({ planReview, reset, plan, fidelity, points });
+  const needs = needsYou({ planReview, reset, plan, fidelity, points }), added = addedFromRecording(planReview), offCamera = setOffCamera(reset), leftOut = leftOutLines(leaveOut, (demo.cfg || {}).apps || []);
   const writes = plan.beats.flatMap(b => b.steps).filter(s => s.writes).length;
-  const html = reviewHtml({ title: `${demo.cfg.title || plan.title}: review`, beats, timings, needs, stats: [['beats', plan.beats.length], ['screens', beats.reduce((n, b) => n + b.shots.length, 0)], ['writes', writes], ['focus points', points.length], ['things for you', needs.length]] });
+  const html = reviewHtml({ title: `${demo.cfg.title || plan.title}: review`, beats, timings, needs, added, offCamera, leftOut, stats: [['beats', plan.beats.length], ['screens', beats.reduce((n, b) => n + b.shots.length, 0)], ['writes', writes], ['focus points', points.length], ['things for you', needs.length]] });
   writeFileSync(join(out, 'index.html'), html);
-  return { file: join(out, 'index.html'), needs };
+  return { file: join(out, 'index.html'), needs, added, offCamera, leftOut };
 }
 
 export async function finish({ demo, packs, emit = () => {} }) {
@@ -221,10 +244,11 @@ export async function finish({ demo, packs, emit = () => {} }) {
   writeJsonAtomic(join(demo.dir, FOCUS_JSON), value);
   result.points = points.length;
   emit({ event: 'finish', step: 'focus', points: points.length });
-  const { resetFor } = await import('./reset.mjs');
+  const { resetFor, parseReset } = await import('./reset.mjs');
   const { loadPacks } = await import('./make.mjs');
-  const reset = existsSync(join(demo.dir, 'reset.md')) ? resetFor(plan, { walker, packs: packs === undefined ? await loadPacks(demo) : packs }) : null;
-  const r = writeReview(demo, { plan, planReview, reset, flow, slots });
+  const rf = join(demo.dir, 'reset.md'), had = existsSync(rf);
+  const reset = had ? resetFor(plan, { walker, packs: packs === undefined ? await loadPacks(demo) : packs }) : null;
+  const r = writeReview(demo, { plan, planReview, reset, flow, slots, leaveOut: had ? parseReset(readFileSync(rf, 'utf8')).leaveOut : [] });
   emit({ event: 'finish', step: 'review', needs: r.needs.length });
   return { ...result, review: r.file, needs: r.needs.length };
 }

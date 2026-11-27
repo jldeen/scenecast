@@ -19,6 +19,7 @@ import { createServer } from 'node:net';
 import { chromium } from 'playwright-core';
 import { startFixture } from '../../examples/fixture-app/server.mjs';
 import { parsePlan, parseStep } from '@scenecast/ai/plan.mjs';
+import { selftestGuard } from './guard.mjs';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = process.env.SCENECAST_BIN ? resolvePath(process.env.SCENECAST_BIN) : join(KIT, '..', 'target', 'debug', process.platform === 'win32' ? 'scenecast.exe' : 'scenecast');
@@ -28,6 +29,7 @@ const REAL = process.argv.includes('--real');
 const only = (process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : REAL ? '1' : '1,2,3,4').split(',').map(Number);
 const RX_PORT = 47695, REPLICA_PORT = 4695;
 const tmp = mkdtempSync(join(tmpdir(), 'scenecast-ai-'));
+await selftestGuard({ tmp, receivers: [RX_PORT], extensions: [RX_PORT] });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fails = [];
 const check = (name, ok, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail && !ok ? `: ${String(detail).slice(0, 1500)}` : '')); if (!ok) fails.push(name); };
