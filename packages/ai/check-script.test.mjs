@@ -135,7 +135,7 @@ test('a doubt lasts until the next write: unproven, then reached, then a write s
 });
 
 test('a wait after a doubt isn\'t carried: its unproven landing still stops the write after a proven step', () => {
-  const plan = parsePlan(`# T
+  const text = `# T
 
 ## Beat 1 · A
 
@@ -148,10 +148,13 @@ test('a wait after a doubt isn\'t carried: its unproven landing still stops the 
   Lands on: chat-roles · "Roles & Industry"
 - Click "Turn on" — ask first
   Writes: turns the plugin on · chat:plugin-switch
-`);
-  const r = predictStops(plan, { beats: [{ steps: ['reached', 'drifted', 'unproven', 'reached', 'write'].map(status => ({ status })) }] }, { writeKnown: known });
+`;
+  const walked = { beats: [{ steps: ['reached', 'drifted', 'unproven', 'reached', 'write'].map(status => ({ status })) }] };
+  const r = predictStops(parsePlan(text), walked, { writeKnown: known });
   assert.equal(r.stops.length, 1);
   assert.match(r.stops[0].why, /step 3/);
+  // A hover there is proven by its own control in a run, or only marked: no stop.
+  assert.deepEqual(predictStops(parsePlan(text.replace('- Wait for the list', '- Hover over "Roles"')), walked, { writeKnown: known }).stops, []);
 });
 
 test('a drifted or missed step is only marked in a run: a proven step after it clears it before the write', () => {
