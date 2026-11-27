@@ -151,7 +151,10 @@ export function guardVerdict({ method, url, body = null }, { hosts = null, allow
   if (!local && LOOPBACK.test(u.host)) return 'pass';
   if (hosts && !hosts.some(h => hostIs(u.host, h))) return 'pass';
   const at = u.host + u.pathname;
-  return allow.some(a => entryMatches(a, m, at, body)) ? 'pass' : 'hold';
+  // A JSON body is checked as it came and with its escapes decoded (\u006d is "m"), so an escape can't slip a write past
+  // a rule's words.
+  let plain = null; if (typeof body === 'string') try { plain = JSON.stringify(JSON.parse(body)); } catch (e) {}
+  return allow.some(a => entryMatches(a, m, at, body) && (plain === null || plain === body || entryMatches(a, m, at, plain))) ? 'pass' : 'hold';
 }
 // A GraphQL call's operation, by name, from its body (for the record of what passed): its operationName, else the
 // name after its first keyword. null for anything else.

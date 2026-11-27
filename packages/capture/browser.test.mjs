@@ -233,6 +233,8 @@ test("Teams' people card: Loki's GraphQL passes a query only, and its name is ke
     b(q + '\nmutation Also { x }', { operationName: 'Also' }),
     b(q + '\tsubscription Also { x }'),
     JSON.stringify({ query: q }).replace(/"}$/, '\\u000amutation Also { x }"}'),
+    // A letter of the keyword escaped: \u006dutation is "mutation" once decoded.
+    b(q + ' mutation Also { x }', { operationName: 'Also' }).replace(' mutation', ' \\u006dutation'),
     b('{ badges { id } }'),
     JSON.stringify({ extensions: { persistedQuery: { version: 1, sha256Hash: 'a'.repeat(64) } }, variables: {} }),
     JSON.stringify([{ query: q }]),
