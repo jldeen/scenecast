@@ -699,7 +699,8 @@ export async function recordUnattended({ demo, emit = () => {}, cmd: viaCmd, pac
     if (recording) {
       emit({ event: 'stage', name: 'stop', label: 'Saving the recording' });
       try { run.summary = await cmd('recordStop', {}, 900); } catch (e) { run.summary = { error: e.message }; }
-      if (run.summary && run.summary.states > 0) forgetLastTake(demo.dir);
+      // Never in the way of the reset after: a focus.json she broke by hand stays as it is.
+      if (run.summary && run.summary.states > 0) try { forgetLastTake(demo.dir); } catch (e) { log(`the last take's beat keys and focus points stay: ${e.message}`); }
       // A save it refused after the last step: the take ends there, and she sees why.
       const os = await ownStopped();
       if (os && !run.stopped) ownStopRun(os);

@@ -272,6 +272,11 @@ fn child_alive(child: &mut Option<Child>) -> bool {
 impl ReceiverHost {
     /// The receiver for this demo, started (or kept) running. Returns its state.
     pub fn ensure(&'static self, dir: &Path) -> Result<ReceiverState, AppError> {
+        self.ensure_with(dir, false)
+    }
+
+    /// `hold`: held for this demo in the same lock that puts the receiver on it, so no other demo slips in between.
+    fn ensure_with(&'static self, dir: &Path, hold: bool) -> Result<ReceiverState, AppError> {
         if self.held_elsewhere(dir) {
             return Err(AppError::Invalid(HELD.into()));
         }
@@ -302,8 +307,14 @@ impl ReceiverHost {
                 g.port = None;
                 g.restarts = 0;
             }
+            if hold {
+                g.held += 1;
+            }
             if let Err(e) = self.start_locked(&mut g) {
                 g.error = Some(e.to_string());
+                if hold {
+                    g.held -= 1;
+                }
                 return Err(e);
             }
             g.error = None;
@@ -320,12 +331,7 @@ impl ReceiverHost {
     /// The receiver for this demo, kept on it until the returned guard is dropped: another demo's `ensure` is refused
     /// meanwhile (a separate-browser recording loses its commands, its reset after included, if it's switched).
     pub fn hold(&'static self, dir: &Path) -> Result<Held, AppError> {
-        self.ensure(dir)?;
-        let mut g = self.inner.lock().expect("receiver lock");
-        if !g.dir.as_deref().is_some_and(|d| same_dir(d, dir)) {
-            return Err(AppError::Invalid(HELD.into()));
-        }
-        g.held += 1;
+        self.ensure_with(dir, true)?;
         Ok(Held(self))
     }
 
@@ -539,8 +545,12 @@ fn spawn(dir: &Path, port: u16) -> Result<Child, AppError> {
         .map_err(|e| AppError::Invalid(format!("can't run {}: {e}", engine.node.display())))
 }
 
-/// The engine, pointed at the app's receiver for this demo when there is one.
+/// The engine, pointed at the app's receiver for this demo when there is one. While another demo's recording holds the
+/// receiver, none: its commands would reach that recording's browser.
 pub fn engine_for(dir: &Path) -> Result<scenecast_build::Engine, AppError> {
+    if host().held_elsewhere(dir) {
+        return Err(AppError::Invalid(HELD.into()));
+    }
     let mut engine = crate::engine()?;
     if let Some(port) = host().port_for(dir) {
         engine
