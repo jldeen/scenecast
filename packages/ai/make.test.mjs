@@ -18,7 +18,7 @@ import { approve, approval, writeReset, planFromScript } from './make.mjs';
 import { walkPlan } from './walk.mjs';
 import { undoGroups, checkClaim } from './reset-run.mjs';
 import { startUrls } from './live.mjs';
-import { scriptPlanInput, planWithModel } from './script-plan.mjs';
+import { scriptPlanInput, planWithModel, trackFromAnswer } from './script-plan.mjs';
 import { makeModel } from './model.mjs';
 import { pointsFromPlan, guideScript, beatStarts, beatTimings, needsYou, addedFromRecording, setOffCamera, leftOutLines, reviewHtml, finish, forgetLastTake } from './finish.mjs';
 import { regroundPlan, walkReads, formatReground, reground, missingCounts } from './reground.mjs';
@@ -226,6 +226,18 @@ test('Copilot gets a screen\'s words only when page text is allowed, redacted; a
   await planWithModel(track, { walker, model: { kind: 'x', ask: async (task, input, opts) => { asked = { input, opts }; return { beats: [] }; } } });
   assert.deepEqual(asked.opts.keyOf, scriptPlanInput(track, walker, { pageText: false }));
   assert.doesNotMatch(JSON.stringify(asked.opts.keyOf), /"draft":|"issues":/);
+});
+
+test('an answer that leaves out the switch to the app her line is in keeps the rules\' switch', () => {
+  const track = parseTalkTrack('# T\n\n## 1. Open · ~5s\n\n> I open Teams.\n\n## 2. Ask · ~10s\n\n> So I ask Copilot.\n', 't.md');
+  const draft = { plan: { beats: [{ steps: [{ kind: 'app', app: 'teams', line: '1.1' }] }, { steps: [{ kind: 'app', app: 'copilot', line: '2.1' }, { kind: 'press', key: 'Enter', line: '2.1' }] }] }, flags: [] };
+  const answer = { beats: [{ n: 1, lines: [{ id: '1.1', steps: ['Go to teams'] }] }, { n: 2, lines: [{ id: '2.1', steps: ['Type "What does this put at risk?" in "Message Copilot"', 'Press Enter'] }] }] };
+  const t = trackFromAnswer(track, answer, draft);
+  assert.deepEqual(t.beats[1].lines[0].intents.map(i => Object.keys(i)[0]), ['app', 'type', 'key']);
+  assert.equal(t.beats[1].lines[0].intents[0].app, 'copilot');
+  // One that switches itself is left as it is.
+  const own = trackFromAnswer(track, { beats: [answer.beats[0], { n: 2, lines: [{ id: '2.1', steps: ['Go to copilot', 'Press Enter'] }] }] }, draft);
+  assert.deepEqual(own.beats[1].lines[0].intents.map(i => Object.keys(i)[0]), ['app', 'key']);
 });
 
 test('one box for what a line names together: rows of one list, a step and the steps it goes on to', () => {

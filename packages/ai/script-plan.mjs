@@ -112,7 +112,11 @@ export function trackFromAnswer(track, answer, draft = null) {
         const a = byId.get(lineId(bi, li));
         if (!a) return l;
         let steps = Array.isArray(a.steps) ? a.steps : [];
-        if (!steps.length && draft) steps = draft.plan.beats.flatMap(b => b.steps).filter(s => s.line === lineId(bi, li)).map(formatStep);
+        const mine = draft ? draft.plan.beats.flatMap(b => b.steps).filter(s => s.line === lineId(bi, li)) : [];
+        if (!steps.length) steps = mine.map(formatStep);
+        // The app her line is in, as the rules read it: an answer that leaves out the switch to it would do the line in
+        // the app before (her prompt typed and sent in Teams, not Copilot).
+        else if (mine[0] && mine[0].kind === 'app' && !steps.some(x => /^go to\b/i.test(String(x).trim()))) steps = [formatStep(mine[0]), ...steps];
         return { ...l, intents: steps.map(s => intentOf(s, l, prompts)).filter(Boolean), points: (Array.isArray(a.point) ? a.point : []).filter(p => p && (p.text || (Array.isArray(p.texts) && p.texts.length))).slice(0, 3) };
       }),
     })),
