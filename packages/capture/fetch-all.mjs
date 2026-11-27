@@ -14,6 +14,8 @@
 const KINDS = new Set(['page', 'iframe', 'worker', 'shared_worker', 'service_worker']);
 
 const DROP_HEADERS = /^(content-encoding|content-length|transfer-encoding)$/i;
+// A target kind with no Fetch at all (a page's own worker: its requests go through the page, which has it).
+const NO_FETCH = /wasn't found/;
 
 export async function fetchEveryTarget(port, { onPaused = async () => null, onResponse = async () => null, log = () => {} } = {}) {
   const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
@@ -40,7 +42,7 @@ export async function fetchEveryTarget(port, { onPaused = async () => null, onRe
       sessions.set(sessionId, kind);
       if (patterns) {
         const err = await fetchOn(sessionId).then(() => null, e => e);
-        if (err && sessions.has(sessionId)) { log(`interception didn't start on a ${kind} (${err.message}); it stays paused`); return; }
+        if (err && !NO_FETCH.test(err.message) && sessions.has(sessionId)) { log(`interception didn't start on a ${kind} (${err.message}); it stays paused`); return; }
       }
     }
     if (kind !== 'browser') await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sessionId).catch(() => {});
@@ -80,7 +82,7 @@ export async function fetchEveryTarget(port, { onPaused = async () => null, onRe
     // Rejects when interception didn't start on a target that's still there: the caller stops rather than go on unguarded.
     async set(p) {
       patterns = p && p.length ? p : null;
-      await Promise.all([...sessions.keys()].map(s => fetchOn(s).catch(e => { if (patterns && sessions.has(s)) throw e; })));
+      await Promise.all([...sessions.keys()].map(s => fetchOn(s).catch(e => { if (patterns && sessions.has(s) && !NO_FETCH.test(e.message)) throw e; })));
     },
     targets: () => sessions.size,
     async close() { if (closed) return; patterns = null; closed = true; try { ws.close(); } catch (e) {} },

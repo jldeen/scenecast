@@ -1,11 +1,11 @@
 {
   "name": "@scenecast/editor",
-  "version": "0.5.6-rc.1",
+  "version": "0.5.6-rc.2",
   "private": true,
   "type": "module",
   "description": "The editor inside the replica: focus-point dots, wording and date overrides, beat starts, undo.",
   "dependencies": {
-    "@stuntdouble/core": "0.5.6-rc.1",
-    "@stuntdouble/player": "0.5.6-rc.1"
+    "@stuntdouble/core": "0.5.6-rc.2",
+    "@stuntdouble/player": "0.5.6-rc.2"
   }
 }
