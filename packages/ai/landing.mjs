@@ -349,9 +349,10 @@ export function proveLandings(plan, walker, flags = [], { checked = null } = {})
 
 // With no recording behind a step: nothing recorded to compare with (no frame, no other captures), and a control found
 // by its exact name.
-// A greeting ("Hi, try asking me to recap a meeting", "Good morning, Jessica"): an app picks another on each visit, so a
-// run can't count on it, even where the recording caught only one.
-const GREETING = /^(hi|hello|hey|welcome|good (morning|afternoon|evening))\b/i;
+// A greeting ("Hi, try asking me to recap a meeting", "Good morning, Jessica", "Welcome back, Jessica"): an app picks
+// another on each visit, so a run can't count on it, even where the recording caught only one. A product's own fixed
+// heading ("Welcome to Contoso Admin") isn't one.
+const GREETING = /^(hi|hello|hey|good (morning|afternoon|evening)|welcome back)\b/i;
 const NONE = { screen: () => null, shown: () => null, flow: { states: {} }, states: [],
   control: (sc, name) => { const el = ((sc && sc.controls) || []).find(c => !unseen(c) && pnorm(c.name) === pnorm(name)); return el ? { el, score: 100 } : null; } };
 const sameProof = (a, b) => !!a && !!b && a.kind === b.kind && (a.state || null) === (b.state || null) && textsOf(a).map(pnorm).join('\n') === textsOf(b).map(pnorm).join('\n');

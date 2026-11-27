@@ -1056,6 +1056,11 @@ test('a plan never proves a step by a greeting: an app picks another on each vis
   const plan = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'start' } }, { kind: 'click', target: 'New', lands: { screen: 'home' } }] }] };
   proveLandings(plan, walker);
   assert.equal(formatLands(plan.beats[0].steps[1].lands), 'home · "Message Copilot"');
+  // A product's own fixed heading still proves a step.
+  screens.home = sc(['Recent chats', 'Welcome to Contoso Admin']);
+  const plan2 = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'start' } }, { kind: 'click', target: 'New', lands: { screen: 'home' } }] }] };
+  proveLandings(plan2, walker);
+  assert.equal(formatLands(plan2.beats[0].steps[1].lands), 'home · "Welcome to Contoso Admin"');
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {

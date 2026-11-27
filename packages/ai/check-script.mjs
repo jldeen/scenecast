@@ -31,7 +31,8 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
   if (c && c.error) stops.push({ ...row(-1, -1, null, 'Before it starts, its checks couldn\'t run', 'Check again in a minute'), detail: c.error });
   else if (c && (c.wrong || c.cant)) for (const l of (c.lines || []).filter(l => l.status !== 'pass')) stops.push({ ...(l.status === 'wrong'
     ? row(-1, -1, { text: l.text }, `Before it starts, the demo isn't as it should be (${said(l.text)})`, 'Put the demo back as it starts, then check again')
-    : row(-1, -1, { text: l.text }, `Before it starts, it can't check this with the plan as it is (${said(l.text)})`, 'Make the plan again: its start checks are made with it')), ...(l.why ? { detail: l.why } : {}) });
+    : l.plan ? row(-1, -1, { text: l.text }, `Before it starts, it can't check this with the plan as it is (${said(l.text)})`, 'Make the plan again: its start checks are made with it')
+      : row(-1, -1, { text: l.text }, `Before it starts, it couldn't check this (${said(l.text)})${l.why ? `: ${l.why}` : ''}`, 'Open the demo where it starts, then check again')), ...(l.why ? { detail: l.why } : {}) });
   for (const o of walk.ownStatus || []) if (!o.ok) stops.push(row(-1, -1, null, o.error || `${name(o.app)} showed you as ${o.status}, not ${(o.expect || []).join(' or ')}`, 'Start again while you\'re at your computer, with that app open'));
   // Each app's start screen, as the run checks it before its first step.
   for (const st of walk.starts || []) if (st.ok === false) stops.push(row(-1, -1, null, `${name(st.app)} isn't where the demo starts: ${(st.why || 'not as the plan has it').replace(new RegExp(`^${st.app}\\b`), name(st.app))}`, 'Open it where the demo starts, or fix its start in the plan'));

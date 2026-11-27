@@ -83,11 +83,14 @@ test('a proof that quotes the answer, then a write, stops; a write with no pack 
 });
 
 test('a start check failing stops the run before it starts, said in plain words', () => {
-  const lines = [{ text: 'chat: Added doesn\'t list the skill', status: 'wrong' }, { text: 'chat on cop-home: Recent is empty', status: 'cant', why: 'the plan never lands on cop-home' }];
-  const r = predictStops(PLAN, { ...walk(['reached', 'reached', 'reached', 'write']), check: { wrong: 1, cant: 1, lines } }, { writeKnown: known, names: { chat: 'Chat app' } });
+  const lines = [{ text: 'chat: Added doesn\'t list the skill', status: 'wrong' }, { text: 'chat on cop-home: Recent is empty', status: 'cant', why: 'the plan never lands on cop-home', plan: true },
+    { text: 'chat: Added lists the skill', status: 'cant', why: 'on the way there, Click "Plugins": it didn\'t land' }];
+  const r = predictStops(PLAN, { ...walk(['reached', 'reached', 'reached', 'write']), check: { wrong: 1, cant: 2, lines } }, { writeKnown: known, names: { chat: 'Chat app' } });
   assert.deepEqual(r.stops.map(s => [s.beat, s.why, s.fix]), [
     [0, 'Before it starts, the demo isn\'t as it should be (Chat app: Added doesn\'t list the skill)', 'Put the demo back as it starts, then check again'],
-    [0, 'Before it starts, it can\'t check this with the plan as it is (Chat app: Recent is empty)', 'Make the plan again: its start checks are made with it']]);
+    [0, 'Before it starts, it can\'t check this with the plan as it is (Chat app: Recent is empty)', 'Make the plan again: its start checks are made with it'],
+    // Not the plan's doing: it says why, and making the plan again isn't the fix.
+    [0, 'Before it starts, it couldn\'t check this (Chat app: Added lists the skill): on the way there, Click "Plugins": it didn\'t land', 'Open the demo where it starts, then check again']]);
   for (const s of r.stops) assert.doesNotMatch(`${s.why} ${s.fix}`, /reset\.md|\bcant\b|\bwrong\b|cop-home|lands on/);
   assert.equal(r.stops[1].detail, 'the plan never lands on cop-home');
 });
