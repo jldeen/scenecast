@@ -632,7 +632,8 @@ try {
   // Ready to present first, then compared and checked in the background: wait for both.
   await waitFor('the demo to be ready, compared and checked', async () => ((await exists('ai-after-done')) && (await attr('ai-after-done', 'data-compared')) === 'true' && (await attr('ai-after-done', 'data-checks')) !== '') || (await b.execute(() => /notice bad/.test(document.querySelector('[data-region="ai-after"]')?.innerHTML || ''))), 900000);
   check('Record for me: built, the talk track on its screens, the guide, the checks pass, compared', await exists('ai-after-done') && (await attr('ai-after-done', 'data-checks')) === 'true' && (await attr('ai-after-done', 'data-compared')) === 'true', await b.execute(() => document.querySelector('[data-region="ai-after"]')?.innerText));
-  check('Record for me: the finish ran after the build (the plan\'s beats, focus points and script)', (await attr('ai-after-done', 'data-finished')) === 'true');
+  // In her browser the run writes its own talk track, beat for beat: the finish is only for a separate-browser take.
+  check('Record for me in her browser: its own talk track, no finish after it', (await attr('ai-after-done', 'data-finished')) === 'false');
   check('Record for me: what was sent to Copilot, listed', await exists('ai-sent-list'));
   await shot('18-record-for-me-done');
   check('Record for me: script.md and focus points', /Kestrel moved the ship date/.test(readFileSync(join(FM, 'script.md'), 'utf8')) && JSON.parse(readFileSync(join(FM, 'focus.json'), 'utf8')).points.length > 0);

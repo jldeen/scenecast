@@ -1218,7 +1218,10 @@ function pendingQuestion(events) {
 // What Check my script found: where a run would stop (before a change it can't prove), and the steps it couldn't
 // prove that no change follows (the run goes on past those and marks the beat).
 const checkItem = (k, x) => `<li data-test="ai-check-${k}">${x.beat > 0 ? `Beat ${x.beat}${x.text ? `, ${esc(x.text)}` : ''}: ` : ''}${esc(x.why)}${x.fix ? `<br><small>${esc(x.fix)}</small>` : ''}</li>`;
-const signInFailed = d => { const o = J(d.id)['capture-sign-in']?.outcome; return o && !o.ok && o.error && !running('capture-sign-in', d.id) ? errorBox(o.error, 'capture-sign-in') : ''; };
+const signInFailed = d => {
+  const j = J(d.id)['capture-sign-in'], e = j && (j.error || (j.outcome && !j.outcome.ok && j.outcome.error));
+  return e && !running('capture-sign-in', d.id) ? errorBox(e, 'capture-sign-in') : '';
+};
 Object.assign(REGIONS, {
   separate(d) {
     const c = J(d.id).capture;
@@ -1998,8 +2001,8 @@ const ACTIONS = {
     loadAi(id);
     // Copilot's run stays on screen (what it did, what it asked); the replica is made meanwhile, a link away. A run in
     // the separate browser writes no talk track: the finish makes the guide's from the plan (in her browser, the run
-    // writes its own, beat for beat).
-    if (o) await makeReplica(id, { finish: away });
+    // writes its own, beat for beat). One that stopped before it recorded anything leaves the replica as it was.
+    if (o && (!away || o.summary?.states > 0)) await makeReplica(id, { finish: away });
   },
   'ai-stop': () => call('ai_stop', { id: S.id }).then(() => toast('Stopping: what was recorded is kept')),
   separate: async t => {
