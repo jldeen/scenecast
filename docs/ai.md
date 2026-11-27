@@ -47,7 +47,7 @@ It takes one question to Copilot, about a minute, and the answer is kept: making
 Without Copilot, the plan comes from your Do lines alone.
 **Approve and start** approves the plan exactly as it is: change it after that and it asks again.
 
-Afterwards Scenecast writes `reset.md`: each change undone, the state your demo starts in (what's switched on or off,
+Afterwards Scenecast writes `reset.md` (and writes it again whenever the plan is made again): each change undone, the state your demo starts in (what's switched on or off,
 the mode picked, the theme, as your first screens show it) set first, and a checklist that only looks. If a later
 screen shows something switched that no step of your plan switches (your script says it's already on), the capture
 switches it off camera just before that step, when it knows how, and the review lists it under **Set off camera**;

@@ -29,6 +29,12 @@ export async function loadPacks(demo) {
   } catch (e) { return null; }
 }
 
+// A new plan, a new reset.md: the last one's undo and checks are the last plan's (its screens, its writes), so a run's
+// start check would stop on them, or its reset would undo the wrong things. Her Leave out stays as she wrote it.
+export async function resetFollows(demo, packs) {
+  if (existsSync(join(demo.dir, RESET))) await writeReset(demo, { packs });
+}
+
 function save(demo, plan, review) {
   const text = formatPlan(plan);
   writeFileSync(join(demo.dir, PLAN), text);
@@ -51,6 +57,7 @@ export async function planFromScript({ demo, file, packs, model = null, settings
   const { plan, flags, model: asked } = model && walker ? await planWithModel(track, { walker, model, packs, apps: demo.cfg.apps || [], settings, emit }) : planFromTrack(track, { walker, apps: demo.cfg.apps || [], packs });
   const review = { at: new Date().toISOString(), from: basename(file), checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags, prompts: track.prompts, ...(asked ? { model: asked } : {}) };
   const text = save(demo, plan, review);
+  await resetFollows(demo, packs);
   // Her words stay with the demo: the source the plan came from (the app shows it as the material). Material she wrote
   // herself isn't replaced.
   const src = join(demo.dir, 'source.md');
@@ -69,6 +76,7 @@ export async function planFromWalkthrough({ demo, file, script = null, packs, em
   const plan = planFromRecording(rec, { walker, title: demo.cfg.title, track, packs, flags });
   const review = { at: new Date().toISOString(), from: basename(file), walkthrough: true, checked: walker ? walker.states.length : 0, beats: plan.beats.length, steps: stepCount(plan), writes: writesOf(plan), flags };
   const text = save(demo, plan, review);
+  await resetFollows(demo, packs);
   emit({ event: 'plan', beats: plan.beats.length, steps: review.steps, writes: review.writes.length, flags: flags.length, askFirst: (text.match(/ — ask first/g) || []).length });
   return { text, plan, review };
 }
