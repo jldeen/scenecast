@@ -640,6 +640,15 @@ test('a recorded click with no name, at the end of a beat, isn\'t the next beat\
   assert.equal(beatStarts(plan, flow)[2].states.chat, 'chat-saved');
 });
 
+test('a take\'s Save kept by its test id only, and a box it emptied, still start the next beats where they were', () => {
+  const { flow, plan } = takeDemo();
+  const save = flow.path.find(p => p.click && /Save note/.test(p.click.sel));
+  save.click = { sel: 'button[data-testid="save"]' };
+  flow.path.splice(flow.path.indexOf(save), 0, { clear: BOX, checkpoint: 'chat-answer' });
+  const nameOf = (sig, m) => sig === 'chat-answer' && m.sel === save.click.sel ? 'Save: Save note' : null;
+  assert.deepEqual(beatStarts(plan, flow, { nameOf }).map(b => [b.active, b.states.chat]), [['chat', 'chat-home'], ['chat', 'chat-answer'], ['admin', 'chat-saved']]);
+});
+
 test('the finish follows the plan the take ran: its beats only, and ⌥1–⌥9 start them, none of the recording\'s after them', async () => {
   const { demo, flow, home } = takeDemo();
   // Her talk track has a beat this take left out; the beat keys from a longer plan before are still there.

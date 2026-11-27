@@ -30,31 +30,35 @@ const AROUND = { card: 'section,article,[role=group],[role=article],[role=region
 const stepKind = s => s.kind === 'app' ? 'app' : s.kind === 'type' ? 'type' : s.kind === 'press' ? (s.key === 'Enter' ? 'enter' : 'key') : s.kind === 'click' ? 'click' : null;
 const pathKind = p => p.type ? 'type' : p.enter ? 'enter' : p.click ? 'click' : p.key ? 'key' : p.app ? 'app' : null;
 const bare = t => norm(String(t || '').replace(/[\u200B-\u200D\u2060\uFEFF]/g, ''));
-const sameStep = (s, p) => {
+const sameStep = (s, p, nameOf = q => specName(q.click)) => {
   const k = stepKind(s);
   if (!k || k !== pathKind(p)) return false;
   if (k === 'app') return p.app === s.app;
   if (k === 'type') return !s.value || bare(p.text) === bare(s.value);
   if (k === 'key') return p.key === s.key;
   // A recorded click with no name (a test id only) isn't the one a plan step names.
-  if (k === 'click') { const a = bare(specName(p.click)), b = bare(s.target); return !!a && (!b || a.includes(b) || b.includes(a)); }
+  if (k === 'click') { const a = bare(nameOf(p)), b = bare(s.target); return !!a && (!b || a.includes(b) || b.includes(a)); }
   return true;
 };
 
 // Each beat of the plan, where it starts: { active, states } (the screens every app is on when it begins). A step
 // lands on the screen the plan names when the recording has it, else on the one the take recorded for it (a plan
-// made from another recording names that recording's screens).
-export function beatStarts(plan, flow) {
+// made from another recording names that recording's screens). nameOf(screen, matcher): the walker's, to name a
+// click the recorder kept by its test id only, from the control it picks on the screen it was on.
+export function beatStarts(plan, flow, { nameOf = null } = {}) {
   const b0 = (flow.beats || [])[0];
   if (!b0) return [];
   const S = flow.states || {}, path = flow.path || [];
   const cur = { ...b0.states };
   let active = b0.active, at = 0;
+  const nameAt = p => specName(p.click) || (nameOf && S[p.checkpoint] && cur[S[p.checkpoint].app] ? nameOf(cur[S[p.checkpoint].app], p.click) || '' : '');
   const recorded = s => {
+    // A box emptied: no plan step does it, but its app is on its screen after it.
+    while (at < path.length && path[at].clear) { const c = path[at++].checkpoint; if (S[c]) cur[S[c].app] = c; }
     // A recorded click with no name (a test id only) that no plan step can be matched to is passed over when the
     // take's next step is this one.
-    if (at + 1 < path.length && pathKind(path[at]) === 'click' && !bare(specName(path[at].click)) && sameStep(s, path[at + 1])) at++;
-    if (at >= path.length || !sameStep(s, path[at])) return null;
+    if (at + 1 < path.length && pathKind(path[at]) === 'click' && !bare(nameAt(path[at])) && sameStep(s, path[at + 1], nameAt)) at++;
+    if (at >= path.length || !sameStep(s, path[at], nameAt)) return null;
     return path[at++].checkpoint;
   };
   return plan.beats.map(b => {
@@ -263,7 +267,7 @@ export async function finish({ demo, packs, emit = () => {} }) {
     const track = parseTalkTrack(text.replace(/^<!-- From: .+? -->\s*/, ''), name.replace(/\.docx$/i, '.md'));
     const tbs = trackBeats(track, plan);
     slots = tbs.map(tb => (tb || {}).time);
-    const starts = beatStarts(plan, flow);
+    const starts = beatStarts(plan, flow, { nameOf: walker.nameOf });
     // The beat keys: ⌥n starts her beat n where it starts, named as her guide names it (flow.editor.json; edits kept).
     // They're the show's beats: none after the plan's last (the recording's own beats, or a longer plan's from before).
     const ed = readEditorOverrides(demo.dir);
