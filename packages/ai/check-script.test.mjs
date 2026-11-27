@@ -134,6 +134,26 @@ test('a doubt lasts until the next write: unproven, then reached, then a write s
   assert.match(r.stops[0].why, /a write after a step it couldn't prove \(step 2/);
 });
 
+test('a wait after a doubt isn\'t carried: its unproven landing still stops the write after a proven step', () => {
+  const plan = parsePlan(`# T
+
+## Beat 1 · A
+
+- Go to chat
+  Lands on: chat-home · "New chat"
+- Click "Plugins"
+  Lands on: chat-plugins · "Roles & Industry"
+- Wait for the list
+- Click "Roles"
+  Lands on: chat-roles · "Roles & Industry"
+- Click "Turn on" — ask first
+  Writes: turns the plugin on · chat:plugin-switch
+`);
+  const r = predictStops(plan, { beats: [{ steps: ['reached', 'drifted', 'unproven', 'reached', 'write'].map(status => ({ status })) }] }, { writeKnown: known });
+  assert.equal(r.stops.length, 1);
+  assert.match(r.stops[0].why, /step 3/);
+});
+
 test('a drifted or missed step is only marked in a run: a proven step after it clears it before the write', () => {
   const plan = parsePlan(`# T
 

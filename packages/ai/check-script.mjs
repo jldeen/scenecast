@@ -65,7 +65,9 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }) } =
       const proven = () => { if (doubt[app] && !doubt[app].lasts) doubt[app] = null; };
       const ruled = r.status === 'after-write' || blind || (r.status === 'drifted' && r.needs);
       if (!ruled && r.status === 'reached') proven();
-      else if (!ruled && r.status === 'unproven' && carries(s)) continue;
+      // A wait, hover or scroll carries the screen it's on only when nothing before it in the app is in doubt (the run's
+      // own rule): after a doubt, its unproven landing counts against the next write.
+      else if (!ruled && r.status === 'unproven' && carries(s) && !doubt[app]) continue;
       else if (!ruled && r.status === 'unproven') set(`nothing proves where it lands${r.why ? ` (${r.why})` : ''}`, 'Give it a Lands on: a control or words that only show once it has run');
       else if (!ruled && r.status === 'drifted') set(`the words it lands on aren't on the screen today${r.why ? ` (${r.why})` : ''}`, r.seen && r.seen.headings && r.seen.headings.length ? `Today the screen says: ${r.seen.headings.slice(0, 3).map(h => `"${h}"`).join(', ')}` : 'Land on what the screen says today', false);
       else if (!ruled && r.status === 'missed') set(`it can't be done today: ${r.why || 'not there'}`, r.needs ? `It may need ${r.needs}` : null, false);
