@@ -8,7 +8,8 @@
 //         click changes), and a More options menu whose styles load when it opens and go again when it closes.
 //         Each answer's steps stream into a collapsed step group ("3 steps") that opens even mid-answer and drops
 //         its list when the answer ends; the second answer also ends with an "Approved 1 action" row that keeps its
-//         list in the page and opens by a class swap
+//         list in the page and opens by a class swap. It runs a background worker of its own, as Teams and Copilot
+//         do: a kind of target with no Fetch, whose requests go through the page
 //   admin http://127.0.0.1:47802/  a search box that filters on Enter, a virtualized grid of 300 tools (only the
 //         rows in view exist), a details pane that opens on a row and closes with its button or Escape
 //   node test/fixture/server.mjs
@@ -217,6 +218,8 @@ document.addEventListener('mouseout', e => {
 const fit = () => $('#app').classList.toggle('narrow', innerWidth < 1100);
 addEventListener('resize', fit); fit();
 renderChat(true);
+// A background worker of the page's own (Teams and Copilot run them).
+new Worker(URL.createObjectURL(new Blob(['setInterval(() => {}, 60000)'], { type: 'text/javascript' })));
 </script></body></html>`;
 
 const chatCss = `html,body{margin:0;height:100%;font:15px/1.4 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#1b1b1b;background:#fff}
