@@ -47,6 +47,10 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
   // What she typed: a proof that quotes it is her words in a box, not the app's.
   const typed = plan.beats.flatMap(b => b.steps).filter(s => s.kind === 'type' && s.value).map(s => s.value);
   const hers = text => typed.some(v => v.includes(text));
+  // The screen each step starts from: the last one the plan landed on before it.
+  const startsOn = new Map();
+  let landed = null;
+  for (const st of plan.beats.flatMap(b => b.steps)) { startsOn.set(st, landed); if (st.lands && st.lands.screen) landed = st.lands.screen; }
   for (const [bi, beat] of plan.beats.entries()) {
     const rows = ((walk.beats || [])[bi] || { steps: [] }).steps;
     // Blind: the rest of the beat needs a write the walk didn't run (after it, or after a miss it caused).
@@ -69,8 +73,9 @@ export function predictStops(plan, walk, { writeKnown = () => ({ ok: true }), na
         // A run checks where a write lands, after it: its proof can't be words the app writes there.
         const l = s.lands;
         // What the app makes up: an answer's words, a greeting, or the name it gave the new chat.
+        // A title the write gave its screen: not the one the screen before it had.
         const title = l && l.screen ? pn(titleOf(l.screen)) : '';
-        const titled = title.split(' ').length >= 2;
+        const titled = !!title && title !== pn(titleOf(startsOn.get(s)));
         const made = l && l.kind === 'words' && l.text && !hers(l.text) && (answerLike(l.text) || GREETING.test(l.text.trim()) || (titled && (pn(l.text) === title || title.includes(pn(l.text)) || pn(l.text).includes(title))));
         if (made) stops.push(row(bi, si, { text }, `its proof is words the app makes up ("${l.text.slice(0, 60)}"), and they change from run to run`, 'Prove it by a control on that screen, such as its message box'));
         doubt[app] = null;

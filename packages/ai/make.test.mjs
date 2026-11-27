@@ -1178,6 +1178,17 @@ test('a send is never proven by the name the app gives the new chat: it changes 
   const plan = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'typed' } }, { kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer' } }] }] };
   proveLandings(plan, walker);
   assert.equal(formatLands(plan.beats[0].steps[1].lands), 'answer · control "Message Cowork"');
+  // A one-word name, or one word of a longer one, doesn't either.
+  for (const name of ['Kestrel', 'Kestrel Risk']) {
+    screens.answer = { ...screens.answer, title: name, headings: [name], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: 'Kestrel' }, { i: 1, kind: 'text', role: 'generic', tag: 'span', text: 'Recent' }],
+      controls: [{ role: 'link', name }, { role: 'textbox', name: 'Message Cowork', editable: true }] };
+    const p1 = { beats: [{ steps: [{ kind: 'app', app: 'copilot', lands: { screen: 'typed' } }, { kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer' } }] }] };
+    proveLandings(p1, walker);
+    assert.equal(formatLands(p1.beats[0].steps[1].lands), 'answer · control "Message Cowork"', name);
+  }
+  // On the live page too (a plan's own proof, checked as a run goes): a send's new title isn't a proof.
+  const live = liveProof({ kind: 'press', key: 'Enter', writes: 'sends prompt 1', lands: { screen: 'answer', kind: 'words', text: t } }, { before: [screens.typed], afters: [{ ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }, { ...screens.answer, title: t, headings: [t], items: [{ i: 0, kind: 'text', role: 'heading', tag: 'h1', text: t }] }] });
+  assert.notEqual(formatLands(live.lands), `answer · "${t}"`);
 });
 
 test('a landing proven on the live page: what the plan expects is strong, any other change weak; a write goes on only after strong ones', () => {

@@ -159,7 +159,7 @@ export const packChecked = packs => s => {
 // says so.
 // answer: the screen is what a write in this beat made (a prompt's answer, a save's card). A plan's proof there is never
 // the words the app wrote (a sentence, a quoted name: they change from run to run), so a run on another day finds it.
-export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [], answer = false } = {}) {
+export function chooseProof(s, from, to, walker, { typed = [], next = null, live = null, first = [], answer = !!(s && s.writes) } = {}) {
   const rec = walker.screen(to);
   const recBefore = from ? [walker.screen(from), walker.shown(from)].filter(Boolean) : [];
   const reads = live ? (live.afters || []).filter(Boolean) : [], readsBefore = live ? (live.befores || []).filter(Boolean) : [];
@@ -177,8 +177,8 @@ export function chooseProof(s, from, to, walker, { typed = [], next = null, live
   // a different one on each run, so neither it nor a part of it proves the step.
   // (A capture with no title of its own is named by its screen's id: that isn't one.)
   const titleNow = pnorm([after.title, rec && rec.title].find(x => x && x !== to) || '');
-  const madeTitle = answer && count(titleNow) >= 2 && !before.some(b => b && pnorm(b.title || '') === titleNow) ? titleNow : null;
-  const titled = t => { const n = pnorm(t); return !!madeTitle && !!n && (n === madeTitle || n.includes(madeTitle) || (count(t) >= 2 && madeTitle.includes(n))); };
+  const madeTitle = answer && titleNow && !before.some(b => b && pnorm(b.title || '') === titleNow) ? titleNow : null;
+  const titled = t => { const n = pnorm(t); return !!madeTitle && !!n && (n === madeTitle || n.includes(madeTitle) || madeTitle.includes(n)); };
   const stable = t => !!t && /[a-z]/i.test(t) && !GREETING.test(String(t).trim()) && !titled(t) && !changes(t) && !(walker.written && walker.written(t)) && !(walker.unstable && walker.unstable(t, app)) && !(live && live.unstable && live.unstable(t)) && !typedIn(t);
   const proves = l => afters.every(sc => holds(sc, l) === true) && before.every(b => holds(b, l) === false);
 
