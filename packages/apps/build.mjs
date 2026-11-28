@@ -92,6 +92,15 @@ export function flowDefaults(flow, appPacks, opts = {}) {
     cp.vendorCss = files.map(f => `pack:${p.id}/${f}`);
     report.push(`${cp.app}: vendor CSS on ${cp.page}`);
   }
+  // Clicks the replica can't play (a live terminal, a page of another site): left out of every screen of the app, and
+  // a later recording doesn't click them.
+  for (const cp of flow.clickPages || []) {
+    const p = appPacks[cp.app]; const names = ((p && p.flow) || {}).dropClicks || [];
+    const add = names.filter(n => !(cp.drop || []).includes(n));
+    if (!add.length) continue;
+    cp.drop = [...(cp.drop || []), ...add];
+    report.push(`${cp.app}: left out on ${cp.page}: ${add.join(', ')}`);
+  }
   flow.packs = used;
   return { flow, report };
 }

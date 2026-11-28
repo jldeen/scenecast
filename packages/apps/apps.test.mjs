@@ -94,6 +94,12 @@ test('flow defaults: named rules by { use } with the demo\'s fields over them, r
   assert.equal(flow.clickPages[0].vendorCss[0], 'pack:m365-copilot/vendor/fluent-react-slider.css');
   assert.equal(flow.lateItems[0].text, 'Give feedback');
   assert.throws(() => flowDefaults({ apps: [{ id: 'c', layout: { set: [{ use: 'nope' }] } }] }, appPacks), /no pack rule "nope"/);
+  // A click the replica can't play (the admin center's Cloud Shell: a live terminal) is left out of the app's clicks,
+  // once, and only that app's.
+  const admin = { apps: [{ id: 'a' }, { id: 'c' }], clickPages: [{ page: 'admin-start', app: 'a', drop: ['Elsewhere'] }, { page: 'chat', app: 'c' }] };
+  flowDefaults(admin, { a: byId('m365-admin'), c: byId('m365-copilot') });
+  flowDefaults(admin, { a: byId('m365-admin'), c: byId('m365-copilot') });
+  assert.deepEqual(admin.clickPages.map(cp => cp.drop || []), [['Elsewhere', 'Cloud Shell'], []]);
 });
 
 test('build rules (core text rules, per pack): conditions, kinds, attributes stripped and whole-line CSS repairs', () => {
