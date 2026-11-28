@@ -60,8 +60,12 @@ async function loadFrame(iframe, url, html = null) {
     }
   });
 }
-// Up to 3 s: a frame taken out again before it loads never fires its load.
-const frameLoaded = f => new Promise(res => { f.addEventListener('load', () => res(), { once: true }); setTimeout(res, 3000); });
+// Its load, or its removal: a frame taken out again before it loads never fires its load.
+const frameLoaded = f => new Promise(res => {
+  const done = () => { clearInterval(t); res(); };
+  const t = setInterval(() => { if (!f.isConnected) done(); }, 100);
+  f.addEventListener('load', done, { once: true });
+});
 function imagesArriving() {
   const app = apps[active];
   if (!app) return false;
@@ -1151,7 +1155,11 @@ function applyLayout(app) {
       plus.style.removeProperty('display'); if (!plus.getAttribute('style')) plus.removeAttribute('style');
       ul.insertBefore(plus, chips[chips.length - 1].nextSibling);
       // A capture that marked the list's hidden copy of "+N" (the one it measures with): shown in the row, clickable.
-      if (d.defaultView.getComputedStyle(plus).visibility === 'hidden') { plus.removeAttribute('aria-hidden'); for (const [k, v] of [['position', 'static'], ['visibility', 'visible'], ['pointer-events', 'auto']]) plus.style.setProperty(k, v); }
+      if (d.defaultView.getComputedStyle(plus).visibility === 'hidden') {
+        plus.removeAttribute('aria-hidden'); for (const [k, v] of [['position', 'static'], ['visibility', 'visible'], ['pointer-events', 'auto']]) plus.style.setProperty(k, v);
+        // The copy is only text: in a plain button, so Enter, Space and screen readers open the list too.
+        if (!plus.querySelector('button,[role=button]')) { const b = d.createElement('button'); b.type = 'button'; b.setAttribute('aria-expanded', 'false'); b.style.cssText = 'font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer'; b.append(...plus.childNodes); plus.append(b); }
+      }
       const btn = plus.querySelector('button,[role=button]') || plus;
       const label = [...plus.querySelectorAll('*')].reverse().find(e => !e.children.length && /^\+\d+$/.test(norm(e.textContent))) || btn;
       if ((app.flags || {})['chips' + ri]) {
@@ -1653,7 +1661,9 @@ window.d1 = {
     const app = apps[id || active]; let d = app.iframe.contentDocument, px = x, py = y, t = d.elementFromPoint(px, py);
     while (t && t.localName === 'iframe') { const r = t.getBoundingClientRect(); px -= r.x; py -= r.y; d = t.contentDocument; t = d.elementFromPoint(px, py); }
     const hit = findTransition(app, 'click', t, d); if (!hit) hvClear(app); const c = hit ? null : clkFind(app, d, t); if (!hit) hvRehover(app);
-    return { target: t && t.localName, busy, transition: hit && JSON.stringify(hit.t).slice(0, 120), click: c && c.d.id, defs: clickDefs(app).length };
+    // step: the click goes to another screen (a flag or a scoped change stays on this one).
+    const step = !!hit && !!(hit.t.stream || hit.t.query || (!hit.t.flag && !hit.t.scope && hit.t.to));
+    return { target: t && t.localName, busy, transition: hit && JSON.stringify(hit.t).slice(0, 120), step, click: c && c.d.id, defs: clickDefs(app).length };
   },
   // Step groups: which are open, and every group button on the screen with its state (for the checks).
   groups: id => { const st = grpState(apps[id || active]); return { open: [...st.open], live: st.live.map(r => r.key) }; },

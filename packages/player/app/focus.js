@@ -175,8 +175,9 @@ export function createFocus({ stage, points, current, docsOf, openGroup, groupBu
         for (let n; (n = w.nextNode());) {
           const el = n.parentElement, lv = el && el.closest('[aria-live]');
           if (!el || el.closest('script,style') || (lv && (lv.offsetWidth <= 2 || lv.offsetHeight <= 2)) || !el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
-          // Text in different elements reads with a space between (a step's label and its model name).
-          if (nodes.length && nodes[nodes.length - 1][0].parentElement !== el && !/\s$/.test(all)) all += ' ';
+          // Text in different elements reads with a space between (a step's label and its model name), but not before
+          // the punctuation after one ("a skill called <strong>supplier-delay-triage</strong>.").
+          if (nodes.length && nodes[nodes.length - 1][0].parentElement !== el && !/\s$/.test(all) && !/^[.,;:!?)]/.test(N(n.data))) all += ' ';
           nodes.push([n, all.length]); all += N(n.data);
         }
         let m, from = 0;

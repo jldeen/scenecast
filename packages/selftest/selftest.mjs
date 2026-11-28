@@ -453,6 +453,12 @@ export default flow => {
         return { there: !!f, text: f && f.contentDocument && f.contentDocument.body ? f.contentDocument.body.innerText : null, errors: window.d1.errors };
       });
       check('replica: a frame a move puts in has loaded when the move is done', slow.there && slow.text === 'slow frame' && !slow.errors.length, JSON.stringify(slow));
+      // A focus line that ends in a bold name, as Copilot writes them: found as one sentence.
+      const bold = await p3.evaluate(() => {
+        window.d1.doc('chat').body.insertAdjacentHTML('beforeend', '<p>A saved skill called <strong>zz-triage</strong>. It scored 96.</p>');
+        return window.d1.focus.locatePoint({ app: 'chat', states: ['chat-01-message'], find: 'A saved skill called zz-triage.' });
+      });
+      check('focus: a line ending in a bold name is found', !!bold, JSON.stringify(bold));
       await p3.close();
     }
     await b2.close();
