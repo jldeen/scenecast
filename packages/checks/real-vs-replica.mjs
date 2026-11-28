@@ -22,7 +22,7 @@ import { availableParallelism } from 'node:os';
 import { diffDetail, verdict } from './compare.mjs';
 import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { openReplica } from './replica-render.mjs';
-import { normFamily, normWeight, parseLoaded, srcParts, fontVerdicts as verdictsOf } from './fonts.mjs';
+import { normFamily, normWeight, parseLoaded, loadedFace, srcParts, fontVerdicts as verdictsOf } from './fonts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -99,7 +99,8 @@ function realFonts(snap) {
     faces.push({ family: normFamily(get('font-family')), weight: normWeight(get('font-weight')), style: get('font-style') || 'normal', urls, data, locals });
   }
   const known = new Set(faces.map(x => x.family));
-  const loaded = (meta.fonts || []).map(s => parseLoaded(s, known));
+  // Each face's parts as the page gave them; a recording from before 0.5.6-rc.5 has only the names to parse.
+  const loaded = meta.fontFaces ? meta.fontFaces.map(f => loadedFace(f)) : (meta.fonts || []).map(s => parseLoaded(s, known));
   const claimed = new Set(faces.flatMap(x => x.urls));
   const scriptFiles = (meta.fontFiles || []).filter(u => !claimed.has(u)).map(u => ({ url: u, sha256: fileSha(u) })).filter(x => x.sha256);
   return loaded.map(l => {

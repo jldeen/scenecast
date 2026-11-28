@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { parseLoaded, srcParts, fontVerdicts } from './fonts.mjs';
+import { parseLoaded, loadedFace, dataBytes, srcParts, fontVerdicts } from './fonts.mjs';
 
 const sha = b => createHash('sha256').update(b).digest('hex');
 const face = (family, weight, src) => ({ family, weight, style: 'normal', src });
@@ -11,8 +11,12 @@ test('a font the replica carries is a match, however its rule names it: a weight
   assert.deepEqual(parseLoaded('Segoe Serif 420 625 normal'), { family: 'segoe serif', name: 'Segoe Serif', weight: '420 625', style: 'normal' });
   assert.deepEqual(parseLoaded('"Segoe UI" 600 normal'), { family: 'segoe ui', name: 'Segoe UI', weight: '600', style: 'normal' });
   assert.equal(parseLoaded('FabricMDL2Icons-1 normal normal').weight, '400');
-  // A family that ends in a number, where the page declares it so.
+  // A family that ends in a number, where the page declares it so; and from the capture's parts, whatever the page declares.
   assert.deepEqual(parseLoaded('Font 2 400 normal', new Set(['font 2'])), { family: 'font 2', name: 'Font 2', weight: '400', style: 'normal' });
+  assert.deepEqual(loadedFace({ family: '"Font 2"', weight: '400', style: 'normal' }), { family: 'font 2', name: 'Font 2', weight: '400', style: 'normal' });
+  assert.equal(loadedFace({ family: 'Segoe Serif', weight: '420 625', style: 'normal' }).weight, '420 625');
+  // Percent-escaped inline data is bytes, whatever they are.
+  assert.deepEqual([...dataBytes('data:font/woff,%B4%00ab')], [0xb4, 0, 0x61, 0x62]);
 
   const woff = Buffer.from('wOFF inline icon font');
   const inline = `url("data:font/woff;charset=utf-8;base64,${woff.toString('base64')}") format("woff")`;
@@ -28,7 +32,7 @@ test('a font the replica carries is a match, however its rule names it: a weight
     // Loaded by script: no rule in the replica.
     { family: 'brand', name: 'Brand', weight: '400', style: 'normal', by: 'script', files: [], candidates: [{ url: 'https://cdn/brand.woff2', sha256: 'bb' }], data: [], locals: [] },
   ];
-  const rep = { loaded: [{ family: 'Segoe Serif' }, { family: 'ShellFabricMDL2IconsLite' }, { family: 'Segoe UI' }], faces: [
+  const rep = { loaded: [{ family: 'Segoe Serif', weight: '420 625', style: 'normal' }, { family: 'ShellFabricMDL2IconsLite', weight: '400', style: 'normal' }, { family: 'Segoe UI', weight: '600', style: 'normal' }], faces: [
     face('"Segoe Serif"', '420 625', 'local("Segoe Serif"), url("/assets/serif.woff2") format("woff2")'),
     face('ShellFabricMDL2IconsLite', 'normal', inline),
     face('"Segoe UI"', '600', 'local("Segoe UI Semibold")'),
@@ -38,4 +42,6 @@ test('a font the replica carries is a match, however its rule names it: a weight
   // Inline data that isn't the real page's is another font.
   const other = { ...rep, faces: [face('ShellFabricMDL2IconsLite', 'normal', 'url("data:font/woff;base64,b3RoZXI=")')] };
   assert.equal(fontVerdicts([real[1]], other, () => [])[0].status, 'different-file');
+  // An installed font the replica didn't load here isn't shown as the same: it may not be on this computer.
+  assert.equal(fontVerdicts([real[2]], { ...rep, loaded: [] }, () => [])[0].status, 'unverified');
 });

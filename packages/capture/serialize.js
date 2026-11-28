@@ -236,6 +236,8 @@ async (opts) => {
         for (const e of [doc.elementFromPoint(innerWidth / 2, innerHeight / 2), doc.body, html]) for (let x = e; x; x = x.parentElement) { const l = lum(getComputedStyle(x).backgroundColor); if (l !== null) return l < 0.5 ? 'dark' : 'light'; }
         return DARK && /dark/.test(getComputedStyle(html).colorScheme) ? 'dark' : 'light'; })(),
       fonts: [...document.fonts].filter(f => f.status === 'loaded').map(f => f.family + ' ' + f.weight + ' ' + f.style),
+      // The same faces with their parts apart (a family can end in a number, and a weight can be a range).
+      fontFaces: [...document.fonts].filter(f => f.status === 'loaded').map(f => ({ family: f.family, weight: f.weight, style: f.style })),
       fontFiles,
       at: new Date().toISOString(),
     },
