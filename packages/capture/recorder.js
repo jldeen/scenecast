@@ -575,7 +575,8 @@ async function recAuto(A) {
   const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorDefer: true, floorShot: name => F.shot(A.page, name), floorMatch: F.match } : {}), ...c });
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
   // The recording's menus are a floor too: clicked whatever the cap or the time, before the ones the audit picks.
-  const fc = inFrame => F && F.clicks ? { floorClicks: F.clicks(A.id, inFrame), floorShot: name => F.shot(A.page, name) } : {};
+  // (Never one the replica can't play: a menu the last recording captured before its pack dropped it.)
+  const fc = inFrame => F && F.clicks ? { floorClicks: F.clicks(A.id, inFrame).filter(e => !dropped().includes(e.name)), floorShot: name => F.shot(A.page, name) } : {};
   // The clicks the demo's build dropped (its flow's clickPages drop: a click that goes elsewhere): never clicked again.
   // And the ones the app's pack says the replica can't play (packs flow.dropClicks, in the recording's options).
   const dropped = () => [...(F && F.dropped ? F.dropped(A.id) : []), ...((REC.opts.dropClicks || {})[A.id] || [])];
