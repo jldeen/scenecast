@@ -416,7 +416,7 @@ impl AssetResolver {
                 "about:blank".to_owned()
             }
         });
-        Ok(scrub(quiet(&drop_missing_fonts(&html))))
+        Ok(scrub(quiet(&drop_missing_fonts(&hide_head_frames(&html)))))
     }
 
     fn rewrite_resources(
@@ -604,6 +604,16 @@ fn percent_decode(text: &str) -> Result<Vec<u8>, AssetError> {
     Ok(out)
 }
 
+// A frame a page keeps in its <head> (the admin center's chat client) never draws there, but loading the capture moves
+// it into <body>, where it takes 154 px at the top of the page. Hidden, it stays out of the way, as on the real page.
+fn hide_head_frames(html: &str) -> String {
+    let Some(end) = html.find("</head>") else {
+        return html.to_owned();
+    };
+    let head = re!(r"(?i)<iframe\b").replace_all(&html[..end], r#"<iframe style="display:none""#);
+    format!("{head}{}", &html[end..])
+}
+
 fn quiet(text: &str) -> String {
     let text = re!(r"(-webkit-)?appearance:\s*slider-vertical\s*;?").replace_all(text, "");
     re!(r#"\sfocusgroup="[^"]*""#)
@@ -666,6 +676,31 @@ mod tests {
         let token = format!("?{}=value&x=1", "sig");
         let bearer = format!("Bearer {}", "a".repeat(20));
         assert_eq!(scrub(format!("{token} {bearer}")), "?sig=&x=1 Bearer");
+    }
+
+    #[test]
+    fn a_frame_kept_in_the_head_is_hidden() {
+        let temp = tempfile::tempdir().unwrap();
+        let raw = temp.path().join("raw");
+        fs::create_dir_all(&raw).unwrap();
+        fs::write(raw.join("urls.json"), "{}").unwrap();
+        let mut resolver = AssetResolver::new(&raw, &temp.path().join("assets")).unwrap();
+        let input = serde_json::json!({
+            "doc": {
+                "html": "<html><head><style>a{}</style><iframe id=\"chat\" data-d1-frame=\"f3\" src=\"d1frame://f3\"></iframe></head><body><iframe data-d1-frame=\"f1\" src=\"d1frame://f1\"></iframe></body></html>",
+                "urls": []
+            },
+            "keys": ["f1", "f3"]
+        });
+        let result = resolver
+            .resolve("document", "s", Some(&input.to_string()))
+            .unwrap();
+        assert_eq!(
+            result.value.as_deref(),
+            Some(
+                "<html><head><style>a{}</style><iframe style=\"display:none\" id=\"chat\" data-d1-frame=\"f3\" src=\"/snaps/s.f3.html\"></iframe></head><body><iframe data-d1-frame=\"f1\" src=\"/snaps/s.f1.html\"></iframe></body></html>"
+            )
+        );
     }
 
     #[test]

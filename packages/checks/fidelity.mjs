@@ -725,7 +725,7 @@ try {
         const stateOfSnap = snap => (Object.entries(S).find(([, s]) => s.snap === snap) || [snap])[0];
         const sig = (app, frame) => bodySig(page, app, frame);
         const isOpen = async (app, d) => (await page.evaluate(a => window.d1.clicks(a), app)).some(c => c.id === d.id || c.name === d.name);
-        const bad = [], rows = []; let ok = 0;
+        const bad = [], rows = []; let ok = 0, onPath = 0;
         const outDir = join(demo.out, 'clicks'); mkdirSync(join(outDir, 'rows'), { recursive: true });
         for (const cp of pages) for (const d of defsOf(cp.app).filter(x => x.page === cp.page)) {
           const st = stateOfSnap(cp.base);
@@ -736,6 +736,9 @@ try {
           await page.evaluate(([m, a]) => window.d1.reveal(m, a), [m, cp.app]); await sleep(200);
           const ctl = await locate(page, m, cp.app);
           if (!ctl || !ctl.w) { bad.push(`${d.name}: control not on ${st}`); continue; }
+          // The path's own next step on this screen (Show more connections opens the next screen): the click follows it.
+          const at = await page.evaluate(([x, y, a]) => window.d1.clickAt(x, y, a), [ctl.x, ctl.y, cp.app]);
+          if (at && at.transition) { onPath++; continue; }
           const before = await sig(cp.app, d.frame);
           // Rest on the control first (its hover shows, as when a presenter clicks), then click.
           await page.mouse.move(ctl.x, ctl.y, { steps: 3 }); await sleep(REST); await page.mouse.click(ctl.x, ctl.y);
@@ -772,7 +775,7 @@ try {
           }
           await sp.context().close();
         }
-        add('clicks', 'Panes, sections and menus', bad.length || errs.length ? 'fail' : rows.length ? 'pass' : 'warn', bad.length || errs.length ? [...bad, ...errs].join('\n') : rows.length ? `${ok}/${rows.length} open and close back to the same page (clicks/click-sheet-*.png)` : 'click pages, but no clicks recorded');
+        add('clicks', 'Panes, sections and menus', bad.length || errs.length ? 'fail' : rows.length ? 'pass' : 'warn', bad.length || errs.length ? [...bad, ...errs].join('\n') : rows.length ? `${ok}/${rows.length} open and close back to the same page${onPath ? ` (${onPath} more go to the next screen of the path)` : ''} (clicks/click-sheet-*.png)` : 'click pages, but no clicks recorded');
       }
     }
   } });

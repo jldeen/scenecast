@@ -849,7 +849,8 @@ async function recChips(A, state, c) {
   const p = A.page;
   const probe = () => p.mainFrame().evaluate(listSel => {
     const norm = s => (s || '').replace(/\s+/g, ' ').trim();
-    const vis = e => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(e).display !== 'none'; };
+    // A list can keep a copy of its "+N" out of sight to measure it (Copilot's Workspace chips: visibility hidden): not the chip.
+    const vis = e => { const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return r.width > 1 && r.height > 1 && cs.display !== 'none' && cs.visibility !== 'hidden'; };
     for (const ul of document.querySelectorAll(listSel || 'ul,ol,[role=list]')) {
       const items = [...ul.children].filter(e => !/^(script|template|style)$/.test(e.localName));
       const plus = items.find(e => vis(e) && /^\+\d+$/.test(norm(e.textContent)));
@@ -892,7 +893,7 @@ async function recChips(A, state, c) {
     const mark = () => p.mainFrame().evaluate(list => {
       const ul = document.querySelector(list); if (!ul) return null;
       document.querySelectorAll('[data-d1-plusmark]').forEach(e => e.removeAttribute('data-d1-plusmark'));
-      const items = [...ul.children].filter(e => !/^(script|template|style)$/.test(e.localName));
+      const items = [...ul.children].filter(e => !/^(script|template|style)$/.test(e.localName) && getComputedStyle(e).visibility !== 'hidden');
       const m = items.find(e => /^\+\d+$/.test((e.textContent || '').replace(/\s+/g, ' ').trim())) || items.find(e => e.getAttribute('aria-expanded') === 'true' || e.querySelector('[aria-expanded="true"]')) || items[items.length - 1];
       if (!m) return null;
       m.setAttribute('data-d1-plusmark', '');
