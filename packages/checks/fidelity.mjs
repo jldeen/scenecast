@@ -782,7 +782,7 @@ try {
           }
           await sp.context().close();
         }
-        add('clicks', 'Panes, sections and menus', bad.length || errs.length ? 'fail' : rows.length ? 'pass' : 'warn', bad.length || errs.length ? [...bad, ...errs].join('\n') : rows.length ? `${ok}/${rows.length} open and close back to the same page${onPath ? ` (${onPath} more go to the next screen of the path)` : ''}${ruled ? ` (${ruled} more change the page by their own rule)` : ''} (clicks/click-sheet-*.png)` : 'click pages, but no clicks recorded');
+        add('clicks', 'Panes, sections and menus', bad.length || errs.length ? 'fail' : rows.length || ruled || onPath ? 'pass' : 'warn', bad.length || errs.length ? [...bad, ...errs].join('\n') : rows.length || ruled ? `${ok}/${rows.length} open and close back to the same page${onPath ? ` (${onPath} more go to the next screen of the path)` : ''}${ruled ? ` (${ruled} more change the page by their own rule)` : ''} (clicks/click-sheet-*.png)` : onPath ? `${onPath} recorded click(s), each the path's own next step: nothing more to check` : 'click pages, but no clicks recorded');
       }
     }
   } });
