@@ -17,6 +17,12 @@ test('a budget the presenter set is kept', () => {
   assert.deepEqual(recordOpts({}), {});
 });
 
+test('a recording never clicks what an app pack says the replica can\'t play (the admin center\'s Cloud Shell)', () => {
+  const cfg = { apps: [{ id: 'admin', url: 'https://admin.cloud.microsoft/', match: 'admin.cloud.microsoft' }, { id: 'c', url: 'https://m365.cloud.microsoft/', match: 'm365.cloud.microsoft' }] };
+  assert.deepEqual(recordOpts(cfg).dropClicks, { admin: ['Cloud Shell'] });
+  assert.equal(recordOpts({ ...cfg, packs: false }).dropClicks, undefined);
+});
+
 test('a demo recorded in the capture browser takes its profile\'s own settings where demo.json leaves them out', () => {
   const home = mkdtempSync(join(tmpdir(), 'profiles-')), dir = mkdtempSync(join(tmpdir(), 'demo-'));
   writeFileSync(join(home, 'demo-tenant.json'), JSON.stringify({ tenant: 'example.com', account: 'presenter@example.com', guard: 'hold', allow: ['/^POST a\\.example\\.com\\/landing$/'] }));

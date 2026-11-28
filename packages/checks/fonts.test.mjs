@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { parseLoaded, loadedFace, dataBytes, srcParts, fontVerdicts } from './fonts.mjs';
+import { parseLoaded, loadedFace, dataBytes, srcParts, declValue, fontVerdicts } from './fonts.mjs';
 
 const sha = b => createHash('sha256').update(b).digest('hex');
 const face = (family, weight, src) => ({ family, weight, style: 'normal', src });
@@ -21,6 +21,9 @@ test('a font the replica carries is a match, however its rule names it: a weight
   const woff = Buffer.from('wOFF inline icon font');
   const inline = `url("data:font/woff;charset=utf-8;base64,${woff.toString('base64')}") format("woff")`;
   assert.deepEqual(srcParts(`local("Segoe UI Semibold"), ${inline}`), { data: [sha(woff)], locals: ['segoe ui semibold'] });
+  // A quoted argument is read whole: a ) in inline data, a quote in a font's name.
+  assert.deepEqual(srcParts(`local("Albert's Font"), url("data:font/woff,wOFF%00)%00") format("woff")`), { data: [sha(Buffer.from([0x77, 0x4f, 0x46, 0x46, 0, 0x29, 0]))], locals: ["albert's font"] });
+  assert.equal(declValue('font-family: X; src: url("data:font/woff;base64,AAA") format("woff"), local("a;b"); font-weight: 400', 'src'), 'url("data:font/woff;base64,AAA") format("woff"), local("a;b")');
 
   const real = [
     // Loaded from a file the replica serves too.

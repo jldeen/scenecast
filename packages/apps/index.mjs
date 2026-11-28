@@ -105,6 +105,12 @@ export const readPackJson = (pack, rel) => { const f = packFile(pack, rel); retu
 // The demo's apps with their packs: { <demo app id>: pack }. demo.json apps[].pack names one ("teams") or turns it
 // off (false); otherwise the app's url, then its match string, finds it. demo.json packs.off lists pack ids to leave
 // out (all of a pack), packs.offRules rule ids ("github:staff-toggle").
+// Clicks each app's pack says the replica can't play (flow.dropClicks), by the demo's app id: no recording clicks them.
+export function dropClicksFor(cfg, list = packs()) {
+  const out = {};
+  for (const [appId, p] of Object.entries(packsForDemo(cfg, list))) { const n = (p.flow || {}).dropClicks; if (n && n.length) out[appId] = n; }
+  return out;
+}
 export function packsForDemo(cfg, list = packs()) {
   const off = new Set(((cfg && cfg.packs) || {}).off || []);
   if (cfg && cfg.packs === false) return {};

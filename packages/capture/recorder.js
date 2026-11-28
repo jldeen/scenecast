@@ -577,7 +577,8 @@ async function recAuto(A) {
   // The recording's menus are a floor too: clicked whatever the cap or the time, before the ones the audit picks.
   const fc = inFrame => F && F.clicks ? { floorClicks: F.clicks(A.id, inFrame), floorShot: name => F.shot(A.page, name) } : {};
   // The clicks the demo's build dropped (its flow's clickPages drop: a click that goes elsewhere): never clicked again.
-  const dropped = () => F && F.dropped ? F.dropped(A.id) : [];
+  // And the ones the app's pack says the replica can't play (packs flow.dropClicks, in the recording's options).
+  const dropped = () => [...(F && F.dropped ? F.dropped(A.id) : []), ...((REC.opts.dropClicks || {})[A.id] || [])];
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id), ...dropped()], reland: (REC.openFp || {})[state] || null, ...fc(false) });
   for (const [i, fu] of f.frames.entries()) {
     const frameRe = '^' + fu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -37,12 +37,37 @@ export function dataBytes(url) {
   if (m[1]) return Buffer.from(m[2], 'base64');
   return Buffer.from(m[2].split(/(%[0-9a-f]{2})/i).flatMap(p => /^%[0-9a-f]{2}$/i.test(p) ? [parseInt(p.slice(1), 16)] : [...Buffer.from(p, 'latin1')]));
 }
+// Each fn(...)'s argument in a CSS value, a quoted one whole (a data: url or a font name can hold ) ; or a quote).
+export function cssArgs(s, fn) {
+  const out = [], re = new RegExp(`\\b${fn}\\(\\s*`, 'gi');
+  for (let m; (m = re.exec(s));) {
+    let i = re.lastIndex, v = '';
+    const q = s[i];
+    if (q === '"' || q === "'") { for (i++; i < s.length && s[i] !== q; i++) v += s[i] === '\\' && i + 1 < s.length ? s[++i] : s[i]; }
+    else { for (; i < s.length && s[i] !== ')'; i++) v += s[i]; v = v.trim(); }
+    out.push(v); re.lastIndex = i;
+  }
+  return out;
+}
+// A declaration's value in a rule's text (one property), up to the semicolon that ends it, not one in quotes or ().
+export function declValue(body, prop) {
+  const m = new RegExp(`(?:^|[;{\\s])${prop}\\s*:`, 'i').exec(body || '');
+  if (!m) return '';
+  let i = m.index + m[0].length, depth = 0, q = null, v = '';
+  for (; i < body.length; i++) {
+    const c = body[i];
+    if (q) { v += c; if (c === '\\' && i + 1 < body.length) v += body[++i]; else if (c === q) q = null; continue; }
+    if (c === '"' || c === "'") q = c; else if (c === '(') depth++; else if (c === ')') depth--; else if (c === ';' && depth <= 0) break;
+    v += c;
+  }
+  return v.trim();
+}
 // A @font-face src value: its fonts carried in the rule (the SHA-256 of each data: url's bytes) and the installed
 // fonts it names (local()).
 export function srcParts(src) {
   const s = String(src || '');
-  const data = [...s.matchAll(/url\(\s*["']?(data:[^"')]+)["']?\s*\)/g)].map(m => dataBytes(m[1])).filter(Boolean).map(sha256);
-  const locals = [...s.matchAll(/local\(\s*["']?([^"')]+?)["']?\s*\)/g)].map(m => m[1].trim().toLowerCase());
+  const data = cssArgs(s, 'url').filter(u => /^data:/i.test(u)).map(dataBytes).filter(Boolean).map(sha256);
+  const locals = cssArgs(s, 'local').map(n => n.trim().toLowerCase());
   return { data, locals };
 }
 

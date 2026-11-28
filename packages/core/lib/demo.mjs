@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { flowFromBundle, applyFlowOverrides } from '@stuntdouble/player/app/bundle-flow.js';
 import { fencePath } from './test-fence.mjs';
+import { dropClicksFor } from '@stuntdouble/apps/index.mjs';
 
 export const KIT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const KIT_VERSION = JSON.parse(readFileSync(__at('core', 'package.json'), 'utf8')).version;
@@ -29,6 +30,9 @@ export const DEFAULTS = {
 export function recordOpts(cfg) {
   const rec = { ...(cfg.record || {}) };
   if (rec.auto && rec.auto.maxS === 240 && Object.keys(rec.auto).sort().join() === 'clickMax,hoverMax,maxS') { const { maxS, ...auto } = rec.auto; rec.auto = auto; }
+  // Clicks the app packs say the replica can't play (the admin center's Cloud Shell): the recorder's sweeps skip them.
+  const drop = dropClicksFor(cfg);
+  if (Object.keys(drop).length) rec.dropClicks = { ...drop, ...(rec.dropClicks || {}) };
   return rec;
 }
 export function arg(args, k, d) { const i = args.indexOf(k); return i >= 0 && i + 1 < args.length ? args[i + 1] : d; }

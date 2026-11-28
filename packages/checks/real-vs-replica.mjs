@@ -22,7 +22,7 @@ import { availableParallelism } from 'node:os';
 import { diffDetail, verdict } from './compare.mjs';
 import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { openReplica } from './replica-render.mjs';
-import { normFamily, normWeight, parseLoaded, loadedFace, srcParts, fontVerdicts as verdictsOf } from './fonts.mjs';
+import { normFamily, normWeight, parseLoaded, loadedFace, srcParts, declValue, fontVerdicts as verdictsOf } from './fonts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -92,7 +92,7 @@ function realFonts(snap) {
   for (const m of (main.html || '').matchAll(/@font-face\s*\{([^}]*)\}/g)) {
     const body = m[1], get = k => ((body.match(new RegExp(k + ':\\s*([^;]+)')) || [])[1] || '').trim();
     // The src whole: a data: url in it has semicolons of its own.
-    const src = (body.match(/(?:^|[;\s])src:\s*((?:url\([^)]*\)|local\([^)]*\)|"[^"]*"|'[^']*'|[^;])+)/) || [])[1] || '';
+    const src = declValue(body, 'src');
     const urls = [...src.matchAll(/url\("?d1res:\/\/(\d+)"?\)/g)].map(x => main.urls[+x[1]]);
     // A font carried in the rule (data:) or installed on the computer (local()) is a source too.
     const { data, locals } = srcParts(src);
