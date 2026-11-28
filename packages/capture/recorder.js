@@ -575,9 +575,11 @@ async function recAuto(A) {
   const hv = c => ({ waitMs: o.hoverWaitMs || learned, settleMaxMs: 2500, perSel: 8, max: o.hoverMax, maxS: o.hoverMaxS, skipSels, ...(floor.length ? { floor, floorDefer: true, floorShot: name => F.shot(A.page, name), floorMatch: F.match } : {}), ...c });
   if (o.hovers) await run('hovers', hv({ skipKeys: [...recSeen('hovers', A.id)] }));
   // The recording's menus are a floor too: clicked whatever the cap or the time, before the ones the audit picks.
-  const fc = inFrame => F && F.clicks ? { floorClicks: F.clicks(A.id, inFrame), floorShot: name => F.shot(A.page, name) } : {};
+  // (Never one the replica can't play: a menu the last recording captured before its pack dropped it.)
+  const fc = inFrame => F && F.clicks ? { floorClicks: F.clicks(A.id, inFrame).filter(e => !dropped().includes(e.name)), floorShot: name => F.shot(A.page, name) } : {};
   // The clicks the demo's build dropped (its flow's clickPages drop: a click that goes elsewhere): never clicked again.
-  const dropped = () => F && F.dropped ? F.dropped(A.id) : [];
+  // And the ones the app's pack says the replica can't play (packs flow.dropClicks, in the recording's options).
+  const dropped = () => [...(F && F.dropped ? F.dropped(A.id) : []), ...((REC.opts.dropClicks || {})[A.id] || [])];
   if (o.clicks) await run('clicks', { pick: { max: o.clickMax }, maxS: o.clickMaxS, skipNames: [...recSeen('clicks', A.id), ...dropped()], reland: (REC.openFp || {})[state] || null, ...fc(false) });
   for (const [i, fu] of f.frames.entries()) {
     const frameRe = '^' + fu.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -847,7 +849,8 @@ async function recChips(A, state, c) {
   const p = A.page;
   const probe = () => p.mainFrame().evaluate(listSel => {
     const norm = s => (s || '').replace(/\s+/g, ' ').trim();
-    const vis = e => { const r = e.getBoundingClientRect(); return r.width > 1 && r.height > 1 && getComputedStyle(e).display !== 'none'; };
+    // A list can keep a copy of its "+N" out of sight to measure it (Copilot's Workspace chips: visibility hidden): not the chip.
+    const vis = e => { const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return r.width > 1 && r.height > 1 && cs.display !== 'none' && cs.visibility !== 'hidden'; };
     for (const ul of document.querySelectorAll(listSel || 'ul,ol,[role=list]')) {
       const items = [...ul.children].filter(e => !/^(script|template|style)$/.test(e.localName));
       const plus = items.find(e => vis(e) && /^\+\d+$/.test(norm(e.textContent)));
@@ -890,7 +893,7 @@ async function recChips(A, state, c) {
     const mark = () => p.mainFrame().evaluate(list => {
       const ul = document.querySelector(list); if (!ul) return null;
       document.querySelectorAll('[data-d1-plusmark]').forEach(e => e.removeAttribute('data-d1-plusmark'));
-      const items = [...ul.children].filter(e => !/^(script|template|style)$/.test(e.localName));
+      const items = [...ul.children].filter(e => !/^(script|template|style)$/.test(e.localName) && getComputedStyle(e).visibility !== 'hidden');
       const m = items.find(e => /^\+\d+$/.test((e.textContent || '').replace(/\s+/g, ' ').trim())) || items.find(e => e.getAttribute('aria-expanded') === 'true' || e.querySelector('[aria-expanded="true"]')) || items[items.length - 1];
       if (!m) return null;
       m.setAttribute('data-d1-plusmark', '');

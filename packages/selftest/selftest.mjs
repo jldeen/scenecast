@@ -438,6 +438,29 @@ export default flow => {
     };
     const g2 = await own();
     check('replica: a step group shows its own answer\'s steps', g2 && g2.expanded && /Pricing the delay/.test(g2.text) && !/supplier alert/.test(g2.text), JSON.stringify(g2));
+    // A frame the next screen has and this one doesn't is put in by the move, and loads before the move is done,
+    // however slowly it arrives (the admin center's hidden frames: two runs differed by whether they had loaded).
+    {
+      const p3 = await b2.newPage({ viewport: { width: 1600, height: 900 } });
+      await p3.route(/\/snaps\/chat-01-message\.html(\?.*)?$/, async route => { const r = await route.fetch(); route.fulfill({ response: r, body: (await r.text()).replace('</body>', '<iframe data-d1-frame="f98" src="/snaps/chat-01-message.f98.html"></iframe></body>') }); });
+      await p3.route(/\/snaps\/chat-01-message\.json(\?.*)?$/, async route => { const r = await route.fetch(); const info = await r.json(); (info.frames = info.frames || []).push({ key: 'f98' }); route.fulfill({ response: r, body: JSON.stringify(info) }); });
+      await p3.route(/\/snaps\/chat-01-message\.f98\.html(\?.*)?$/, async route => { await sleep(800); route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body><p>slow frame</p></body></html>' }); });
+      await p3.goto(`http://127.0.0.1:${REPLICA_PORT}/`); await p3.waitForFunction(() => window.d1 && window.d1.state.active);
+      const slow = await p3.evaluate(async () => {
+        await window.d1.go('chat', 'chat-start'); await window.d1.idle();
+        await window.d1.morph('chat', 'chat-01-message'); await window.d1.idle();
+        const f = window.d1.doc('chat').querySelector('iframe[data-d1-frame="f98"]');
+        return { there: !!f, text: f && f.contentDocument && f.contentDocument.body ? f.contentDocument.body.innerText : null, errors: window.d1.errors };
+      });
+      check('replica: a frame a move puts in has loaded when the move is done', slow.there && slow.text === 'slow frame' && !slow.errors.length, JSON.stringify(slow));
+      // A focus line that ends in a bold name, as Copilot writes them: found as one sentence.
+      const bold = await p3.evaluate(() => {
+        window.d1.doc('chat').body.insertAdjacentHTML('beforeend', '<p>A saved skill called <strong>zz-triage</strong>. It scored 96.</p>');
+        return window.d1.focus.locatePoint({ app: 'chat', states: ['chat-01-message'], find: 'A saved skill called zz-triage.' });
+      });
+      check('focus: a line ending in a bold name is found', !!bold, JSON.stringify(bold));
+      await p3.close();
+    }
     await b2.close();
   }
   // 6 · Release: the full checklist (two identical runs included), a secret scan, a commit.

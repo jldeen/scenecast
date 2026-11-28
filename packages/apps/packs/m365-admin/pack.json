@@ -40,6 +40,9 @@
     }
   },
   "flow": {
+    "dropClicks": [
+      "Cloud Shell"
+    ],
     "layout": {
       "nav": {
         "kind": "responsive",

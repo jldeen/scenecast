@@ -22,6 +22,7 @@ import { availableParallelism } from 'node:os';
 import { diffDetail, verdict } from './compare.mjs';
 import { loadDemo, arg } from '@stuntdouble/core/lib/demo.mjs';
 import { openReplica } from './replica-render.mjs';
+import { normFamily, normWeight, parseLoaded, loadedFace, srcParts, declValue, fontVerdicts as verdictsOf } from './fonts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -62,8 +63,6 @@ const urlIndex = existsSync(join(demo.raw, 'urls.json')) ? JSON.parse(readFileSy
 const rawFile = url => { const e = urlIndex[url]; if (!e || !e.file) return null; const f = join(demo.raw, 'blobs', e.file); return existsSync(f) ? f : null; };
 const isHtml = f => /<(!doctype html|html[\s>])/i.test(readFileSync(f).subarray(0, 600).toString('latin1'));
 const fileSha = url => { const f = rawFile(url); return f && !isHtml(f) ? sha256(readFileSync(f)) : null; };
-const normFamily = s => String(s || '').trim().replace(/^["']|["']$/g, '').toLowerCase();
-const normWeight = w => ({ normal: '400', bold: '700' }[String(w || 'normal').trim()] || String(w).trim());
 // The size a screen was recorded at (its browser window's viewport and pixel ratio, in the raw snapshot): the replica
 // is shown at that size to compare like with like. A presenter's browser window is rarely the demo's 1920×1080, and its
 // height changes by a little as the debugging bar comes and goes.
@@ -92,16 +91,22 @@ function realFonts(snap) {
   const faces = [];
   for (const m of (main.html || '').matchAll(/@font-face\s*\{([^}]*)\}/g)) {
     const body = m[1], get = k => ((body.match(new RegExp(k + ':\\s*([^;]+)')) || [])[1] || '').trim();
-    const urls = [...get('src').matchAll(/url\("?d1res:\/\/(\d+)"?\)/g)].map(x => main.urls[+x[1]]);
-    faces.push({ family: normFamily(get('font-family')), weight: normWeight(get('font-weight')), style: get('font-style') || 'normal', urls });
+    // The src whole: a data: url in it has semicolons of its own.
+    const src = declValue(body, 'src');
+    const urls = [...src.matchAll(/url\("?d1res:\/\/(\d+)"?\)/g)].map(x => main.urls[+x[1]]);
+    // A font carried in the rule (data:) or installed on the computer (local()) is a source too.
+    const { data, locals } = srcParts(src);
+    faces.push({ family: normFamily(get('font-family')), weight: normWeight(get('font-weight')), style: get('font-style') || 'normal', urls, data, locals });
   }
-  const loaded = (meta.fonts || []).map(s => { const p = s.trim().split(' '); const style = p.pop(), weight = p.pop(); return { family: normFamily(p.join(' ')), name: p.join(' ').trim().replace(/^["']|["']$/g, ''), weight: normWeight(weight), style }; });
+  const known = new Set(faces.map(x => x.family));
+  // Each face's parts as the page gave them; a recording from before 0.5.6-rc.5 has only the names to parse.
+  const loaded = meta.fontFaces ? meta.fontFaces.map(f => loadedFace(f)) : (meta.fonts || []).map(s => parseLoaded(s, known));
   const claimed = new Set(faces.flatMap(x => x.urls));
   const scriptFiles = (meta.fontFiles || []).filter(u => !claimed.has(u)).map(u => ({ url: u, sha256: fileSha(u) })).filter(x => x.sha256);
   return loaded.map(l => {
     const face = faces.find(x => x.family === l.family && x.weight === l.weight && x.style === l.style) || faces.find(x => x.family === l.family);
     const files = face ? face.urls.map(u => ({ url: u, sha256: fileSha(u) })).filter(x => x.sha256) : [];
-    return { ...l, by: face ? 'stylesheet' : 'script', files, candidates: face ? [] : scriptFiles };
+    return { ...l, by: face ? 'stylesheet' : 'script', files, candidates: face ? [] : scriptFiles, data: face ? face.data : [], locals: face ? face.locals : [] };
   });
 }
 // The replica's fonts on the page now: loaded faces, and each @font-face rule's files.
@@ -114,23 +119,7 @@ const replicaFontsIn = app => {
 };
 const assetSha = src => { const m = /\/assets\/([^"')?#]+)/.exec(src || ''); if (!m) return null; const f = join(demo.data, 'assets', m[1]); return existsSync(f) && statSize(f) ? sha256(readFileSync(f)) : null; };
 const statSize = f => readFileSync(f).length;
-function fontVerdicts(real, rep) {
-  if (!real) return [];
-  return real.map(r => {
-    const loaded = rep.loaded.some(x => normFamily(x.family) === r.family);
-    const faces = rep.faces.filter(x => normFamily(x.family) === r.family);
-    const exact = faces.find(x => normWeight(x.weight) === r.weight && x.style === r.style) || faces[0];
-    const repSha = exact ? (exact.src.match(/\/assets\/[^"')]+/g) || []).map(assetSha).filter(Boolean) : [];
-    const want = r.files.length ? r.files : r.candidates;
-    const base = { family: r.family, name: r.name, weight: r.weight, style: r.style, loadedBy: r.by, real: want.map(x => ({ url: x.url.split('?')[0], sha256: x.sha256 })), replica: repSha };
-    // Matched by its file: a face this screen doesn't use isn't loaded, but it's there, from the same file.
-    base.used = loaded;
-    if (!repSha.length) return { ...base, status: 'substituted', why: r.by === 'script' ? 'the real page loaded this font by script (no @font-face rule was captured); the replica falls back' : 'the replica has no file for this font and falls back' };
-    if (!want.length) return { ...base, status: 'unverified', why: 'the real page\'s file for this font was not captured' };
-    if (repSha.some(s => want.some(x => x.sha256 === s))) return { ...base, status: 'match' };
-    return { ...base, status: 'different-file', why: 'the replica loads another file for this font than the real page did' };
-  });
-}
+const fontVerdicts = (real, rep) => verdictsOf(real, rep, src => (String(src || '').match(/\/assets\/[^"')]+/g) || []).map(assetSha).filter(Boolean));
 
 // The last comparisons, by what went in: the diff code, the item, and both pictures' bytes.
 const CACHE = join(demo.out, 'fidelity', 'cache'), usedKeys = new Set();

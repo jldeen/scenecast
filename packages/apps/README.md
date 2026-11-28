@@ -27,7 +27,7 @@ Each `pack.json` says where its rules came from (`sources`) and why each rule ex
   "start": { "url": "…", "signIn": { "hosts": [], "hint": "…" }, "ready": { "sel": "…" } },
   "record": { "busy": [], "ignore": [], "groups": {}, "streamMinMs": 0, "streamMaxMs": 0, "auto": {}, "hoverDelayMs": [240, 390], "zooms": [] },
   "build": { "strip": { "attrs": [] }, "repairs": { "css": "repairs/css.json" }, "rules": [] },
-  "flow": { "layout": {}, "drags": {}, "groups": {}, "lateItems": [], "vendorCss": [] },
+  "flow": { "layout": {}, "drags": {}, "groups": {}, "lateItems": [], "vendorCss": [], "dropClicks": [] },
   "theme": { "system": "fluent", "follows": "setting|system|none", "setting": "…", "markers": {}, "themes": { "dark": "themes/dark.json" }, "fallbacks": [] },
   "platform": { "frame": "browser|app", "platforms": { "windows": "platforms/windows.json" }, "shortcuts": { "⌥ ⌘ G": "Ctrl+Alt+G" } },
   "writes": [], "effects": [], "safe": [],
@@ -75,7 +75,8 @@ levels: never bands that assume a 1920-px window; the engine works bands out fro
 
 `flow.groups` fills a demo's step-group entry where it has none (status lines to drop, grid classes);
 `flow.lateItems` are menu items that load after their menu opens; `flow.vendorCss` is CSS for menus no capture has
-(referenced from the flow as `pack:<id>/<file>`).
+(referenced from the flow as `pack:<id>/<file>`); `flow.dropClicks` names controls whose click the replica can't
+play (the admin center's Cloud Shell opens a live terminal): left out of every screen, and a later recording doesn't click them.
 
 ### Writes, effects, safe (for plans and generated resets)
 

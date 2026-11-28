@@ -155,6 +155,8 @@ function fitChips() {
   const ul = $('.chips'); if (!ul || !ul.clientWidth) return;
   const items = [...ul.querySelectorAll(':scope > li[data-chip]')];
   items.forEach(li => li.style.removeProperty('display')); const old = ul.querySelector('[data-chip-more]'); if (old) old.remove();
+  // Like Fluent's overflow (Copilot's Workspace chips), a hidden copy of "+N" to measure with, always there: not the chip.
+  if (!ul.querySelector('[data-chip-measure]')) ul.insertAdjacentHTML('beforeend', '<li aria-hidden="true" data-chip-measure="" style="position:absolute;top:0;left:0;visibility:hidden;pointer-events:none">+9</li>');
   const W = ul.clientWidth, gap = 6, widths = items.map(li => li.getBoundingClientRect().width);
   const rowsFor = ws => { let rows = 1, x = 0; for (const w of ws) { if (x && x + gap + w > W) { rows++; x = w; } else x = x ? x + gap + w : w; } return rows; };
   if (rowsFor(widths) <= 2) return;

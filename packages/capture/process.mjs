@@ -600,10 +600,15 @@ report.clicks = {};
   const out = hoverOut[cp.app]; out.clicks = out.clicks || []; out.css = out.css || {};
   const fixPart = (h, rec) => isolateHover(edit(rewritePart(h, rec), 'click:' + cp.app, undefined, (rec.frameUrl && packOfUrl(rec.frameUrl)) || APP_PACK[cp.app], rec.frameUrl).replace(/\sdata-d1-(hpart|ctl)="[^"]*"/g, '').replace(/\sdata-d1-scroll="[^"]*"/g, '').replace(/\sfocusgroup="[^"]*"/g, ''), prefix);
   const used = []; let n = 0; let lazy = '';
+  // One click per control: a re-recording's floor (an older take's names, "Worked for 30s") and a fresh pick can find
+  // the same control, and the replica only ever opens the first click for it.
+  const seen = new Set();
   for (const rec of recs) {
     const r = rec.res;
     const name = rec.cand.text;
     if (!r || (cp.drop || []).includes(name)) continue;
+    const same = JSON.stringify((({ count, ...x }) => x)(rec.ctl.spec || {}));
+    if (seen.has(same)) { report.clicks[cp.page + ':' + name] = 'skipped: same control as another click'; continue; }
     // Stylesheets that came with the click (styles a menu loads when it first opens): their rules are CSS sources.
     if (rec.css && rec.css.parts) lazy += rec.css.parts.map(h => isolateHover(scrub(h.replace(/d1res:\/\/(\d+)/g, (m, n2) => local(rec.css.urls[+n2], rec.css.inline))).replace(/\sdata-d1-hcss="[^"]*"/g, ''), prefix)).join('\n');
     // How it closes: as the flow says; a menu or popup closes like one (Escape, a click elsewhere); else as audited.
@@ -636,7 +641,7 @@ report.clicks = {};
     const sticky = (cp.sticky || []).includes(name);
     const reopen = (cp.reopen || {})[name] || (rec.reopen ? (({ count, ...x }) => x)(rec.reopen) : undefined);
     const def = { id: `click-${cp.page}-${rec.n}`, name, page: cp.page, frame: cp.frame || null, ctl, ctlRect: rec.ctl.rect, ctlAttrs: rec.ctl.attrs, up: r.up, anchorTag: r.anchorTag, ops: ops.length ? ops : undefined, sops: sops || undefined, sup: sops ? r.up - pre.length : undefined, portals: portals.length ? portals : undefined, restore, reopen, revertMs: rec.revertMs || undefined, sticky: sticky || undefined, popup: !!popup || undefined, copy: /^copy\b/i.test(name) || undefined, shot: `click-${cp.page}/${String(rec.n).padStart(4, '0')}.png` };
-    out.clicks.push(def); n++;
+    out.clicks.push(def); n++; seen.add(same);
     // Controls that work the same way on another element: the same changes, with its own name in them.
     for (const other of ((cp.copies || {})[name] || [])) {
       const from = name.replace(/^(Collapse|Expand|Open|Close|Show|Hide) /, '');
